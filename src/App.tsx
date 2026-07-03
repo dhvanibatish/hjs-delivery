@@ -254,7 +254,7 @@ function checkLogin(branch, password) {
       ? {
           branch: 'ALL',
           isHead: true,
-          name: 'All stores',
+          name: 'Head Office',
           storeName: 'All stores',
         }
       : null;
@@ -271,26 +271,26 @@ function checkLogin(branch, password) {
 /* ── STAGES ────────────────────────────────────────────────────────────── */
 const STAGES = [
   {
+    id: 'new',
+    label: 'New Delivery',
+    short: 'New',
+    status: 'New Delivery',
+    color: T.slate,
+    soft: T.slateSoft,
+  },
+  {
     id: 'talked',
     label: 'Talked to Customer',
     short: 'Contacted',
     status: 'Talked To Customer',
-    color: T.slate,
-    soft: T.slateSoft,
+    color: T.blue,
+    soft: T.blueSoft,
   },
   {
     id: 'scheduled',
     label: 'Delivery Scheduled',
     short: 'Scheduled',
     status: 'Delivery Scheduled',
-    color: T.blue,
-    soft: T.blueSoft,
-  },
-  {
-    id: 'inspected',
-    label: 'Item Inspected',
-    short: 'Inspected',
-    status: 'Item Inspected',
     color: T.amber,
     soft: T.amberSoft,
   },
@@ -305,14 +305,15 @@ const STAGES = [
 ];
 const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 const stageToStatus = (id) =>
-  (STAGES.find((s) => s.id === id) || {}).status || 'Talked To Customer';
+  (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
 function statusToStage(s) {
   const t = String(s || '').toLowerCase();
   if (t.includes('cancel')) return 'cancelled';
   if (t.includes('schedul')) return 'scheduled';
-  if (t.includes('inspect')) return 'inspected';
+  if (t.includes('inspect')) return 'scheduled'; // inspection ab Scheduled ka part hai
   if (t.includes('deliver')) return 'delivered';
-  return 'talked';
+  if (t.includes('talk')) return 'talked';
+  return 'new'; // naya record → New Delivery
 }
 
 function deriveBranch(r) {
@@ -375,10 +376,10 @@ const show = (v) =>
 /* app-controlled timeline: each move/edit logs an event with the fields entered */
 function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
-  if (toStage === 'talked') return { ...rmk };
-  if (toStage === 'scheduled')
+  if (toStage === 'new') return {};
+  if (toStage === 'talked')
     return { Date: f.date || '—', Time: f.time || '—', ...rmk };
-  if (toStage === 'inspected')
+  if (toStage === 'scheduled')
     return {
       'Delivery person': f.person || '—',
       Vehicle: f.vehicle || '—',
@@ -574,11 +575,11 @@ export default function App() {
   const buildPatch = (toStage, f, mode) => {
     const patch = { updated_at: new Date().toISOString() };
     if (mode === 'move') patch.status = stageToStatus(toStage);
-    if (toStage === 'talked' || toStage === 'scheduled') {
+    if (toStage === 'talked') {
       patch.confirmed_date = f.date || null;
       patch.confirmed_time = f.time || null;
       patch.stage1_remarks = f.remarks || null;
-    } else if (toStage === 'inspected') {
+    } else if (toStage === 'scheduled') {
       patch.app_delivery_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
       patch.item_inspected = !!f.inspected;
@@ -846,7 +847,7 @@ function Login({ onLogin }) {
               }}
             >
               <option value="">Select store…</option>
-              <option value="ALL">All stores</option>
+              <option value="ALL">All stores (Head office)</option>
               {STORE_ORDER.map((c) => (
                 <option key={c} value={c}>
                   {branchLabel(c)}
@@ -951,7 +952,7 @@ function Sidebar({ session }) {
             className="ellip"
             style={{ fontSize: 10.5, color: 'rgba(255,255,255,.6)' }}
           >
-            {mgr ? `Mgr: ${mgr}` : 'All stores'}
+            {mgr ? `Mgr: ${mgr}` : 'Head Office'}
           </div>
         </div>
       </div>
@@ -1388,15 +1389,16 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
   // per-stage field blocks (previous + current editable, future locked)
   const blocks = [
     {
-      id: 'scheduled',
+      id: 'talked',
       i: 1,
       rows: [
         ['Date', show(r.confirmed_date)],
         ['Time', show(r.confirmed_time)],
+        ['Remarks', show(r.stage1_remarks)],
       ],
     },
     {
-      id: 'inspected',
+      id: 'scheduled',
       i: 2,
       rows: [
         ['Delivery person', d.person || '—'],
@@ -1703,7 +1705,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
     remarks:
       (toStage === 'delivered'
         ? r.stage4_remarks
-        : toStage === 'inspected'
+        : toStage === 'scheduled'
           ? r.stage3_remarks
           : r.stage1_remarks) || '',
     person: delivery.person || '',
@@ -1732,7 +1734,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
   const canSave =
     mode === 'edit'
       ? true
-      : toStage === 'inspected'
+      : toStage === 'scheduled'
         ? !!(f.person && f.inspected)
         : toStage === 'delivered'
           ? f.delivered
@@ -1763,15 +1765,9 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
           </button>
         </div>
         <div className="modal-body">
-          {(toStage === 'talked' || toStage === 'scheduled') && (
+          {toStage === 'talked' && (
             <>
-              <Field
-                label={
-                  toStage === 'talked'
-                    ? 'Customer confirmed date'
-                    : 'Scheduled date'
-                }
-              >
+              <Field label="Date">
                 <input
                   className="inp"
                   type="date"
@@ -1780,9 +1776,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   onChange={(e) => set('date', e.target.value)}
                 />
               </Field>
-              <Field
-                label={toStage === 'talked' ? 'Confirmed time' : 'Slot time'}
-              >
+              <Field label="Time">
                 <input
                   className="inp"
                   type="time"
@@ -1794,7 +1788,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
             </>
           )}
 
-          {toStage === 'inspected' && (
+          {toStage === 'scheduled' && (
             <>
               <Field label="Delivery person">
                 <select
