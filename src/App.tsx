@@ -119,7 +119,7 @@ const BRANCH_NAMES = {
   JAL: 'Jalandhar',
   JPR: 'Jaipur',
   LKO: 'Lucknow',
-  NWD: 'New Delhi',
+  NWD: 'North West Delhi',
   JKP: 'Janakpuri',
 };
 const branchLabel = (code) => BRANCH_NAMES[code] || code;
@@ -1961,7 +1961,7 @@ function StyleTag() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; }
+      html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
       body { color: ${T.ink}; background: ${T.beige}; }
       #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
       button { color: inherit; font-family: inherit; }
@@ -2048,6 +2048,8 @@ function StyleTag() {
       .tl-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 3px; box-shadow: 0 0 0 3px ${T.cream}; z-index: 1; }
       .tl-line { flex: 1; width: 2px; margin: 2px 0; min-height: 14px; }
       .tl-note { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .tl-field { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; font-weight: 500; line-height: 1.4; }
+      .tl-field b { font-weight: 700; color: ${T.ink}; }
 
       .stage-picker { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
       .stage-pick-btn { border: 1px solid; border-radius: 10px; padding: 10px 4px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
