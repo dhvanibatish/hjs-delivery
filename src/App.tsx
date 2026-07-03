@@ -254,7 +254,7 @@ function checkLogin(branch, password) {
       ? {
           branch: 'ALL',
           isHead: true,
-          name: 'Head Office',
+          name: 'All stores',
           storeName: 'All stores',
         }
       : null;
@@ -847,7 +847,7 @@ function Login({ onLogin }) {
               }}
             >
               <option value="">Select store…</option>
-              <option value="ALL">All stores (Head office)</option>
+              <option value="ALL">All stores</option>
               {STORE_ORDER.map((c) => (
                 <option key={c} value={c}>
                   {branchLabel(c)}
@@ -952,7 +952,7 @@ function Sidebar({ session }) {
             className="ellip"
             style={{ fontSize: 10.5, color: 'rgba(255,255,255,.6)' }}
           >
-            {mgr ? `Mgr: ${mgr}` : 'Head Office'}
+            {mgr ? `Mgr: ${mgr}` : 'All stores'}
           </div>
         </div>
       </div>
