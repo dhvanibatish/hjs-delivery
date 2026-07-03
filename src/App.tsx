@@ -309,11 +309,12 @@ const stageToStatus = (id) =>
 function statusToStage(s) {
   const t = String(s || '').toLowerCase();
   if (t.includes('cancel')) return 'cancelled';
+  if (t.includes('new')) return 'new'; // "New Delivery" — 'deliver' se pehle check zaroori
   if (t.includes('schedul')) return 'scheduled';
   if (t.includes('inspect')) return 'scheduled'; // inspection ab Scheduled ka part hai
   if (t.includes('deliver')) return 'delivered';
   if (t.includes('talk')) return 'talked';
-  return 'new'; // naya record → New Delivery
+  return 'new'; // naya / unknown record → New Delivery
 }
 
 function deriveBranch(r) {
