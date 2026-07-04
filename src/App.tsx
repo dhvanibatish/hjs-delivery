@@ -84,6 +84,14 @@ async function sbTimeline(invoiceId) {
     return [];
   }
 }
+async function sbByInvoiceNumber(invNo) {
+  const res = await fetch(
+    `${CONFIG.url}/rest/v1/${CONFIG.table}?invoice_number=eq.${encodeURIComponent(invNo)}&select=*`,
+    { headers: HDRS() },
+  );
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
+}
 
 /* ══════════════════════════════════════════════════════════════════════ */
 const T = {
@@ -374,6 +382,28 @@ function fmtDateTime(iso) {
 const show = (v) =>
   v !== null && v !== undefined && v !== '' && v !== 'null' ? String(v) : '—';
 
+/* customer-friendly date/time */
+function niceDate(d) {
+  if (!d || d === 'null') return null;
+  const x = new Date(d);
+  if (isNaN(x)) return String(d);
+  return x.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+function niceTime(t) {
+  if (!t || t === 'null') return null;
+  const parts = String(t).split(':');
+  if (parts.length < 2) return String(t);
+  let hh = parseInt(parts[0], 10);
+  if (isNaN(hh)) return String(t);
+  const ap = hh >= 12 ? 'PM' : 'AM';
+  hh = hh % 12 || 12;
+  return `${hh}:${parts[1]} ${ap}`;
+}
+
 /* app-controlled timeline: each move/edit logs an event with the fields entered */
 function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
@@ -521,6 +551,14 @@ function useIsMobile(bp = 760) {
 
 /* ════════════════════════════════════════════════════════════════ APP */
 export default function App() {
+  // Public customer tracking route: ...?track  or  ...?inv=MOH/25-26/041
+  const params =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  if (params.has('track') || params.has('inv'))
+    return <TrackPage prefill={params.get('inv') || ''} />;
+
   const isMobile = useIsMobile();
   const [session, setSession] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
@@ -1950,6 +1988,286 @@ function Toast({ msg }) {
   );
 }
 
+/* ══════════════════════════════════════════════ CUSTOMER TRACK PAGE */
+const TRACK_STEPS = [
+  {
+    id: 'new',
+    label: 'Order Received',
+    desc: 'Aapka order register ho gaya hai',
+    icon: Package,
+  },
+  {
+    id: 'talked',
+    label: 'Confirmed With You',
+    desc: 'Humne aapse baat karke confirm kiya',
+    icon: Phone,
+  },
+  {
+    id: 'scheduled',
+    label: 'Delivery Scheduled',
+    desc: 'Delivery plan ho gayi hai',
+    icon: Truck,
+  },
+  {
+    id: 'delivered',
+    label: 'Delivered',
+    desc: 'Order aap tak pahunch gaya',
+    icon: CheckCircle2,
+  },
+];
+function stepTime(log, stageId) {
+  if (!Array.isArray(log)) return null;
+  const evs = log.filter((e) => e && e.stage === stageId);
+  return evs.length ? evs[evs.length - 1].ts : null;
+}
+
+function TrackPage({ prefill }) {
+  const [inv, setInv] = useState(prefill || '');
+  const [phone4, setPhone4] = useState('');
+  const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
+  const [row, setRow] = useState(null);
+  const [err, setErr] = useState('');
+
+  const track = async () => {
+    const q = inv.trim();
+    if (!q) {
+      setErr('Apna invoice number daalo.');
+      return;
+    }
+    setErr('');
+    setState('loading');
+    try {
+      const rows = await sbByInvoiceNumber(q);
+      if (!rows || rows.length === 0) {
+        setState('notfound');
+        setRow(null);
+        return;
+      }
+      const r = rows[0];
+      const p4 = phone4.trim();
+      if (p4) {
+        const digits = String(r.customer_phone || '').replace(/\D/g, '');
+        if (!digits.endsWith(p4)) {
+          setState('notfound');
+          setRow(null);
+          return;
+        }
+      }
+      setRow(r);
+      setState('done');
+    } catch (e) {
+      setErr(e.message || 'Kuch galat hua');
+      setState('error');
+    }
+  };
+
+  return (
+    <div className="track-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="track-topbar">
+        <div className="brand">
+          <div className="brand-badge">
+            <Truck size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
+              Healthy Jeena Sikho
+            </div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
+              Track your delivery
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="track-body">
+        <div className="track-card">
+          <h1 className="track-h1">Apni delivery track karein</h1>
+          <p className="track-sub">
+            Invoice number daalein (bill par likha hota hai). Chaahein to phone
+            ke last 4 digit bhi — extra safety ke liye.
+          </p>
+          <Field label="Invoice number">
+            <input
+              className="inp"
+              placeholder="e.g. GGN/07/2026/0926"
+              value={inv}
+              onChange={(e) => {
+                setInv(e.target.value);
+                setErr('');
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && track()}
+            />
+          </Field>
+          <Field label="Phone ke last 4 digit (optional)">
+            <input
+              className="inp"
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="1234"
+              value={phone4}
+              onChange={(e) => {
+                setPhone4(e.target.value.replace(/\D/g, ''));
+                setErr('');
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && track()}
+            />
+          </Field>
+          {err && <div className="login-err">{err}</div>}
+          <button
+            className="btn-primary"
+            style={{ width: '100%', marginTop: 4 }}
+            disabled={state === 'loading'}
+            onClick={track}
+          >
+            {state === 'loading' ? (
+              'Dhoondh rahe hain…'
+            ) : (
+              <>
+                Track order <ArrowRight size={17} />
+              </>
+            )}
+          </button>
+
+          {state === 'notfound' && (
+            <div className="track-msg">
+              Is invoice number{phone4 ? ' + phone' : ''} se koi order nahi mila.
+              Details dobara check karein.
+            </div>
+          )}
+          {state === 'error' && (
+            <div className="track-msg">
+              Abhi track nahi ho paa raha. Thodi der baad try karein.
+            </div>
+          )}
+        </div>
+
+        {state === 'done' && row && <TrackResult row={row} />}
+
+        <div className="track-foot">
+          Healthy Jeena Sikho · Medical equipment rentals
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrackResult({ row }) {
+  const d = rowToDelivery(row);
+  const cancelled = d.stage === 'cancelled';
+  const idx = stageIndex(d.stage);
+  const log = Array.isArray(row.app_log) ? row.app_log : [];
+  const Icon = equipIcon(d.equipment);
+
+  const banner = cancelled
+    ? { text: 'Ye order cancel ho gaya hai', bg: T.redSoft, fg: T.red }
+    : d.stage === 'delivered'
+      ? { text: 'Deliver ho gaya 🎉', bg: T.mint, fg: T.green }
+      : d.stage === 'scheduled'
+        ? { text: 'Delivery scheduled hai', bg: T.amberSoft, fg: T.amber }
+        : d.stage === 'talked'
+          ? { text: 'Order confirmed hai', bg: T.blueSoft, fg: T.blue }
+          : { text: 'Order mil gaya hai', bg: T.slateSoft, fg: T.slate };
+
+  const schedDate = niceDate(row.confirmed_date);
+  const schedTime = niceTime(row.confirmed_time);
+
+  return (
+    <div className="track-result">
+      {/* order summary */}
+      <div className="track-order">
+        <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
+          <Icon size={22} color={T.green} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{d.equipment}</div>
+          <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
+            Order #{d.id}
+          </div>
+        </div>
+      </div>
+
+      <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
+        {banner.text}
+      </div>
+
+      {/* the timeline */}
+      <div className="track-tl">
+        {cancelled ? (
+          <div className="track-msg" style={{ marginTop: 0 }}>
+            Is order ki delivery cancel kar di gayi hai. Sawaal ho to store se
+            sampark karein.
+          </div>
+        ) : (
+          TRACK_STEPS.map((step, i) => {
+            const done = i <= idx;
+            const current = i === idx;
+            const ts =
+              stepTime(log, step.id) ||
+              (i === 0 ? row.invoice_date || row.synced_at : null);
+            const StepIcon = step.icon;
+            return (
+              <div className="ttl-row" key={step.id}>
+                <div className="ttl-left">
+                  <div
+                    className="ttl-dot"
+                    style={{
+                      background: done ? T.green : '#fff',
+                      borderColor: done ? T.green : T.line,
+                      color: done ? '#fff' : T.inkSoft,
+                    }}
+                  >
+                    <StepIcon size={16} />
+                  </div>
+                  {i < TRACK_STEPS.length - 1 && (
+                    <span
+                      className="ttl-line"
+                      style={{ background: i < idx ? T.green : T.line }}
+                    />
+                  )}
+                </div>
+                <div className="ttl-content">
+                  <div
+                    className="ttl-title"
+                    style={{
+                      color: done ? T.ink : T.inkSoft,
+                      fontWeight: current ? 800 : 700,
+                    }}
+                  >
+                    {step.label}
+                    {current && <span className="ttl-now">abhi yahan</span>}
+                  </div>
+                  <div className="ttl-desc">{step.desc}</div>
+                  {done && ts && (
+                    <div className="ttl-time">{fmtDateTime(ts)}</div>
+                  )}
+                  {/* scheduled ke andar slot + delivery person */}
+                  {step.id === 'scheduled' && done && (
+                    <div className="ttl-extra">
+                      {(schedDate || schedTime) && (
+                        <div>
+                          <b>Slot:</b> {schedDate || ''}
+                          {schedDate && schedTime ? ', ' : ''}
+                          {schedTime || ''}
+                        </div>
+                      )}
+                      {d.person && (
+                        <div>
+                          <b>Delivery partner:</b> {d.person}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════ STYLES */
 function StyleTag() {
   return (
@@ -2093,6 +2411,31 @@ function StyleTag() {
       .flow-pip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
       .login-form { background: ${T.beige}; display: flex; align-items: center; justify-content: center; padding: 40px; }
       .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
+
+      /* ── customer track page ── */
+      .track-wrap { min-height: 100vh; background: ${T.beige}; }
+      .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
+      .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
+      .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
+      .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
+      .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
+      .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
+      .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
+      .track-order { display: flex; align-items: center; gap: 12px; }
+      .track-banner { text-align: center; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 13px; margin: 16px 0 4px; }
+      .track-tl { margin-top: 14px; }
+      .ttl-row { display: flex; gap: 14px; }
+      .ttl-left { display: flex; flex-direction: column; align-items: center; }
+      .ttl-dot { width: 38px; height: 38px; border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 0 0 4px #fff; z-index: 1; }
+      .ttl-line { flex: 1; width: 3px; margin: 3px 0; min-height: 26px; border-radius: 3px; }
+      .ttl-content { padding-bottom: 22px; padding-top: 4px; }
+      .ttl-title { font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .ttl-now { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; color: ${T.green}; padding: 3px 8px; border-radius: 20px; }
+      .ttl-desc { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .ttl-time { font-size: 12px; color: ${T.green}; font-weight: 700; margin-top: 4px; }
+      .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
+      .ttl-extra b { font-weight: 700; }
+      .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
 
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
