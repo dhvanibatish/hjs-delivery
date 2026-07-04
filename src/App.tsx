@@ -48,49 +48,35 @@ const HDRS = () => ({
   Authorization: `Bearer ${CONFIG.key}`,
 });
 
-async function sbSelect() {
-  const res = await fetch(
-    `${CONFIG.url}/rest/v1/${CONFIG.table}?select=*&order=synced_at.desc`,
-    { headers: HDRS() },
-  );
+async function sbRpc(fn, body) {
+  const res = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { ...HDRS(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
-async function sbPatch(invoiceId, patch) {
-  const res = await fetch(
-    `${CONFIG.url}/rest/v1/${CONFIG.table}?invoice_id=eq.${encodeURIComponent(invoiceId)}`,
-    {
-      method: 'PATCH',
-      headers: {
-        ...HDRS(),
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify(patch),
-    },
-  );
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json();
+// staff login — DB verifies password, returns [] if wrong
+async function sbLogin(store, pw) {
+  return sbRpc('staff_login', { p_store: store, p_password: pw });
 }
-async function sbTimeline(invoiceId) {
-  try {
-    const res = await fetch(
-      `${CONFIG.url}/rest/v1/delivery_timeline?select=*&invoice_id=eq.${encodeURIComponent(invoiceId)}`,
-      { headers: HDRS() },
-    );
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
+// staff data — returns rows for the store (or all for ALL). Password checked in DB.
+async function sbList(store, pw) {
+  return sbRpc('staff_list', { p_store: store, p_password: pw });
 }
-async function sbByInvoiceNumber(invNo) {
-  const res = await fetch(
-    `${CONFIG.url}/rest/v1/${CONFIG.table}?invoice_number=eq.${encodeURIComponent(invNo)}&select=*`,
-    { headers: HDRS() },
-  );
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json();
+// staff update — stage move/edit. Password + store-scope checked in DB.
+async function sbUpdate(store, pw, invoiceId, patch) {
+  return sbRpc('staff_update', {
+    p_store: store,
+    p_password: pw,
+    p_invoice: invoiceId,
+    p_patch: patch,
+  });
+}
+// public customer tracking — safe fields only, phone last-4 verified in DB
+async function sbTrack(invNo, phone4) {
+  return sbRpc('track_order', { p_invoice: invNo, p_phone4: phone4 });
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -249,31 +235,17 @@ const STORE_ORDER = [
   'NWD',
   'JKP',
 ];
-const STORE_PASSWORDS = STORE_ORDER.reduce((m, code, i) => {
-  m[code] = String(1001 + i);
-  return m;
-}, {});
-const ALL_PASSWORD = '2222';
-
-function checkLogin(branch, password) {
-  const p = String(password || '');
-  if (branch === 'ALL')
-    return p === ALL_PASSWORD
-      ? {
-          branch: 'ALL',
-          isHead: true,
-          name: 'All stores',
-          storeName: 'All stores',
-        }
-      : null;
-  if (STORE_PASSWORDS[branch] && STORE_PASSWORDS[branch] === p)
-    return {
-      branch,
-      isHead: false,
-      name: branchLabel(branch),
-      storeName: branchLabel(branch),
-    };
-  return null;
+/* NOTE: passwords ab client mein NAHI hain — DB (app_staff) mein hain aur
+   Supabase RPC verify karta hai. Ye sirf session object banata hai. */
+function sessionFor(branch) {
+  const isHead = branch === 'ALL';
+  return {
+    branch,
+    authStore: branch,
+    isHead,
+    name: isHead ? 'All stores' : branchLabel(branch),
+    storeName: isHead ? 'All stores' : branchLabel(branch),
+  };
 }
 
 /* ── STAGES ────────────────────────────────────────────────────────────── */
@@ -582,7 +554,9 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      setDeliveries((await sbSelect()).map(rowToDelivery));
+      setDeliveries(
+        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+      );
     } catch (e) {
       setError(e.message || 'Fetch failed');
     }
@@ -645,7 +619,7 @@ export default function App() {
       return;
     }
     try {
-      await sbPatch(invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(
         mode === 'edit'
           ? 'Updated ✓'
@@ -677,7 +651,7 @@ export default function App() {
       return;
     }
     try {
-      await sbPatch(invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
       load();
     } catch (e) {
@@ -800,17 +774,34 @@ function Login({ onLogin }) {
   const [branch, setBranch] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
-  const go = () => {
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
     if (!branch) {
       setErr('Pehle store choose karo.');
       return;
     }
-    const res = checkLogin(branch, pw);
-    if (!res) {
-      setErr('Galat password.');
+    if (!pw) {
+      setErr('Password daalo.');
       return;
     }
-    onLogin(res);
+    if (!CONFIGURED) {
+      onLogin({ ...sessionFor(branch), pw });
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      const rows = await sbLogin(branch, pw);
+      if (!rows || rows.length === 0) {
+        setErr('Galat password.');
+        setBusy(false);
+        return;
+      }
+      onLogin({ ...sessionFor(branch), pw });
+    } catch (e) {
+      setErr('Login nahi ho paaya. Dobara try karo.');
+      setBusy(false);
+    }
   };
   return (
     <div style={{ fontFamily: FONT }} className="login-wrap">
@@ -911,10 +902,16 @@ function Login({ onLogin }) {
           <button
             className="btn-primary"
             style={{ width: '100%', marginTop: 4 }}
-            disabled={!branch || !pw}
+            disabled={!branch || !pw || busy}
             onClick={go}
           >
-            Sign in <ArrowRight size={17} />
+            {busy ? (
+              'Checking…'
+            ) : (
+              <>
+                Sign in <ArrowRight size={17} />
+              </>
+            )}
           </button>
           <div
             style={{
@@ -1409,21 +1406,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
   const idx = stageIndex(d.stage);
   const stage = STAGES[idx] || STAGES[0];
   const r = d._raw || {};
-  const [tl, setTl] = useState(null);
-
-  useEffect(() => {
-    let alive = true;
-    if (!CONFIGURED) {
-      setTl([]);
-      return;
-    }
-    sbTimeline(d.invoice_id)
-      .then((rows) => alive && setTl(rows))
-      .catch(() => alive && setTl([]));
-    return () => {
-      alive = false;
-    };
-  }, [d.invoice_id, d.rawStatus, r.updated_at]);
+  // app_log is the timeline source now (table is locked; no direct fetch)
+  const tl = [];
 
   // per-stage field blocks (previous + current editable, future locked)
   const blocks = [
@@ -2030,30 +2014,25 @@ function TrackPage({ prefill }) {
 
   const track = async () => {
     const q = inv.trim();
+    const p4 = phone4.trim();
     if (!q) {
       setErr('Apna invoice number daalo.');
+      return;
+    }
+    if (p4.length !== 4) {
+      setErr('Phone ke last 4 digit daalo.');
       return;
     }
     setErr('');
     setState('loading');
     try {
-      const rows = await sbByInvoiceNumber(q);
+      const rows = await sbTrack(q, p4);
       if (!rows || rows.length === 0) {
         setState('notfound');
         setRow(null);
         return;
       }
-      const r = rows[0];
-      const p4 = phone4.trim();
-      if (p4) {
-        const digits = String(r.customer_phone || '').replace(/\D/g, '');
-        if (!digits.endsWith(p4)) {
-          setState('notfound');
-          setRow(null);
-          return;
-        }
-      }
-      setRow(r);
+      setRow(rows[0]);
       setState('done');
     } catch (e) {
       setErr(e.message || 'Kuch galat hua');
@@ -2099,7 +2078,7 @@ function TrackPage({ prefill }) {
               onKeyDown={(e) => e.key === 'Enter' && track()}
             />
           </Field>
-          <Field label="Phone ke last 4 digit (optional)">
+          <Field label="Phone ke last 4 digit">
             <input
               className="inp"
               inputMode="numeric"
@@ -2153,19 +2132,26 @@ function TrackPage({ prefill }) {
 }
 
 function TrackResult({ row }) {
-  const d = rowToDelivery(row);
-  const cancelled = d.stage === 'cancelled';
-  const idx = stageIndex(d.stage);
+  // row = safe fields from track_order RPC (poora delivery row NAHI)
+  const equipment = equipmentText({
+    line_items: row.line_items,
+    item_name: row.item_name,
+  });
+  const stage = statusToStage(row.status);
+  const cancelled = stage === 'cancelled';
+  const idx = stageIndex(stage);
   const log = Array.isArray(row.app_log) ? row.app_log : [];
-  const Icon = equipIcon(d.equipment);
+  const Icon = equipIcon(equipment);
+  const person = row.delivery_partner || null;
+  const orderId = row.invoice_number;
 
   const banner = cancelled
     ? { text: 'Ye order cancel ho gaya hai', bg: T.redSoft, fg: T.red }
-    : d.stage === 'delivered'
+    : stage === 'delivered'
       ? { text: 'Deliver ho gaya 🎉', bg: T.mint, fg: T.green }
-      : d.stage === 'scheduled'
+      : stage === 'scheduled'
         ? { text: 'Delivery scheduled hai', bg: T.amberSoft, fg: T.amber }
-        : d.stage === 'talked'
+        : stage === 'talked'
           ? { text: 'Order confirmed hai', bg: T.blueSoft, fg: T.blue }
           : { text: 'Order mil gaya hai', bg: T.slateSoft, fg: T.slate };
 
@@ -2180,9 +2166,9 @@ function TrackResult({ row }) {
           <Icon size={22} color={T.green} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{d.equipment}</div>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{equipment}</div>
           <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
-            Order #{d.id}
+            Order #{orderId}
           </div>
         </div>
       </div>
@@ -2202,9 +2188,7 @@ function TrackResult({ row }) {
           TRACK_STEPS.map((step, i) => {
             const done = i <= idx;
             const current = i === idx;
-            const ts =
-              stepTime(log, step.id) ||
-              (i === 0 ? row.invoice_date || row.synced_at : null);
+            const ts = stepTime(log, step.id);
             const StepIcon = step.icon;
             return (
               <div className="ttl-row" key={step.id}>
@@ -2251,9 +2235,9 @@ function TrackResult({ row }) {
                           {schedTime || ''}
                         </div>
                       )}
-                      {d.person && (
+                      {person && (
                         <div>
-                          <b>Delivery partner:</b> {d.person}
+                          <b>Delivery partner:</b> {person}
                         </div>
                       )}
                     </div>
