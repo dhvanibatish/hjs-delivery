@@ -253,7 +253,7 @@ const STAGES = [
   {
     id: 'new',
     label: 'New Delivery',
-    short: 'New',
+    short: 'New Job',
     status: 'New Delivery',
     color: T.slate,
     soft: T.slateSoft,
@@ -438,14 +438,6 @@ function inView(x, viewMode) {
 
 /* stat categories jinpe collapsible entries khulti hain */
 const CATS = [
-  {
-    id: 'total',
-    label: 'Total Deliveries',
-    icon: Truck,
-    color: T.green,
-    soft: T.mint,
-    test: (x) => x.stage !== 'cancelled',
-  },
   {
     id: 'pending',
     label: 'Pending',
@@ -876,7 +868,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
 }
 
 /* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
-   Stat categories (Total / Pending / Delivered / Cancelled) — har card
+   Stat categories (Pending / Delivered / Cancelled) — har card
    clickable + collapsible. Click karo to us category ki entries khulti hain.
    Ismein koi stage-wise board NAHI hota.                                 */
 function CategoriesView({ items, loading, onOpen, onMove }) {
@@ -1360,7 +1352,9 @@ function Header({
             className="col-pip"
             style={{ background: live ? T.greenBright : T.amber }}
           />
-          {live ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · ${count}` : 'Demo data'}
+          {live
+            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Deliveries · ${count}`
+            : 'Demo data'}
         </span>
       </div>
     </div>
