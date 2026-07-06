@@ -410,6 +410,68 @@ function makeEvent(toStage, fields, mode) {
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
+/* ── Today vs Archived ─────────────────────────────────────────────────
+   Archived = sirf delivered. Today = baaki sab + aaj deliver hue.       */
+function deliveredTs(x) {
+  const log = x && x._raw && Array.isArray(x._raw.app_log) ? x._raw.app_log : [];
+  const evs = log.filter((e) => e && e.stage === 'delivered');
+  if (evs.length) return evs[evs.length - 1].ts;
+  return (x._raw && x._raw.updated_at) || x.synced_at || null;
+}
+function isToday(ts) {
+  if (!ts) return false;
+  const d = new Date(ts);
+  if (isNaN(d)) return false;
+  const n = new Date();
+  return (
+    d.getFullYear() === n.getFullYear() &&
+    d.getMonth() === n.getMonth() &&
+    d.getDate() === n.getDate()
+  );
+}
+function inView(x, viewMode) {
+  if (viewMode === 'archived') return x.stage === 'delivered';
+  // today: past-delivered chhod ke sab (naye/pending/cancelled + aaj delivered)
+  if (x.stage === 'delivered') return isToday(deliveredTs(x));
+  return true;
+}
+
+/* stat categories jinpe collapsible entries khulti hain */
+const CATS = [
+  {
+    id: 'total',
+    label: 'Total Deliveries',
+    icon: Truck,
+    color: T.green,
+    soft: T.mint,
+    test: (x) => x.stage !== 'cancelled',
+  },
+  {
+    id: 'pending',
+    label: 'Pending',
+    icon: Package,
+    color: T.blue,
+    soft: T.blueSoft,
+    test: (x) => x.stage !== 'cancelled' && x.stage !== 'delivered',
+  },
+  {
+    id: 'delivered',
+    label: 'Delivered',
+    icon: CheckCircle2,
+    color: T.forestSoft,
+    soft: T.mint,
+    test: (x) => x.stage === 'delivered',
+  },
+  {
+    id: 'cancelled',
+    label: 'Cancelled',
+    icon: AlertTriangle,
+    color: T.amber,
+    soft: T.amberSoft,
+    test: (x) => x.stage === 'cancelled',
+  },
+];
+
 function rowToDelivery(r) {
   const branch = deriveBranch(r);
   return {
@@ -540,6 +602,7 @@ export default function App() {
   const [modal, setModal] = useState(null); // { invoiceId, toStage, mode }
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
+  const [viewMode, setViewMode] = useState('today'); // today | archived
 
   const ping = (m) => {
     setToast(m);
@@ -582,6 +645,11 @@ export default function App() {
         x.area.toLowerCase().includes(q),
     );
   }, [scoped, search]);
+
+  const viewItems = useMemo(
+    () => filtered.filter((x) => inView(x, viewMode)),
+    [filtered, viewMode],
+  );
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
@@ -693,7 +761,9 @@ export default function App() {
             <Header
               session={session}
               live={CONFIGURED}
-              count={scoped.length}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
               onSwitchStore={(b) =>
                 setSession((s) => ({
                   ...s,
@@ -713,27 +783,15 @@ export default function App() {
                 </div>
               </div>
             )}
-            <Stats items={scoped} />
-            {isMobile ? (
-              <MobileBoard
-                items={filtered}
-                loading={loading}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-                onMove={(x, toStage) =>
-                  setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                }
-              />
-            ) : (
-              <Board
-                items={filtered}
-                loading={loading}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-                onMove={(x, toStage) =>
-                  setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                }
-              />
-            )}
-            <FooterTotal items={scoped} />
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+            />
           </main>
         </div>
       </div>
@@ -1044,7 +1102,7 @@ function Topbar({ session, search, setSearch, onReload, loading, onLogout }) {
   );
 }
 
-function Header({ session, live, count, onSwitchStore }) {
+function Header({ session, live, count, viewMode, onViewMode, onSwitchStore }) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -1104,6 +1162,21 @@ function Header({ session, live, count, onSwitchStore }) {
           flexWrap: 'wrap',
         }}
       >
+        <div style={{ position: 'relative' }}>
+          <Clock
+            size={15}
+            color={T.inkSoft}
+            style={{ position: 'absolute', left: 12, top: 11 }}
+          />
+          <select
+            className="store-switch"
+            value={viewMode}
+            onChange={(e) => onViewMode(e.target.value)}
+          >
+            <option value="today">Today</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
         {session.isHead && (
           <div style={{ position: 'relative' }}>
             <Building2
@@ -1136,7 +1209,7 @@ function Header({ session, live, count, onSwitchStore }) {
             className="col-pip"
             style={{ background: live ? T.greenBright : T.amber }}
           />
-          {live ? `Live · ${count} rows` : 'Demo data'}
+          {live ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · ${count}` : 'Demo data'}
         </span>
       </div>
     </div>
