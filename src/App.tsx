@@ -593,7 +593,6 @@ export default function App() {
   if (params.has('track') || params.has('inv'))
     return <TrackPage prefill={params.get('inv') || ''} />;
 
-  const isMobile = useIsMobile();
   const [session, setSession] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -827,6 +826,35 @@ export default function App() {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════ ENTRIES VIEW
+   FIX: ye component missing tha isliye login ke baad screen crash ho rahi
+   thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
+   FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
+function EntriesView({ items, viewMode, loading, onOpen, onMove }) {
+  const isMobile = useIsMobile();
+  return (
+    <>
+      <Stats items={items} />
+      {isMobile ? (
+        <MobileBoard
+          items={items}
+          loading={loading}
+          onOpen={onOpen}
+          onMove={onMove}
+        />
+      ) : (
+        <Board
+          items={items}
+          loading={loading}
+          onOpen={onOpen}
+          onMove={onMove}
+        />
+      )}
+      <FooterTotal items={items} />
+    </>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
 function Login({ onLogin }) {
   const [branch, setBranch] = useState('');
@@ -857,7 +885,7 @@ function Login({ onLogin }) {
       }
       onLogin({ ...sessionFor(branch), pw });
     } catch (e) {
-      setErr('Login nahi ho paaya. Dobara try karo.');
+      setErr('Login error: ' + (e.message || 'unknown'));
       setBusy(false);
     }
   };
