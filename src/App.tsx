@@ -602,6 +602,9 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today | archived
+  const [layoutMode, setLayoutMode] = useState('board'); // board | categories (sirf head ke liye toggle)
+  // store-specific login → hamesha categories. Head → chosen layout.
+  const effLayout = session && session.isHead ? layoutMode : 'categories';
 
   const ping = (m) => {
     setToast(m);
@@ -763,6 +766,8 @@ export default function App() {
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
               onSwitchStore={(b) =>
                 setSession((s) => ({
                   ...s,
@@ -785,6 +790,7 @@ export default function App() {
             <EntriesView
               items={viewItems}
               viewMode={viewMode}
+              layoutMode={effLayout}
               loading={loading}
               onOpen={(x) => setActiveId(x.invoice_id)}
               onMove={(x, toStage) =>
@@ -830,8 +836,22 @@ export default function App() {
    FIX: ye component missing tha isliye login ke baad screen crash ho rahi
    thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
    FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
-function EntriesView({ items, viewMode, loading, onOpen, onMove }) {
+function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
   const isMobile = useIsMobile();
+
+  // Categories layout → collapsible stat categories (store-specific + head ka 2nd view)
+  if (layoutMode === 'categories') {
+    return (
+      <CategoriesView
+        items={items}
+        loading={loading}
+        onOpen={onOpen}
+        onMove={onMove}
+      />
+    );
+  }
+
+  // Board layout → stage-wise kanban (sirf All stores view ka option)
   return (
     <>
       <Stats items={items} />
@@ -852,6 +872,82 @@ function EntriesView({ items, viewMode, loading, onOpen, onMove }) {
       )}
       <FooterTotal items={items} />
     </>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
+   Stat categories (Total / Pending / Delivered / Cancelled) — har card
+   clickable + collapsible. Click karo to us category ki entries khulti hain.
+   Ismein koi stage-wise board NAHI hota.                                 */
+function CategoriesView({ items, loading, onOpen, onMove }) {
+  const [open, setOpen] = useState('pending'); // default: Pending khula
+  if (loading && items.length === 0)
+    return <div className="loading">Deliveries load ho rahi hain…</div>;
+  return (
+    <div className="cat-list">
+      {CATS.map((c) => {
+        const rows = items.filter(c.test);
+        const isOpen = open === c.id;
+        return (
+          <section
+            key={c.id}
+            className="cat-sec"
+            style={{ borderTopColor: c.color }}
+          >
+            <button
+              className="cat-head"
+              onClick={() => setOpen(isOpen ? null : c.id)}
+            >
+              <div className="cat-ico" style={{ background: c.soft }}>
+                <c.icon size={20} color={c.color} />
+              </div>
+              <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{c.label}</div>
+                <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 1 }}>
+                  {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
+                </div>
+              </div>
+              <span
+                className="col-count"
+                style={{ background: c.soft, color: c.color }}
+              >
+                {rows.length}
+              </span>
+              <ChevronRight
+                size={18}
+                color={T.inkSoft}
+                style={{
+                  transform: isOpen ? 'rotate(90deg)' : 'none',
+                  transition: 'transform .15s',
+                }}
+              />
+            </button>
+            {isOpen && (
+              <div className="cat-body">
+                {rows.length === 0 ? (
+                  <div className="empty">Koi entry nahi</div>
+                ) : (
+                  <div className="cat-grid">
+                    {rows.map((x) => {
+                      const stg = STAGES[stageIndex(x.stage)] || STAGES[0];
+                      return (
+                        <Card
+                          key={x.invoice_id}
+                          d={x}
+                          stage={stg}
+                          onOpen={() => onOpen(x)}
+                          onMove={onMove}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1130,7 +1226,16 @@ function Topbar({ session, search, setSearch, onReload, loading, onLogout }) {
   );
 }
 
-function Header({ session, live, count, viewMode, onViewMode, onSwitchStore }) {
+function Header({
+  session,
+  live,
+  count,
+  viewMode,
+  onViewMode,
+  layoutMode,
+  onLayoutMode,
+  onSwitchStore,
+}) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -1205,6 +1310,24 @@ function Header({ session, live, count, viewMode, onViewMode, onSwitchStore }) {
             <option value="archived">Archived</option>
           </select>
         </div>
+        {session.isHead && (
+          <div className="layout-toggle">
+            <button
+              className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => onLayoutMode('board')}
+            >
+              <LayoutDashboard size={14} /> Stages
+            </button>
+            <button
+              className={
+                layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'
+              }
+              onClick={() => onLayoutMode('categories')}
+            >
+              <Package size={14} /> Categories
+            </button>
+          </div>
+        )}
         {session.isHead && (
           <div style={{ position: 'relative' }}>
             <Building2
@@ -1596,7 +1719,40 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           {stage.label}
         </span>
 
-        <div className="kv-grid" style={{ marginTop: 14 }}>
+        {/* ── Move to stage (ab sabse upar) — jo stages bhar gayi wo colored ── */}
+        <div className="sec-title" style={{ marginTop: 16 }}>
+          Move to stage
+        </div>
+        <div className="stage-picker">
+          {STAGES.map((s, i) => {
+            const done = i <= idx; // ye stages bhar chuki hain → colored
+            const cur = i === idx; // current stage → thoda extra highlight
+            return (
+              <button
+                key={s.id}
+                className="stage-pick-btn"
+                style={{
+                  background: done ? s.color : '#fff',
+                  color: done ? '#fff' : T.ink,
+                  borderColor: done ? s.color : T.line,
+                  boxShadow: cur ? `0 0 0 3px ${s.soft}` : 'none',
+                  fontWeight: cur ? 800 : 700,
+                }}
+                onClick={() => {
+                  if (i === idx) return;
+                  i > idx ? onAdvance(s.id) : onSetStage(s.id);
+                }}
+              >
+                {s.short}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+          Aage jaane pe form khulega · peeche jaana ek click mein.
+        </div>
+
+        <div className="kv-grid" style={{ marginTop: 18 }}>
           <KV label="Phone" value={d.phone} />
           <KV label="Area" value={d.area} />
           <KV label="Equipment" value={d.equipment} full />
@@ -1724,35 +1880,6 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
             continuous log banega.
           </div>
         )}
-
-        <div className="sec-title" style={{ marginTop: 12 }}>
-          Move to stage
-        </div>
-        <div className="stage-picker">
-          {STAGES.map((s, i) => {
-            const cur = i === idx;
-            return (
-              <button
-                key={s.id}
-                className="stage-pick-btn"
-                style={{
-                  background: cur ? s.color : '#fff',
-                  color: cur ? '#fff' : T.ink,
-                  borderColor: cur ? s.color : T.line,
-                }}
-                onClick={() => {
-                  if (i === idx) return;
-                  i > idx ? onAdvance(s.id) : onSetStage(s.id);
-                }}
-              >
-                {s.short}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-          Aage jaane pe form khulega · peeche jaana ek click mein.
-        </div>
       </div>
     </div>
   );
@@ -2398,6 +2525,20 @@ function StyleTag() {
       .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); }
       .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
 
+      /* ── layout toggle (Stages / Categories) ── */
+      .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
+      .lt-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .lt-btn.active { background: ${T.forest}; color: #fff; }
+
+      /* ── categories (collapsible stat categories) ── */
+      .cat-list { display: flex; flex-direction: column; gap: 14px; }
+      .cat-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 2px rgba(20,57,43,.04); }
+      .cat-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: #fff; border: none; cursor: pointer; font-family: inherit; color: ${T.ink}; }
+      .cat-head:hover { background: ${T.cream}; }
+      .cat-ico { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
+      .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+
       .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
@@ -2437,6 +2578,8 @@ function StyleTag() {
       .kv-label { font-size: 10px; color: ${T.inkSoft}; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
       .kv-val { font-size: 13px; font-weight: 600; margin-top: 2px; color: ${T.ink}; word-break: break-word; }
       .sec-title { font-size: 12.5px; font-weight: 800; margin: 18px 0 8px; color: ${T.ink}; display: flex; align-items: center; gap: 6px; }
+      .mini-edit { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border: 1px solid ${T.mint}; border-radius: 8px; padding: 4px 9px; cursor: pointer; font-family: inherit; }
+      .mini-edit:hover { background: #dcebdd; }
       .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
       .edit-btn:hover { background: #dcebdd; }
 
