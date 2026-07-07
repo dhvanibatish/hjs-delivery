@@ -668,23 +668,26 @@ export default function App() {
     return deliveries.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return scoped;
-    return scoped.filter(
-      (x) =>
-        x.customer.toLowerCase().includes(q) ||
-        String(x.id).toLowerCase().includes(q) ||
-        x.area.toLowerCase().includes(q) ||
-        String(x.phone).toLowerCase().includes(q),
-    );
-  }, [scoped, search]);
+  // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
+  const viewItems = useMemo(
+    () => scoped.filter((x) => inView(x, viewMode)),
+    [scoped, viewMode],
+  );
 
-  const viewItems = useMemo(() => {
-    // Search active → today/archived filter ignore, poori list mein match dikhao
-    if (search.trim()) return filtered;
-    return filtered.filter((x) => inView(x, viewMode));
-  }, [filtered, viewMode, search]);
+  // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return scoped
+      .filter(
+        (x) =>
+          x.customer.toLowerCase().includes(q) ||
+          String(x.id).toLowerCase().includes(q) ||
+          x.area.toLowerCase().includes(q) ||
+          String(x.phone).toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  }, [scoped, search]);
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
@@ -788,6 +791,11 @@ export default function App() {
             session={session}
             search={search}
             setSearch={setSearch}
+            results={searchResults}
+            onPick={(x) => {
+              setActiveId(x.invoice_id);
+              setSearch('');
+            }}
             onReload={load}
             loading={loading}
             onLogout={() => setSession(null)}
@@ -1212,7 +1220,16 @@ function Sidebar({ session }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ TOPBAR */
-function Topbar({ session, search, setSearch, onReload, loading, onLogout }) {
+function Topbar({
+  session,
+  search,
+  setSearch,
+  results,
+  onPick,
+  onReload,
+  loading,
+  onLogout,
+}) {
   return (
     <header className="topbar">
       <div className="tb-search">
@@ -1223,10 +1240,42 @@ function Topbar({ session, search, setSearch, onReload, loading, onLogout }) {
         />
         <input
           className="topbar-search"
-          placeholder="Search by customer, invoice, area…"
+          placeholder="Search by customer, invoice, phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {search.trim() && (
+          <div className="search-dd">
+            {!results || results.length === 0 ? (
+              <div className="search-empty">Koi match nahi mila</div>
+            ) : (
+              results.map((x) => {
+                const today = isToday(createdTs(x));
+                return (
+                  <button
+                    key={x.invoice_id}
+                    className="search-row"
+                    onClick={() => onPick(x)}
+                  >
+                    <div className="search-row-main">
+                      <span className="ellip search-name">{x.customer}</span>
+                      <span
+                        className={
+                          today ? 'search-tag today' : 'search-tag arch'
+                        }
+                      >
+                        {today ? 'Today' : 'Archived'}
+                      </span>
+                    </div>
+                    <div className="ellip search-sub">
+                      ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
       <div className="tb-actions">
         <button className="icon-btn" onClick={onReload} title="Reload">
@@ -2681,6 +2730,16 @@ function StyleTag() {
 
       .tb-search { position: relative; flex: 1; max-width: 420px; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
+      .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
+      .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
+      .search-row:hover { background: ${T.cream}; }
+      .search-row-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .search-name { font-size: 13.5px; font-weight: 700; color: ${T.ink}; min-width: 0; }
+      .search-tag { flex-shrink: 0; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 6px; }
+      .search-tag.today { background: ${T.mint}; color: ${T.green}; }
+      .search-tag.arch { background: ${T.slateSoft}; color: ${T.slate}; }
+      .search-sub { font-size: 11.5px; color: ${T.inkSoft}; }
+      .search-empty { padding: 14px; text-align: center; font-size: 12.5px; color: ${T.inkSoft}; }
       .m-board { display: flex; flex-direction: column; gap: 12px; }
       .m-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 14px; overflow: hidden; }
       .m-sec-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 15px 14px; background: #fff; border: none; cursor: pointer; font-family: inherit; text-align: left; color: ${T.ink}; }
