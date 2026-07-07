@@ -437,10 +437,30 @@ function isToday(ts) {
     d.getDate() === n.getDate()
   );
 }
+/* Supabase created time — row jab create hui. Agar tumhare table mein column
+   ka naam alag ho (e.g. created_time), ye list usko bhi cover karti hai. */
+function createdTs(x) {
+  const r = (x && x._raw) || {};
+  return (
+    r.created_at ||
+    r.created_time ||
+    r.inserted_at ||
+    r.synced_at ||
+    x.synced_at ||
+    r.updated_at ||
+    null
+  );
+}
 function inView(x, viewMode) {
-  if (viewMode === 'archived') return x.stage === 'delivered';
-  // today: past-delivered chhod ke sab (naye/pending/cancelled + aaj delivered)
-  if (x.stage === 'delivered') return isToday(deliveredTs(x));
+  const createdToday = isToday(createdTs(x));
+  if (viewMode === 'archived') {
+    // Archived = deliver ho chuki + aaj create NAHI hui (purani delivered)
+    return x.stage === 'delivered' && !createdToday;
+  }
+  // Today:
+  // - delivered entry sirf tab jab aaj hi create/aayi ho (warna Archived mein)
+  if (x.stage === 'delivered') return createdToday;
+  // - baaki sab (pending: new/talked/scheduled + cancelled) jab tak pending → Today
   return true;
 }
 
@@ -1787,7 +1807,6 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           if (b.i > idx + 1) return null; // aage wali stages abhi chhupi
           const st = STAGES[b.i];
           const editable = b.i <= idx;
-          const isNext = b.i === idx + 1;
           return (
             <div key={b.id}>
               <div
@@ -1814,14 +1833,15 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
                   </span>
                 )}
               </div>
-              <div className="kv-grid" style={{ opacity: editable ? 1 : 0.6 }}>
-                {b.rows.map(([k, v]) => (
-                  <KV key={k} label={k} value={v} full={k === 'Remarks'} />
-                ))}
-              </div>
-              {isNext && (
+              {editable ? (
+                <div className="kv-grid">
+                  {b.rows.map(([k, v]) => (
+                    <KV key={k} label={k} value={v} full={k === 'Remarks'} />
+                  ))}
+                </div>
+              ) : (
                 <div className="block-next-note">
-                  Ye bharne ke liye upar <b>{st.short}</b> button dabao.
+                  Ye stage bharne ke liye upar <b>{st.short}</b> button dabao.
                 </div>
               )}
             </div>
