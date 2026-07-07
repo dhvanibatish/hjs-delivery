@@ -419,13 +419,7 @@ const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
 /* ── Today vs Archived ─────────────────────────────────────────────────
-   Archived = sirf delivered. Today = baaki sab + aaj deliver hue.       */
-function deliveredTs(x) {
-  const log = x && x._raw && Array.isArray(x._raw.app_log) ? x._raw.app_log : [];
-  const evs = log.filter((e) => e && e.stage === 'delivered');
-  if (evs.length) return evs[evs.length - 1].ts;
-  return (x._raw && x._raw.updated_at) || x.synced_at || null;
-}
+   Today = sirf aaj create hui entries (kisi bhi stage). Archived = sab.   */
 function isToday(ts) {
   if (!ts) return false;
   const d = new Date(ts);
@@ -452,16 +446,10 @@ function createdTs(x) {
   );
 }
 function inView(x, viewMode) {
-  const createdToday = isToday(createdTs(x));
-  if (viewMode === 'archived') {
-    // Archived = deliver ho chuki + aaj create NAHI hui (purani delivered)
-    return x.stage === 'delivered' && !createdToday;
-  }
-  // Today:
-  // - delivered entry sirf tab jab aaj hi create/aayi ho (warna Archived mein)
-  if (x.stage === 'delivered') return createdToday;
-  // - baaki sab (pending: new/talked/scheduled + cancelled) jab tak pending → Today
-  return true;
+  // Archived = saari entries (aaj waali bhi + purani bhi) — poora record
+  if (viewMode === 'archived') return true;
+  // Today = sirf wo jo aaj create hui (kisi bhi stage mein). Purani nahi.
+  return isToday(createdTs(x));
 }
 
 /* stat categories jinpe collapsible entries khulti hain.
