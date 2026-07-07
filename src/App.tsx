@@ -297,6 +297,14 @@ function statusToStage(s) {
   return 'new'; // naya / unknown record → New Delivery
 }
 
+/* Drawer mein agli stage ke liye simple prompt (next stage id → message) */
+const STAGE_HINT = {
+  new: 'Delivery shuru karo',
+  talked: 'Customer se baat karke Contacted bharo',
+  scheduled: 'Delivery schedule karke details bharo',
+  delivered: 'Item deliver karke amount bharo',
+};
+
 function deriveBranch(r) {
   if (r.store_code && String(r.store_code).trim() && r.store_code !== 'null')
     return String(r.store_code).trim().toUpperCase();
@@ -436,7 +444,10 @@ function inView(x, viewMode) {
   return true;
 }
 
-/* stat categories jinpe collapsible entries khulti hain */
+/* stat categories jinpe collapsible entries khulti hain.
+   NOTE: "Total Deliveries" ab yahan se hata diya — wo count Header ke
+   "Today/Archived · Total deliveries · N" chip mein dikhta hai. Pending +
+   Delivered + Cancelled se poori picture mil jaati hai.                 */
 const CATS = [
   {
     id: 'pending',
@@ -868,7 +879,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
 }
 
 /* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
-   Stat categories (Pending / Delivered / Cancelled) — har card
+   Stat categories (Total / Pending / Delivered / Cancelled) — har card
    clickable + collapsible. Click karo to us category ki entries khulti hain.
    Ismein koi stage-wise board NAHI hota.                                 */
 function CategoriesView({ items, loading, onOpen, onMove }) {
@@ -1623,6 +1634,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
   const Icon = equipIcon(d.equipment);
   const idx = stageIndex(d.stage);
   const stage = STAGES[idx] || STAGES[0];
+  const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
   const r = d._raw || {};
   // app_log is the timeline source now (table is locked; no direct fetch)
   const tl = [];
@@ -1713,37 +1725,52 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           {stage.label}
         </span>
 
-        {/* ── Move to stage (ab sabse upar) — jo stages bhar gayi wo colored ── */}
+        {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
         <div className="sec-title" style={{ marginTop: 16 }}>
           Move to stage
         </div>
+        {next ? (
+          <div className="next-hint">
+            <span className="col-pip" style={{ background: next.color }} />
+            <span>
+              Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
+            </span>
+          </div>
+        ) : (
+          <div className="next-hint done">
+            <Check size={14} /> Saari stages complete — delivery done
+          </div>
+        )}
         <div className="stage-picker">
           {STAGES.map((s, i) => {
-            const done = i <= idx; // ye stages bhar chuki hain → colored
-            const cur = i === idx; // current stage → thoda extra highlight
+            if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
+            const filled = i <= idx; // bhar chuki → solid color
+            const isNext = i === idx + 1; // agli actionable stage → soft tint
             return (
               <button
                 key={s.id}
-                className="stage-pick-btn"
+                className={isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'}
                 style={{
-                  background: done ? s.color : '#fff',
-                  color: done ? '#fff' : T.ink,
-                  borderColor: done ? s.color : T.line,
-                  boxShadow: cur ? `0 0 0 3px ${s.soft}` : 'none',
-                  fontWeight: cur ? 800 : 700,
+                  background: filled ? s.color : isNext ? s.soft : '#fff',
+                  color: filled ? '#fff' : s.color,
+                  borderColor: s.color,
                 }}
                 onClick={() => {
                   if (i === idx) return;
                   i > idx ? onAdvance(s.id) : onSetStage(s.id);
                 }}
               >
+                {filled && (
+                  <Check size={12} style={{ marginRight: 4, verticalAlign: -1 }} />
+                )}
                 {s.short}
               </button>
             );
           })}
         </div>
         <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-          Aage jaane pe form khulega · peeche jaana ek click mein.
+          Bhari hui stages colored hain · agli stage bharne pe wo colored hogi
+          aur uske baad wali khulegi.
         </div>
 
         <div className="kv-grid" style={{ marginTop: 18 }}>
@@ -1757,15 +1784,17 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
 
         {/* stage-wise fields — previous + current editable, future locked */}
         {blocks.map((b) => {
+          if (b.i > idx + 1) return null; // aage wali stages abhi chhupi
           const st = STAGES[b.i];
           const editable = b.i <= idx;
+          const isNext = b.i === idx + 1;
           return (
             <div key={b.id}>
               <div
-                className="sec-title"
+                className="sec-title stage-block-title"
                 style={{ justifyContent: 'space-between' }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <span className="col-pip" style={{ background: st.color }} />{' '}
                   {st.label}
                 </span>
@@ -1774,32 +1803,30 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
                     className="mini-edit"
                     onClick={() => onEditStage(b.id)}
                   >
-                    <Pencil size={12} /> Edit
+                    <Pencil size={13} /> Edit
                   </button>
                 ) : (
                   <span
-                    style={{
-                      fontSize: 10.5,
-                      color: T.inkSoft,
-                      fontWeight: 600,
-                    }}
+                    className="next-badge"
+                    style={{ color: st.color, background: st.soft }}
                   >
-                    locked
+                    Agla step
                   </span>
                 )}
               </div>
-              <div className="kv-grid" style={{ opacity: editable ? 1 : 0.55 }}>
+              <div className="kv-grid" style={{ opacity: editable ? 1 : 0.6 }}>
                 {b.rows.map(([k, v]) => (
                   <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                 ))}
               </div>
+              {isNext && (
+                <div className="block-next-note">
+                  Ye bharne ke liye upar <b>{st.short}</b> button dabao.
+                </div>
+              )}
             </div>
           );
         })}
-        <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-          Previous + current stages editable hain. Future stages tab khulenge
-          jab delivery wahan pahunchegi.
-        </div>
 
         <div className="sec-title" style={{ marginTop: 22 }}>
           <History size={14} /> Timeline / history
@@ -2586,8 +2613,19 @@ function StyleTag() {
       .tl-field { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; font-weight: 500; line-height: 1.4; }
       .tl-field b { font-weight: 700; color: ${T.ink}; }
 
-      .stage-picker { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
-      .stage-pick-btn { border: 1px solid; border-radius: 10px; padding: 10px 4px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .stage-picker { display: flex; flex-wrap: wrap; gap: 10px; }
+      .stage-pick-btn { flex: 1 1 110px; min-width: 104px; border: 1.5px solid; border-radius: 12px; padding: 14px 10px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .1s, box-shadow .12s; }
+      .stage-pick-btn:hover { transform: translateY(-1px); }
+      .stage-pick-btn.is-next { border-width: 2.5px; box-shadow: 0 3px 12px rgba(20,57,43,.12); }
+
+      .next-hint { display: flex; align-items: center; gap: 9px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 14px; color: ${T.ink}; margin-bottom: 12px; line-height: 1.4; }
+      .next-hint b { font-weight: 800; }
+      .next-hint .col-pip { width: 10px; height: 10px; }
+      .next-hint.done { background: ${T.mint}; border-color: #cfe3d0; color: ${T.green}; font-weight: 800; }
+      .next-badge { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 4px 10px; border-radius: 8px; }
+      .sec-title.stage-block-title { font-size: 15px; }
+      .block-next-note { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 8px; background: ${T.cream}; border: 1px dashed ${T.line}; border-radius: 10px; padding: 8px 11px; }
+      .block-next-note b { color: ${T.ink}; font-weight: 800; }
 
       .tb-search { position: relative; flex: 1; max-width: 420px; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
