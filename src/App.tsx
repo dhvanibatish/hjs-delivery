@@ -21,6 +21,7 @@ import {
   Building2,
   Car,
   ArrowRight,
+  ArrowLeft,
   CheckCircle2,
   Wind,
   BedDouble,
@@ -674,14 +675,16 @@ export default function App() {
       (x) =>
         x.customer.toLowerCase().includes(q) ||
         String(x.id).toLowerCase().includes(q) ||
-        x.area.toLowerCase().includes(q),
+        x.area.toLowerCase().includes(q) ||
+        String(x.phone).toLowerCase().includes(q),
     );
   }, [scoped, search]);
 
-  const viewItems = useMemo(
-    () => filtered.filter((x) => inView(x, viewMode)),
-    [filtered, viewMode],
-  );
+  const viewItems = useMemo(() => {
+    // Search active → today/archived filter ignore, poori list mein match dikhao
+    if (search.trim()) return filtered;
+    return filtered.filter((x) => inView(x, viewMode));
+  }, [filtered, viewMode, search]);
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
@@ -2499,7 +2502,9 @@ function TrackResult({ row }) {
                     style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
                   >
                     {step.label}
-                    {current && <span className="ttl-now">You are here</span>}
+                    {current && (
+                      <ArrowLeft className="ttl-now-arrow" size={18} />
+                    )}
                   </div>
                   <div className="ttl-desc">{step.desc}</div>
 
@@ -2742,6 +2747,7 @@ function StyleTag() {
       .ttl-content { padding-bottom: 22px; padding-top: 4px; }
       .ttl-title { font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .ttl-now { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; color: ${T.green}; padding: 3px 8px; border-radius: 20px; }
+      .ttl-now-arrow { color: ${T.green}; flex-shrink: 0; }
       .ttl-desc { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 2px; }
       .ttl-time { font-size: 12px; color: ${T.green}; font-weight: 700; margin-top: 4px; }
       .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
