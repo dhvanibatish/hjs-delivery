@@ -74,9 +74,10 @@ async function sbUpdate(store, pw, invoiceId, patch) {
     p_patch: patch,
   });
 }
-// public customer tracking — safe fields only, phone last-4 verified in DB
-async function sbTrack(invNo, phone4) {
-  return sbRpc('track_order', { p_invoice: invNo, p_phone4: phone4 });
+// public customer tracking — link se invoice + customer ka registered phone
+// NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
+async function sbTrack(invoice, phone) {
+  return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -322,13 +323,31 @@ function clean(v) {
     : '';
 }
 function equipmentText(r) {
-  const li = r.line_items;
+  let li = r.line_items;
+  // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo
+  if (typeof li === 'string') {
+    const t = li.trim();
+    if (t.startsWith('[') || t.startsWith('{')) {
+      try {
+        li = JSON.parse(t);
+      } catch (_) {}
+    }
+  }
   if (Array.isArray(li)) {
     const names = li
-      .map((x) => (typeof x === 'string' ? x : x && x.name ? x.name : ''))
+      .map((x) => {
+        if (typeof x === 'string') return x;
+        if (x && x.name) {
+          const q = Number(x.quantity) || 0;
+          return q > 1 ? `${x.name} × ${q}` : x.name;
+        }
+        return '';
+      })
       .filter(Boolean);
     if (names.length) return names.join(', ');
-  } else if (typeof li === 'string' && li.trim() && li !== 'null') return li;
+  } else if (typeof li === 'string' && li.trim() && li !== 'null') {
+    return li;
+  }
   if (r.item_name && r.item_name !== 'null') {
     const t = String(r.item_name)
       .split('|')
@@ -602,7 +621,7 @@ export default function App() {
       ? new URLSearchParams(window.location.search)
       : new URLSearchParams();
   if (params.has('track') || params.has('inv'))
-    return <TrackPage prefill={params.get('inv') || ''} />;
+    return <TrackPage invoice={params.get('inv') || ''} />;
 
   const [session, setSession] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
@@ -2233,57 +2252,54 @@ function Toast({ msg }) {
 const TRACK_STEPS = [
   {
     id: 'new',
-    label: 'Order Received',
-    desc: 'Aapka order register ho gaya hai',
+    label: 'Order Registered',
+    desc: 'Your order has been registered. Our team will call you shortly to confirm the delivery date and time.',
     icon: Package,
   },
   {
     id: 'talked',
     label: 'Confirmed With You',
-    desc: 'Humne aapse baat karke confirm kiya',
+    desc: 'Our team has contacted you and your delivery date and time has been confirmed.',
     icon: Phone,
   },
   {
     id: 'scheduled',
     label: 'Delivery Scheduled',
-    desc: 'Delivery plan ho gayi hai',
+    desc: 'Your item has passed the quality check and the delivery has been scheduled.',
     icon: Truck,
   },
   {
     id: 'delivered',
     label: 'Delivered',
-    desc: 'Order aap tak pahunch gaya',
+    desc: 'Your order has been delivered successfully. Thank you for choosing Healthy Jeena Sikho.',
     icon: CheckCircle2,
   },
 ];
+/* customer country-code dropdown — default +91 */
+const COUNTRY_CODES = ['+91', '+1', '+44', '+971', '+977', '+880', '+61'];
 function stepTime(log, stageId) {
   if (!Array.isArray(log)) return null;
   const evs = log.filter((e) => e && e.stage === stageId);
   return evs.length ? evs[evs.length - 1].ts : null;
 }
 
-function TrackPage({ prefill }) {
-  const [inv, setInv] = useState(prefill || '');
-  const [phone4, setPhone4] = useState('');
+function TrackPage({ invoice }) {
+  const [code, setCode] = useState('+91');
+  const [phone, setPhone] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
   const [row, setRow] = useState(null);
   const [err, setErr] = useState('');
 
   const track = async () => {
-    const q = inv.trim();
-    const p4 = phone4.trim();
-    if (!q) {
-      setErr('Apna invoice number daalo.');
-      return;
-    }
-    if (p4.length !== 4) {
-      setErr('Phone ke last 4 digit daalo.');
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) {
+      setErr('Please enter your full registered mobile number.');
       return;
     }
     setErr('');
     setState('loading');
     try {
-      const rows = await sbTrack(q, p4);
+      const rows = await sbTrack(invoice || '', `${code}${digits}`);
       if (!rows || rows.length === 0) {
         setState('notfound');
         setRow(null);
@@ -2292,7 +2308,7 @@ function TrackPage({ prefill }) {
       setRow(rows[0]);
       setState('done');
     } catch (e) {
-      setErr(e.message || 'Kuch galat hua');
+      setErr(e.message || 'Something went wrong');
       setState('error');
     }
   };
@@ -2318,36 +2334,41 @@ function TrackPage({ prefill }) {
 
       <div className="track-body">
         <div className="track-card">
-          <h1 className="track-h1">Apni delivery track karein</h1>
+          <h1 className="track-h1">Track your delivery</h1>
           <p className="track-sub">
-            Invoice number daalein (bill par likha hota hai). Chaahein to phone
-            ke last 4 digit bhi — extra safety ke liye.
+            Welcome! Please enter your registered mobile number to see your
+            order status.
           </p>
-          <Field label="Invoice number">
-            <input
-              className="inp"
-              placeholder="e.g. GGN/07/2026/0926"
-              value={inv}
-              onChange={(e) => {
-                setInv(e.target.value);
-                setErr('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && track()}
-            />
-          </Field>
-          <Field label="Phone ke last 4 digit">
-            <input
-              className="inp"
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="1234"
-              value={phone4}
-              onChange={(e) => {
-                setPhone4(e.target.value.replace(/\D/g, ''));
-                setErr('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && track()}
-            />
+          {invoice && (
+            <div className="track-inv">
+              Order&nbsp;<b>{invoice}</b>
+            </div>
+          )}
+          <Field label="Registered mobile number">
+            <div className="phone-row">
+              <select
+                className="inp code-select"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="inp phone-input"
+                inputMode="numeric"
+                placeholder="98765 43210"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value.replace(/\D/g, ''));
+                  setErr('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && track()}
+              />
+            </div>
           </Field>
           {err && <div className="login-err">{err}</div>}
           <button
@@ -2357,7 +2378,7 @@ function TrackPage({ prefill }) {
             onClick={track}
           >
             {state === 'loading' ? (
-              'Dhoondh rahe hain…'
+              'Searching…'
             ) : (
               <>
                 Track order <ArrowRight size={17} />
@@ -2367,13 +2388,12 @@ function TrackPage({ prefill }) {
 
           {state === 'notfound' && (
             <div className="track-msg">
-              Is invoice number{phone4 ? ' + phone' : ''} se koi order nahi mila.
-              Details dobara check karein.
+              No order found for this number. Please check and try again.
             </div>
           )}
           {state === 'error' && (
             <div className="track-msg">
-              Abhi track nahi ho paa raha. Thodi der baad try karein.
+              Unable to track right now. Please try again in a bit.
             </div>
           )}
         </div>
@@ -2443,9 +2463,18 @@ function TrackResult({ row }) {
           </div>
         ) : (
           TRACK_STEPS.map((step, i) => {
-            const done = i <= idx;
+            if (i > idx) return null; // sirf reached stages dikhao — future hidden
             const current = i === idx;
-            const ts = stepTime(log, step.id);
+            // "reached this stage" time — har stage pe green chhota timestamp
+            const reachedTs =
+              stepTime(log, step.id) ||
+              (step.id === 'new'
+                ? row.created_at ||
+                  row.created_time ||
+                  row.inserted_at ||
+                  row.synced_at ||
+                  null
+                : null);
             const StepIcon = step.icon;
             return (
               <div className="ttl-row" key={step.id}>
@@ -2453,41 +2482,44 @@ function TrackResult({ row }) {
                   <div
                     className="ttl-dot"
                     style={{
-                      background: done ? T.green : '#fff',
-                      borderColor: done ? T.green : T.line,
-                      color: done ? '#fff' : T.inkSoft,
+                      background: T.green,
+                      borderColor: T.green,
+                      color: '#fff',
                     }}
                   >
                     <StepIcon size={16} />
                   </div>
-                  {i < TRACK_STEPS.length - 1 && (
-                    <span
-                      className="ttl-line"
-                      style={{ background: i < idx ? T.green : T.line }}
-                    />
+                  {i < idx && (
+                    <span className="ttl-line" style={{ background: T.green }} />
                   )}
                 </div>
                 <div className="ttl-content">
                   <div
                     className="ttl-title"
-                    style={{
-                      color: done ? T.ink : T.inkSoft,
-                      fontWeight: current ? 800 : 700,
-                    }}
+                    style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
                   >
                     {step.label}
-                    {current && <span className="ttl-now">abhi yahan</span>}
+                    {current && <span className="ttl-now">You are here</span>}
                   </div>
                   <div className="ttl-desc">{step.desc}</div>
-                  {done && ts && (
-                    <div className="ttl-time">{fmtDateTime(ts)}</div>
+
+                  {/* Stage 2 — confirmed delivery slot */}
+                  {step.id === 'talked' && (schedDate || schedTime) && (
+                    <div className="ttl-extra">
+                      <div>
+                        <b>Confirmed slot:</b> {schedDate || ''}
+                        {schedDate && schedTime ? ', ' : ''}
+                        {schedTime || ''}
+                      </div>
+                    </div>
                   )}
-                  {/* scheduled ke andar slot + delivery person */}
-                  {step.id === 'scheduled' && done && (
+
+                  {/* Stage 3 — delivery slot + partner */}
+                  {step.id === 'scheduled' && (
                     <div className="ttl-extra">
                       {(schedDate || schedTime) && (
                         <div>
-                          <b>Slot:</b> {schedDate || ''}
+                          <b>Delivery slot:</b> {schedDate || ''}
                           {schedDate && schedTime ? ', ' : ''}
                           {schedTime || ''}
                         </div>
@@ -2497,6 +2529,13 @@ function TrackResult({ row }) {
                           <b>Delivery partner:</b> {person}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* har stage pe — kab update hua (green chhota) */}
+                  {reachedTs && (
+                    <div className="ttl-time">
+                      Updated: {fmtDateTime(reachedTs)}
                     </div>
                   )}
                 </div>
@@ -2687,6 +2726,10 @@ function StyleTag() {
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
+      .phone-row { display: flex; gap: 10px; }
+      .track-inv { display: inline-flex; align-items: center; align-self: flex-start; background: ${T.mint}; color: ${T.green}; border: 1px solid #cfe3d0; border-radius: 10px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; margin: -2px 0 2px; }
+      .phone-row .code-select { flex: 0 0 92px; width: 92px; text-align: center; font-weight: 700; padding: 11px 8px; }
+      .phone-row .phone-input { flex: 1 1 auto; min-width: 0; }
       .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
       .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
       .track-order { display: flex; align-items: center; gap: 12px; }
