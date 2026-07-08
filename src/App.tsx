@@ -438,16 +438,17 @@ function makeEvent(toStage, fields, mode) {
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
-/* cancelled order: app_log se sabse door tak pahunchi stage (New = 0 default) */
+/* cancelled order: cancel hone se theek pehle jo aakhri (latest) stage set thi.
+   NOTE: max NAHI lete — app_log mein aage-peeche move ho sakta hai, isliye
+   sabse last event hi asli "current" stage hai jab cancel hua. */
 function reachedIdxFromLog(log) {
-  let max = 0; // New hamesha reach hoti hai
-  if (Array.isArray(log)) {
-    log.forEach((e) => {
-      const si = stageIndex(e && e.stage);
-      if (si > max) max = si;
-    });
+  if (Array.isArray(log) && log.length) {
+    for (let i = log.length - 1; i >= 0; i--) {
+      const si = stageIndex(log[i] && log[i].stage);
+      if (si >= 0) return si;
+    }
   }
-  return max;
+  return 0; // koi log nahi → New
 }
 
 /* ── Today vs Archived ─────────────────────────────────────────────────
