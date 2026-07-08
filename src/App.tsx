@@ -438,6 +438,18 @@ function makeEvent(toStage, fields, mode) {
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
+/* cancelled order: app_log se sabse door tak pahunchi stage (New = 0 default) */
+function reachedIdxFromLog(log) {
+  let max = 0; // New hamesha reach hoti hai
+  if (Array.isArray(log)) {
+    log.forEach((e) => {
+      const si = stageIndex(e && e.stage);
+      if (si > max) max = si;
+    });
+  }
+  return max;
+}
+
 /* ── Today vs Archived ─────────────────────────────────────────────────
    Today = sirf aaj create hui entries (kisi bhi stage). Archived = sab.   */
 function isToday(ts) {
@@ -1232,6 +1244,15 @@ function Topbar({
 }) {
   return (
     <header className="topbar">
+      <div className="tb-brand">
+        <div
+          className="brand-badge"
+          style={{ width: 32, height: 32, borderRadius: 10 }}
+        >
+          <Truck size={17} color="#fff" />
+        </div>
+        <span>Healthy Jeena Sikho</span>
+      </div>
       <div className="tb-search">
         <Search
           size={16}
@@ -1731,6 +1752,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
     ? { label: 'Cancelled', color: T.red, soft: T.redSoft }
     : STAGES[idx] || STAGES[0];
   const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
+  // cancelled: cancel se pehle kahan tak pahunchi thi (greyed dikhane ke liye)
+  const reachedIdx = cancelled ? reachedIdxFromLog(d._raw && d._raw.app_log) : idx;
   const r = d._raw || {};
   // app_log is the timeline source now (table is locked; no direct fetch)
   const tl = [];
@@ -1822,16 +1845,47 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
         </span>
 
         {cancelled ? (
-          <div className="cancel-note">
-            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div>
-              <div style={{ fontWeight: 800 }}>This order has been cancelled</div>
-              <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                Zoho Books se cancel hua hai (₹0 invoice). Isliye stages disable
-                hain.
+          <>
+            <div className="cancel-note">
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div style={{ fontWeight: 800 }}>
+                  This order has been cancelled
+                </div>
+                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                  Zoho Books se cancel hua hai. Stages edit nahi ho sakti — bas
+                  record ke liye dikha rahe hain.
+                </div>
               </div>
             </div>
-          </div>
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              Cancel se pehle ki stages
+            </div>
+            <div className="stage-picker">
+              {STAGES.map((s, i) => {
+                if (i > reachedIdx) return null; // jahan tak pahunchi thi
+                return (
+                  <button
+                    key={s.id}
+                    className="stage-pick-btn"
+                    disabled
+                    style={{
+                      background: '#EDEBE4',
+                      color: T.inkSoft,
+                      borderColor: T.line,
+                      cursor: 'default',
+                    }}
+                  >
+                    <Check
+                      size={12}
+                      style={{ marginRight: 4, verticalAlign: -1 }}
+                    />
+                    {s.short}
+                  </button>
+                );
+              })}
+            </div>
+          </>
         ) : (
           <>
             {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
@@ -1898,14 +1952,15 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           <KV label="Store manager" value={d.manager} full />
         </div>
 
-        {/* stage-wise fields — cancelled pe nahi dikhte */}
-        {!cancelled &&
-          blocks.map((b) => {
-          if (b.i > idx + 1) return null; // aage wali stages abhi chhupi
+        {/* stage-wise fields — normal: progressive; cancelled: reached blocks read-only */}
+        {blocks.map((b) => {
+          const limit = cancelled ? reachedIdx : idx + 1;
+          if (b.i > limit) return null;
           const st = STAGES[b.i];
-          const editable = b.i <= idx;
+          const filled = cancelled ? b.i <= reachedIdx : b.i <= idx;
+          const editable = filled && !cancelled;
           return (
-            <div key={b.id}>
+            <div key={b.id} style={cancelled ? { opacity: 0.75 } : null}>
               <div
                 className="sec-title stage-block-title"
                 style={{ justifyContent: 'space-between' }}
@@ -1921,6 +1976,13 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
                   >
                     <Pencil size={13} /> Edit
                   </button>
+                ) : cancelled ? (
+                  <span
+                    className="next-badge"
+                    style={{ color: T.inkSoft, background: T.slateSoft }}
+                  >
+                    locked
+                  </span>
                 ) : (
                   <span
                     className="next-badge"
@@ -1930,7 +1992,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
                   </span>
                 )}
               </div>
-              {editable ? (
+              {filled ? (
                 <div className="kv-grid">
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
@@ -1948,6 +2010,24 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
         <div className="sec-title" style={{ marginTop: 22 }}>
           <History size={14} /> Timeline / history
         </div>
+        {cancelled && (
+          <div className="timeline">
+            <div className="tl-row">
+              <div className="tl-marker">
+                <span className="tl-dot" style={{ background: T.red }} />
+                {appLog.length > 0 && (
+                  <span className="tl-line" style={{ background: T.line }} />
+                )}
+              </div>
+              <div style={{ paddingBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: T.red }}>
+                  Order Cancelled
+                </div>
+                <div className="tl-note">Zoho Books se cancel hua</div>
+              </div>
+            </div>
+          </div>
+        )}
         {appLog.length > 0 ? (
           <div className="timeline">
             {appLog.map((ev, i) => {
@@ -2508,6 +2588,9 @@ function TrackResult({ row }) {
   const cancelled = stage === 'cancelled';
   const idx = stageIndex(stage);
   const log = Array.isArray(row.app_log) ? row.app_log : [];
+  // cancelled: cancel se pehle jahan tak pahunchi thi (app_log se)
+  const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
+  const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
   const Icon = equipIcon(equipment);
   const person = row.delivery_partner || null;
   const orderId = row.invoice_number;
@@ -2546,16 +2629,96 @@ function TrackResult({ row }) {
 
       {/* the timeline */}
       <div className="track-tl">
-        {cancelled ? (
+        {TRACK_STEPS.map((step, i) => {
+          if (i > flowIdx) return null; // sirf reached stages dikhao
+          const current = !cancelled && i === idx;
+          // "reached this stage" time — har stage pe green chhota timestamp
+          const reachedTs =
+            stepTime(log, step.id) ||
+            (step.id === 'new'
+              ? row.created_at ||
+                row.created_time ||
+                row.inserted_at ||
+                row.synced_at ||
+                null
+              : null);
+          const StepIcon = step.icon;
+          // cancelled hua to aakhri reached stage bhi neeche cancel-entry se jude
+          const showLine = i < flowIdx || cancelled;
+          return (
+            <div className="ttl-row" key={step.id}>
+              <div className="ttl-left">
+                <div
+                  className="ttl-dot"
+                  style={{
+                    background: T.green,
+                    borderColor: T.green,
+                    color: '#fff',
+                  }}
+                >
+                  <StepIcon size={16} />
+                </div>
+                {showLine && (
+                  <span className="ttl-line" style={{ background: T.green }} />
+                )}
+              </div>
+              <div className="ttl-content">
+                <div
+                  className="ttl-title"
+                  style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
+                >
+                  {step.label}
+                  {current && <ArrowLeft className="ttl-now-arrow" size={18} />}
+                </div>
+                <div className="ttl-desc">{step.desc}</div>
+
+                {/* Stage 2 — confirmed delivery slot */}
+                {step.id === 'talked' && (schedDate || schedTime) && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Confirmed slot:</b> {schedDate || ''}
+                      {schedDate && schedTime ? ', ' : ''}
+                      {schedTime || ''}
+                    </div>
+                  </div>
+                )}
+
+                {/* Stage 3 — delivery slot + partner */}
+                {step.id === 'scheduled' && (
+                  <div className="ttl-extra">
+                    {(schedDate || schedTime) && (
+                      <div>
+                        <b>Delivery slot:</b> {schedDate || ''}
+                        {schedDate && schedTime ? ', ' : ''}
+                        {schedTime || ''}
+                      </div>
+                    )}
+                    {person && (
+                      <div>
+                        <b>Delivery partner:</b> {person}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* har stage pe — kab update hua (green chhota) */}
+                {reachedTs && (
+                  <div className="ttl-time">
+                    Updated: {fmtDateTime(reachedTs)}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* cancelled → reached stages ke baad red Cancelled entry */}
+        {cancelled && (
           <div className="ttl-row">
             <div className="ttl-left">
               <div
                 className="ttl-dot"
-                style={{
-                  background: T.red,
-                  borderColor: T.red,
-                  color: '#fff',
-                }}
+                style={{ background: T.red, borderColor: T.red, color: '#fff' }}
               >
                 <AlertTriangle size={16} />
               </div>
@@ -2573,89 +2736,6 @@ function TrackResult({ row }) {
               </div>
             </div>
           </div>
-        ) : (
-          TRACK_STEPS.map((step, i) => {
-            if (i > idx) return null; // sirf reached stages dikhao — future hidden
-            const current = i === idx;
-            // "reached this stage" time — har stage pe green chhota timestamp
-            const reachedTs =
-              stepTime(log, step.id) ||
-              (step.id === 'new'
-                ? row.created_at ||
-                  row.created_time ||
-                  row.inserted_at ||
-                  row.synced_at ||
-                  null
-                : null);
-            const StepIcon = step.icon;
-            return (
-              <div className="ttl-row" key={step.id}>
-                <div className="ttl-left">
-                  <div
-                    className="ttl-dot"
-                    style={{
-                      background: T.green,
-                      borderColor: T.green,
-                      color: '#fff',
-                    }}
-                  >
-                    <StepIcon size={16} />
-                  </div>
-                  {i < idx && (
-                    <span className="ttl-line" style={{ background: T.green }} />
-                  )}
-                </div>
-                <div className="ttl-content">
-                  <div
-                    className="ttl-title"
-                    style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
-                  >
-                    {step.label}
-                    {current && (
-                      <ArrowLeft className="ttl-now-arrow" size={18} />
-                    )}
-                  </div>
-                  <div className="ttl-desc">{step.desc}</div>
-
-                  {/* Stage 2 — confirmed delivery slot */}
-                  {step.id === 'talked' && (schedDate || schedTime) && (
-                    <div className="ttl-extra">
-                      <div>
-                        <b>Confirmed slot:</b> {schedDate || ''}
-                        {schedDate && schedTime ? ', ' : ''}
-                        {schedTime || ''}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Stage 3 — delivery slot + partner */}
-                  {step.id === 'scheduled' && (
-                    <div className="ttl-extra">
-                      {(schedDate || schedTime) && (
-                        <div>
-                          <b>Delivery slot:</b> {schedDate || ''}
-                          {schedDate && schedTime ? ', ' : ''}
-                          {schedTime || ''}
-                        </div>
-                      )}
-                      {person && (
-                        <div>
-                          <b>Delivery partner:</b> {person}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* har stage pe — kab update hua (green chhota) */}
-                  {reachedTs && (
-                    <div className="ttl-time">
-                      Updated: {fmtDateTime(reachedTs)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
         )}
       </div>
     </div>
@@ -2792,6 +2872,8 @@ function StyleTag() {
       .block-next-note b { color: ${T.ink}; font-weight: 800; }
 
       .tb-search { position: relative; flex: 1; max-width: 420px; }
+      .tb-brand { display: none; align-items: center; gap: 9px; }
+      .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
       .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
       .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
@@ -2883,7 +2965,8 @@ function StyleTag() {
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
         .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
-        .tb-actions { order: 1; width: 100%; justify-content: flex-end; }
+        .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
+        .tb-actions { order: 1; width: auto; justify-content: flex-end; }
         .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
         main { padding: 20px 16px 60px !important; }
         .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
