@@ -80,6 +80,11 @@ async function sbUpdate(store, pw, invoiceId, patch) {
 async function sbTrack(invoice, phone) {
   return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
 }
+// sales team — sirf phone se us customer ki saari deliveries (latest→old).
+// p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
+async function sbTrackSearch(phone, pin) {
+  return sbRpc('track_search', { p_phone: phone, p_pin: pin });
+}
 
 /* ══════════════════════════════════════════════════════════════════════ */
 const T = {
@@ -629,13 +634,20 @@ function useIsMobile(bp = 760) {
 
 /* ════════════════════════════════════════════════════════════════ APP */
 export default function App() {
-  // Public customer tracking route: ...?track  or  ...?inv=MOH/25-26/041
+  // Tracking routes (Netlify SPA — query params + optional /track path):
+  //   /track                → sales: number se saari deliveries + timeline
+  //   /track?inv=CHD/...     → customer: single invoice (phone verify)
+  //   ?inv=CHD/...           → customer (bina /track ke bhi chalega)
   const params =
     typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search)
       : new URLSearchParams();
-  if (params.has('track') || params.has('inv'))
-    return <TrackPage invoice={params.get('inv') || ''} />;
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isTrackPath = /\/track\/?$/.test(path);
+  const inv = params.get('inv') || '';
+  if (inv) return <TrackPage invoice={inv} />; // customer — single order
+  if (params.has('track') || params.has('sales') || isTrackPath)
+    return <SalesTrackPage />; // sales — phone → list → timeline
 
   const [session, setSession] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
@@ -1245,6 +1257,15 @@ function Topbar({
 }) {
   return (
     <header className="topbar">
+      <div className="tb-brand">
+        <div
+          className="brand-badge"
+          style={{ width: 32, height: 32, borderRadius: 10 }}
+        >
+          <Truck size={17} color="#fff" />
+        </div>
+        <span>Healthy Jeena Sikho</span>
+      </div>
       <div className="tb-search">
         <Search
           size={16}
@@ -1315,17 +1336,8 @@ function Topbar({
           </div>
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-            <div
-              className="session-sub-desktop"
-              style={{ fontSize: 11, color: T.inkSoft }}
-            >
+            <div style={{ fontSize: 11, color: T.inkSoft }}>
               {session.storeName}
-            </div>
-            <div
-              className="session-sub-mobile"
-              style={{ fontSize: 11, color: T.inkSoft }}
-            >
-              Healthy Jeena Sikho
             </div>
           </div>
         </div>
@@ -2454,6 +2466,256 @@ function stepTime(log, stageId) {
   return evs.length ? evs[evs.length - 1].ts : null;
 }
 
+/* ── SALES TRACK PAGE ──────────────────────────────────────────────────
+   /track → sales team ek customer ka number daale, us number ki saari
+   deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
+   timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
+function SalesTrackPage() {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateErr, setGateErr] = useState('');
+  const [phone, setPhone] = useState('');
+  const [state, setState] = useState('idle'); // idle|loading|done|notfound|error
+  const [rows, setRows] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [err, setErr] = useState('');
+
+  // PIN verify: empty phone se call — sahi PIN pe [] aata hai, galat pe error
+  const unlock = async () => {
+    if (!pin) {
+      setGateErr('Enter the sales PIN.');
+      return;
+    }
+    setGateBusy(true);
+    setGateErr('');
+    try {
+      await sbTrackSearch('', pin);
+      setUnlocked(true);
+    } catch (e) {
+      setGateErr('Wrong PIN. Try again.');
+    }
+    setGateBusy(false);
+  };
+
+  const search = async () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) {
+      setErr('Please enter a full 10-digit mobile number.');
+      return;
+    }
+    setErr('');
+    setState('loading');
+    setSelected(null);
+    try {
+      const res = await sbTrackSearch(`+91${digits}`, pin);
+      if (!res || res.length === 0) {
+        setRows([]);
+        setState('notfound');
+        return;
+      }
+      setRows(res);
+      setState('done');
+    } catch (e) {
+      // PIN galat ho gaya (e.g. changed) → wapas gate pe
+      if (String(e.message || '').toLowerCase().includes('pin')) {
+        setUnlocked(false);
+        setGateErr('Session expired — enter PIN again.');
+        return;
+      }
+      setErr(e.message || 'Something went wrong');
+      setState('error');
+    }
+  };
+
+  return (
+    <div className="track-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="track-topbar">
+        <div className="brand">
+          <div className="brand-badge">
+            <Truck size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
+              Healthy Jeena Sikho
+            </div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
+              Delivery tracker · Sales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="track-body">
+        {!unlocked ? (
+          <div className="track-card">
+            <h1 className="track-h1">Sales access</h1>
+            <p className="track-sub">
+              Enter the sales PIN to look up customer deliveries.
+            </p>
+            <Field label="Sales PIN">
+              <input
+                className="inp"
+                type="password"
+                inputMode="numeric"
+                placeholder="••••"
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, ''));
+                  setGateErr('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && unlock()}
+              />
+            </Field>
+            {gateErr && <div className="login-err">{gateErr}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={!pin || gateBusy}
+              onClick={unlock}
+            >
+              {gateBusy ? (
+                'Checking…'
+              ) : (
+                <>
+                  Unlock <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            <div className="track-foot" style={{ marginTop: 6 }}>
+              Healthy Jeena Sikho · Internal use only
+            </div>
+          </div>
+        ) : selected ? (
+          <>
+            <button className="track-back" onClick={() => setSelected(null)}>
+              <ArrowLeft size={16} /> Back to list
+            </button>
+            <TrackResult row={selected} />
+          </>
+        ) : (
+          <div className="track-card">
+            <h1 className="track-h1">Track a customer's deliveries</h1>
+            <p className="track-sub">
+              Enter the customer's registered mobile number to see all their
+              orders, latest first.
+            </p>
+            <Field label="Customer mobile number">
+              <div className="phone-row">
+                <span className="code-fixed">+91</span>
+                <input
+                  className="inp phone-input"
+                  inputMode="numeric"
+                  placeholder="98765 43210"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value.replace(/\D/g, ''));
+                    setErr('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && search()}
+                />
+              </div>
+            </Field>
+            {err && <div className="login-err">{err}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={state === 'loading'}
+              onClick={search}
+            >
+              {state === 'loading' ? (
+                'Searching…'
+              ) : (
+                <>
+                  Search <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            {state === 'notfound' && (
+              <div className="track-msg">
+                No deliveries found for this number.
+              </div>
+            )}
+            {state === 'error' && (
+              <div className="track-msg">
+                Unable to search right now. Please try again.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!selected && state === 'done' && rows.length > 0 && (
+          <div className="sales-list">
+            <div className="sales-list-head">
+              {rows.length} {rows.length === 1 ? 'delivery' : 'deliveries'} ·
+              latest first
+            </div>
+            {rows.map((r) => {
+              const st = statusToStage(r.status);
+              const cancelled = st === 'cancelled';
+              const stg = STAGES[stageIndex(st)] || STAGES[0];
+              const equip = equipmentText({
+                line_items: r.line_items,
+                item_name: r.item_name,
+              });
+              const Icon = equipIcon(equip);
+              return (
+                <button
+                  key={r.invoice_number}
+                  className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
+                  onClick={() => setSelected(r)}
+                >
+                  <div
+                    className="eq-ico"
+                    style={{ background: cancelled ? T.redSoft : stg.soft }}
+                  >
+                    <Icon size={17} color={cancelled ? T.red : stg.color} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="sales-row-top">
+                      <span
+                        className="ellip"
+                        style={{ fontWeight: 800, fontSize: 14.5 }}
+                      >
+                        {r.customer_name || 'Customer'}
+                      </span>
+                      <span
+                        className="sales-chip"
+                        style={{
+                          background: cancelled ? T.redSoft : stg.soft,
+                          color: cancelled ? T.red : stg.color,
+                        }}
+                      >
+                        {cancelled ? 'Cancelled' : stg.short}
+                      </span>
+                    </div>
+                    <div className="ellip sales-sub">{equip}</div>
+                    <div className="sales-meta">
+                      <span className="ellip">#{r.invoice_number}</span>
+                      <span>
+                        ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+                      </span>
+                      {niceDate(r.created_at) && (
+                        <span>{niceDate(r.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={T.inkSoft} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="track-foot">
+          Healthy Jeena Sikho · Internal delivery tracker
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TrackPage({ invoice }) {
   const [phone, setPhone] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
@@ -2862,8 +3124,9 @@ function StyleTag() {
       .block-next-note b { color: ${T.ink}; font-weight: 800; }
 
       .tb-search { position: relative; flex: 1; max-width: 420px; }
+      .tb-brand { display: none; align-items: center; gap: 9px; }
+      .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
-      .session-sub-mobile { display: none; }
       .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
       .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
       .search-row:hover { background: ${T.cream}; }
@@ -2949,15 +3212,27 @@ function StyleTag() {
       .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
       .ttl-extra b { font-weight: 700; }
       .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
+      .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
+      .track-back:hover { background: ${T.beige}; }
+      .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+      .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
+      .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
+      .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
+      .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
+      .sales-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .sales-chip { flex-shrink: 0; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 3px 9px; border-radius: 8px; }
+      .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
+      .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+      .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
 
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
         .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
-        .tb-actions { order: 1; width: 100%; justify-content: flex-end; }
+        .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
+        .tb-actions { order: 1; width: auto; justify-content: flex-end; }
         .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
-        .session-sub-desktop { display: none; }
-        .session-sub-mobile { display: block; }
         main { padding: 20px 16px 60px !important; }
         .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
         .kv-grid { grid-template-columns: 1fr 1fr; }
