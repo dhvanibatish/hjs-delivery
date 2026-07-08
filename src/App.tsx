@@ -1250,22 +1250,29 @@ function Topbar({
               <div className="search-empty">Koi match nahi mila</div>
             ) : (
               results.map((x) => {
+                const cancelled = x.stage === 'cancelled';
                 const today = isToday(createdTs(x));
+                const tagClass = cancelled
+                  ? 'search-tag cancel'
+                  : today
+                    ? 'search-tag today'
+                    : 'search-tag arch';
+                const tagText = cancelled
+                  ? 'Cancelled'
+                  : today
+                    ? 'Today'
+                    : 'Archived';
                 return (
                   <button
                     key={x.invoice_id}
-                    className="search-row"
+                    className={
+                      cancelled ? 'search-row is-cancelled' : 'search-row'
+                    }
                     onClick={() => onPick(x)}
                   >
                     <div className="search-row-main">
                       <span className="ellip search-name">{x.customer}</span>
-                      <span
-                        className={
-                          today ? 'search-tag today' : 'search-tag arch'
-                        }
-                      >
-                        {today ? 'Today' : 'Archived'}
-                      </span>
+                      <span className={tagClass}>{tagText}</span>
                     </div>
                     <div className="ellip search-sub">
                       ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
@@ -1646,12 +1653,19 @@ function MobileBoard({ items, loading, onOpen, onMove }) {
 
 function Card({ d, stage, onOpen, onMove }) {
   const Icon = equipIcon(d.equipment);
+  const cancelled = d.stage === 'cancelled';
   const next = STAGES[stageIndex(d.stage) + 1];
   return (
-    <div className="card" onClick={onOpen}>
+    <div
+      className={cancelled ? 'card is-cancelled' : 'card'}
+      onClick={onOpen}
+    >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <div className="eq-ico" style={{ background: stage.soft }}>
-          <Icon size={17} color={stage.color} />
+        <div
+          className="eq-ico"
+          style={{ background: cancelled ? T.redSoft : stage.soft }}
+        >
+          <Icon size={17} color={cancelled ? T.red : stage.color} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="card-name">{d.customer}</div>
@@ -1711,8 +1725,11 @@ function FooterTotal({ items }) {
 /* ══════════════════════════════════════════════════════════════ DRAWER */
 function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
   const Icon = equipIcon(d.equipment);
+  const cancelled = d.stage === 'cancelled';
   const idx = stageIndex(d.stage);
-  const stage = STAGES[idx] || STAGES[0];
+  const stage = cancelled
+    ? { label: 'Cancelled', color: T.red, soft: T.redSoft }
+    : STAGES[idx] || STAGES[0];
   const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
   const r = d._raw || {};
   // app_log is the timeline source now (table is locked; no direct fetch)
@@ -1804,53 +1821,73 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           {stage.label}
         </span>
 
-        {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
-        <div className="sec-title" style={{ marginTop: 16 }}>
-          Move to stage
-        </div>
-        {next ? (
-          <div className="next-hint">
-            <span className="col-pip" style={{ background: next.color }} />
-            <span>
-              Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
-            </span>
+        {cancelled ? (
+          <div className="cancel-note">
+            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontWeight: 800 }}>This order has been cancelled</div>
+              <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                Zoho Books se cancel hua hai (₹0 invoice). Isliye stages disable
+                hain.
+              </div>
+            </div>
           </div>
         ) : (
-          <div className="next-hint done">
-            <Check size={14} /> Saari stages complete — delivery done
-          </div>
+          <>
+            {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              Move to stage
+            </div>
+            {next ? (
+              <div className="next-hint">
+                <span className="col-pip" style={{ background: next.color }} />
+                <span>
+                  Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
+                </span>
+              </div>
+            ) : (
+              <div className="next-hint done">
+                <Check size={14} /> Saari stages complete — delivery done
+              </div>
+            )}
+            <div className="stage-picker">
+              {STAGES.map((s, i) => {
+                if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
+                const filled = i <= idx; // bhar chuki → solid color
+                const isNext = i === idx + 1; // agli actionable stage → soft tint
+                return (
+                  <button
+                    key={s.id}
+                    className={
+                      isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'
+                    }
+                    style={{
+                      background: filled ? s.color : isNext ? s.soft : '#fff',
+                      color: filled ? '#fff' : s.color,
+                      borderColor: s.color,
+                    }}
+                    onClick={() => {
+                      if (i === idx) return;
+                      i > idx ? onAdvance(s.id) : onSetStage(s.id);
+                    }}
+                  >
+                    {filled && (
+                      <Check
+                        size={12}
+                        style={{ marginRight: 4, verticalAlign: -1 }}
+                      />
+                    )}
+                    {s.short}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+              Bhari hui stages colored hain · agli stage bharne pe wo colored
+              hogi aur uske baad wali khulegi.
+            </div>
+          </>
         )}
-        <div className="stage-picker">
-          {STAGES.map((s, i) => {
-            if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
-            const filled = i <= idx; // bhar chuki → solid color
-            const isNext = i === idx + 1; // agli actionable stage → soft tint
-            return (
-              <button
-                key={s.id}
-                className={isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'}
-                style={{
-                  background: filled ? s.color : isNext ? s.soft : '#fff',
-                  color: filled ? '#fff' : s.color,
-                  borderColor: s.color,
-                }}
-                onClick={() => {
-                  if (i === idx) return;
-                  i > idx ? onAdvance(s.id) : onSetStage(s.id);
-                }}
-              >
-                {filled && (
-                  <Check size={12} style={{ marginRight: 4, verticalAlign: -1 }} />
-                )}
-                {s.short}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-          Bhari hui stages colored hain · agli stage bharne pe wo colored hogi
-          aur uske baad wali khulegi.
-        </div>
 
         <div className="kv-grid" style={{ marginTop: 18 }}>
           <KV label="Phone" value={d.phone} />
@@ -1861,8 +1898,9 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           <KV label="Store manager" value={d.manager} full />
         </div>
 
-        {/* stage-wise fields — previous + current editable, future locked */}
-        {blocks.map((b) => {
+        {/* stage-wise fields — cancelled pe nahi dikhte */}
+        {!cancelled &&
+          blocks.map((b) => {
           if (b.i > idx + 1) return null; // aage wali stages abhi chhupi
           const st = STAGES[b.i];
           const editable = b.i <= idx;
@@ -2475,14 +2513,14 @@ function TrackResult({ row }) {
   const orderId = row.invoice_number;
 
   const banner = cancelled
-    ? { text: 'Ye order cancel ho gaya hai', bg: T.redSoft, fg: T.red }
+    ? { text: 'This order has been cancelled', bg: T.redSoft, fg: T.red }
     : stage === 'delivered'
-      ? { text: 'Deliver ho gaya 🎉', bg: T.mint, fg: T.green }
+      ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
       : stage === 'scheduled'
-        ? { text: 'Delivery scheduled hai', bg: T.amberSoft, fg: T.amber }
+        ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
         : stage === 'talked'
-          ? { text: 'Order confirmed hai', bg: T.blueSoft, fg: T.blue }
-          : { text: 'Order mil gaya hai', bg: T.slateSoft, fg: T.slate };
+          ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
+          : { text: 'Your order has been received', bg: T.slateSoft, fg: T.slate };
 
   const schedDate = niceDate(row.confirmed_date);
   const schedTime = niceTime(row.confirmed_time);
@@ -2509,9 +2547,31 @@ function TrackResult({ row }) {
       {/* the timeline */}
       <div className="track-tl">
         {cancelled ? (
-          <div className="track-msg" style={{ marginTop: 0 }}>
-            Is order ki delivery cancel kar di gayi hai. Sawaal ho to store se
-            sampark karein.
+          <div className="ttl-row">
+            <div className="ttl-left">
+              <div
+                className="ttl-dot"
+                style={{
+                  background: T.red,
+                  borderColor: T.red,
+                  color: '#fff',
+                }}
+              >
+                <AlertTriangle size={16} />
+              </div>
+            </div>
+            <div className="ttl-content">
+              <div
+                className="ttl-title"
+                style={{ color: T.red, fontWeight: 800 }}
+              >
+                Order Cancelled
+              </div>
+              <div className="ttl-desc">
+                This order has been cancelled. Please contact the store for any
+                questions.
+              </div>
+            </div>
           </div>
         ) : (
           TRACK_STEPS.map((step, i) => {
@@ -2684,6 +2744,9 @@ function StyleTag() {
       .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+      .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
+      .card.is-cancelled:hover { border-color: #DFB9AC; }
+      .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
 
       .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
 
@@ -2738,6 +2801,9 @@ function StyleTag() {
       .search-tag { flex-shrink: 0; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 6px; }
       .search-tag.today { background: ${T.mint}; color: ${T.green}; }
       .search-tag.arch { background: ${T.slateSoft}; color: ${T.slate}; }
+      .search-tag.cancel { background: ${T.redSoft}; color: ${T.red}; }
+      .search-row.is-cancelled { background: #FCF2EF; }
+      .search-row.is-cancelled:hover { background: #F8E6E0; }
       .search-sub { font-size: 11.5px; color: ${T.inkSoft}; }
       .search-empty { padding: 14px; text-align: center; font-size: 12.5px; color: ${T.inkSoft}; }
       .m-board { display: flex; flex-direction: column; gap: 12px; }
