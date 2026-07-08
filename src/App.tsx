@@ -1245,15 +1245,6 @@ function Topbar({
 }) {
   return (
     <header className="topbar">
-      <div className="tb-brand">
-        <div
-          className="brand-badge"
-          style={{ width: 32, height: 32, borderRadius: 10 }}
-        >
-          <Truck size={17} color="#fff" />
-        </div>
-        <span>Healthy Jeena Sikho</span>
-      </div>
       <div className="tb-search">
         <Search
           size={16}
@@ -1324,8 +1315,17 @@ function Topbar({
           </div>
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-            <div style={{ fontSize: 11, color: T.inkSoft }}>
+            <div
+              className="session-sub-desktop"
+              style={{ fontSize: 11, color: T.inkSoft }}
+            >
               {session.storeName}
+            </div>
+            <div
+              className="session-sub-mobile"
+              style={{ fontSize: 11, color: T.inkSoft }}
+            >
+              Healthy Jeena Sikho
             </div>
           </div>
         </div>
@@ -2862,9 +2862,8 @@ function StyleTag() {
       .block-next-note b { color: ${T.ink}; font-weight: 800; }
 
       .tb-search { position: relative; flex: 1; max-width: 420px; }
-      .tb-brand { display: none; align-items: center; gap: 9px; }
-      .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
+      .session-sub-mobile { display: none; }
       .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
       .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
       .search-row:hover { background: ${T.cream}; }
@@ -2955,9 +2954,10 @@ function StyleTag() {
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
         .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
-        .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
-        .tb-actions { order: 1; width: auto; justify-content: flex-end; }
+        .tb-actions { order: 1; width: 100%; justify-content: flex-end; }
         .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
+        .session-sub-desktop { display: none; }
+        .session-sub-mobile { display: block; }
         main { padding: 20px 16px 60px !important; }
         .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
         .kv-grid { grid-template-columns: 1fr 1fr; }
