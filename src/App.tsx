@@ -2455,7 +2455,6 @@ function stepTime(log, stageId) {
 }
 
 function TrackPage({ invoice }) {
-  const [code, setCode] = useState('+91');
   const [phone, setPhone] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
   const [row, setRow] = useState(null);
@@ -2470,7 +2469,7 @@ function TrackPage({ invoice }) {
     setErr('');
     setState('loading');
     try {
-      const rows = await sbTrack(invoice || '', `${code}${digits}`);
+      const rows = await sbTrack(invoice || '', `+91${digits}`);
       if (!rows || rows.length === 0) {
         setState('notfound');
         setRow(null);
@@ -2517,17 +2516,7 @@ function TrackPage({ invoice }) {
           )}
           <Field label="Registered mobile number">
             <div className="phone-row">
-              <select
-                className="inp code-select"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              >
-                {COUNTRY_CODES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              <span className="code-fixed">+91</span>
               <input
                 className="inp phone-input"
                 inputMode="numeric"
@@ -2941,7 +2930,7 @@ function StyleTag() {
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
       .phone-row { display: flex; gap: 10px; }
       .track-inv { display: inline-flex; align-items: center; align-self: flex-start; background: ${T.mint}; color: ${T.green}; border: 1px solid #cfe3d0; border-radius: 10px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; margin: -2px 0 2px; }
-      .phone-row .code-select { flex: 0 0 92px; width: 92px; text-align: center; font-weight: 700; padding: 11px 8px; }
+      .phone-row .code-fixed { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid ${T.line}; border-radius: 11px; background: ${T.beige}; font-size: 14px; font-weight: 800; color: ${T.ink}; }
       .phone-row .phone-input { flex: 1 1 auto; min-width: 0; }
       .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
       .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
