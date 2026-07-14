@@ -400,10 +400,13 @@ function clean(v) {
 }
 function equipmentText(r) {
   let li = r.line_items;
-  // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo
+  // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo.
+  // NOTE: naye project mein line_items jsonb hai; track RPC ::text cast karti
+  // hai to wo "Oxymed..." (quotes ke saath) aati hai. '"' waali ko bhi parse
+  // karo taaki quotes hat jaayein.
   if (typeof li === 'string') {
     const t = li.trim();
-    if (t.startsWith('[') || t.startsWith('{')) {
+    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
       try {
         li = JSON.parse(t);
       } catch (_) {}
@@ -433,6 +436,45 @@ function equipmentText(r) {
     if (t) return t;
   }
   return 'Equipment';
+}
+/* line_items ko array of item-names mein todo (track page ki bullet list) */
+function equipmentList(r) {
+  let li = r.line_items;
+  if (typeof li === 'string') {
+    const t = li.trim();
+    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
+      try {
+        li = JSON.parse(t);
+      } catch (_) {}
+    }
+  }
+  if (Array.isArray(li)) {
+    const names = li
+      .map((x) => {
+        if (typeof x === 'string') return x;
+        if (x && x.name) {
+          const q = Number(x.quantity) || 0;
+          return q > 1 ? `${x.name} × ${q}` : x.name;
+        }
+        return '';
+      })
+      .filter(Boolean);
+    if (names.length) return names;
+  }
+  if (typeof li === 'string' && li.trim() && li !== 'null') {
+    return li
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (r.item_name && r.item_name !== 'null') {
+    const parts = String(r.item_name)
+      .split('|')
+      .map((s) => s.split(' x')[0].trim())
+      .filter(Boolean);
+    if (parts.length) return parts;
+  }
+  return ['Equipment'];
 }
 function equipIcon(text) {
   const t = String(text || '').toLowerCase();
@@ -3343,6 +3385,10 @@ function TrackResult({ row }) {
     line_items: row.line_items,
     item_name: row.item_name,
   });
+  const items = equipmentList({
+    line_items: row.line_items,
+    item_name: row.item_name,
+  });
   const stage = statusToStage(row.status);
   const closedMeta = CLOSED[stage] || null;
   const cancelled = !!closedMeta;
@@ -3376,12 +3422,19 @@ function TrackResult({ row }) {
           <Icon size={22} color={T.green} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{equipment}</div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: T.ink }}>
+            {items.length > 1 ? `${items.length} items` : 'Order details'}
+          </div>
           <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
             Order #{orderId}
           </div>
         </div>
       </div>
+      <ul className="eq-list">
+        {items.map((it, i) => (
+          <li key={i}>{it}</li>
+        ))}
+      </ul>
 
       <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
         {banner.text}
@@ -3722,6 +3775,9 @@ function StyleTag() {
       .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
       .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
       .track-order { display: flex; align-items: center; gap: 12px; }
+      .eq-list { margin: 12px 0 0; padding: 12px 14px; list-style: none; display: flex; flex-direction: column; gap: 7px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; }
+      .eq-list li { position: relative; padding-left: 17px; font-size: 12.5px; font-weight: 700; color: ${T.forestSoft}; line-height: 1.4; }
+      .eq-list li::before { content: ''; position: absolute; left: 2px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; }
       .track-banner { text-align: center; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 13px; margin: 16px 0 4px; }
       .track-tl { margin-top: 14px; }
       .ttl-row { display: flex; gap: 14px; }
