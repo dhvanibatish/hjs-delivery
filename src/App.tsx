@@ -42,8 +42,8 @@ import {
    1) CONFIG  ── url + ANON PUBLIC key (SERVICE_ROLE nahi). Khaali = DEMO.
    ══════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
-  url: 'https://fasmqrbeojrqetjfhssx.supabase.co',
-  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhc21xcmJlb2pycWV0amZoc3N4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTIyODUsImV4cCI6MjA5ODI4ODI4NX0.UXcDOSYYjAlCp4jFS-eg4fm0EW03ud1V4jtikw9171o',
+  url: 'https://idcmfebqizovivuvsuns.supabase.co',
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY21mZWJxaXpvdml2dXZzdW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDgxODgsImV4cCI6MjA5OTMyNDE4OH0.miXziOcl5sEo8S6K1WsrHRhCbtEYRgnnUA4gAISUkmM',
   table: 'deliveries',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
