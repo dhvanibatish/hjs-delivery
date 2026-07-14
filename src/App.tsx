@@ -785,11 +785,13 @@ function usePostHeight() {
   useEffect(() => {
     if (!EMBEDDED) return;
     document.documentElement.classList.add('hjs-embed');
+    let last = 0;
     const post = () => {
-      const h = Math.max(
-        document.body ? document.body.scrollHeight : 0,
-        document.documentElement ? document.documentElement.scrollHeight : 0,
-      );
+      // SIRF body content ki height — documentElement/viewport NAHI, warna
+      // iframe ki apni height count hoke infinite-grow loop ban jaata hai.
+      const h = document.body ? document.body.scrollHeight : 0;
+      if (!h || Math.abs(h - last) < 3) return;
+      last = h;
       try {
         window.parent.postMessage({ hjsHeight: h }, '*');
       } catch (_) {}
