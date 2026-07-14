@@ -1131,6 +1131,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
       <DrillView
         cat={drill}
         items={items}
+        viewMode={viewMode}
         onBack={back}
         onOpen={onOpen}
         onMove={onMove}
@@ -1138,11 +1139,13 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
     );
   }
 
-  // Board layout → stage-wise kanban
+  // Board layout → stage-wise kanban. Archived mein sirf Delivered list.
   return (
     <>
-      <Stats items={items} onDrill={setDrill} />
-      {isMobile ? (
+      <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
+      {viewMode === 'archived' ? (
+        <ArchivedList items={items} onOpen={onOpen} onMove={onMove} />
+      ) : isMobile ? (
         <MobileBoard
           items={items}
           loading={loading}
@@ -1157,7 +1160,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
           onMove={onMove}
         />
       )}
-      <FooterTotal items={items} />
+      {viewMode !== 'archived' && <FooterTotal items={items} />}
     </>
   );
 }
@@ -1191,9 +1194,12 @@ const STAT_CATS = {
 };
 
 /* Stat card click → us category ki entries grid + Back to stages */
-function DrillView({ cat, items, onBack, onOpen, onMove }) {
+function DrillView({ cat, items, viewMode, onBack, onOpen, onMove }) {
   const meta = STAT_CATS[cat] || STAT_CATS.total;
-  const rows = items.filter(meta.test);
+  // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
+  const allArchived = cat === 'total' && viewMode === 'archived';
+  const rows = items.filter(allArchived ? () => true : meta.test);
+  const label = allArchived ? 'All archived' : meta.label;
   return (
     <div>
       <button className="track-back" onClick={onBack}>
@@ -1204,9 +1210,7 @@ function DrillView({ cat, items, onBack, onOpen, onMove }) {
           className="col-pip"
           style={{ background: meta.color, width: 10, height: 10 }}
         />
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
-          {meta.label}
-        </h3>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{label}</h3>
         <span
           className="col-count"
           style={{ background: meta.soft, color: meta.color }}
@@ -1216,6 +1220,44 @@ function DrillView({ cat, items, onBack, onOpen, onMove }) {
       </div>
       {rows.length === 0 ? (
         <div className="empty">Koi entry nahi</div>
+      ) : (
+        <div className="cat-grid">
+          {rows.map((x) => (
+            <Card
+              key={x.invoice_id}
+              d={x}
+              stage={stageMeta(x.stage)}
+              onOpen={() => onOpen(x)}
+              onMove={onMove}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Archived board → sirf Delivered entries ki grid. Cancelled waale stat card
+   se drill karke dekh lo. Saare 4 stage columns dikhane ki zarurat nahi. */
+function ArchivedList({ items, onOpen, onMove }) {
+  const rows = items.filter((x) => x.stage === 'delivered');
+  return (
+    <div>
+      <div className="drill-head">
+        <span
+          className="col-pip"
+          style={{ background: T.green, width: 10, height: 10 }}
+        />
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Delivered</h3>
+        <span
+          className="col-count"
+          style={{ background: T.mint, color: T.forestSoft }}
+        >
+          {rows.length}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty">Koi delivered entry nahi</div>
       ) : (
         <div className="cat-grid">
           {rows.map((x) => (
@@ -1783,47 +1825,75 @@ function Header({
 }
 
 /* ═══════════════════════════════════════════════════════════════ STATS */
-function Stats({ items, onDrill }) {
+function Stats({ items, viewMode, onDrill }) {
   const board = items.filter((x) => !isClosedStage(x.stage));
   const pending = board.filter((x) => x.stage !== 'delivered').length;
   const done = board.filter((x) => x.stage === 'delivered').length;
   const cancelled = items.filter((x) => x.stage === 'cancelled').length;
-  const cards = [
-    {
-      id: 'total',
-      label: 'Total Deliveries',
-      value: board.length,
-      icon: Truck,
-      color: T.green,
-      soft: T.mint,
-    },
-    {
-      id: 'pending',
-      label: 'Pending',
-      value: pending,
-      icon: Package,
-      color: T.blue,
-      soft: T.blueSoft,
-    },
-    {
-      id: 'delivered',
-      label: 'Delivered',
-      value: done,
-      icon: CheckCircle2,
-      color: T.forestSoft,
-      soft: T.mint,
-    },
-    {
-      id: 'cancelled',
-      label: 'Cancelled',
-      value: cancelled,
-      icon: AlertTriangle,
-      color: T.amber,
-      soft: T.amberSoft,
-    },
-  ];
+  const archived = viewMode === 'archived';
+  const cards = archived
+    ? [
+        {
+          id: 'total',
+          label: 'Total Archived',
+          value: items.length,
+          icon: Truck,
+          color: T.green,
+          soft: T.mint,
+        },
+        {
+          id: 'delivered',
+          label: 'Delivered',
+          value: done,
+          icon: CheckCircle2,
+          color: T.forestSoft,
+          soft: T.mint,
+        },
+        {
+          id: 'cancelled',
+          label: 'Cancelled',
+          value: cancelled,
+          icon: AlertTriangle,
+          color: T.amber,
+          soft: T.amberSoft,
+        },
+      ]
+    : [
+        {
+          id: 'total',
+          label: 'Total Deliveries',
+          value: board.length,
+          icon: Truck,
+          color: T.green,
+          soft: T.mint,
+        },
+        {
+          id: 'pending',
+          label: 'Pending',
+          value: pending,
+          icon: Package,
+          color: T.blue,
+          soft: T.blueSoft,
+        },
+        {
+          id: 'delivered',
+          label: 'Delivered',
+          value: done,
+          icon: CheckCircle2,
+          color: T.forestSoft,
+          soft: T.mint,
+        },
+        {
+          id: 'cancelled',
+          label: 'Cancelled',
+          value: cancelled,
+          icon: AlertTriangle,
+          color: T.amber,
+          soft: T.amberSoft,
+        },
+      ];
   return (
-    <div className="stat-grid">
+    <div className={archived ? 'stat-grid three' : 'stat-grid'}>
       {cards.map((c) => (
         <button
           key={c.label}
@@ -3450,6 +3520,7 @@ function StyleTag() {
       .loading { text-align: center; color: ${T.inkSoft}; padding: 50px; font-size: 14px; }
 
       .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
+      .stat-grid.three { grid-template-columns: repeat(3,minmax(0,1fr)); }
       .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); cursor: pointer; text-align: left; font-family: inherit; color: ${T.ink}; width: 100%; transition: transform .12s, box-shadow .12s, border-color .12s; }
       .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
@@ -3662,7 +3733,7 @@ function StyleTag() {
         .modal { width: 100%; border-radius: 18px; }
         .glass-card { padding: 24px 20px; }
       }
-      @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } }
+      @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
       @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
     `}</style>
   );
