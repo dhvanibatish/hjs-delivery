@@ -1237,27 +1237,49 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove }) {
   );
 }
 
-/* Archived board → sirf Delivered entries ki grid. Cancelled waale stat card
-   se drill karke dekh lo. Saare 4 stage columns dikhane ki zarurat nahi. */
+/* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
+   color bhi badalta hai (green = delivered, red = cancelled). */
 function ArchivedList({ items, onOpen, onMove }) {
-  const rows = items.filter((x) => x.stage === 'delivered');
+  const [mode, setMode] = useState('delivered');
+  const meta =
+    mode === 'cancelled'
+      ? {
+          label: 'Cancelled',
+          color: T.red,
+          soft: T.redSoft,
+          test: (x) => x.stage === 'cancelled',
+        }
+      : {
+          label: 'Delivered',
+          color: T.green,
+          soft: T.mint,
+          test: (x) => x.stage === 'delivered',
+        };
+  const rows = items.filter(meta.test);
   return (
     <div>
       <div className="drill-head">
         <span
           className="col-pip"
-          style={{ background: T.green, width: 10, height: 10 }}
+          style={{ background: meta.color, width: 10, height: 10 }}
         />
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Delivered</h3>
+        <select
+          className="arch-select"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+        >
+          <option value="delivered">Delivered</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
         <span
           className="col-count"
-          style={{ background: T.mint, color: T.forestSoft }}
+          style={{ background: meta.soft, color: meta.color }}
         >
           {rows.length}
         </span>
       </div>
       {rows.length === 0 ? (
-        <div className="empty">Koi delivered entry nahi</div>
+        <div className="empty">Koi {meta.label.toLowerCase()} entry nahi</div>
       ) : (
         <div className="cat-grid">
           {rows.map((x) => (
@@ -2977,7 +2999,14 @@ function SalesTrackPage() {
       await sbTrackSearch('', pin);
       setUnlocked(true);
     } catch (e) {
-      setGateErr('Wrong PIN. Try again.');
+      const msg = String(e.message || '');
+      // RPC sirf galat PIN pe hi 'pin' waala error deta hai. Baaki errors
+      // (function missing / permission / naya project setup) alag dikhao.
+      if (/pin|invalid|unauthor/i.test(msg)) {
+        setGateErr('Wrong PIN. Try again.');
+      } else {
+        setGateErr('Access error: ' + msg);
+      }
     }
     setGateBusy(false);
   };
@@ -3525,6 +3554,8 @@ function StyleTag() {
       .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
       .drill-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+      .arch-select { font-size: 17px; font-weight: 800; font-family: inherit; color: ${T.ink}; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; outline: none; }
+      .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
 
       /* ── layout toggle (Stages / Categories) ── */
       .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
