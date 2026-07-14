@@ -2183,9 +2183,11 @@ function Card({ d, stage, onOpen, onMove }) {
         <span style={{ color: T.green, fontWeight: 800 }}>
           <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
         </span>
-        <span className="ellip" style={{ maxWidth: 120 }}>
+        <span className="ellip" style={{ maxWidth: 130 }}>
           <MapPin size={12} /> {d.area}
         </span>
+      </div>
+      <div className="card-meta">
         <span>
           <Clock size={12} /> {d.expected}
         </span>
