@@ -33,6 +33,9 @@ import {
   Pencil,
   History,
   UserCog,
+  Copy,
+  Info,
+  Trash2,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -295,6 +298,9 @@ const stageToStatus = (id) =>
   (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
 function statusToStage(s) {
   const t = String(s || '').toLowerCase();
+  if (t.includes('delet')) return 'deleted'; // "Deleted" — 'deliver' se alag
+  if (t.includes('duplicate')) return 'duplicate';
+  if (t.includes('renew')) return 'renewal';
   if (t.includes('cancel')) return 'cancelled';
   if (t.includes('new')) return 'new'; // "New Delivery" — 'deliver' se pehle check zaroori
   if (t.includes('schedul')) return 'scheduled';
@@ -303,6 +309,70 @@ function statusToStage(s) {
   if (t.includes('talk')) return 'talked';
   return 'new'; // naya / unknown record → New Delivery
 }
+
+/* ── CLOSED STATES ──────────────────────────────────────────────────────
+   Cancelled / Duplicate / Renewal — teeno "closed" hain: active pipeline se
+   hat jaati hain, apne color mein dikhti hain, aur drawer khol ke pata lag
+   jaata hai. Status column mein hi likha jaata hai (koi naya column nahi). */
+const CLOSED = {
+  cancelled: {
+    id: 'cancelled',
+    label: 'Cancelled',
+    short: 'Cancelled',
+    color: T.red,
+    soft: T.redSoft,
+    title: 'This order has been cancelled',
+    note: 'Zoho Books se cancel hua hai. Stages edit nahi ho sakti — bas record ke liye dikha rahe hain.',
+    cust: 'This order has been cancelled. Please contact the store for any questions.',
+  },
+  duplicate: {
+    id: 'duplicate',
+    label: 'Duplicate Invoice',
+    short: 'Duplicate',
+    color: T.slate,
+    soft: T.slateSoft,
+    title: 'Marked as duplicate invoice',
+    note: 'Store manager ne isse duplicate invoice mark kiya hai — active delivery list se hata diya gaya hai.',
+    cust: 'This entry has been marked as a duplicate invoice. Please contact the store for any questions.',
+  },
+  renewal: {
+    id: 'renewal',
+    label: 'Renewal Invoice',
+    short: 'Renewal',
+    color: T.blue,
+    soft: T.blueSoft,
+    title: 'Marked as renewal invoice',
+    note: 'Store manager ne isse renewal invoice mark kiya hai — active delivery list se hata diya gaya hai.',
+    cust: 'This is a renewal invoice. Please contact the store for any questions.',
+  },
+  // deleted = soft delete. Row Supabase mein rehti hai (status="Deleted"),
+  // par app ke saare views se hata di jaati hai (scoped filter mein).
+  deleted: {
+    id: 'deleted',
+    label: 'Deleted',
+    short: 'Deleted',
+    color: T.slate,
+    soft: T.slateSoft,
+    title: 'This entry was deleted',
+    note: 'Head ne isse delete kiya hai — Supabase mein record ke liye rakha gaya hai.',
+    cust: 'This order is no longer active. Please contact the store for any questions.',
+  },
+};
+const CLOSED_STATUS = {
+  cancelled: 'Cancelled Invoice',
+  duplicate: 'Duplicate Invoice',
+  renewal: 'Renewal Invoice',
+};
+const isClosedStage = (s) =>
+  s === 'cancelled' || s === 'duplicate' || s === 'renewal' || s === 'deleted';
+/* stage id → meta (STAGES ya CLOSED dono cover). Card/list ke colors ke liye. */
+function stageMeta(id) {
+  const s = STAGES[stageIndex(id)];
+  if (s) return s;
+  if (CLOSED[id]) return CLOSED[id];
+  return STAGES[0];
+}
+const stageColorOf = (id) => stageMeta(id).color;
 
 /* Drawer mein agli stage ke liye simple prompt (next stage id → message) */
 const STAGE_HINT = {
@@ -440,6 +510,16 @@ function makeEvent(toStage, fields, mode) {
     fields: stageFields(toStage, fields || {}),
   };
 }
+/* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
+function makeClosedEvent(flag, remarks) {
+  return {
+    ts: new Date().toISOString(),
+    stage: flag,
+    label: (CLOSED[flag] || {}).label || flag,
+    action: 'Marked as',
+    fields: remarks ? { Remarks: remarks } : {},
+  };
+}
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
@@ -501,7 +581,7 @@ const CATS = [
     icon: Package,
     color: T.blue,
     soft: T.blueSoft,
-    test: (x) => x.stage !== 'cancelled' && x.stage !== 'delivered',
+    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
   },
   {
     id: 'delivered',
@@ -515,9 +595,25 @@ const CATS = [
     id: 'cancelled',
     label: 'Cancelled',
     icon: AlertTriangle,
-    color: T.amber,
-    soft: T.amberSoft,
+    color: T.red,
+    soft: T.redSoft,
     test: (x) => x.stage === 'cancelled',
+  },
+  {
+    id: 'renewal',
+    label: 'Renewal Invoices',
+    icon: RefreshCw,
+    color: T.blue,
+    soft: T.blueSoft,
+    test: (x) => x.stage === 'renewal',
+  },
+  {
+    id: 'duplicate',
+    label: 'Duplicate Invoices',
+    icon: Copy,
+    color: T.slate,
+    soft: T.slateSoft,
+    test: (x) => x.stage === 'duplicate',
   },
 ];
 
@@ -658,9 +754,9 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today | archived
-  const [layoutMode, setLayoutMode] = useState('board'); // board | categories (sirf head ke liye toggle)
-  // store-specific login → hamesha categories. Head → chosen layout.
-  const effLayout = session && session.isHead ? layoutMode : 'categories';
+  const [layoutMode, setLayoutMode] = useState('board'); // board | categories
+  // har store (aur head) → chosen layout. Default Stages (board), toggle se Categories.
+  const effLayout = layoutMode;
 
   const ping = (m) => {
     setToast(m);
@@ -689,8 +785,11 @@ export default function App() {
 
   const scoped = useMemo(() => {
     if (!session) return [];
-    if (session.branch === 'ALL') return deliveries;
-    return deliveries.filter((x) => x.branch === session.branch);
+    // Deleted (soft-deleted) entries app ke kisi bhi view mein nahi aati —
+    // par Supabase mein status="Deleted" ke saath row bani rehti hai.
+    const base = deliveries.filter((x) => x.stage !== 'deleted');
+    if (session.branch === 'ALL') return base;
+    return base.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
@@ -739,8 +838,42 @@ export default function App() {
     return patch;
   };
 
+  // closed mark (cancelled/duplicate/renewal) — status column mein likha jaata hai
+  const closeEntry = async (invoiceId, flag, remarks) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const patch = {
+      status: CLOSED_STATUS[flag],
+      updated_at: new Date().toISOString(),
+      app_log: [...existingLog(cur), makeClosedEvent(flag, remarks)],
+    };
+    if (!CONFIGURED) {
+      setDeliveries((prev) =>
+        prev.map((x) =>
+          x.invoice_id === invoiceId
+            ? { ...x, stage: flag, rawStatus: patch.status }
+            : x,
+        ),
+      );
+      ping(`Demo — ${CLOSED[flag].label}`);
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      ping(`Marked as ${CLOSED[flag].label}`);
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
   const commitModal = async (fields) => {
     const { invoiceId, toStage, mode } = modal;
+    // Contact stage pe agar invoice flag (duplicate/renewal/cancelled) chuna →
+    // date/time ki zarurat nahi, seedha closed mark karo.
+    if (toStage === 'talked' && fields.invoiceFlag) {
+      setModal(null);
+      return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
+    }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
@@ -787,6 +920,46 @@ export default function App() {
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
+    }
+  };
+
+  // delete — sirf head. HARD delete NAHI: row Supabase mein rehti hai,
+  // bas status="Deleted" ho jaata hai aur app ke views se hat jaati hai.
+  const removeEntry = async (invoiceId) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const patch = {
+      status: 'Deleted',
+      updated_at: new Date().toISOString(),
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: new Date().toISOString(),
+          stage: 'deleted',
+          label: 'Deleted',
+          action: 'Marked as',
+          fields: {},
+        },
+      ],
+    };
+    if (!CONFIGURED) {
+      setDeliveries((prev) =>
+        prev.map((x) =>
+          x.invoice_id === invoiceId
+            ? { ...x, stage: 'deleted', rawStatus: 'Deleted' }
+            : x,
+        ),
+      );
+      setActiveId(null);
+      ping('Deleted (demo)');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      setActiveId(null);
+      ping('Deleted — Supabase mein "Deleted" mark ho gaya');
+      load();
+    } catch (e) {
+      ping('Delete failed: ' + e.message);
     }
   };
 
@@ -870,6 +1043,8 @@ export default function App() {
       {active && (
         <Drawer
           d={active}
+          canDelete={session.isHead}
+          onDelete={() => removeEntry(active.invoice_id)}
           onClose={() => setActiveId(null)}
           onAdvance={(toStage) =>
             setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
@@ -905,7 +1080,7 @@ export default function App() {
 function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
   const isMobile = useIsMobile();
 
-  // Categories layout → collapsible stat categories (store-specific + head ka 2nd view)
+  // Categories layout → collapsible stat categories
   if (layoutMode === 'categories') {
     return (
       <CategoriesView
@@ -917,7 +1092,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
     );
   }
 
-  // Board layout → stage-wise kanban (sirf All stores view ka option)
+  // Board layout → stage-wise kanban
   return (
     <>
       <Stats items={items} />
@@ -942,9 +1117,9 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
 }
 
 /* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
-   Stat categories (Total / Pending / Delivered / Cancelled) — har card
-   clickable + collapsible. Click karo to us category ki entries khulti hain.
-   Ismein koi stage-wise board NAHI hota.                                 */
+   Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
+   har card clickable + collapsible. Click karo to us category ki entries
+   khulti hain. Ismein koi stage-wise board NAHI hota.                    */
 function CategoriesView({ items, loading, onOpen, onMove }) {
   const [open, setOpen] = useState('pending'); // default: Pending khula
   if (loading && items.length === 0)
@@ -995,7 +1170,7 @@ function CategoriesView({ items, loading, onOpen, onMove }) {
                 ) : (
                   <div className="cat-grid">
                     {rows.map((x) => {
-                      const stg = STAGES[stageIndex(x.stage)] || STAGES[0];
+                      const stg = stageMeta(x.stage);
                       return (
                         <Card
                           key={x.invoice_id}
@@ -1284,15 +1459,15 @@ function Topbar({
               <div className="search-empty">Koi match nahi mila</div>
             ) : (
               results.map((x) => {
-                const cancelled = x.stage === 'cancelled';
+                const closed = isClosedStage(x.stage);
                 const today = isToday(createdTs(x));
-                const tagClass = cancelled
+                const tagClass = closed
                   ? 'search-tag cancel'
                   : today
                     ? 'search-tag today'
                     : 'search-tag arch';
-                const tagText = cancelled
-                  ? 'Cancelled'
+                const tagText = closed
+                  ? stageMeta(x.stage).short
                   : today
                     ? 'Today'
                     : 'Archived';
@@ -1300,7 +1475,7 @@ function Topbar({
                   <button
                     key={x.invoice_id}
                     className={
-                      cancelled ? 'search-row is-cancelled' : 'search-row'
+                      closed ? 'search-row is-cancelled' : 'search-row'
                     }
                     onClick={() => onPick(x)}
                   >
@@ -1433,24 +1608,22 @@ function Header({
             <option value="archived">Archived</option>
           </select>
         </div>
-        {session.isHead && (
-          <div className="layout-toggle">
-            <button
-              className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => onLayoutMode('board')}
-            >
-              <LayoutDashboard size={14} /> Stages
-            </button>
-            <button
-              className={
-                layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'
-              }
-              onClick={() => onLayoutMode('categories')}
-            >
-              <Package size={14} /> Categories
-            </button>
-          </div>
-        )}
+        <div className="layout-toggle">
+          <button
+            className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
+            onClick={() => onLayoutMode('board')}
+          >
+            <LayoutDashboard size={14} /> Stages
+          </button>
+          <button
+            className={
+              layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'
+            }
+            onClick={() => onLayoutMode('categories')}
+          >
+            <Package size={14} /> Categories
+          </button>
+        </div>
         {session.isHead && (
           <div style={{ position: 'relative' }}>
             <Building2
@@ -1494,7 +1667,7 @@ function Header({
 
 /* ═══════════════════════════════════════════════════════════════ STATS */
 function Stats({ items }) {
-  const board = items.filter((x) => x.stage !== 'cancelled');
+  const board = items.filter((x) => !isClosedStage(x.stage));
   const pending = board.filter((x) => x.stage !== 'delivered').length;
   const done = board.filter((x) => x.stage === 'delivered').length;
   const cancelled = items.filter((x) => x.stage === 'cancelled').length;
@@ -1687,19 +1860,17 @@ function MobileBoard({ items, loading, onOpen, onMove }) {
 
 function Card({ d, stage, onOpen, onMove }) {
   const Icon = equipIcon(d.equipment);
+  const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
-  const next = STAGES[stageIndex(d.stage) + 1];
+  const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   return (
     <div
       className={cancelled ? 'card is-cancelled' : 'card'}
       onClick={onOpen}
     >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <div
-          className="eq-ico"
-          style={{ background: cancelled ? T.redSoft : stage.soft }}
-        >
-          <Icon size={17} color={cancelled ? T.red : stage.color} />
+        <div className="eq-ico" style={{ background: stage.soft }}>
+          <Icon size={17} color={stage.color} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="card-name">{d.customer}</div>
@@ -1725,7 +1896,15 @@ function Card({ d, stage, onOpen, onMove }) {
           </span>
         </div>
       )}
-      {next ? (
+      {closed ? (
+        <div
+          className="card-done"
+          style={{ color: stage.color, background: stage.soft }}
+        >
+          {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
+          {stage.short}
+        </div>
+      ) : next ? (
         <button
           className="card-next"
           onClick={(e) => {
@@ -1745,27 +1924,40 @@ function Card({ d, stage, onOpen, onMove }) {
 }
 
 function FooterTotal({ items }) {
-  const board = items.filter((x) => x.stage !== 'cancelled');
+  const board = items.filter((x) => !isClosedStage(x.stage));
   const per = STAGES.map(
     (s) => `${s.short} ${items.filter((x) => x.stage === s.id).length}`,
   ).join(' · ');
+  const can = items.filter((x) => x.stage === 'cancelled').length;
+  const dup = items.filter((x) => x.stage === 'duplicate').length;
+  const ren = items.filter((x) => x.stage === 'renewal').length;
+  const extra = [
+    can && `Cancelled ${can}`,
+    ren && `Renewal ${ren}`,
+    dup && `Duplicate ${dup}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div className="foot-total">
       Total {board.length} deliveries &nbsp;•&nbsp; {per}
+      {extra ? ` \u2022 ${extra}` : ''}
     </div>
   );
 }
 
 /* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
+function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
   const Icon = equipIcon(d.equipment);
-  const cancelled = d.stage === 'cancelled';
+  const closedMeta = CLOSED[d.stage] || null;
+  const cancelled = !!closedMeta; // "closed" = cancelled / duplicate / renewal
   const idx = stageIndex(d.stage);
   const stage = cancelled
-    ? { label: 'Cancelled', color: T.red, soft: T.redSoft }
+    ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
     : STAGES[idx] || STAGES[0];
   const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
-  // cancelled: cancel se pehle kahan tak pahunchi thi (greyed dikhane ke liye)
+  // closed: yahan tak pahunchi thi (greyed dikhane ke liye)
   const reachedIdx = cancelled ? reachedIdxFromLog(d._raw && d._raw.app_log) : idx;
   const r = d._raw || {};
   // app_log is the timeline source now (table is locked; no direct fetch)
@@ -1815,6 +2007,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
   ];
 
   const appLog = Array.isArray(r.app_log) ? r.app_log : [];
+  const hasClosedLog = appLog.some((e) => e && CLOSED[e.stage]);
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -1859,20 +2052,28 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
 
         {cancelled ? (
           <>
-            <div className="cancel-note">
-              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div
+              className="cancel-note"
+              style={{
+                background: closedMeta.soft,
+                color: closedMeta.color,
+                borderColor: closedMeta.soft,
+              }}
+            >
+              {d.stage === 'cancelled' ? (
+                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              ) : (
+                <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              )}
               <div>
-                <div style={{ fontWeight: 800 }}>
-                  This order has been cancelled
-                </div>
+                <div style={{ fontWeight: 800 }}>{closedMeta.title}</div>
                 <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                  Zoho Books se cancel hua hai. Stages edit nahi ho sakti — bas
-                  record ke liye dikha rahe hain.
+                  {closedMeta.note}
                 </div>
               </div>
             </div>
             <div className="sec-title" style={{ marginTop: 16 }}>
-              Cancel se pehle ki stages
+              Is se pehle ki stages
             </div>
             <div className="stage-picker">
               {STAGES.map((s, i) => {
@@ -2023,20 +2224,29 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
         <div className="sec-title" style={{ marginTop: 22 }}>
           <History size={14} /> Timeline / history
         </div>
-        {cancelled && (
+        {cancelled && !hasClosedLog && (
           <div className="timeline">
             <div className="tl-row">
               <div className="tl-marker">
-                <span className="tl-dot" style={{ background: T.red }} />
+                <span
+                  className="tl-dot"
+                  style={{ background: closedMeta.color }}
+                />
                 {appLog.length > 0 && (
                   <span className="tl-line" style={{ background: T.line }} />
                 )}
               </div>
               <div style={{ paddingBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: T.red }}>
-                  Order Cancelled
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: closedMeta.color,
+                  }}
+                >
+                  {closedMeta.label}
                 </div>
-                <div className="tl-note">Zoho Books se cancel hua</div>
+                <div className="tl-note">{closedMeta.title}</div>
               </div>
             </div>
           </div>
@@ -2044,7 +2254,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
         {appLog.length > 0 ? (
           <div className="timeline">
             {appLog.map((ev, i) => {
-              const c = STAGES[stageIndex(ev.stage)]?.color || T.green;
+              const c = stageColorOf(ev.stage);
               return (
                 <div key={i} className="tl-row">
                   <div className="tl-marker">
@@ -2109,6 +2319,40 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage }) {
           <div style={{ fontSize: 12, color: T.inkSoft }}>
             Abhi koi history nahi. Jaise hi koi stage move/edit hoga, yahan
             continuous log banega.
+          </div>
+        )}
+
+        {canDelete && (
+          <div className="danger-zone">
+            {confirmDel ? (
+              <div className="danger-confirm">
+                <span
+                  style={{ fontSize: 13, fontWeight: 700, color: T.red }}
+                >
+                  Pakka delete karna hai?
+                </span>
+                <button className="btn-danger" onClick={onDelete}>
+                  <Trash2 size={15} /> Haan, delete
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setConfirmDel(false)}
+                >
+                  Rehne do
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn-danger"
+                onClick={() => setConfirmDel(true)}
+              >
+                <Trash2 size={15} /> Delete this entry
+              </button>
+            )}
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+              Sirf head delete kar sakta hai · view se hat jayega par Supabase
+              mein <b>status = "Deleted"</b> ke saath record safe rahega.
+            </div>
           </div>
         )}
       </div>
@@ -2180,6 +2424,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
   const r = (delivery && delivery._raw) || {};
   const persons = personsFor(delivery.branch, delivery.person || '');
   const [f, setF] = useState({
+    invoiceFlag: '',
     date:
       r.confirmed_date && r.confirmed_date !== 'null' ? r.confirmed_date : '',
     time:
@@ -2213,14 +2458,17 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
       e.currentTarget.showPicker();
     } catch (_) {}
   };
+  const flagSel = toStage === 'talked' && !!f.invoiceFlag;
   const canSave =
     mode === 'edit'
       ? true
-      : toStage === 'scheduled'
-        ? !!(f.person && f.inspected)
-        : toStage === 'delivered'
-          ? f.delivered
-          : true;
+      : flagSel
+        ? true
+        : toStage === 'scheduled'
+          ? !!(f.person && f.inspected)
+          : toStage === 'delivered'
+            ? f.delivered
+            : true;
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2230,13 +2478,22 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
             <span
               className="stage-badge"
               style={{
-                background: stage.soft,
-                color: stage.color,
+                background: flagSel ? CLOSED[f.invoiceFlag].soft : stage.soft,
+                color: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
                 marginBottom: 8,
               }}
             >
-              <span className="col-pip" style={{ background: stage.color }} />{' '}
-              {mode === 'edit' ? `Edit · ${stage.label}` : stage.label}
+              <span
+                className="col-pip"
+                style={{
+                  background: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
+                }}
+              />{' '}
+              {flagSel
+                ? CLOSED[f.invoiceFlag].label
+                : mode === 'edit'
+                  ? `Edit · ${stage.label}`
+                  : stage.label}
             </span>
             <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
               {delivery.customer} · {delivery.id}
@@ -2249,24 +2506,52 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
         <div className="modal-body">
           {toStage === 'talked' && (
             <>
-              <Field label="Date">
-                <input
+              <Field label="Invoice status">
+                <select
                   className="inp"
-                  type="date"
-                  value={f.date}
-                  onClick={openPicker}
-                  onChange={(e) => set('date', e.target.value)}
-                />
+                  value={f.invoiceFlag}
+                  onChange={(e) => set('invoiceFlag', e.target.value)}
+                >
+                  <option value="">Regular — customer se baat hui</option>
+                  <option value="renewal">Renewal invoice</option>
+                  <option value="duplicate">Duplicate invoice</option>
+                  <option value="cancelled">Cancelled invoice</option>
+                </select>
               </Field>
-              <Field label="Time">
-                <input
-                  className="inp"
-                  type="time"
-                  value={f.time}
-                  onClick={openPicker}
-                  onChange={(e) => set('time', e.target.value)}
-                />
-              </Field>
+              {flagSel ? (
+                <div
+                  className="flag-note"
+                  style={{
+                    background: CLOSED[f.invoiceFlag].soft,
+                    color: CLOSED[f.invoiceFlag].color,
+                  }}
+                >
+                  Ye entry <b>{CLOSED[f.invoiceFlag].label}</b> mark hokar active
+                  list se hat jayegi — date/time bharne ki zarurat nahi. Neeche
+                  save dabao.
+                </div>
+              ) : (
+                <>
+                  <Field label="Date">
+                    <input
+                      className="inp"
+                      type="date"
+                      value={f.date}
+                      onClick={openPicker}
+                      onChange={(e) => set('date', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Time">
+                    <input
+                      className="inp"
+                      type="time"
+                      value={f.time}
+                      onClick={openPicker}
+                      onChange={(e) => set('time', e.target.value)}
+                    />
+                  </Field>
+                </>
+              )}
             </>
           )}
 
@@ -2384,7 +2669,11 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
             onClick={() => onSave(f)}
           >
             <ShieldCheck size={16} />{' '}
-            {mode === 'edit' ? 'Update' : 'Save & update'}
+            {flagSel
+              ? `Mark as ${CLOSED[f.invoiceFlag].short}`
+              : mode === 'edit'
+                ? 'Update'
+                : 'Save & update'}
           </button>
         </div>
       </div>
@@ -2654,7 +2943,7 @@ function SalesTrackPage() {
             {rows.map((r) => {
               const st = statusToStage(r.status);
               const cancelled = st === 'cancelled';
-              const stg = STAGES[stageIndex(st)] || STAGES[0];
+              const stg = stageMeta(st);
               const equip = equipmentText({
                 line_items: r.line_items,
                 item_name: r.item_name,
@@ -2666,11 +2955,8 @@ function SalesTrackPage() {
                   className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
                   onClick={() => setSelected(r)}
                 >
-                  <div
-                    className="eq-ico"
-                    style={{ background: cancelled ? T.redSoft : stg.soft }}
-                  >
-                    <Icon size={17} color={cancelled ? T.red : stg.color} />
+                  <div className="eq-ico" style={{ background: stg.soft }}>
+                    <Icon size={17} color={stg.color} />
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="sales-row-top">
@@ -2682,12 +2968,9 @@ function SalesTrackPage() {
                       </span>
                       <span
                         className="sales-chip"
-                        style={{
-                          background: cancelled ? T.redSoft : stg.soft,
-                          color: cancelled ? T.red : stg.color,
-                        }}
+                        style={{ background: stg.soft, color: stg.color }}
                       >
-                        {cancelled ? 'Cancelled' : stg.short}
+                        {stg.short}
                       </span>
                     </div>
                     <div className="ellip sales-sub">{equip}</div>
@@ -2837,10 +3120,11 @@ function TrackResult({ row }) {
     item_name: row.item_name,
   });
   const stage = statusToStage(row.status);
-  const cancelled = stage === 'cancelled';
+  const closedMeta = CLOSED[stage] || null;
+  const cancelled = !!closedMeta;
   const idx = stageIndex(stage);
   const log = Array.isArray(row.app_log) ? row.app_log : [];
-  // cancelled: cancel se pehle jahan tak pahunchi thi (app_log se)
+  // closed: cancel/mark se pehle jahan tak pahunchi thi (app_log se)
   const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
   const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
   const Icon = equipIcon(equipment);
@@ -2848,7 +3132,7 @@ function TrackResult({ row }) {
   const orderId = row.invoice_number;
 
   const banner = cancelled
-    ? { text: 'This order has been cancelled', bg: T.redSoft, fg: T.red }
+    ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
       ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
       : stage === 'scheduled'
@@ -2895,7 +3179,7 @@ function TrackResult({ row }) {
                 null
               : null);
           const StepIcon = step.icon;
-          // cancelled hua to aakhri reached stage bhi neeche cancel-entry se jude
+          // closed hua to aakhri reached stage bhi neeche closed-entry se jude
           const showLine = i < flowIdx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
@@ -2964,28 +3248,33 @@ function TrackResult({ row }) {
           );
         })}
 
-        {/* cancelled → reached stages ke baad red Cancelled entry */}
+        {/* closed → reached stages ke baad colored closed entry */}
         {cancelled && (
           <div className="ttl-row">
             <div className="ttl-left">
               <div
                 className="ttl-dot"
-                style={{ background: T.red, borderColor: T.red, color: '#fff' }}
+                style={{
+                  background: closedMeta.color,
+                  borderColor: closedMeta.color,
+                  color: '#fff',
+                }}
               >
-                <AlertTriangle size={16} />
+                {stage === 'cancelled' ? (
+                  <AlertTriangle size={16} />
+                ) : (
+                  <Info size={16} />
+                )}
               </div>
             </div>
             <div className="ttl-content">
               <div
                 className="ttl-title"
-                style={{ color: T.red, fontWeight: 800 }}
+                style={{ color: closedMeta.color, fontWeight: 800 }}
               >
-                Order Cancelled
+                {closedMeta.label}
               </div>
-              <div className="ttl-desc">
-                This order has been cancelled. Please contact the store for any
-                questions.
-              </div>
+              <div className="ttl-desc">{closedMeta.cust}</div>
             </div>
           </div>
         )}
@@ -3099,6 +3388,13 @@ function StyleTag() {
       .mini-edit:hover { background: #dcebdd; }
       .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
       .edit-btn:hover { background: #dcebdd; }
+
+      .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+      .flag-note b { font-weight: 800; }
+      .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
+      .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .btn-danger { background: #fff; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+      .btn-danger:hover { background: ${T.redSoft}; }
 
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
