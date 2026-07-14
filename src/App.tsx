@@ -784,7 +784,6 @@ const EMBEDDED =
 function usePostHeight() {
   useEffect(() => {
     if (!EMBEDDED) return;
-    document.documentElement.classList.add('hjs-embed');
     let last = 0;
     const post = () => {
       // #root ki asli rendered height — body.scrollHeight kabhi shrink nahi
@@ -1060,12 +1059,12 @@ export default function App() {
       style={{
         fontFamily: FONT,
         background: T.beige,
-        minHeight: EMBEDDED ? 0 : '100vh',
+        minHeight: '100vh',
         color: T.ink,
       }}
     >
       <StyleTag />
-      <div style={{ display: 'flex', minHeight: EMBEDDED ? 0 : '100vh' }}>
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar session={session} />
         <div
           style={{
