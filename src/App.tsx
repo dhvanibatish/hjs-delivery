@@ -1728,11 +1728,11 @@ function Topbar({
           <Bell size={18} color={T.ink} />
           <span className="dot" />
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="tb-user" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="avatar">
             {(session.name || 'M').slice(0, 1).toUpperCase()}
           </div>
-          <div style={{ lineHeight: 1.2 }}>
+          <div className="tb-user-text" style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
             <div style={{ fontSize: 11, color: T.inkSoft }}>
               {session.storeName}
@@ -3810,11 +3810,14 @@ function StyleTag() {
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
-        .topbar { height: auto; flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
+        .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
-        .tb-actions { order: 1; width: auto; justify-content: flex-end; }
+        .tb-brand span { font-size: 14px; }
+        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; gap: 8px; }
+        .tb-user-text { display: none; }
         .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
-        main { padding: 20px 16px 60px !important; }
+        .icon-btn { width: 34px; height: 34px; }
+        main { padding: 16px 14px 60px !important; }
         .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
         .kv-grid { grid-template-columns: 1fr 1fr; }
         .modal { width: 100%; border-radius: 18px; }
