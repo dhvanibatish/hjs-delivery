@@ -3609,9 +3609,10 @@ function StyleTag() {
       /* ── EMBED MODE (Zoho iframe): app content-height le, taaki iframe auto-resize ho ── */
       .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
       .hjs-embed .sidebar { height: auto !important; position: static !important; }
-      .hjs-embed .login-wrap { min-height: 0 !important; }
+      .hjs-embed .login-wrap { min-height: 0 !important; align-items: stretch; }
       .hjs-embed .track-wrap { min-height: 0 !important; }
-      .hjs-embed .login-hero { min-height: 480px; }
+      .hjs-embed .login-hero { min-height: 0; padding: 38px 44px; }
+      .hjs-embed .login-form { padding: 32px 40px; align-items: center; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
       .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
