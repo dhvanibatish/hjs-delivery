@@ -784,11 +784,8 @@ const EMBEDDED =
 function usePostHeight() {
   useEffect(() => {
     if (!EMBEDDED) return;
-    document.documentElement.classList.add('hjs-embed');
     let last = 0;
     const post = () => {
-      // SIRF body content ki height — documentElement/viewport NAHI, warna
-      // iframe ki apni height count hoke infinite-grow loop ban jaata hai.
       const h = document.body ? document.body.scrollHeight : 0;
       if (!h || Math.abs(h - last) < 3) return;
       last = h;
@@ -803,7 +800,7 @@ function usePostHeight() {
       ro.observe(document.body);
     }
     window.addEventListener('resize', post);
-    const iv = setInterval(post, 1200); // async content ke liye fallback
+    const iv = setInterval(post, 1200);
     return () => {
       if (ro) ro.disconnect();
       window.removeEventListener('resize', post);
@@ -1055,12 +1052,12 @@ export default function App() {
       style={{
         fontFamily: FONT,
         background: T.beige,
-        minHeight: EMBEDDED ? 0 : '100vh',
+        minHeight: '100vh',
         color: T.ink,
       }}
     >
       <StyleTag />
-      <div style={{ display: 'flex', minHeight: EMBEDDED ? 0 : '100vh' }}>
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar session={session} />
         <div
           style={{
@@ -3607,13 +3604,6 @@ function StyleTag() {
       html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
       body { color: ${T.ink}; background: ${T.beige}; }
       #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
-
-      /* ── EMBED MODE (Zoho iframe): 100vh hatao taaki iframe auto-height le ── */
-      .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
-      .hjs-embed .sidebar { height: auto !important; position: static !important; }
-      .hjs-embed .login-wrap { min-height: 0 !important; }
-      .hjs-embed .track-wrap { min-height: 0 !important; }
-      .hjs-embed .login-hero { min-height: 520px; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
       .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
