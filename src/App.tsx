@@ -787,7 +787,14 @@ function usePostHeight() {
     document.documentElement.classList.add('hjs-embed');
     let last = 0;
     const post = () => {
-      const h = document.body ? document.body.scrollHeight : 0;
+      // #root ki asli rendered height — body.scrollHeight kabhi shrink nahi
+      // hoti, isliye chhote content pe white space reh jaata tha.
+      const root = document.getElementById('root');
+      const h = root
+        ? Math.ceil(root.getBoundingClientRect().height)
+        : document.body
+          ? document.body.scrollHeight
+          : 0;
       if (!h || Math.abs(h - last) < 3) return;
       last = h;
       try {
@@ -3609,6 +3616,7 @@ function StyleTag() {
       /* ── EMBED MODE (Zoho iframe): app content-height le, taaki iframe auto-resize ho ── */
       .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
       .hjs-embed .sidebar { height: auto !important; position: static !important; }
+      .hjs-embed .login-wrap { min-height: 0 !important; }
       .hjs-embed .track-wrap { min-height: 0 !important; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
