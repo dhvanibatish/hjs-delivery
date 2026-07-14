@@ -775,8 +775,44 @@ function useIsMobile(bp = 760) {
   return m;
 }
 
+/* iframe ke andar chal raha hai? (Zoho landing page embed) */
+const EMBEDDED =
+  typeof window !== 'undefined' && window.parent && window.parent !== window;
+
+/* Embed mode: app apni asli content-height parent (Zoho) ko bhejta hai,
+   taaki iframe utna hi bada ho — na cut, na neeche white gap. */
+function usePostHeight() {
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    document.documentElement.classList.add('hjs-embed');
+    const post = () => {
+      const h = Math.max(
+        document.body ? document.body.scrollHeight : 0,
+        document.documentElement ? document.documentElement.scrollHeight : 0,
+      );
+      try {
+        window.parent.postMessage({ hjsHeight: h }, '*');
+      } catch (_) {}
+    };
+    post();
+    let ro;
+    if (typeof ResizeObserver !== 'undefined' && document.body) {
+      ro = new ResizeObserver(post);
+      ro.observe(document.body);
+    }
+    window.addEventListener('resize', post);
+    const iv = setInterval(post, 1200); // async content ke liye fallback
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', post);
+      clearInterval(iv);
+    };
+  }, []);
+}
+
 /* ════════════════════════════════════════════════════════════════ APP */
 export default function App() {
+  usePostHeight();
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -1017,12 +1053,12 @@ export default function App() {
       style={{
         fontFamily: FONT,
         background: T.beige,
-        minHeight: '100vh',
+        minHeight: EMBEDDED ? 0 : '100vh',
         color: T.ink,
       }}
     >
       <StyleTag />
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', minHeight: EMBEDDED ? 0 : '100vh' }}>
         <Sidebar session={session} />
         <div
           style={{
@@ -3569,6 +3605,13 @@ function StyleTag() {
       html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
       body { color: ${T.ink}; background: ${T.beige}; }
       #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
+
+      /* ── EMBED MODE (Zoho iframe): 100vh hatao taaki iframe auto-height le ── */
+      .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
+      .hjs-embed .sidebar { height: auto !important; position: static !important; }
+      .hjs-embed .login-wrap { min-height: 0 !important; }
+      .hjs-embed .track-wrap { min-height: 0 !important; }
+      .hjs-embed .login-hero { min-height: 520px; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
       .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
