@@ -564,10 +564,15 @@ function createdTs(x) {
   );
 }
 function inView(x, viewMode) {
-  // Archived = saari entries (aaj waali bhi + purani bhi) — poora record
-  if (viewMode === 'archived') return true;
-  // Today = sirf wo jo aaj create hui (kisi bhi stage mein). Purani nahi.
-  return isToday(createdTs(x));
+  const st = x.stage;
+  // pending = abhi kaam baaki (new / talked / scheduled)
+  const pending = st !== 'delivered' && !isClosedStage(st);
+  if (viewMode === 'archived') {
+    // Archived = ho-chuki entries: Delivered + Cancelled / Duplicate / Renewal
+    return !pending;
+  }
+  // Today (kaam waala view) = saari pending (chahe purani ho) + jo aaj create hui
+  return pending || isToday(createdTs(x));
 }
 
 /* stat categories jinpe collapsible entries khulti hain.
@@ -1079,6 +1084,34 @@ export default function App() {
    FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
 function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
   const isMobile = useIsMobile();
+  const [drill, setDrill] = useState(null); // null | total|pending|delivered|cancelled
+
+  // layout ya view badalte hi drill reset
+  useEffect(() => {
+    setDrill(null);
+  }, [layoutMode, viewMode]);
+
+  // drill khulne pe ek history entry push karo — phone/browser ka back button
+  // drill band karega (logout NAHI karega).
+  useEffect(() => {
+    if (!drill || typeof window === 'undefined') return;
+    window.history.pushState({ hjsDrill: drill }, '');
+    const onPop = () => setDrill(null);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [drill]);
+
+  const back = () => {
+    if (
+      typeof window !== 'undefined' &&
+      window.history.state &&
+      window.history.state.hjsDrill
+    ) {
+      window.history.back(); // popstate → setDrill(null)
+    } else {
+      setDrill(null);
+    }
+  };
 
   // Categories layout → collapsible stat categories
   if (layoutMode === 'categories') {
@@ -1092,10 +1125,23 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
     );
   }
 
+  // Kisi stat card pe click → us category ki entries + Back button
+  if (drill) {
+    return (
+      <DrillView
+        cat={drill}
+        items={items}
+        onBack={back}
+        onOpen={onOpen}
+        onMove={onMove}
+      />
+    );
+  }
+
   // Board layout → stage-wise kanban
   return (
     <>
-      <Stats items={items} />
+      <Stats items={items} onDrill={setDrill} />
       {isMobile ? (
         <MobileBoard
           items={items}
@@ -1113,6 +1159,77 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
       )}
       <FooterTotal items={items} />
     </>
+  );
+}
+
+/* stat card → kaunsi entries dikhani hain */
+const STAT_CATS = {
+  total: {
+    label: 'Total Deliveries',
+    color: T.green,
+    soft: T.mint,
+    test: (x) => !isClosedStage(x.stage),
+  },
+  pending: {
+    label: 'Pending',
+    color: T.blue,
+    soft: T.blueSoft,
+    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
+  },
+  delivered: {
+    label: 'Delivered',
+    color: T.forestSoft,
+    soft: T.mint,
+    test: (x) => x.stage === 'delivered',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    color: T.amber,
+    soft: T.amberSoft,
+    test: (x) => x.stage === 'cancelled',
+  },
+};
+
+/* Stat card click → us category ki entries grid + Back to stages */
+function DrillView({ cat, items, onBack, onOpen, onMove }) {
+  const meta = STAT_CATS[cat] || STAT_CATS.total;
+  const rows = items.filter(meta.test);
+  return (
+    <div>
+      <button className="track-back" onClick={onBack}>
+        <ArrowLeft size={16} /> Back to stages
+      </button>
+      <div className="drill-head">
+        <span
+          className="col-pip"
+          style={{ background: meta.color, width: 10, height: 10 }}
+        />
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
+          {meta.label}
+        </h3>
+        <span
+          className="col-count"
+          style={{ background: meta.soft, color: meta.color }}
+        >
+          {rows.length}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty">Koi entry nahi</div>
+      ) : (
+        <div className="cat-grid">
+          {rows.map((x) => (
+            <Card
+              key={x.invoice_id}
+              d={x}
+              stage={stageMeta(x.stage)}
+              onOpen={() => onOpen(x)}
+              onMove={onMove}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1666,13 +1783,14 @@ function Header({
 }
 
 /* ═══════════════════════════════════════════════════════════════ STATS */
-function Stats({ items }) {
+function Stats({ items, onDrill }) {
   const board = items.filter((x) => !isClosedStage(x.stage));
   const pending = board.filter((x) => x.stage !== 'delivered').length;
   const done = board.filter((x) => x.stage === 'delivered').length;
   const cancelled = items.filter((x) => x.stage === 'cancelled').length;
   const cards = [
     {
+      id: 'total',
       label: 'Total Deliveries',
       value: board.length,
       icon: Truck,
@@ -1680,6 +1798,7 @@ function Stats({ items }) {
       soft: T.mint,
     },
     {
+      id: 'pending',
       label: 'Pending',
       value: pending,
       icon: Package,
@@ -1687,6 +1806,7 @@ function Stats({ items }) {
       soft: T.blueSoft,
     },
     {
+      id: 'delivered',
       label: 'Delivered',
       value: done,
       icon: CheckCircle2,
@@ -1694,6 +1814,7 @@ function Stats({ items }) {
       soft: T.mint,
     },
     {
+      id: 'cancelled',
       label: 'Cancelled',
       value: cancelled,
       icon: AlertTriangle,
@@ -1704,7 +1825,11 @@ function Stats({ items }) {
   return (
     <div className="stat-grid">
       {cards.map((c) => (
-        <div key={c.label} className="stat-card">
+        <button
+          key={c.label}
+          className="stat-card"
+          onClick={() => onDrill && onDrill(c.id)}
+        >
           <div className="stat-ico" style={{ background: c.soft }}>
             <c.icon size={20} color={c.color} />
           </div>
@@ -1730,7 +1855,7 @@ function Stats({ items }) {
               {c.label}
             </div>
           </div>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -3325,8 +3450,10 @@ function StyleTag() {
       .loading { text-align: center; color: ${T.inkSoft}; padding: 50px; font-size: 14px; }
 
       .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
-      .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); }
+      .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); cursor: pointer; text-align: left; font-family: inherit; color: ${T.ink}; width: 100%; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
+      .drill-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
 
       /* ── layout toggle (Stages / Categories) ── */
       .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
