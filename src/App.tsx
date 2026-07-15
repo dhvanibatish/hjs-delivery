@@ -3212,7 +3212,7 @@ function SalesTrackPage() {
                 <input
                   className="inp phone-input"
                   inputMode="numeric"
-                  placeholder="98765 43210"
+                  placeholder="Enter mobile number"
                   value={phone}
                   onChange={(e) => {
                     setPhone(e.target.value.replace(/\D/g, ''));
@@ -3386,7 +3386,7 @@ function TrackPage({ invoice }) {
               <input
                 className="inp phone-input"
                 inputMode="numeric"
-                placeholder="98765 43210"
+                placeholder="Enter mobile number"
                 value={phone}
                 onChange={(e) => {
                   setPhone(e.target.value.replace(/\D/g, ''));
