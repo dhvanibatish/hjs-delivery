@@ -830,7 +830,13 @@ export default function App() {
   const path = typeof window !== 'undefined' ? window.location.pathname : '';
   const isTrackPath = /\/track\/?$/.test(path);
   const inv = params.get('inv') || '';
+  // ?order  → STATIC customer link (WhatsApp CTA button ke liye). Koi invoice
+  // nahi chahiye — customer apna registered phone daale, uska latest order
+  // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
+  // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
   if (inv) return <TrackPage invoice={inv} />; // customer — single order
+  if (params.has('order') || params.has('my'))
+    return <TrackPage invoice="" />; // customer — phone se latest order
   if (params.has('track') || params.has('sales') || isTrackPath)
     return <SalesTrackPage />; // sales — phone → list → timeline
 
@@ -2192,10 +2198,10 @@ function Card({ d, stage, onOpen, onMove }) {
           <Clock size={12} /> {d.expected}
         </span>
       </div>
-      {d.person && (
+      {(d.person || d.manager) && (
         <div className="card-meta">
-          <span>
-            <User size={12} /> {d.person}
+          <span className="ellip" style={{ maxWidth: '100%' }}>
+            <User size={12} /> {d.person || d.manager}
           </span>
         </div>
       )}
@@ -3312,6 +3318,7 @@ function SalesTrackPage() {
 function TrackPage({ invoice }) {
   const [phone, setPhone] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
+  const [rows, setRows] = useState([]);
   const [row, setRow] = useState(null);
   const [err, setErr] = useState('');
 
@@ -3323,14 +3330,18 @@ function TrackPage({ invoice }) {
     }
     setErr('');
     setState('loading');
+    setRow(null);
     try {
-      const rows = await sbTrack(invoice || '', `+91${digits}`);
-      if (!rows || rows.length === 0) {
+      const res = await sbTrack(invoice || '', `+91${digits}`);
+      if (!res || res.length === 0) {
         setState('notfound');
-        setRow(null);
+        setRows([]);
         return;
       }
-      setRow(rows[0]);
+      setRows(res);
+      // Ek hi order → seedha timeline. Ek se zyada (jaise oxygen + cannula
+      // alag invoices) → list dikhao, customer apna order chun le.
+      if (res.length === 1) setRow(res[0]);
       setState('done');
     } catch (e) {
       setErr(e.message || 'Something went wrong');
@@ -3413,7 +3424,72 @@ function TrackPage({ invoice }) {
           )}
         </div>
 
-        {state === 'done' && row && <TrackResult row={row} />}
+        {/* 1 se zyada order → customer apna order chune */}
+        {state === 'done' && !row && rows.length > 1 && (
+          <div className="sales-list">
+            <div className="sales-list-head">
+              {rows.length} orders found · choose one
+            </div>
+            {rows.map((r) => {
+              const st = statusToStage(r.status);
+              const stg = stageMeta(st);
+              const equip = equipmentText({
+                line_items: r.line_items,
+                item_name: r.item_name,
+              });
+              const Icon = equipIcon(equip);
+              return (
+                <button
+                  key={r.invoice_number}
+                  className="sales-row"
+                  onClick={() => setRow(r)}
+                >
+                  <div className="eq-ico" style={{ background: stg.soft }}>
+                    <Icon size={17} color={stg.color} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="sales-row-top">
+                      <span
+                        className="ellip"
+                        style={{ fontWeight: 800, fontSize: 14 }}
+                      >
+                        {equip}
+                      </span>
+                      <span
+                        className="sales-chip"
+                        style={{ background: stg.soft, color: stg.color }}
+                      >
+                        {stg.short}
+                      </span>
+                    </div>
+                    <div className="sales-meta">
+                      <span className="ellip">#{r.invoice_number}</span>
+                      {niceDate(r.created_at) && (
+                        <span>{niceDate(r.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={T.inkSoft} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {state === 'done' && row && (
+          <>
+            {rows.length > 1 && (
+              <button
+                className="track-back"
+                style={{ marginTop: 16 }}
+                onClick={() => setRow(null)}
+              >
+                <ArrowLeft size={16} /> Back to my orders
+              </button>
+            )}
+            <TrackResult row={row} />
+          </>
+        )}
 
         <div className="track-foot">
           Healthy Jeena Sikho · Medical equipment rentals
