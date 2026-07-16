@@ -2814,6 +2814,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
       r.security_type && r.security_type !== 'null' ? r.security_type : 'Cash',
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  // Chrome mein date/time input pe click se picker khud nahi khulta —
+  // showPicker() chahiye. Cross-origin iframe (Zoho) mein ye throw karta hai,
+  // wahan user calendar icon se khol lega — isliye try/catch.
+  const openPicker = (e) => {
+    try {
+      e.currentTarget.showPicker();
+    } catch (_) {}
+  };
   // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
   // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
   const flagSel = toStage === 'talked' && !!f.invoiceFlag;
@@ -2899,6 +2907,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       className="inp"
                       type="date"
                       value={f.date}
+                      onClick={openPicker}
+                      onFocus={openPicker}
                       onChange={(e) => set('date', e.target.value)}
                     />
                   </Field>
@@ -2907,6 +2917,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       className="inp"
                       type="time"
                       value={f.time}
+                      onClick={openPicker}
+                      onFocus={openPicker}
                       onChange={(e) => set('time', e.target.value)}
                     />
                   </Field>
@@ -2968,6 +2980,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   className="inp"
                   type="time"
                   value={f.eta}
+                  onClick={openPicker}
+                  onFocus={openPicker}
                   onChange={(e) => set('eta', e.target.value)}
                 />
               </Field>
@@ -3959,6 +3973,13 @@ function StyleTag() {
       .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
       .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
       .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      /* native date/time ka calendar/clock icon — bada + saaf dikhe (iframe mein
+         showPicker block hota hai, wahan user isi icon se picker kholega) */
+      .inp[type="date"], .inp[type="time"] { cursor: pointer; }
+      .inp[type="date"]::-webkit-calendar-picker-indicator,
+      .inp[type="time"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; padding: 4px; margin-right: -2px; border-radius: 6px; transform: scale(1.25); }
+      .inp[type="date"]::-webkit-calendar-picker-indicator:hover,
+      .inp[type="time"]::-webkit-calendar-picker-indicator:hover { background: ${T.mint}; }
       textarea.inp { resize: vertical; }
 
       .check1 { display: flex; align-items: center; gap: 10px; border: 1px solid ${T.line}; background: #fff; border-radius: 11px; padding: 12px 13px; cursor: pointer; font-family: inherit; text-align: left; }
