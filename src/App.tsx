@@ -2777,10 +2777,16 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
   const persons = personsFor(delivery.branch, delivery.person || '');
   const [f, setF] = useState({
     invoiceFlag: '',
+    // Stage pe MOVE kar rahe ho → date/time/ETA hamesha khaali (purani value
+    // dobara na chip jaye). EDIT kar rahe ho → jo bhara hai wahi dikhao.
     date:
-      r.confirmed_date && r.confirmed_date !== 'null' ? r.confirmed_date : '',
+      mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null'
+        ? r.confirmed_date
+        : '',
     time:
-      r.confirmed_time && r.confirmed_time !== 'null' ? r.confirmed_time : '',
+      mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null'
+        ? String(r.confirmed_time).slice(0, 5)
+        : '',
     remarks:
       (toStage === 'delivered'
         ? r.stage4_remarks
@@ -2789,7 +2795,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
           : r.stage1_remarks) || '',
     person: delivery.person || '',
     vehicle: delivery.vehicle || '',
-    eta: r.app_eta && r.app_eta !== 'null' ? String(r.app_eta).slice(0, 5) : '',
+    eta:
+      mode === 'edit' && r.app_eta && r.app_eta !== 'null'
+        ? String(r.app_eta).slice(0, 5)
+        : '',
     inspected: !!r.item_inspected,
     delivered: !!r.item_delivered,
     amount:
@@ -3290,11 +3299,13 @@ function TimePick({ value, onChange }) {
   );
 }
 function Field({ label, children }) {
+  // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
+  // jisse picker khulke turant band ho jaata tha (laptop pe).
   return (
-    <label className="field">
+    <div className="field">
       <span className="field-label">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 function Check1({ checked, onChange, label }) {
