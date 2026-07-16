@@ -1620,10 +1620,12 @@ function Login({ onLogin }) {
             <input
               className="inp"
               type="password"
+              inputMode="numeric"
+              maxLength={4}
               placeholder="••••"
               value={pw}
               onChange={(e) => {
-                setPw(e.target.value);
+                setPw(e.target.value.replace(/\D/g, '').slice(0, 4));
                 setErr('');
               }}
               onKeyDown={(e) => e.key === 'Enter' && go()}
@@ -2907,8 +2909,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       className="inp"
                       type="date"
                       value={f.date}
+                      min="2024-01-01"
+                      max="2099-12-31"
                       onClick={openPicker}
-                      onChange={(e) => set('date', e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        // Chrome year 275760 tak deta hai — 4 digit tak hi rakho
+                        if (v && Number(v.slice(0, 4)) > 2099) return;
+                        set('date', v);
+                      }}
                     />
                   </Field>
                   <Field label="Time *">
@@ -3258,10 +3267,11 @@ function SalesTrackPage() {
                 className="inp"
                 type="password"
                 inputMode="numeric"
+                maxLength={4}
                 placeholder="••••"
                 value={pin}
                 onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, ''));
+                  setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
                   setGateErr('');
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && unlock()}
