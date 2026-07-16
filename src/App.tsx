@@ -819,6 +819,8 @@ const EMBEDDED =
 function usePostHeight() {
   useEffect(() => {
     if (!EMBEDDED) return;
+    // ye class lagne pe hi embed-mode CSS (100vh hatana) apply hota hai
+    document.documentElement.classList.add('hjs-embed');
     let last = 0;
     const post = () => {
       // #root ki asli rendered height — body.scrollHeight kabhi shrink nahi
@@ -1102,12 +1104,12 @@ export default function App() {
       style={{
         fontFamily: FONT,
         background: T.beige,
-        minHeight: '100vh',
+        minHeight: EMBEDDED ? 0 : '100vh',
         color: T.ink,
       }}
     >
       <StyleTag />
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', minHeight: EMBEDDED ? 0 : '100vh' }}>
         <Sidebar session={session} />
         <div
           style={{
@@ -3821,9 +3823,11 @@ function StyleTag() {
 
       /* ── EMBED MODE (Zoho iframe): app content-height le, taaki iframe auto-resize ho ── */
       .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
+      .hjs-embed #root { min-height: 0 !important; }
       .hjs-embed .sidebar { height: auto !important; position: static !important; }
       .hjs-embed .login-wrap { min-height: 0 !important; }
       .hjs-embed .track-wrap { min-height: 0 !important; }
+      .hjs-embed .track-body { padding-bottom: 22px; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
       .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
