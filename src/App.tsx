@@ -3044,10 +3044,15 @@ function DatePick({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const sel = value ? new Date(value + 'T00:00:00') : null;
   const today = new Date();
-  const [view, setView] = useState(() => {
-    const b = sel && !isNaN(sel) ? sel : today;
-    return { y: b.getFullYear(), m: b.getMonth() };
-  });
+  const base = sel && !isNaN(sel) ? sel : today;
+  const [view, setView] = useState({ y: base.getFullYear(), m: base.getMonth() });
+
+  // panel khulte hi selected date ke month pe jao (warna purana view atka rehta)
+  useEffect(() => {
+    if (!open) return;
+    const d = value ? new Date(value + 'T00:00:00') : new Date();
+    if (!isNaN(d)) setView({ y: d.getFullYear(), m: d.getMonth() });
+  }, [open]); // eslint-disable-line
 
   const first = new Date(view.y, view.m, 1).getDay();
   const days = new Date(view.y, view.m + 1, 0).getDate();
@@ -3073,7 +3078,7 @@ function DatePick({ value, onChange }) {
     sel.getFullYear() === view.y &&
     sel.getMonth() === view.m &&
     sel.getDate() === d;
-  const isToday = (d) =>
+  const isNow = (d) =>
     today.getFullYear() === view.y &&
     today.getMonth() === view.m &&
     today.getDate() === d;
@@ -3096,6 +3101,13 @@ function DatePick({ value, onChange }) {
       </button>
       {open && (
         <div className="cal">
+          {/* manual bharne ke liye — normal input bhi rakha hai */}
+          <input
+            className="inp manual-inp"
+            type="date"
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+          />
           <div className="cal-head">
             <button className="cal-nav" onClick={() => shift(-1)}>
               <ArrowLeft size={15} />
@@ -3120,16 +3132,9 @@ function DatePick({ value, onChange }) {
                 <button
                   key={d}
                   className={
-                    isSel(d)
-                      ? 'cal-day sel'
-                      : isToday(d)
-                        ? 'cal-day now'
-                        : 'cal-day'
+                    isSel(d) ? 'cal-day sel' : isNow(d) ? 'cal-day now' : 'cal-day'
                   }
-                  onClick={() => {
-                    onChange(toISO(view.y, view.m, d));
-                    setOpen(false);
-                  }}
+                  onClick={() => onChange(toISO(view.y, view.m, d))}
                 >
                   {d}
                 </button>
@@ -3137,26 +3142,11 @@ function DatePick({ value, onChange }) {
             )}
           </div>
           <div className="cal-foot">
-            <button
-              className="cal-quick"
-              onClick={() => {
-                const n = new Date();
-                onChange(toISO(n.getFullYear(), n.getMonth(), n.getDate()));
-                setOpen(false);
-              }}
-            >
-              Today
+            <button className="cal-quick" onClick={() => onChange('')}>
+              Clear
             </button>
-            <button
-              className="cal-quick"
-              onClick={() => {
-                const n = new Date();
-                n.setDate(n.getDate() + 1);
-                onChange(toISO(n.getFullYear(), n.getMonth(), n.getDate()));
-                setOpen(false);
-              }}
-            >
-              Tomorrow
+            <button className="cal-quick save" onClick={() => setOpen(false)}>
+              Save
             </button>
           </div>
         </div>
@@ -3165,14 +3155,15 @@ function DatePick({ value, onChange }) {
   );
 }
 
-/* ── TIME PICKER — hour + minute + AM/PM chips. Value format: HH:MM (24h) ── */
+/* ── TIME PICKER — phone-alarm jaisa: H / M / AM-PM vertical scroll columns.
+   Value format: HH:MM (24h). Manual input bhi upar rakha hai. ── */
 function TimePick({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const parts = String(value || '').split(':');
   const h24 = parseInt(parts[0], 10);
   const mm = parts.length > 1 ? parseInt(parts[1], 10) : NaN;
   const has = !isNaN(h24) && !isNaN(mm);
-  const ap = has ? (h24 >= 12 ? 'PM' : 'AM') : 'AM';
+  const ap = has ? (h24 >= 12 ? 'PM' : 'AM') : null;
   const h12 = has ? h24 % 12 || 12 : null;
 
   const emit = (nh12, nmm, nap) => {
@@ -3180,9 +3171,12 @@ function TimePick({ value, onChange }) {
     if (nap === 'PM') H += 12;
     onChange(`${pad2(H)}:${pad2(nmm)}`);
   };
-  const setH = (n) => emit(n, isNaN(mm) ? 0 : mm, ap);
-  const setM = (n) => emit(h12 || 9, n, ap);
+  const setH = (n) => emit(n, isNaN(mm) ? 0 : mm, ap || 'AM');
+  const setM = (n) => emit(h12 || 9, n, ap || 'AM');
   const setAP = (a) => emit(h12 || 9, isNaN(mm) ? 0 : mm, a);
+
+  const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  const MINS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
   return (
     <div>
@@ -3202,46 +3196,63 @@ function TimePick({ value, onChange }) {
       </button>
       {open && (
         <div className="cal">
-          <div className="tp-label">Hour</div>
-          <div className="tp-row">
-            {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((h) => (
-              <button
-                key={h}
-                className={h12 === h ? 'tp-chip on' : 'tp-chip'}
-                onClick={() => setH(h)}
-              >
-                {h}
-              </button>
-            ))}
+          {/* manual bharne ke liye — normal input bhi rakha hai */}
+          <input
+            className="inp manual-inp"
+            type="time"
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <div className="tp-cols">
+            <div className="tp-col">
+              <div className="tp-label">H</div>
+              <div className="tp-scroll">
+                {HOURS.map((h) => (
+                  <button
+                    key={h}
+                    className={h12 === h ? 'tp-item on' : 'tp-item'}
+                    onClick={() => setH(h)}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="tp-col">
+              <div className="tp-label">M</div>
+              <div className="tp-scroll">
+                {MINS.map((m) => (
+                  <button
+                    key={m}
+                    className={mm === m ? 'tp-item on' : 'tp-item'}
+                    onClick={() => setM(m)}
+                  >
+                    {pad2(m)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="tp-col">
+              <div className="tp-label">AM/PM</div>
+              <div className="tp-scroll">
+                {['AM', 'PM'].map((a) => (
+                  <button
+                    key={a}
+                    className={ap === a ? 'tp-item on' : 'tp-item'}
+                    onClick={() => setAP(a)}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="tp-label">Minutes</div>
-          <div className="tp-row">
-            {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => (
-              <button
-                key={m}
-                className={mm === m ? 'tp-chip on' : 'tp-chip'}
-                onClick={() => setM(m)}
-              >
-                {pad2(m)}
-              </button>
-            ))}
-          </div>
-          <div className="tp-row" style={{ marginTop: 10 }}>
-            {['AM', 'PM'].map((a) => (
-              <button
-                key={a}
-                className={has && ap === a ? 'tp-chip wide on' : 'tp-chip wide'}
-                onClick={() => setAP(a)}
-              >
-                {a}
-              </button>
-            ))}
-            <button
-              className="tp-chip wide"
-              style={{ marginLeft: 'auto' }}
-              onClick={() => setOpen(false)}
-            >
-              Done
+          <div className="cal-foot">
+            <button className="cal-quick" onClick={() => onChange('')}>
+              Clear
+            </button>
+            <button className="cal-quick save" onClick={() => setOpen(false)}>
+              Save
             </button>
           </div>
         </div>
@@ -3249,7 +3260,6 @@ function TimePick({ value, onChange }) {
     </div>
   );
 }
-
 function Field({ label, children }) {
   return (
     <label className="field">
@@ -4078,14 +4088,18 @@ function StyleTag() {
       .cal-day.now { border: 1.5px solid ${T.green}; color: ${T.green}; font-weight: 800; }
       .cal-day.sel { background: ${T.green}; color: #fff; font-weight: 800; }
       .cal-foot { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid ${T.line}; }
-      .cal-quick { flex: 1; border: 1px solid ${T.line}; background: ${T.cream}; border-radius: 9px; padding: 8px; font-size: 12px; font-weight: 700; font-family: inherit; color: ${T.green}; cursor: pointer; }
-      .cal-quick:hover { background: ${T.mint}; border-color: ${T.green}; }
-      .tp-label { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; color: ${T.inkSoft}; margin: 6px 0 6px; }
-      .tp-row { display: flex; flex-wrap: wrap; gap: 6px; }
-      .tp-chip { min-width: 40px; padding: 8px 4px; border: 1px solid ${T.line}; background: #fff; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .tp-chip:hover { border-color: ${T.green}; background: ${T.mint}; }
-      .tp-chip.on { background: ${T.green}; border-color: ${T.green}; color: #fff; }
-      .tp-chip.wide { min-width: 58px; }
+      .cal-quick { flex: 1; border: 1px solid ${T.line}; background: ${T.cream}; border-radius: 9px; padding: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .cal-quick:hover { background: ${T.beige}; }
+      .cal-quick.save { background: ${T.green}; border-color: ${T.green}; color: #fff; }
+      .cal-quick.save:hover { background: #276b2b; }
+      .manual-inp { margin-bottom: 10px; }
+      .tp-label { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; color: ${T.inkSoft}; text-align: center; margin-bottom: 6px; }
+      .tp-cols { display: flex; gap: 8px; }
+      .tp-col { flex: 1; min-width: 0; }
+      .tp-scroll { max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 3px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 10px; }
+      .tp-item { border: none; background: transparent; border-radius: 8px; padding: 9px 4px; font-size: 13.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .tp-item:hover { background: ${T.mint}; }
+      .tp-item.on { background: ${T.green}; color: #fff; }
       .flag-note b { font-weight: 800; }
       .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
       .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
