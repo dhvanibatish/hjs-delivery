@@ -814,48 +814,19 @@ function useIsMobile(bp = 760) {
 const EMBEDDED =
   typeof window !== 'undefined' && window.parent && window.parent !== window;
 
-/* Embed mode: app apni asli content-height parent (Zoho) ko bhejta hai,
-   taaki iframe utna hi bada ho — na cut, na neeche white gap. */
-function usePostHeight() {
+/* Embed mode: sirf ek class lagti hai (CSS ke liye). Height ab app khud
+   nahi bhejta — iframe ko fixed 100vh di jaati hai aur app usko poora bharta
+   hai, isliye na neeche white space aata hai na cut hota hai. */
+function useEmbedFlag() {
   useEffect(() => {
     if (!EMBEDDED) return;
-    // ye class lagne pe hi embed-mode CSS (100vh hatana) apply hota hai
     document.documentElement.classList.add('hjs-embed');
-    let last = 0;
-    const post = () => {
-      // #root ki asli rendered height — body.scrollHeight kabhi shrink nahi
-      // hoti, isliye chhote content pe white space reh jaata tha.
-      const root = document.getElementById('root');
-      const h = root
-        ? Math.ceil(root.getBoundingClientRect().height)
-        : document.body
-          ? document.body.scrollHeight
-          : 0;
-      if (!h || Math.abs(h - last) < 3) return;
-      last = h;
-      try {
-        window.parent.postMessage({ hjsHeight: h }, '*');
-      } catch (_) {}
-    };
-    post();
-    let ro;
-    if (typeof ResizeObserver !== 'undefined' && document.body) {
-      ro = new ResizeObserver(post);
-      ro.observe(document.body);
-    }
-    window.addEventListener('resize', post);
-    const iv = setInterval(post, 1200);
-    return () => {
-      if (ro) ro.disconnect();
-      window.removeEventListener('resize', post);
-      clearInterval(iv);
-    };
   }, []);
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
 export default function App() {
-  usePostHeight();
+  useEmbedFlag();
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -1104,12 +1075,12 @@ export default function App() {
       style={{
         fontFamily: FONT,
         background: T.beige,
-        minHeight: EMBEDDED ? 0 : '100vh',
+        minHeight: '100vh',
         color: T.ink,
       }}
     >
       <StyleTag />
-      <div style={{ display: 'flex', minHeight: EMBEDDED ? 0 : '100vh' }}>
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar session={session} />
         <div
           style={{
@@ -3821,13 +3792,8 @@ function StyleTag() {
       body { color: ${T.ink}; background: ${T.beige}; }
       #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
 
-      /* ── EMBED MODE (Zoho iframe): app content-height le, taaki iframe auto-resize ho ── */
-      .hjs-embed, .hjs-embed body { min-height: 0 !important; height: auto !important; }
-      .hjs-embed #root { min-height: 0 !important; }
-      .hjs-embed .sidebar { height: auto !important; position: static !important; }
-      .hjs-embed .login-wrap { min-height: 0 !important; }
-      .hjs-embed .track-wrap { min-height: 0 !important; }
-      .hjs-embed .track-body { padding-bottom: 22px; }
+      /* ── EMBED MODE (Zoho iframe): app poora frame bhare (100vh = iframe height) ── */
+      .hjs-embed .track-wrap, .hjs-embed .login-wrap { min-height: 100vh; }
       button { color: inherit; font-family: inherit; }
       h1, h2, h3 { color: ${T.ink}; }
       .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
