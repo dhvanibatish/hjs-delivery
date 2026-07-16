@@ -2908,7 +2908,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       type="date"
                       value={f.date}
                       onClick={openPicker}
-                      onFocus={openPicker}
                       onChange={(e) => set('date', e.target.value)}
                     />
                   </Field>
@@ -2918,7 +2917,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       type="time"
                       value={f.time}
                       onClick={openPicker}
-                      onFocus={openPicker}
                       onChange={(e) => set('time', e.target.value)}
                     />
                   </Field>
@@ -2981,7 +2979,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   type="time"
                   value={f.eta}
                   onClick={openPicker}
-                  onFocus={openPicker}
                   onChange={(e) => set('eta', e.target.value)}
                 />
               </Field>
@@ -3973,13 +3970,13 @@ function StyleTag() {
       .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
       .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
       .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-      /* native date/time ka calendar/clock icon — bada + saaf dikhe (iframe mein
-         showPicker block hota hai, wahan user isi icon se picker kholega) */
+      /* native date/time picker icon — proper calendar / clock (green).
+         Manual typing bhi chalti hai; icon sirf picker kholne ke liye hai. */
       .inp[type="date"], .inp[type="time"] { cursor: pointer; }
       .inp[type="date"]::-webkit-calendar-picker-indicator,
-      .inp[type="time"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; padding: 4px; margin-right: -2px; border-radius: 6px; transform: scale(1.25); }
-      .inp[type="date"]::-webkit-calendar-picker-indicator:hover,
-      .inp[type="time"]::-webkit-calendar-picker-indicator:hover { background: ${T.mint}; }
+      .inp[type="time"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 19px; height: 19px; padding: 0; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 19px 19px; }
+      .inp[type="date"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
+      .inp[type="time"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'/%3E%3Cpolyline%20points='12%206%2012%2012%2016%2014'/%3E%3C/svg%3E"); }
       textarea.inp { resize: vertical; }
 
       .check1 { display: flex; align-items: center; gap: 10px; border: 1px solid ${T.line}; background: #fff; border-radius: 11px; padding: 12px 13px; cursor: pointer; font-family: inherit; text-align: left; }
