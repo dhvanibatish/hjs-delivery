@@ -3898,6 +3898,11 @@ function StyleTag() {
       .edit-btn:hover { background: #dcebdd; }
 
       .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+      .flag-note b { font-weight: 800; }
+      .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
+      .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
+      .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
 
       .timeline { margin-bottom: 8px; }
