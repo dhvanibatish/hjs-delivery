@@ -531,6 +531,7 @@ function stageFields(toStage, f) {
     return {
       'Delivery person': f.person || '—',
       Vehicle: f.vehicle || '—',
+      'Estimated arrival': f.eta ? niceTime(f.eta) || f.eta : '—',
       Inspected: f.inspected ? 'Yes' : 'No',
       ...rmk,
     };
@@ -920,6 +921,7 @@ export default function App() {
     } else if (toStage === 'scheduled') {
       patch.app_delivery_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
+      patch.app_eta = f.eta || null;
       patch.item_inspected = !!f.inspected;
       patch.stage3_remarks = f.remarks || null;
     } else if (toStage === 'delivered') {
@@ -2289,6 +2291,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       rows: [
         ['Delivery person', d.person || '—'],
         ['Vehicle', d.vehicle || '—'],
+        ['Estimated arrival', niceTime(r.app_eta) || '—'],
         ['Inspected', r.item_inspected ? 'Yes' : 'No'],
         ['Remarks', show(r.stage3_remarks)],
       ],
@@ -2746,6 +2749,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
           : r.stage1_remarks) || '',
     person: delivery.person || '',
     vehicle: delivery.vehicle || '',
+    eta: r.app_eta && r.app_eta !== 'null' ? String(r.app_eta).slice(0, 5) : '',
     inspected: !!r.item_inspected,
     delivered: !!r.item_delivered,
     amount:
@@ -2762,22 +2766,21 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
       r.security_type && r.security_type !== 'null' ? r.security_type : 'Cash',
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  const openPicker = (e) => {
-    try {
-      e.currentTarget.showPicker();
-    } catch (_) {}
-  };
+  // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
+  // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
   const flagSel = toStage === 'talked' && !!f.invoiceFlag;
   const canSave =
     mode === 'edit'
       ? true
       : flagSel
         ? true
-        : toStage === 'scheduled'
-          ? !!(f.person && f.inspected)
-          : toStage === 'delivered'
-            ? f.delivered
-            : true;
+        : toStage === 'talked'
+          ? !!(f.date && f.time) // baat hui → date+time zaroori
+          : toStage === 'scheduled'
+            ? !!(f.person && f.eta && f.inspected)
+            : toStage === 'delivered'
+              ? f.delivered
+              : true;
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2821,7 +2824,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   value={f.invoiceFlag}
                   onChange={(e) => set('invoiceFlag', e.target.value)}
                 >
-                  <option value="">Regular — customer se baat hui</option>
+                  <option value="">Customer se baat hui</option>
                   <option value="renewal">Renewal invoice</option>
                   <option value="duplicate">Duplicate invoice</option>
                   <option value="cancelled">Cancelled invoice</option>
@@ -2841,24 +2844,27 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                 </div>
               ) : (
                 <>
-                  <Field label="Date">
+                  <Field label="Date *">
                     <input
                       className="inp"
                       type="date"
                       value={f.date}
-                      onClick={openPicker}
                       onChange={(e) => set('date', e.target.value)}
                     />
                   </Field>
-                  <Field label="Time">
+                  <Field label="Time *">
                     <input
                       className="inp"
                       type="time"
                       value={f.time}
-                      onClick={openPicker}
                       onChange={(e) => set('time', e.target.value)}
                     />
                   </Field>
+                  {!(f.date && f.time) && (
+                    <div className="req-note">
+                      Date aur Time dono bharna zaroori hai.
+                    </div>
+                  )}
                 </>
               )}
             </>
@@ -2897,6 +2903,20 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   )}
                 </select>
               </Field>
+              <Field label="Estimated arrival time *">
+                <input
+                  className="inp"
+                  type="time"
+                  value={f.eta}
+                  onChange={(e) => set('eta', e.target.value)}
+                />
+              </Field>
+              {!f.eta && (
+                <div className="req-note">
+                  Customer ko yahi time message mein jaayega — bharna zaroori
+                  hai.
+                </div>
+              )}
               <Check1
                 checked={f.inspected}
                 onChange={() => set('inspected', !f.inspected)}
@@ -3631,6 +3651,11 @@ function TrackResult({ row }) {
                         <b>Delivery partner:</b> {person}
                       </div>
                     )}
+                    {niceTime(row.app_eta) && (
+                      <div>
+                        <b>Estimated arrival:</b> {niceTime(row.app_eta)}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3798,6 +3823,7 @@ function StyleTag() {
       .edit-btn:hover { background: #dcebdd; }
 
       .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+      .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .flag-note b { font-weight: 800; }
       .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
       .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
