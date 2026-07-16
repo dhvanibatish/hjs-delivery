@@ -3436,7 +3436,13 @@ function TrackPage({ invoice }) {
     setState('loading');
     setRow(null);
     try {
-      const res = await sbTrack(invoice || '', `+91${digits}`);
+      const all = await sbTrack(invoice || '', `+91${digits}`);
+      // Renewal / Duplicate / Deleted = internal cheezein — customer ko na dikhe.
+      // Cancelled dikhta hai (customer ko pata hona chahiye).
+      const res = (all || []).filter((r) => {
+        const st = statusToStage(r.status);
+        return st !== 'renewal' && st !== 'duplicate' && st !== 'deleted';
+      });
       if (!res || res.length === 0) {
         setState('notfound');
         setRows([]);
