@@ -606,6 +606,15 @@ function createdTs(x) {
     null
   );
 }
+/* delivery kab hui — app_log ke aakhri 'delivered' event se. Fallback updated_at */
+function deliveredTs(x) {
+  const r = (x && x._raw) || {};
+  const log = Array.isArray(r.app_log) ? r.app_log : [];
+  for (let i = log.length - 1; i >= 0; i--) {
+    if (log[i] && log[i].stage === 'delivered' && log[i].ts) return log[i].ts;
+  }
+  return r.updated_at || null;
+}
 function inView(x, viewMode) {
   const st = x.stage;
   // pending = abhi kaam baaki (new / talked / scheduled)
@@ -614,8 +623,16 @@ function inView(x, viewMode) {
     // Archived = ho-chuki entries: Delivered + Cancelled / Duplicate / Renewal
     return !pending;
   }
-  // Today (kaam waala view) = saari pending (chahe purani ho) + jo aaj create hui
-  return pending || isToday(createdTs(x));
+  // Today (kaam waala view):
+  //   - saari pending (chahe purani ho)
+  //   - jo aaj create hui
+  //   - jo AAJ deliver hui (purani entry bhi) — kal se Today se hat jayegi,
+  //     par Archived mein hamesha rahegi.
+  return (
+    pending ||
+    isToday(createdTs(x)) ||
+    (st === 'delivered' && isToday(deliveredTs(x)))
+  );
 }
 
 /* stat categories jinpe collapsible entries khulti hain.
