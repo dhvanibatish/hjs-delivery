@@ -36,7 +36,6 @@ import {
   Copy,
   Info,
   Trash2,
-  Calendar as CalendarIcon,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2896,15 +2895,19 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
               ) : (
                 <>
                   <Field label="Date *">
-                    <DatePick
+                    <input
+                      className="inp"
+                      type="date"
                       value={f.date}
-                      onChange={(v) => set('date', v)}
+                      onChange={(e) => set('date', e.target.value)}
                     />
                   </Field>
                   <Field label="Time *">
-                    <TimePick
+                    <input
+                      className="inp"
+                      type="time"
                       value={f.time}
-                      onChange={(v) => set('time', v)}
+                      onChange={(e) => set('time', e.target.value)}
                     />
                   </Field>
                   {!(f.date && f.time) && (
@@ -2961,7 +2964,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
           {toStage === 'dispatched' && (
             <>
               <Field label="Estimated arrival time *">
-                <TimePick value={f.eta} onChange={(v) => set('eta', v)} />
+                <input
+                  className="inp"
+                  type="time"
+                  value={f.eta}
+                  onChange={(e) => set('eta', e.target.value)}
+                />
               </Field>
               {!f.eta && (
                 <div className="req-note">
@@ -3058,246 +3066,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
 }
 
 /* ═════════════════════════════════════════════════════════════ SMALL UI */
-/* ── DATE PICKER — apna calendar (native input nahi, kyunki Zoho iframe
-   mein native picker block ho jaata hai). Value format: YYYY-MM-DD ── */
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const pad2 = (n) => String(n).padStart(2, '0');
-const toISO = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
-
-function DatePick({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const sel = value ? new Date(value + 'T00:00:00') : null;
-  const today = new Date();
-  const base = sel && !isNaN(sel) ? sel : today;
-  const [view, setView] = useState({ y: base.getFullYear(), m: base.getMonth() });
-
-  // panel khulte hi selected date ke month pe jao (warna purana view atka rehta)
-  useEffect(() => {
-    if (!open) return;
-    const d = value ? new Date(value + 'T00:00:00') : new Date();
-    if (!isNaN(d)) setView({ y: d.getFullYear(), m: d.getMonth() });
-  }, [open]); // eslint-disable-line
-
-  const first = new Date(view.y, view.m, 1).getDay();
-  const days = new Date(view.y, view.m + 1, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < first; i++) cells.push(null);
-  for (let d = 1; d <= days; d++) cells.push(d);
-
-  const shift = (n) => {
-    let m = view.m + n;
-    let y = view.y;
-    if (m < 0) {
-      m = 11;
-      y--;
-    }
-    if (m > 11) {
-      m = 0;
-      y++;
-    }
-    setView({ y, m });
-  };
-  const isSel = (d) =>
-    sel &&
-    sel.getFullYear() === view.y &&
-    sel.getMonth() === view.m &&
-    sel.getDate() === d;
-  const isNow = (d) =>
-    today.getFullYear() === view.y &&
-    today.getMonth() === view.m &&
-    today.getDate() === d;
-
-  return (
-    <div>
-      <button className="pick-btn" onClick={() => setOpen(!open)}>
-        <CalendarIcon size={16} color={T.inkSoft} />
-        <span style={{ flex: 1, textAlign: 'left' }}>
-          {value ? niceDate(value) : 'Select date…'}
-        </span>
-        <ChevronRight
-          size={16}
-          color={T.inkSoft}
-          style={{
-            transform: open ? 'rotate(90deg)' : 'none',
-            transition: 'transform .15s',
-          }}
-        />
-      </button>
-      {open && (
-        <div className="cal">
-          {/* manual bharne ke liye — normal input bhi rakha hai */}
-          <input
-            className="inp manual-inp"
-            type="date"
-            value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <div className="cal-head">
-            <button className="cal-nav" onClick={() => shift(-1)}>
-              <ArrowLeft size={15} />
-            </button>
-            <span style={{ fontWeight: 800, fontSize: 13.5 }}>
-              {MONTHS[view.m]} {view.y}
-            </span>
-            <button className="cal-nav" onClick={() => shift(1)}>
-              <ArrowRight size={15} />
-            </button>
-          </div>
-          <div className="cal-grid">
-            {WEEK.map((w, i) => (
-              <div key={'w' + i} className="cal-w">
-                {w}
-              </div>
-            ))}
-            {cells.map((d, i) =>
-              d === null ? (
-                <div key={'e' + i} />
-              ) : (
-                <button
-                  key={d}
-                  className={
-                    isSel(d) ? 'cal-day sel' : isNow(d) ? 'cal-day now' : 'cal-day'
-                  }
-                  onClick={() => onChange(toISO(view.y, view.m, d))}
-                >
-                  {d}
-                </button>
-              ),
-            )}
-          </div>
-          <div className="cal-foot">
-            <button className="cal-quick" onClick={() => onChange('')}>
-              Clear
-            </button>
-            <button className="cal-quick save" onClick={() => setOpen(false)}>
-              Save
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── TIME PICKER — phone-alarm jaisa: H / M / AM-PM vertical scroll columns.
-   Value format: HH:MM (24h). Manual input bhi upar rakha hai. ── */
-function TimePick({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const parts = String(value || '').split(':');
-  const h24 = parseInt(parts[0], 10);
-  const mm = parts.length > 1 ? parseInt(parts[1], 10) : NaN;
-  const has = !isNaN(h24) && !isNaN(mm);
-  const ap = has ? (h24 >= 12 ? 'PM' : 'AM') : null;
-  const h12 = has ? h24 % 12 || 12 : null;
-
-  const emit = (nh12, nmm, nap) => {
-    let H = nh12 % 12;
-    if (nap === 'PM') H += 12;
-    onChange(`${pad2(H)}:${pad2(nmm)}`);
-  };
-  const setH = (n) => emit(n, isNaN(mm) ? 0 : mm, ap || 'AM');
-  const setM = (n) => emit(h12 || 9, n, ap || 'AM');
-  const setAP = (a) => emit(h12 || 9, isNaN(mm) ? 0 : mm, a);
-
-  const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const MINS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-
-  return (
-    <div>
-      <button className="pick-btn" onClick={() => setOpen(!open)}>
-        <Clock size={16} color={T.inkSoft} />
-        <span style={{ flex: 1, textAlign: 'left' }}>
-          {has ? niceTime(value) : 'Select time…'}
-        </span>
-        <ChevronRight
-          size={16}
-          color={T.inkSoft}
-          style={{
-            transform: open ? 'rotate(90deg)' : 'none',
-            transition: 'transform .15s',
-          }}
-        />
-      </button>
-      {open && (
-        <div className="cal">
-          {/* manual bharne ke liye — normal input bhi rakha hai */}
-          <input
-            className="inp manual-inp"
-            type="time"
-            value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <div className="tp-cols">
-            <div className="tp-col">
-              <div className="tp-label">H</div>
-              <div className="tp-scroll">
-                {HOURS.map((h) => (
-                  <button
-                    key={h}
-                    className={h12 === h ? 'tp-item on' : 'tp-item'}
-                    onClick={() => setH(h)}
-                  >
-                    {h}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="tp-col">
-              <div className="tp-label">M</div>
-              <div className="tp-scroll">
-                {MINS.map((m) => (
-                  <button
-                    key={m}
-                    className={mm === m ? 'tp-item on' : 'tp-item'}
-                    onClick={() => setM(m)}
-                  >
-                    {pad2(m)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="tp-col">
-              <div className="tp-label">AM/PM</div>
-              <div className="tp-scroll">
-                {['AM', 'PM'].map((a) => (
-                  <button
-                    key={a}
-                    className={ap === a ? 'tp-item on' : 'tp-item'}
-                    onClick={() => setAP(a)}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="cal-foot">
-            <button className="cal-quick" onClick={() => onChange('')}>
-              Clear
-            </button>
-            <button className="cal-quick save" onClick={() => setOpen(false)}>
-              Save
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 function Field({ label, children }) {
   // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
   // jisse picker khulke turant band ho jaata tha (laptop pe).
@@ -4134,38 +3902,6 @@ function StyleTag() {
 
       .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
-
-      /* ── custom date/time pickers ── */
-      .pick-btn { width: 100%; display: flex; align-items: center; gap: 9px; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
-      .pick-btn:hover { border-color: ${T.green}; }
-      .cal { margin-top: 8px; border: 1px solid ${T.line}; border-radius: 13px; background: #fff; padding: 12px; box-shadow: 0 6px 18px rgba(20,57,43,.08); }
-      .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-      .cal-nav { width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${T.line}; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: ${T.ink}; }
-      .cal-nav:hover { background: ${T.beige}; }
-      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-      .cal-w { text-align: center; font-size: 10.5px; font-weight: 800; color: ${T.inkSoft}; padding: 4px 0; }
-      .cal-day { height: 34px; border: none; background: transparent; border-radius: 9px; font-size: 13px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .cal-day:hover { background: ${T.mint}; }
-      .cal-day.now { border: 1.5px solid ${T.green}; color: ${T.green}; font-weight: 800; }
-      .cal-day.sel { background: ${T.green}; color: #fff; font-weight: 800; }
-      .cal-foot { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid ${T.line}; }
-      .cal-quick { flex: 1; border: 1px solid ${T.line}; background: ${T.cream}; border-radius: 9px; padding: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
-      .cal-quick:hover { background: ${T.beige}; }
-      .cal-quick.save { background: ${T.green}; border-color: ${T.green}; color: #fff; }
-      .cal-quick.save:hover { background: #276b2b; }
-      .manual-inp { margin-bottom: 10px; }
-      .tp-label { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; color: ${T.inkSoft}; text-align: center; margin-bottom: 6px; }
-      .tp-cols { display: flex; gap: 8px; }
-      .tp-col { flex: 1; min-width: 0; }
-      .tp-scroll { max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 3px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 10px; }
-      .tp-item { border: none; background: transparent; border-radius: 8px; padding: 9px 4px; font-size: 13.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .tp-item:hover { background: ${T.mint}; }
-      .tp-item.on { background: ${T.green}; color: #fff; }
-      .flag-note b { font-weight: 800; }
-      .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
-      .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-      .btn-danger { background: #fff; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-      .btn-danger:hover { background: ${T.redSoft}; }
 
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
