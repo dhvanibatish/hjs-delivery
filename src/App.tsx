@@ -109,6 +109,8 @@ const T = {
   blueSoft: '#E8EFF6',
   slate: '#64748B',
   slateSoft: '#EEF1F3',
+  violet: '#6B5B9A',
+  violetSoft: '#EEEAF7',
   red: '#B4472E',
   redSoft: '#F7E7E1',
 };
@@ -286,6 +288,14 @@ const STAGES = [
     soft: T.amberSoft,
   },
   {
+    id: 'dispatched',
+    label: 'Out for Delivery',
+    short: 'Dispatched',
+    status: 'Out For Delivery',
+    color: T.violet,
+    soft: T.violetSoft,
+  },
+  {
     id: 'delivered',
     label: 'Item Delivered',
     short: 'Delivered',
@@ -304,6 +314,8 @@ function statusToStage(s) {
   if (t.includes('renew')) return 'renewal';
   if (t.includes('cancel')) return 'cancelled';
   if (t.includes('new')) return 'new'; // "New Delivery" — 'deliver' se pehle check zaroori
+  // NOTE: "Out For Delivery" mein bhi 'deliver' aata hai — isliye ye pehle
+  if (t.includes('out for') || t.includes('dispatch')) return 'dispatched';
   if (t.includes('schedul')) return 'scheduled';
   if (t.includes('inspect')) return 'scheduled'; // inspection ab Scheduled ka part hai
   if (t.includes('deliver')) return 'delivered';
@@ -380,6 +392,7 @@ const STAGE_HINT = {
   new: 'Delivery shuru karo',
   talked: 'Customer se baat karke Contacted bharo',
   scheduled: 'Delivery schedule karke details bharo',
+  dispatched: 'Item nikal gaya — estimated time bharo',
   delivered: 'Item deliver karke amount bharo',
 };
 
@@ -532,8 +545,12 @@ function stageFields(toStage, f) {
     return {
       'Delivery person': f.person || '—',
       Vehicle: f.vehicle || '—',
-      'Estimated arrival': f.eta ? niceTime(f.eta) || f.eta : '—',
       Inspected: f.inspected ? 'Yes' : 'No',
+      ...rmk,
+    };
+  if (toStage === 'dispatched')
+    return {
+      'Estimated arrival': f.eta ? niceTime(f.eta) || f.eta : '—',
       ...rmk,
     };
   if (toStage === 'delivered')
@@ -939,9 +956,10 @@ export default function App() {
     } else if (toStage === 'scheduled') {
       patch.app_delivery_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
-      patch.app_eta = f.eta || null;
       patch.item_inspected = !!f.inspected;
       patch.stage3_remarks = f.remarks || null;
+    } else if (toStage === 'dispatched') {
+      patch.app_eta = f.eta || null;
     } else if (toStage === 'delivered') {
       patch.item_delivered = !!f.delivered;
       patch.amount_collected = Number(f.amount) || 0;
@@ -2309,14 +2327,18 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       rows: [
         ['Delivery person', d.person || '—'],
         ['Vehicle', d.vehicle || '—'],
-        ['Estimated arrival', niceTime(r.app_eta) || '—'],
         ['Inspected', r.item_inspected ? 'Yes' : 'No'],
         ['Remarks', show(r.stage3_remarks)],
       ],
     },
     {
-      id: 'delivered',
+      id: 'dispatched',
       i: 3,
+      rows: [['Estimated arrival', niceTime(r.app_eta) || '—']],
+    },
+    {
+      id: 'delivered',
+      i: 4,
       rows: [
         ['Delivered', r.item_delivered ? 'Yes' : 'No'],
         [
@@ -2795,10 +2817,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
         : toStage === 'talked'
           ? !!(f.date && f.time) // baat hui → date+time zaroori
           : toStage === 'scheduled'
-            ? !!(f.person && f.eta && f.inspected)
-            : toStage === 'delivered'
-              ? f.delivered
-              : true;
+            ? !!(f.person && f.inspected)
+            : toStage === 'dispatched'
+              ? !!f.eta
+              : toStage === 'delivered'
+                ? f.delivered
+                : true;
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2917,6 +2941,16 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   )}
                 </select>
               </Field>
+              <Check1
+                checked={f.inspected}
+                onChange={() => set('inspected', !f.inspected)}
+                label="Item inspected & ready"
+              />
+            </>
+          )}
+
+          {toStage === 'dispatched' && (
+            <>
               <Field label="Estimated arrival time *">
                 <TimePick value={f.eta} onChange={(v) => set('eta', v)} />
               </Field>
@@ -2926,11 +2960,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                   hai.
                 </div>
               )}
-              <Check1
-                checked={f.inspected}
-                onChange={() => set('inspected', !f.inspected)}
-                label="Item inspected & ready"
-              />
             </>
           )}
 
@@ -3316,6 +3345,12 @@ const TRACK_STEPS = [
     id: 'scheduled',
     label: 'Delivery Scheduled',
     desc: 'Your item has passed the quality check and the delivery has been scheduled.',
+    icon: ClipboardCheck,
+  },
+  {
+    id: 'dispatched',
+    label: 'Out for Delivery',
+    desc: 'Your order has been dispatched and is on its way to your location.',
     icon: Truck,
   },
   {
@@ -3794,11 +3829,21 @@ function TrackResult({ row }) {
     ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
       ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
-      : stage === 'scheduled'
-        ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
-        : stage === 'talked'
-          ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
-          : { text: 'Your order has been received', bg: T.slateSoft, fg: T.slate };
+      : stage === 'dispatched'
+        ? {
+            text: 'Your order is out for delivery',
+            bg: T.violetSoft,
+            fg: T.violet,
+          }
+        : stage === 'scheduled'
+          ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
+          : stage === 'talked'
+            ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
+            : {
+                text: 'Your order has been received',
+                bg: T.slateSoft,
+                fg: T.slate,
+              };
 
   const schedDate = niceDate(row.confirmed_date);
   const schedTime = niceTime(row.confirmed_time);
@@ -3900,11 +3945,15 @@ function TrackResult({ row }) {
                         <b>Delivery partner:</b> {person}
                       </div>
                     )}
-                    {niceTime(row.app_eta) && (
-                      <div>
-                        <b>Estimated arrival:</b> {niceTime(row.app_eta)}
-                      </div>
-                    )}
+                  </div>
+                )}
+
+                {/* Stage 4 — out for delivery: estimated arrival */}
+                {step.id === 'dispatched' && niceTime(row.app_eta) && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Estimated arrival:</b> {niceTime(row.app_eta)}
+                    </div>
                   </div>
                 )}
 
@@ -4024,12 +4073,13 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; align-items: start; }
+      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
       .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
       .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
-      .column:nth-child(4) { border-top: 3px solid ${T.green}; }
+      .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
+      .column:nth-child(5) { border-top: 3px solid ${T.green}; }
       .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
       .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
@@ -4235,6 +4285,7 @@ function StyleTag() {
       .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
       .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
 
+      @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
