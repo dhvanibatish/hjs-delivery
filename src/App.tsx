@@ -2970,13 +2970,19 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
 
           {toStage === 'dispatched' && (
             <>
-              <Field label="Estimated arrival time *">
+              <Field label="Estimated arrival (date & time) *">
                 <input
                   className="inp"
-                  type="time"
+                  type="datetime-local"
                   value={f.eta}
+                  min="2024-01-01T00:00"
+                  max="2099-12-31T23:59"
                   onClick={openPicker}
-                  onChange={(e) => set('eta', e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v && Number(v.slice(0, 4)) > 2099) return;
+                    set('eta', v);
+                  }}
                 />
               </Field>
               {!f.eta && (
