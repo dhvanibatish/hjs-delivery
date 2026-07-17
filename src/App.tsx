@@ -116,11 +116,11 @@ const T = {
 const FONT = "'Plus Jakarta Sans','Inter',system-ui,-apple-system,sans-serif";
 
 const BRANCH_NAMES = {
-  MOH: 'Mohali',
-  CHD: 'Chandigarh',
+  MOH: 'Mohali Showroom',
+  CHD: 'Head Office',
   GGN: 'Gurgaon',
   NCR: 'Delhi NCR',
-  NOD: 'Noida',
+  NOD: 'Noida Showroom',
   LDH: 'Ludhiana',
   JAL: 'Jalandhar',
   JPR: 'Jaipur',
