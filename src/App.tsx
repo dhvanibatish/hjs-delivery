@@ -139,9 +139,9 @@ const STORE_MANAGERS = {
   JPR: 'Niraj Kumar - 8340710549',
   LKO: 'Mohd. Akhlaque - 7080809820',
   NWD: 'Nitin - 7007413101',
-  NOD: 'Dharmendra Singh - 9315573166',
+  NOD: 'Ravi Saini - 9759302924',
   JAL: 'Bhupinder - 8558892244',
-  MOH: 'Rajiv - 8146658040',
+  MOH: 'Sumita - 7814327703',
   JKP: 'Rajan - 8595353451',
 };
 
