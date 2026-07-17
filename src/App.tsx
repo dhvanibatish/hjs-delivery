@@ -534,6 +534,21 @@ function niceTime(t) {
   return `${hh}:${parts[1]} ${ap}`;
 }
 
+/* datetime (YYYY-MM-DD HH:MM ya ...THH:MM) → "17 Jul 2026, 3:30 PM" */
+function niceDateTime(v) {
+  if (!v || v === 'null') return null;
+  const t = String(v).replace(' ', 'T');
+  const d = niceDate(t.slice(0, 10));
+  const tm = niceTime(t.slice(11, 16));
+  if (!d && !tm) return String(v);
+  return [d, tm].filter(Boolean).join(', ');
+}
+/* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
+function toLocalInput(v) {
+  if (!v || v === 'null') return '';
+  return String(v).replace(' ', 'T').slice(0, 16);
+}
+
 /* app-controlled timeline: each move/edit logs an event with the fields entered */
 function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
@@ -549,7 +564,7 @@ function stageFields(toStage, f) {
     };
   if (toStage === 'dispatched')
     return {
-      'Estimated arrival': f.eta ? niceTime(f.eta) || f.eta : '—',
+      'Estimated arrival': f.eta ? niceDateTime(f.eta) || f.eta : '—',
       ...rmk,
     };
   if (toStage === 'delivered')
@@ -2308,7 +2323,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     {
       id: 'dispatched',
       i: 3,
-      rows: [['Estimated arrival', niceTime(r.app_eta) || '—']],
+      rows: [['Estimated arrival', niceDateTime(r.app_eta) || '—']],
     },
     {
       id: 'delivered',
@@ -2771,7 +2786,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
     vehicle: delivery.vehicle || '',
     eta:
       mode === 'edit' && r.app_eta && r.app_eta !== 'null'
-        ? String(r.app_eta).slice(0, 5)
+        ? toLocalInput(r.app_eta)
         : '',
     inspected: !!r.item_inspected,
     delivered: !!r.item_delivered,
@@ -3728,10 +3743,10 @@ function TrackResult({ row }) {
                 )}
 
                 {/* Stage 4 — out for delivery: estimated arrival */}
-                {step.id === 'dispatched' && niceTime(row.app_eta) && (
+                {step.id === 'dispatched' && niceDateTime(row.app_eta) && (
                   <div className="ttl-extra">
                     <div>
-                      <b>Estimated arrival:</b> {niceTime(row.app_eta)}
+                      <b>Estimated arrival:</b> {niceDateTime(row.app_eta)}
                     </div>
                   </div>
                 )}
@@ -3963,10 +3978,12 @@ function StyleTag() {
       .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
       /* native date/time picker icon — proper calendar / clock (green).
          Manual typing bhi chalti hai; icon sirf picker kholne ke liye hai. */
-      .inp[type="date"], .inp[type="time"] { cursor: pointer; }
+      .inp[type="date"], .inp[type="time"], .inp[type="datetime-local"] { cursor: pointer; }
       .inp[type="date"]::-webkit-calendar-picker-indicator,
-      .inp[type="time"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 19px; height: 19px; padding: 0; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 19px 19px; }
-      .inp[type="date"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
+      .inp[type="time"]::-webkit-calendar-picker-indicator,
+      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 19px; height: 19px; padding: 0; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 19px 19px; }
+      .inp[type="date"]::-webkit-calendar-picker-indicator,
+      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
       .inp[type="time"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'/%3E%3Cpolyline%20points='12%206%2012%2012%2016%2014'/%3E%3C/svg%3E"); }
       textarea.inp { resize: vertical; }
 
