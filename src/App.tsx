@@ -346,6 +346,18 @@ function moveText(id) {
   const s = STAGES[stageIndex(id)];
   return `Move to ${s ? s.short : ''}`;
 }
+// timeline event ki line (Hindi on toggle)
+function eventLine(ev) {
+  if (HJS_LANG !== 'hi') return `${ev.action} ${ev.label}`;
+  const label = HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
+  const verb =
+    ev.action === 'Edited'
+      ? 'एडिट किया'
+      : ev.action === 'Marked as'
+        ? 'मार्क किया'
+        : 'पे पहुँचा';
+  return `${label} ${verb}`;
+}
 const stageToStatus = (id) =>
   (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
 function statusToStage(s) {
@@ -1854,7 +1866,7 @@ function Topbar({
             className={lang === 'hi' ? 'lang-btn active' : 'lang-btn'}
             onClick={() => onLang && onLang('hi')}
           >
-            हिं
+            Hing
           </button>
         </div>
         <button className="icon-btn" onClick={onReload} title="Reload">
@@ -2674,7 +2686,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   </div>
                   <div style={{ paddingBottom: 16 }}>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>
-                      {ev.action} {ev.label}
+                      {eventLine(ev)}
                     </div>
                     <div className="tl-note">{fmtDateTime(ev.ts)}</div>
                     {ev.fields &&
