@@ -3036,13 +3036,25 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
       : flagSel
         ? true
         : toStage === 'talked'
-          ? !!(f.date && f.time) // baat hui → date+time zaroori
+          ? !!(f.date && f.time) // baat hui → date + time
           : toStage === 'scheduled'
-            ? !!(f.person && f.inspected)
+            ? !!(
+                f.person &&
+                f.vehicle &&
+                f.inspected &&
+                f.photoInspected
+              ) // person + vehicle + inspected + photo
             : toStage === 'dispatched'
-              ? !!f.eta
+              ? !!f.eta // estimated arrival
               : toStage === 'delivered'
-                ? f.delivered
+                ? !!(
+                    f.delivered &&
+                    f.photoDelivered &&
+                    String(f.amount).trim() !== '' &&
+                    f.amountType &&
+                    String(f.security).trim() !== '' &&
+                    f.securityType
+                  ) // delivered + photo + amount + security (sab bharo)
                 : true;
 
   const inner = (
@@ -3148,7 +3160,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
 
           {toStage === 'scheduled' && (
             <>
-              <Field label="Delivery person">
+              <Field label="Delivery person *">
                 <select
                   className="inp"
                   value={f.person}
@@ -3162,7 +3174,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                   ))}
                 </select>
               </Field>
-              <Field label="Vehicle">
+              <Field label="Vehicle *">
                 <select
                   className="inp"
                   value={f.vehicle}
@@ -3186,12 +3198,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               />
               {f.inspected && (
                 <PhotoUpload
-                  label="Inspection photo"
+                  label="Inspection photo *"
                   invoiceNumber={delivery.id}
                   kind="inspected"
                   value={f.photoInspected}
                   onChange={(url) => set('photoInspected', url)}
                 />
+              )}
+              {f.inspected && !f.photoInspected && (
+                <div className="req-note">Inspection photo lagana zaroori hai.</div>
               )}
             </>
           )}
@@ -3234,23 +3249,30 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               />
               {f.delivered && (
                 <PhotoUpload
-                  label="Delivery photo"
+                  label="Delivery photo *"
                   invoiceNumber={delivery.id}
                   kind="delivered"
                   value={f.photoDelivered}
                   onChange={(url) => set('photoDelivered', url)}
                 />
               )}
+              {f.delivered && !f.photoDelivered && (
+                <div className="req-note">Delivery photo lagana zaroori hai.</div>
+              )}
               <div className="two-col">
-                <Field label="Amount collected">
+                <Field label="Amount collected *">
                   <input
                     className="inp"
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
                     value={f.amount}
-                    onChange={(e) => set('amount', e.target.value)}
+                    onChange={(e) =>
+                      set('amount', e.target.value.replace(/[^0-9]/g, ''))
+                    }
                   />
                 </Field>
-                <Field label="Amount type">
+                <Field label="Amount type *">
                   <select
                     className="inp"
                     value={f.amountType}
@@ -3263,16 +3285,19 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 </Field>
               </div>
               <div className="two-col">
-                <Field label="Security collected">
+                <Field label="Security collected *">
                   <input
                     className="inp"
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     placeholder="0"
                     value={f.security}
-                    onChange={(e) => set('security', e.target.value)}
+                    onChange={(e) =>
+                      set('security', e.target.value.replace(/[^0-9]/g, ''))
+                    }
                   />
                 </Field>
-                <Field label="Security type">
+                <Field label="Security type *">
                   <select
                     className="inp"
                     value={f.securityType}
