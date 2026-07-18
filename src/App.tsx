@@ -1047,18 +1047,14 @@ export default function App() {
     }
   };
 
-  const commitModal = async (fields) => {
-    const { invoiceId, toStage, mode } = modal;
-    // Contact stage pe agar invoice flag (duplicate/renewal/cancelled) chuna →
-    // date/time ki zarurat nahi, seedha closed mark karo.
+  // core move/edit apply — modal aur inline card dono use karte hain
+  const applyMove = async (invoiceId, toStage, fields, mode) => {
     if (toStage === 'talked' && fields.invoiceFlag) {
-      setModal(null);
       return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
     }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
-    setModal(null);
     if (!CONFIGURED) {
       ping('Demo mode — save nahi hua');
       return;
@@ -1070,11 +1066,17 @@ export default function App() {
           ? 'Updated ✓'
           : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
       );
-      if (mode === 'move') jumpMobile(toStage); // phone: destination stage kholo
+      if (mode === 'move') jumpMobile(toStage);
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
+  };
+
+  const commitModal = async (fields) => {
+    const { invoiceId, toStage, mode } = modal;
+    setModal(null);
+    await applyMove(invoiceId, toStage, fields, mode);
   };
 
   // direct backward move (no form)
@@ -1220,6 +1222,9 @@ export default function App() {
               onMove={(x, toStage) =>
                 setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
               }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
               focus={lastMove}
             />
           </main>
@@ -1270,6 +1275,7 @@ function EntriesView({
   loading,
   onOpen,
   onMove,
+  onCommit,
   focus,
 }) {
   const isMobile = useIsMobile();
@@ -1310,6 +1316,7 @@ function EntriesView({
         loading={loading}
         onOpen={onOpen}
         onMove={onMove}
+        onCommit={onCommit}
       />
     );
   }
@@ -1324,6 +1331,7 @@ function EntriesView({
         onBack={back}
         onOpen={onOpen}
         onMove={onMove}
+        onCommit={onCommit}
       />
     );
   }
@@ -1335,13 +1343,19 @@ function EntriesView({
         <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
       )}
       {viewMode === 'archived' ? (
-        <ArchivedList items={items} onOpen={onOpen} onMove={onMove} />
+        <ArchivedList
+          items={items}
+          onOpen={onOpen}
+          onMove={onMove}
+          onCommit={onCommit}
+        />
       ) : isMobile ? (
         <MobileBoard
           items={items}
           loading={loading}
           onOpen={onOpen}
           onMove={onMove}
+          onCommit={onCommit}
           focus={focus}
         />
       ) : (
@@ -1350,6 +1364,7 @@ function EntriesView({
           loading={loading}
           onOpen={onOpen}
           onMove={onMove}
+          onCommit={onCommit}
         />
       )}
       {viewMode !== 'archived' && <FooterTotal items={items} />}
@@ -1386,7 +1401,7 @@ const STAT_CATS = {
 };
 
 /* Stat card click → us category ki entries grid + Back to stages */
-function DrillView({ cat, items, viewMode, onBack, onOpen, onMove }) {
+function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
   const meta = STAT_CATS[cat] || STAT_CATS.total;
   // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
   const allArchived = cat === 'total' && viewMode === 'archived';
@@ -1421,6 +1436,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove }) {
               stage={stageMeta(x.stage)}
               onOpen={() => onOpen(x)}
               onMove={onMove}
+              onCommit={onCommit}
             />
           ))}
         </div>
@@ -1431,7 +1447,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove }) {
 
 /* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
    color bhi badalta hai (green = delivered, red = cancelled). */
-function ArchivedList({ items, onOpen, onMove }) {
+function ArchivedList({ items, onOpen, onMove, onCommit }) {
   const [mode, setMode] = useState('delivered');
   const meta =
     mode === 'cancelled'
@@ -1481,6 +1497,7 @@ function ArchivedList({ items, onOpen, onMove }) {
               stage={stageMeta(x.stage)}
               onOpen={() => onOpen(x)}
               onMove={onMove}
+              onCommit={onCommit}
             />
           ))}
         </div>
@@ -1493,7 +1510,7 @@ function ArchivedList({ items, onOpen, onMove }) {
    Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
    har card clickable + collapsible. Click karo to us category ki entries
    khulti hain. Ismein koi stage-wise board NAHI hota.                    */
-function CategoriesView({ items, loading, onOpen, onMove }) {
+function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
   const [open, setOpen] = useState('pending'); // default: Pending khula
   if (loading && items.length === 0)
     return <div className="loading">Deliveries load ho rahi hain…</div>;
@@ -1551,6 +1568,7 @@ function CategoriesView({ items, loading, onOpen, onMove }) {
                           stage={stg}
                           onOpen={() => onOpen(x)}
                           onMove={onMove}
+                          onCommit={onCommit}
                         />
                       );
                     })}
@@ -2164,7 +2182,7 @@ function Stats({ items, viewMode, onDrill }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ BOARD */
-function Board({ items, loading, onOpen, onMove }) {
+function Board({ items, loading, onOpen, onMove, onCommit }) {
   if (loading && items.length === 0)
     return (
       <div className="loading">Supabase se deliveries load ho rahi hain…</div>
@@ -2198,6 +2216,7 @@ function Board({ items, loading, onOpen, onMove }) {
                   stage={stage}
                   onOpen={() => onOpen(x)}
                   onMove={onMove}
+                  onCommit={onCommit}
                 />
               ))}
             </div>
@@ -2209,7 +2228,7 @@ function Board({ items, loading, onOpen, onMove }) {
 }
 
 /* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
-function MobileBoard({ items, loading, onOpen, onMove, focus }) {
+function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
   // Phone: sirf entry-waale stages dikhao. Accordion single-open.
   const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
   const activeIds = active.map((s) => s.id);
@@ -2294,6 +2313,7 @@ function MobileBoard({ items, loading, onOpen, onMove, focus }) {
                     stage={stage}
                     onOpen={() => onOpen(x)}
                     onMove={onMove}
+                    onCommit={onCommit}
                   />
                 ))}
               </div>
@@ -2305,11 +2325,13 @@ function MobileBoard({ items, loading, onOpen, onMove, focus }) {
   );
 }
 
-function Card({ d, stage, onOpen, onMove }) {
+function Card({ d, stage, onOpen, onMove, onCommit }) {
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
   const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
+  const [expand, setExpand] = useState(false);
+  const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
   return (
     <div
       className={cancelled ? 'card is-cancelled' : 'card'}
@@ -2354,15 +2376,44 @@ function Card({ d, stage, onOpen, onMove }) {
           {stage.short}
         </div>
       ) : next ? (
-        <button
-          className="card-next"
-          onClick={(e) => {
-            e.stopPropagation();
-            onMove(d, next.id);
-          }}
-        >
-          {moveText(next.id)} <ArrowRight size={13} />
-        </button>
+        <>
+          <button
+            className={expand ? 'card-next is-open' : 'card-next'}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canInline) setExpand((v) => !v);
+              else onMove(d, next.id);
+            }}
+          >
+            {moveText(next.id)}{' '}
+            {canInline ? (
+              <ChevronRight
+                size={14}
+                style={{
+                  transform: expand ? 'rotate(90deg)' : 'none',
+                  transition: 'transform .15s',
+                }}
+              />
+            ) : (
+              <ArrowRight size={13} />
+            )}
+          </button>
+          {canInline && expand && (
+            <div onClick={(e) => e.stopPropagation()}>
+              <StageModal
+                delivery={d}
+                toStage={next.id}
+                mode="move"
+                embedded
+                onClose={() => setExpand(false)}
+                onSave={(fields) => {
+                  setExpand(false);
+                  onCommit(d, next.id, fields);
+                }}
+              />
+            </div>
+          )}
+        </>
       ) : (
         <div className="card-done">
           <Check size={13} /> Completed
@@ -2873,7 +2924,7 @@ function tlParse(r) {
 }
 
 /* ═══════════════════════════════════════════════════════════ STAGE MODAL */
-function StageModal({ delivery, toStage, mode, onClose, onSave }) {
+function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const stage = STAGES[stageIndex(toStage)];
   const r = (delivery && delivery._raw) || {};
   const persons = personsFor(delivery.branch, delivery.person || '');
@@ -2948,9 +2999,9 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                 ? f.delivered
                 : true;
 
-  return (
-    <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+  const inner = (
+    <>
+      {!embedded && (
         <div className="modal-head">
           <div>
             <span
@@ -2981,7 +3032,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
             <X size={18} color={T.ink} />
           </button>
         </div>
-        <div className="modal-body">
+      )}
+      <div className="modal-body">
           {toStage === 'talked' && (
             <>
               <Field label="Invoice status">
@@ -3034,6 +3086,9 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                       onClick={openPicker}
                       onChange={(e) => set('time', e.target.value)}
                     />
+                    {f.time && (
+                      <span className="tp-preview">🕐 {niceTime(f.time)}</span>
+                    )}
                   </Field>
                   {!(f.date && f.time) && (
                     <div className="req-note">
@@ -3102,6 +3157,9 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                     set('eta', v);
                   }}
                 />
+                {f.eta && (
+                  <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
+                )}
               </Field>
               {!f.eta && (
                 <div className="req-note">
@@ -3192,6 +3250,13 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
                 : 'Save & update'}
           </button>
         </div>
+    </>
+  );
+  if (embedded) return <div className="inline-move">{inner}</div>;
+  return (
+    <div className="overlay center" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        {inner}
       </div>
     </div>
   );
@@ -4010,6 +4075,10 @@ function StyleTag() {
       .card-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; }
       .card-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: ${T.inkSoft}; }
       .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
+      .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
+      .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
+      .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
+      .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
@@ -4043,6 +4112,7 @@ function StyleTag() {
       .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
+      .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
 
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
@@ -4195,12 +4265,17 @@ function StyleTag() {
         .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; gap: 8px; }
         .tb-user-text { display: none; }
         .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
+        .lang-toggle { order: 3; }
         .icon-btn { width: 34px; height: 34px; }
-        main { padding: 16px 14px 60px !important; }
+        main { padding: 10px 14px 60px !important; }
+        main > div:first-child { margin-bottom: 14px !important; }
+        h2 { font-size: 22px !important; }
         .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
         .kv-grid { grid-template-columns: 1fr 1fr; }
         .modal { width: 100%; border-radius: 18px; }
         .glass-card { padding: 24px 20px; }
+        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
+        .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
       }
       @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
       @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
