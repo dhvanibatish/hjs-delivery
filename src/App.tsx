@@ -928,6 +928,8 @@ export default function App() {
   const [viewMode, setViewMode] = useState('today'); // today | archived
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
+  const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
+  const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1068,6 +1070,7 @@ export default function App() {
           ? 'Updated ✓'
           : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
       );
+      if (mode === 'move') jumpMobile(toStage); // phone: destination stage kholo
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
@@ -1096,6 +1099,7 @@ export default function App() {
     try {
       await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
+      jumpMobile(toStage);
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
@@ -1216,6 +1220,7 @@ export default function App() {
               onMove={(x, toStage) =>
                 setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
               }
+              focus={lastMove}
             />
           </main>
         </div>
@@ -1258,7 +1263,15 @@ export default function App() {
    FIX: ye component missing tha isliye login ke baad screen crash ho rahi
    thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
    FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
-function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
+function EntriesView({
+  items,
+  viewMode,
+  layoutMode,
+  loading,
+  onOpen,
+  onMove,
+  focus,
+}) {
   const isMobile = useIsMobile();
   const [drill, setDrill] = useState(null); // null | total|pending|delivered|cancelled
 
@@ -1329,6 +1342,7 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
           loading={loading}
           onOpen={onOpen}
           onMove={onMove}
+          focus={focus}
         />
       ) : (
         <Board
@@ -2195,17 +2209,34 @@ function Board({ items, loading, onOpen, onMove }) {
 }
 
 /* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
-function MobileBoard({ items, loading, onOpen, onMove }) {
-  // Phone: sirf un stages ke cards dikhao jinme entry hai. Accordion single-open —
-  // default first (jisme entry hai), user doosra dabaye to pehla apne aap close.
-  // Entry move hone pe wo stage khaali hoke gayab, aur next stage khud open.
+function MobileBoard({ items, loading, onOpen, onMove, focus }) {
+  // Phone: sirf entry-waale stages dikhao. Accordion single-open.
   const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
-  const sig = active.map((s) => s.id).join(',');
-  const [open, setOpen] = useState(active[0] ? active[0].id : null);
+  const activeIds = active.map((s) => s.id);
+  const sig = activeIds.join(',');
+  const [open, setOpen] = useState(activeIds[0] || null);
+  const consumed = React.useRef(0);
   useEffect(() => {
-    setOpen(active[0] ? active[0].id : null);
+    setOpen((prev) => {
+      // abhi-abhi move hua → us DESTINATION stage ko kholo (chahe purane stage
+      // mein aur entries bachi ho). Har move ek hi baar consume hota hai.
+      if (
+        focus &&
+        focus.n !== consumed.current &&
+        activeIds.includes(focus.stage)
+      ) {
+        consumed.current = focus.n;
+        return focus.stage;
+      }
+      // khula stage mein abhi bhi entry hai → wahi rehne do
+      if (prev && activeIds.includes(prev)) return prev;
+      // warna aage ka pehla active stage
+      const prevIdx = prev ? stageIndex(prev) : -1;
+      const forward = active.find((s) => stageIndex(s.id) > prevIdx);
+      return forward ? forward.id : activeIds[0] || null;
+    });
     // eslint-disable-next-line
-  }, [sig]);
+  }, [sig, focus && focus.n]);
 
   if (loading && items.length === 0)
     return <div className="loading">Deliveries load ho rahi hain…</div>;
