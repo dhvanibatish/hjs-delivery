@@ -36,6 +36,8 @@ import {
   Copy,
   Info,
   Trash2,
+  Camera,
+  Upload,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -87,6 +89,28 @@ async function sbTrack(invoice, phone) {
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
 async function sbTrackSearch(phone, pin) {
   return sbRpc('track_search', { p_phone: phone, p_pin: pin });
+}
+// photo upload → Supabase Storage bucket 'delivery-photos'.
+// naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
+// return: public URL (deliveries table mein save hota hai)
+async function sbUploadPhoto(invoiceNumber, kind, file) {
+  const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
+  const ext = (file.name && file.name.split('.').pop()) || 'jpg';
+  const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
+  const res = await fetch(
+    `${CONFIG.url}/storage/v1/object/delivery-photos/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        ...HDRS(),
+        'Content-Type': file.type || 'image/jpeg',
+        'x-upsert': 'true',
+      },
+      body: file,
+    },
+  );
+  if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
+  return `${CONFIG.url}/storage/v1/object/public/delivery-photos/${path}`;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -1005,11 +1029,13 @@ export default function App() {
       patch.app_delivery_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
       patch.item_inspected = !!f.inspected;
+      patch.photo_inspected = f.photoInspected || null;
       patch.stage3_remarks = f.remarks || null;
     } else if (toStage === 'dispatched') {
       patch.app_eta = f.eta || null;
     } else if (toStage === 'delivered') {
       patch.item_delivered = !!f.delivered;
+      patch.photo_delivered = f.photoDelivered || null;
       patch.amount_collected = Number(f.amount) || 0;
       patch.amount_type = f.amountType || null;
       patch.security_collected = Number(f.security) || 0;
@@ -2483,6 +2509,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
         ['Inspected', r.item_inspected ? 'Yes' : 'No'],
         ['Remarks', show(r.stage3_remarks)],
       ],
+      photo: r.photo_inspected,
     },
     {
       id: 'dispatched',
@@ -2508,6 +2535,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
         ],
         ['Remarks', show(r.stage4_remarks)],
       ],
+      photo: r.photo_delivered,
     },
   ];
 
@@ -2716,6 +2744,16 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                   ))}
+                  {b.photo && b.photo !== 'null' && (
+                    <a
+                      className="kv-photo"
+                      href={b.photo}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img src={b.photo} alt="photo" />
+                    </a>
+                  )}
                 </div>
               ) : (
                 <div className="block-next-note">
@@ -2958,6 +2996,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
         ? toLocalInput(r.app_eta)
         : nowDT,
     inspected: !!r.item_inspected,
+    photoInspected:
+      r.photo_inspected && r.photo_inspected !== 'null'
+        ? r.photo_inspected
+        : '',
+    photoDelivered:
+      r.photo_delivered && r.photo_delivered !== 'null'
+        ? r.photo_delivered
+        : '',
     delivered: !!r.item_delivered,
     amount:
       r.amount_collected != null && r.amount_collected !== 0
@@ -3138,6 +3184,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 onChange={() => set('inspected', !f.inspected)}
                 label="Item inspected & ready"
               />
+              {f.inspected && (
+                <PhotoUpload
+                  label="Inspection photo"
+                  invoiceNumber={delivery.id}
+                  kind="inspected"
+                  value={f.photoInspected}
+                  onChange={(url) => set('photoInspected', url)}
+                />
+              )}
             </>
           )}
 
@@ -3177,6 +3232,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 onChange={() => set('delivered', !f.delivered)}
                 label="Item delivered to customer"
               />
+              {f.delivered && (
+                <PhotoUpload
+                  label="Delivery photo"
+                  invoiceNumber={delivery.id}
+                  kind="delivered"
+                  value={f.photoDelivered}
+                  onChange={(url) => set('photoDelivered', url)}
+                />
+              )}
               <div className="two-col">
                 <Field label="Amount collected">
                   <input
@@ -3293,6 +3357,83 @@ function Check1({ checked, onChange, label }) {
         {label}
       </span>
     </button>
+  );
+}
+
+/* Photo upload — camera se click ya device se choose. Supabase Storage pe
+   upload hoke URL onChange se milta hai. */
+function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const camRef = React.useRef(null);
+  const fileRef = React.useRef(null);
+
+  const handle = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // same file dobara chun sakein
+    if (!file) return;
+    setErr('');
+    setBusy(true);
+    try {
+      const url = await sbUploadPhoto(invoiceNumber, kind, file);
+      onChange(url);
+    } catch (er) {
+      setErr('Upload fail hua, dobara try karo');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="photo-up">
+      <div className="photo-up-label">{label}</div>
+      {value ? (
+        <div className="photo-preview">
+          <img src={value} alt={label} />
+          <button
+            className="photo-remove"
+            onClick={() => onChange('')}
+            type="button"
+          >
+            <X size={13} /> Hatao
+          </button>
+        </div>
+      ) : (
+        <div className="photo-btns">
+          <button
+            type="button"
+            className="photo-btn"
+            onClick={() => camRef.current && camRef.current.click()}
+            disabled={busy}
+          >
+            <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
+          </button>
+          <button
+            type="button"
+            className="photo-btn alt"
+            onClick={() => fileRef.current && fileRef.current.click()}
+            disabled={busy}
+          >
+            <Upload size={15} /> Device se
+          </button>
+        </div>
+      )}
+      <input
+        ref={camRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={handle}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handle}
+      />
+      {err && <div className="req-note">{err}</div>}
+    </div>
   );
 }
 function Toast({ msg }) {
@@ -4113,6 +4254,17 @@ function StyleTag() {
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
+      .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
+      .photo-btns { display: flex; gap: 9px; }
+      .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .photo-btn.alt { background: #fff; color: ${T.green}; }
+      .photo-btn:disabled { opacity: .6; cursor: default; }
+      .photo-preview { position: relative; }
+      .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
+      .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
+      .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
