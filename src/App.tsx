@@ -308,17 +308,17 @@ const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 /* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
    Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
 const HINDI = {
-  new: { label: 'नई डिलीवरी', short: 'नई डिलीवरी' },
-  talked: { label: 'कस्टमर से बात हुई', short: 'बात हुई' },
-  scheduled: { label: 'लड़का और गाड़ी अरेंज हुई', short: 'अरेंज हुई' },
-  dispatched: { label: 'ऑर्डर रास्ते में है', short: 'रास्ते में' },
-  delivered: { label: 'हिसाब-किताब हो गया', short: 'हो गया' },
+  new: { label: 'Nayi Delivery', short: 'Nayi Delivery' },
+  talked: { label: 'Customer se baat hui', short: 'Baat hui' },
+  scheduled: { label: 'Ladka aur gaadi arrange hui', short: 'Arrange hui' },
+  dispatched: { label: 'Order raaste mein hai', short: 'Raaste mein' },
+  delivered: { label: 'Hisaab-kitaab ho gaya', short: 'Ho gaya' },
 };
 const HINDI_MOVE = {
-  talked: 'कस्टमर से बात करो',
-  scheduled: 'लड़का और गाड़ी अरेंज करो',
-  dispatched: 'ऑर्डर को भेजो',
-  delivered: 'ऑर्डर का हिसाब लो',
+  talked: 'Customer se baat karo',
+  scheduled: 'Ladka aur gaadi arrange karo',
+  dispatched: 'Order ko bhejo',
+  delivered: 'Order ka hisaab lo',
 };
 let HJS_LANG = 'en';
 try {
@@ -352,10 +352,10 @@ function eventLine(ev) {
   const label = HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
   const verb =
     ev.action === 'Edited'
-      ? 'एडिट किया'
+      ? 'edit kiya'
       : ev.action === 'Marked as'
-        ? 'मार्क किया'
-        : 'पे पहुँचा';
+        ? 'mark kiya'
+        : 'pe pahuncha';
   return `${label} ${verb}`;
 }
 const stageToStatus = (id) =>
