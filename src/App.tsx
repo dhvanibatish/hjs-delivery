@@ -304,6 +304,48 @@ const STAGES = [
   },
 ];
 const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
+
+/* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
+   Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
+const HINDI = {
+  new: { label: 'नई डिलीवरी', short: 'नई डिलीवरी' },
+  talked: { label: 'कस्टमर से बात हुई', short: 'बात हुई' },
+  scheduled: { label: 'लड़का और गाड़ी अरेंज हुई', short: 'अरेंज हुई' },
+  dispatched: { label: 'ऑर्डर रास्ते में है', short: 'रास्ते में' },
+  delivered: { label: 'हिसाब-किताब हो गया', short: 'हो गया' },
+};
+const HINDI_MOVE = {
+  talked: 'कस्टमर से बात करो',
+  scheduled: 'लड़का और गाड़ी अरेंज करो',
+  dispatched: 'ऑर्डर को भेजो',
+  delivered: 'ऑर्डर का हिसाब लो',
+};
+let HJS_LANG = 'en';
+try {
+  if (typeof localStorage !== 'undefined')
+    HJS_LANG = localStorage.getItem('hjsLang') === 'hi' ? 'hi' : 'en';
+} catch (_) {}
+function setHjsLang(l) {
+  HJS_LANG = l === 'hi' ? 'hi' : 'en';
+  try {
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem('hjsLang', HJS_LANG);
+  } catch (_) {}
+}
+// stage ka poora naam (Hindi on toggle; closed stages hamesha English)
+function sLabel(id) {
+  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].label : stageMeta(id).label;
+}
+// stage ka chhota naam
+function sShort(id) {
+  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].short : stageMeta(id).short;
+}
+// "Move to X" button text
+function moveText(id) {
+  if (HJS_LANG === 'hi' && HINDI_MOVE[id]) return HINDI_MOVE[id];
+  const s = STAGES[stageIndex(id)];
+  return `Move to ${s ? s.short : ''}`;
+}
 const stageToStatus = (id) =>
   (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
 function statusToStage(s) {
@@ -873,6 +915,11 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today | archived
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
+  const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
+  const switchLang = (l) => {
+    setHjsLang(l);
+    setLang(HJS_LANG);
+  };
   // har store (aur head) → chosen layout. Default Stages (board), toggle se Categories.
   const effLayout = layoutMode;
 
@@ -1117,6 +1164,8 @@ export default function App() {
             onReload={load}
             loading={loading}
             onLogout={() => setSession(null)}
+            lang={lang}
+            onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             <Header
@@ -1727,6 +1776,8 @@ function Topbar({
   onReload,
   loading,
   onLogout,
+  lang,
+  onLang,
 }) {
   return (
     <header className="topbar">
@@ -1792,6 +1843,20 @@ function Topbar({
         )}
       </div>
       <div className="tb-actions">
+        <div className="lang-toggle">
+          <button
+            className={lang === 'en' ? 'lang-btn active' : 'lang-btn'}
+            onClick={() => onLang && onLang('en')}
+          >
+            EN
+          </button>
+          <button
+            className={lang === 'hi' ? 'lang-btn active' : 'lang-btn'}
+            onClick={() => onLang && onLang('hi')}
+          >
+            हिं
+          </button>
+        </div>
         <button className="icon-btn" onClick={onReload} title="Reload">
           <RefreshCw
             size={17}
@@ -2085,7 +2150,7 @@ function Board({ items, loading, onOpen, onMove }) {
             <div className="col-head">
               <span className="col-pip" style={{ background: stage.color }} />
               <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-                {stage.label}
+                {sLabel(stage.id)}
               </span>
               <span
                 className="col-count"
@@ -2137,7 +2202,7 @@ function MobileBoard({ items, loading, onOpen, onMove }) {
             >
               <span className="col-pip" style={{ background: stage.color }} />
               <span style={{ fontWeight: 700, fontSize: 14.5 }}>
-                {stage.label}
+                {sLabel(stage.id)}
               </span>
               <span
                 className="col-count"
@@ -2248,7 +2313,7 @@ function Card({ d, stage, onOpen, onMove }) {
             onMove(d, next.id);
           }}
         >
-          Move to {next.short} <ArrowRight size={13} />
+          {moveText(next.id)} <ArrowRight size={13} />
         </button>
       ) : (
         <div className="card-done">
@@ -2388,7 +2453,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           style={{ background: stage.soft, color: stage.color }}
         >
           <span className="col-pip" style={{ background: stage.color }} />{' '}
-          {stage.label}
+          {cancelled ? stage.label : sLabel(d.stage)}
         </span>
 
         {cancelled ? (
@@ -2435,7 +2500,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                       size={12}
                       style={{ marginRight: 4, verticalAlign: -1 }}
                     />
-                    {s.short}
+                    {sShort(s.id)}
                   </button>
                 );
               })}
@@ -2486,7 +2551,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                         style={{ marginRight: 4, verticalAlign: -1 }}
                       />
                     )}
-                    {s.short}
+                    {sShort(s.id)}
                   </button>
                 );
               })}
@@ -2522,7 +2587,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <span className="col-pip" style={{ background: st.color }} />{' '}
-                  {st.label}
+                  {sLabel(st.id)}
                 </span>
                 {editable ? (
                   <button
@@ -2852,8 +2917,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
               {flagSel
                 ? CLOSED[f.invoiceFlag].label
                 : mode === 'edit'
-                  ? `Edit · ${stage.label}`
-                  : stage.label}
+                  ? `Edit · ${sLabel(toStage)}`
+                  : sLabel(toStage)}
             </span>
             <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
               {delivery.customer} · {delivery.id}
@@ -3953,6 +4018,9 @@ function StyleTag() {
       .tb-brand { display: none; align-items: center; gap: 9px; }
       .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
+      .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
+      .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .lang-btn.active { background: ${T.forest}; color: #fff; }
       .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
       .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
       .search-row:hover { background: ${T.cream}; }
