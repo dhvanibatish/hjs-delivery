@@ -1318,7 +1318,9 @@ function EntriesView({ items, viewMode, layoutMode, loading, onOpen, onMove }) {
   // Board layout → stage-wise kanban. Archived mein sirf Delivered list.
   return (
     <>
-      <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
+      {!isMobile && (
+        <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
+      )}
       {viewMode === 'archived' ? (
         <ArchivedList items={items} onOpen={onOpen} onMove={onMove} />
       ) : isMobile ? (
@@ -2194,12 +2196,29 @@ function Board({ items, loading, onOpen, onMove }) {
 
 /* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
 function MobileBoard({ items, loading, onOpen, onMove }) {
-  const [open, setOpen] = useState(null);
+  // Phone: sirf un stages ke cards dikhao jinme entry hai. Accordion single-open —
+  // default first (jisme entry hai), user doosra dabaye to pehla apne aap close.
+  // Entry move hone pe wo stage khaali hoke gayab, aur next stage khud open.
+  const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
+  const sig = active.map((s) => s.id).join(',');
+  const [open, setOpen] = useState(active[0] ? active[0].id : null);
+  useEffect(() => {
+    setOpen(active[0] ? active[0].id : null);
+    // eslint-disable-next-line
+  }, [sig]);
+
   if (loading && items.length === 0)
     return <div className="loading">Deliveries load ho rahi hain…</div>;
+  if (active.length === 0)
+    return (
+      <div className="empty" style={{ padding: '44px 0' }}>
+        Koi delivery nahi
+      </div>
+    );
+
   return (
     <div className="m-board">
-      {STAGES.map((stage) => {
+      {active.map((stage) => {
         const cards = items.filter((x) => x.stage === stage.id);
         const isOpen = open === stage.id;
         return (
@@ -2237,34 +2256,20 @@ function MobileBoard({ items, loading, onOpen, onMove }) {
             </button>
             {isOpen && (
               <div className="m-sec-body">
-                {cards.length === 0 ? (
-                  <div className="empty">Koi delivery nahi</div>
-                ) : (
-                  cards.map((x) => (
-                    <Card
-                      key={x.invoice_id}
-                      d={x}
-                      stage={stage}
-                      onOpen={() => onOpen(x)}
-                      onMove={onMove}
-                    />
-                  ))
-                )}
+                {cards.map((x) => (
+                  <Card
+                    key={x.invoice_id}
+                    d={x}
+                    stage={stage}
+                    onOpen={() => onOpen(x)}
+                    onMove={onMove}
+                  />
+                ))}
               </div>
             )}
           </section>
         );
       })}
-      <div
-        style={{
-          fontSize: 11.5,
-          color: T.inkSoft,
-          textAlign: 'center',
-          marginTop: 4,
-        }}
-      >
-        Kisi stage pe tap karke uske records dekho.
-      </div>
     </div>
   );
 }
@@ -2841,18 +2846,23 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
   const stage = STAGES[stageIndex(toStage)];
   const r = (delivery && delivery._raw) || {};
   const persons = personsFor(delivery.branch, delivery.person || '');
+  // abhi ka date / time / datetime — default value ke liye
+  const _now = new Date();
+  const _pad = (n) => String(n).padStart(2, '0');
+  const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
+  const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
+  const nowDT = `${nowDate}T${nowTime}`;
   const [f, setF] = useState({
     invoiceFlag: '',
-    // Stage pe MOVE kar rahe ho → date/time/ETA hamesha khaali (purani value
-    // dobara na chip jaye). EDIT kar rahe ho → jo bhara hai wahi dikhao.
+    // EDIT → jo bhara hai wahi. MOVE → abhi ka date/time/ETA pehle se bhara.
     date:
       mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null'
         ? r.confirmed_date
-        : '',
+        : nowDate,
     time:
       mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null'
         ? String(r.confirmed_time).slice(0, 5)
-        : '',
+        : nowTime,
     remarks:
       (toStage === 'delivered'
         ? r.stage4_remarks
@@ -2864,7 +2874,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave }) {
     eta:
       mode === 'edit' && r.app_eta && r.app_eta !== 'null'
         ? toLocalInput(r.app_eta)
-        : '',
+        : nowDT,
     inspected: !!r.item_inspected,
     delivered: !!r.item_delivered,
     amount:
