@@ -3072,32 +3072,24 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
   // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
   const flagSel = toStage === 'talked' && !!f.invoiceFlag;
-  const canSave =
-    mode === 'edit'
-      ? true
-      : flagSel
-        ? true
-        : toStage === 'talked'
-          ? !!(f.date && f.time) // baat hui → date + time
-          : toStage === 'scheduled'
+  const canSave = flagSel
+    ? true
+    : toStage === 'talked'
+      ? !!(f.date && f.time) // baat hui → date + time
+      : toStage === 'scheduled'
+        ? !!(f.person && f.vehicle && f.inspected && f.photoInspected)
+        : toStage === 'dispatched'
+          ? !!f.eta
+          : toStage === 'delivered'
             ? !!(
-                f.person &&
-                f.vehicle &&
-                f.inspected &&
-                f.photoInspected
-              ) // person + vehicle + inspected + photo
-            : toStage === 'dispatched'
-              ? !!f.eta // estimated arrival
-              : toStage === 'delivered'
-                ? !!(
-                    f.delivered &&
-                    f.photoDelivered &&
-                    String(f.amount).trim() !== '' &&
-                    f.amountType &&
-                    String(f.security).trim() !== '' &&
-                    f.securityType
-                  ) // delivered + photo + amount + security (sab bharo)
-                : true;
+                f.delivered &&
+                f.photoDelivered &&
+                String(f.amount).trim() !== '' &&
+                f.amountType &&
+                String(f.security).trim() !== '' &&
+                f.securityType
+              )
+            : true;
 
   const inner = (
     <>
