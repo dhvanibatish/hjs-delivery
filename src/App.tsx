@@ -2990,7 +2990,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           ? r.stage3_remarks
           : r.stage1_remarks) || '',
     person: delivery.person || '',
-    vehicle: delivery.vehicle || '',
+    vehicle: delivery.vehicle || 'Auto-Rikshaw',
     eta:
       mode === 'edit' && r.app_eta && r.app_eta !== 'null'
         ? toLocalInput(r.app_eta)
