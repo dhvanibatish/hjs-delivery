@@ -329,6 +329,36 @@ const STAGES = [
 ];
 const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 
+// peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
+const STAGE_COLS = {
+  talked: { confirmed_date: null, confirmed_time: null, stage1_remarks: null },
+  scheduled: {
+    app_delivery_person: null,
+    app_vehicle: null,
+    item_inspected: false,
+    photo_inspected: null,
+    stage3_remarks: null,
+  },
+  dispatched: { app_eta: null },
+  delivered: {
+    item_delivered: false,
+    photo_delivered: null,
+    amount_collected: 0,
+    amount_type: null,
+    security_collected: 0,
+    security_type: null,
+    stage4_remarks: null,
+  },
+};
+function clearAhead(toStage) {
+  const t = stageIndex(toStage);
+  let patch = {};
+  STAGES.forEach((s, i) => {
+    if (i > t && STAGE_COLS[s.id]) patch = { ...patch, ...STAGE_COLS[s.id] };
+  });
+  return patch;
+}
+
 /* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
    Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
 const HINDI = {
@@ -1108,11 +1138,23 @@ export default function App() {
   // direct backward move (no form)
   const setStage = async (invoiceId, toStage) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const goingBack =
+      cur && stageIndex(toStage) < stageIndex(cur.stage || 'new');
+    if (goingBack) {
+      const ok =
+        typeof window === 'undefined'
+          ? true
+          : window.confirm(
+              `Entry ko "${STAGES[stageIndex(toStage)].label}" pe wapas le jaayein?\n\nAage ki bhari hui details (person, photo, amount waghera) hat jaayengi — baad mein dobara bharni hongi.`,
+            );
+      if (!ok) return;
+    }
     const patch = {
       status: stageToStatus(toStage),
       updated_at: new Date().toISOString(),
       app_log: [...existingLog(cur), makeEvent(toStage, {}, 'move')],
     };
+    if (goingBack) Object.assign(patch, clearAhead(toStage));
     if (!CONFIGURED) {
       setDeliveries((prev) =>
         prev.map((x) =>
