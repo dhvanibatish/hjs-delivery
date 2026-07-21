@@ -255,8 +255,8 @@ const PAY_OPTIONS = [
 ];
 
 /* ══════════════════════════════════════════════════════════════════════
-   LOGIN  ── store dropdown se choose karo. Password store-wise 1001 se shuru
-   hota hai aur aakhri store tak badhta hai. All stores (head) = 2222.
+   LOGIN  ── store dropdown se choose karke store-wise password daalo.
+   Head login se saare stores dikhte hain.
    ══════════════════════════════════════════════════════════════════════ */
 const STORE_ORDER = [
   'MOH',
@@ -1809,9 +1809,6 @@ function Login({ onLogin }) {
             {CONFIGURED
               ? 'Live · Supabase connected'
               : 'Demo mode · CONFIG.key khaali hai'}
-            <br />
-            Store password: <b>1001</b> se shuru &nbsp;·&nbsp; All stores:{' '}
-            <b>2222</b>
           </div>
         </div>
       </div>
