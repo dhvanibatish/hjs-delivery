@@ -1605,7 +1605,7 @@ function Login({ onLogin }) {
             </div>
           </div>
           <h1 className="hero-h1">Har pickup,<br />ek hi jagah.</h1>
-          <p className="hero-p">Zoho Books se aane wali har return \u2014 customer se baat se lekar item collect hone tak, store-wise, live from Supabase.</p>
+          <p className="hero-p">Zoho Books se aane wali har return — customer se baat se lekar item collect hone tak, store-wise, live from Supabase.</p>
           <div className="hero-chips">
             {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map((c) => <span key={c} className="hero-chip">{c}</span>)}
           </div>
@@ -1625,19 +1625,19 @@ function Login({ onLogin }) {
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4, display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShieldCheck size={20} color={T.green} /> Dev access
             </div>
-            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>Internal WIP \u2014 dev password daalo.</div>
+            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>Internal WIP — dev password daalo.</div>
           </div>
           <Field label="Password">
-            <input className="inp" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022" value={pw} autoFocus
+            <input className="inp" type="password" placeholder="••••••" value={pw} autoFocus
               onChange={(e) => { setPw(e.target.value); setErr(''); }}
               onKeyDown={(e) => e.key === 'Enter' && go()} />
           </Field>
           {err && <div className="login-err">{err}</div>}
           <button className="btn-primary" style={{ width: '100%', marginTop: 4 }} disabled={!pw.trim() || busy} onClick={go}>
-            {busy ? 'Checking\u2026' : <>Enter <ArrowRight size={17} /></>}
+            {busy ? 'Checking…' : <>Enter <ArrowRight size={17} /></>}
           </button>
           <div style={{ textAlign: 'center', fontSize: 11.5, color: T.inkSoft, marginTop: 12, lineHeight: 1.6 }}>
-            Live \u00b7 Supabase connected<br />Sirf internal team ke liye
+            Live · Supabase connected<br />Sirf internal team ke liye
           </div>
         </div>
       </div>
@@ -2336,7 +2336,7 @@ function FooterTotal({ items }) {
   return (
     <div className="foot-total">
       Total {board.length} pickups &nbsp;•&nbsp; {per}
-      {extra ? ` \u2022 ${extra}` : ''}
+      {extra ? ` • ${extra}` : ''}
     </div>
   );
 }
@@ -2373,8 +2373,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'scheduled',
       i: 2,
       rows: [
-        ['Pickup person', d.person || '\u2014'],
-        ['Transport', d.vehicle || '\u2014'],
+        ['Pickup person', d.person || '—'],
+        ['Transport', d.vehicle || '—'],
         ['Remarks', show(r.stage2_remarks)],
       ],
     },
@@ -2382,7 +2382,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'dispatched',
       i: 3,
       rows: [
-        ['Estimated arrival', niceDateTime(r.app_eta) || '\u2014'],
+        ['Estimated arrival', niceDateTime(r.app_eta) || '—'],
         ['Remarks', show(r.stage3_remarks)],
       ],
     },
@@ -2396,8 +2396,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
         [
           'Charges',
           r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
-            ? `\u20b9${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
-            : '\u2014',
+            ? `₹${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
+            : '—',
         ],
         ['Remarks', show(r.stage4_remarks)],
       ],
@@ -2870,10 +2870,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           <div>
             <span className="stage-badge" style={{ background: stage.soft, color: stage.color, marginBottom: 8 }}>
               <span className="col-pip" style={{ background: stage.color }} />{' '}
-              {mode === 'edit' ? `Edit \u00b7 ${sLabel(toStage)}` : sLabel(toStage)}
+              {mode === 'edit' ? `Edit · ${sLabel(toStage)}` : sLabel(toStage)}
             </span>
             <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
-              {delivery.customer} \u00b7 {delivery.id}
+              {delivery.customer} · {delivery.id}
             </div>
           </div>
           <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
@@ -2888,7 +2888,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             </Field>
             <Field label="Time *">
               <input className="inp" type="time" value={f.time} onClick={openPicker} onChange={(e) => set('time', e.target.value)} />
-              {f.time && <span className="tp-preview">\U0001f550 {niceTime(f.time)}</span>}
+              {f.time && <span className="tp-preview">🕐 {niceTime(f.time)}</span>}
             </Field>
             {!(f.date && f.time) && <div className="req-note">Date aur Time dono bharo.</div>}
           </>
@@ -2897,13 +2897,13 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           <>
             <Field label="Pickup person *">
               <select className="inp" value={f.person} onChange={(e) => set('person', e.target.value)}>
-                <option value="">Select\u2026</option>
+                <option value="">Select…</option>
                 {persons.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </Field>
             <Field label="Transport / vehicle *">
               <select className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)}>
-                <option value="">Select\u2026</option>
+                <option value="">Select…</option>
                 {VEHICLES.map((v) => <option key={v} value={v}>{v}</option>)}
                 {f.vehicle && !VEHICLES.includes(f.vehicle) && <option value={f.vehicle}>{f.vehicle}</option>}
               </select>
@@ -2915,7 +2915,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             <Field label="Estimated arrival (date & time) *">
               <input className="inp" type="datetime-local" value={f.eta} min="2024-01-01T00:00" max="2099-12-31T23:59" onClick={openPicker}
                 onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('eta', v); }} />
-              {f.eta && <span className="tp-preview">\U0001f550 {niceDateTime(f.eta)}</span>}
+              {f.eta && <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>}
             </Field>
             {!f.eta && <div className="req-note">ETA bharna zaroori hai.</div>}
           </>
@@ -2926,7 +2926,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             <Field label="Actual pickup date *">
               <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
             </Field>
-            <Field label="Pickup charges collected (\u20b9)">
+            <Field label="Pickup charges collected (₹)">
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
                 onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
@@ -2936,7 +2936,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           </>
         )}
         <Field label="Remarks">
-          <textarea className="inp" rows={2} placeholder="Optional notes\u2026" value={f.remarks} onChange={(e) => set('remarks', e.target.value)} />
+          <textarea className="inp" rows={2} placeholder="Optional notes…" value={f.remarks} onChange={(e) => set('remarks', e.target.value)} />
         </Field>
       </div>
       <div className="modal-foot">
