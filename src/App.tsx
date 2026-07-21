@@ -173,8 +173,9 @@ const STORE_MANAGERS = {
 const DP = {
   CHD: [
     'Ghola Singh - 8360758647',
-    'Surinder - 9115445618',
     'Sanjay - 6239650644',
+    'Niranjan - 9811069030',
+    'Vikas - 8433051048',
     'MBC',
   ],
   NCR: [
