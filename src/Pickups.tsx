@@ -1,296 +1,1596 @@
 // @ts-nocheck
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Truck, Package, Phone, MapPin, User, Search, Clock, IndianRupee, LogOut,
-  RefreshCw, ChevronRight, ArrowRight, ArrowLeft, Check, CheckCircle2, X,
-  Camera, Upload, Trash2, History, Building2, Calendar, ClipboardCheck,
-  ShieldCheck, LayoutDashboard, RotateCcw, MessageSquareWarning, Bell,
-  Wind, BedDouble, Accessibility, Stethoscope, AlertTriangle, Info,
+  Truck,
+  Package,
+  ClipboardCheck,
+  Phone,
+  Clock,
+  MapPin,
+  User,
+  Search,
+  Bell,
+  LayoutDashboard,
+  RotateCcw,
+  AlertTriangle,
+  ChevronRight,
+  X,
+  Check,
+  IndianRupee,
+  ShieldCheck,
+  LogOut,
+  Building2,
+  Car,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
+  Wind,
+  BedDouble,
+  Accessibility,
+  Stethoscope,
+  MessageSquareWarning,
+  RefreshCw,
+  CloudOff,
+  Pencil,
+  History,
+  UserCog,
+  Copy,
+  Info,
+  Trash2,
+  Camera,
+  Upload,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
-   HJS PICKUPS — standalone app (delivery se alag file, delivery untouched)
-   Same HJS Supabase project · pickup_* RPCs · dev-password gate.
+   1) CONFIG  ── url + ANON PUBLIC key (SERVICE_ROLE nahi). Khaali = DEMO.
    ══════════════════════════════════════════════════════════════════════ */
-const PICKUP_CONFIG = {
+const CONFIG = {
   url: 'https://idcmfebqizovivuvsuns.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY21mZWJxaXpvdml2dXZzdW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDgxODgsImV4cCI6MjA5OTMyNDE4OH0.miXziOcl5sEo8S6K1WsrHRhCbtEYRgnnUA4gAISUkmM',
-  bucket: 'pickup-photos',
+  table: 'pickups',
 };
-const HDRS = () => ({ apikey: PICKUP_CONFIG.key, Authorization: `Bearer ${PICKUP_CONFIG.key}` });
+const CONFIGURED = !!(CONFIG.url && CONFIG.key);
+const HDRS = () => ({
+  apikey: CONFIG.key,
+  Authorization: `Bearer ${CONFIG.key}`,
+});
 
-async function pkRpc(fn, body) {
-  const res = await fetch(`${PICKUP_CONFIG.url}/rest/v1/rpc/${fn}`, {
-    method: 'POST', headers: { ...HDRS(), 'Content-Type': 'application/json' },
+async function sbRpc(fn, body) {
+  const res = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { ...HDRS(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
-const pkList = (dev) => pkRpc('pickup_list', { p_dev: dev });
-const pkUpdate = (dev, invoice, patch) => pkRpc('pickup_update', { p_dev: dev, p_invoice: invoice, p_patch: patch });
-
-async function pkUploadPhoto(invoiceNumber, kind, file) {
+// staff login — DB verifies password, returns [] if wrong
+async function sbLogin(store, pw) {
+  return sbRpc('pickup_list', { p_dev: pw });
+}
+// staff data — returns rows for the store (or all for ALL). Password checked in DB.
+async function sbList(store, pw) {
+  return sbRpc('pickup_list', { p_dev: pw });
+}
+// staff update — stage move/edit. Password + store-scope checked in DB.
+async function sbUpdate(store, pw, invoiceId, patch) {
+  return sbRpc('pickup_update', { p_dev: pw, p_invoice: invoiceId, p_patch: patch });
+}
+// public customer tracking — link se invoice + customer ka registered phone
+// NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
+async function sbTrack(invoice, phone) {
+  return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
+}
+// sales team — sirf phone se us customer ki saari deliveries (latest→old).
+// p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
+async function sbTrackSearch(phone, pin) {
+  return sbRpc('track_search', { p_phone: phone, p_pin: pin });
+}
+// photo upload → Supabase Storage bucket 'pickup-photos'.
+// naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
+// return: public URL (deliveries table mein save hota hai)
+async function sbUploadPhoto(invoiceNumber, kind, file) {
   const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
   const ext = (file.name && file.name.split('.').pop()) || 'jpg';
   const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
-  const res = await fetch(`${PICKUP_CONFIG.url}/storage/v1/object/${PICKUP_CONFIG.bucket}/${path}`, {
-    method: 'POST', headers: { ...HDRS(), 'Content-Type': file.type || 'image/jpeg', 'x-upsert': 'true' }, body: file,
-  });
+  const res = await fetch(
+    `${CONFIG.url}/storage/v1/object/pickup-photos/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        ...HDRS(),
+        'Content-Type': file.type || 'image/jpeg',
+        'x-upsert': 'true',
+      },
+      body: file,
+    },
+  );
   if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
-  return `${PICKUP_CONFIG.url}/storage/v1/object/public/${PICKUP_CONFIG.bucket}/${path}`;
+  return `${CONFIG.url}/storage/v1/object/public/pickup-photos/${path}`;
 }
 
-/* ── THEME (delivery se same) ─────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════ */
 const T = {
-  forest: '#14392B', forestSoft: '#1E5138', green: '#2E7D32', greenBright: '#3D9A42',
-  mint: '#E7F0E8', beige: '#F5F1E8', cream: '#FBF9F4', card: '#FFFFFF', ink: '#1C2620',
-  inkSoft: '#657069', line: '#E7E2D6', amber: '#C77D28', amberSoft: '#FBF0DE',
-  blue: '#3E6B9E', blueSoft: '#E8EFF6', slate: '#64748B', slateSoft: '#EEF1F3',
-  violet: '#6B5B9A', violetSoft: '#EEEAF7', red: '#B4472E', redSoft: '#F7E7E1',
+  forest: '#14392B',
+  forestSoft: '#1E5138',
+  green: '#2E7D32',
+  greenBright: '#3D9A42',
+  mint: '#E7F0E8',
+  beige: '#F5F1E8',
+  cream: '#FBF9F4',
+  card: '#FFFFFF',
+  ink: '#1C2620',
+  inkSoft: '#657069',
+  line: '#E7E2D6',
+  amber: '#C77D28',
+  amberSoft: '#FBF0DE',
+  blue: '#3E6B9E',
+  blueSoft: '#E8EFF6',
+  slate: '#64748B',
+  slateSoft: '#EEF1F3',
+  violet: '#6B5B9A',
+  violetSoft: '#EEEAF7',
+  red: '#B4472E',
+  redSoft: '#F7E7E1',
 };
 const FONT = "'Plus Jakarta Sans','Inter',system-ui,-apple-system,sans-serif";
 
-/* ── STAGES (5) ───────────────────────────────────────────────────────── */
+const BRANCH_NAMES = {
+  MOH: 'Mohali Showroom',
+  CHD: 'Head Office',
+  GGN: 'Gurgaon',
+  NCR: 'Delhi NCR',
+  NOD: 'Noida Showroom',
+  LDH: 'Ludhiana',
+  JAL: 'Jalandhar',
+  JPR: 'Jaipur',
+  LKO: 'Lucknow',
+  NWD: 'North West Delhi',
+  JKP: 'Janakpuri',
+};
+const branchLabel = (code) => BRANCH_NAMES[code] || code;
+
+/* Store managers (branch → name) */
+const STORE_MANAGERS = {
+  GGN: 'Hemant - 9773641804',
+  CHD: 'Niranjan - 9811069030',
+  NCR: 'Dharmendra Singh - 9315573166',
+  LDH: 'Gursajan - 8360687306',
+  JPR: 'Niraj Kumar - 8340710549',
+  LKO: 'Mohd. Akhlaque - 7080809820',
+  NWD: 'Nitin - 7007413101',
+  NOD: 'Ravi Saini - 9759302924',
+  JAL: 'Bhupinder - 8558892244',
+  MOH: 'Sumita - 7814327703',
+  JKP: 'Rajan - 8595353451',
+};
+
+/* Delivery persons store-wise. MOH shares CHD, NOD shares NCR. */
+const DP = {
+  CHD: [
+    'Ghola Singh - 8360758647',
+    'Surinder - 9115445618',
+    'Sanjay - 6239650644',
+    'MBC',
+  ],
+  NCR: [
+    'Shiva - 7303916944',
+    'Sonu Sharma - 8447292843',
+    'Gunjan Kumar - 7632972410',
+    'Vikas Kumar Chauhan - 9650866938',
+    'Dinesh - 9899755760',
+    'Pradeep Kharwar - 9760629197',
+    'Sikandar - 9821646171',
+    'Gauri - 9871648466',
+    'Arvind - 7210669844',
+    'Abhishek - 9137544967',
+    'MBC',
+  ],
+  GGN: [
+    'Hemant - 9773641804',
+    'Amit - 9934973249',
+    'Arjun - 7042496461',
+    'MBC',
+  ],
+  LDH: [
+    'Gursajan - 8360687306',
+    'Jagmeet - 8427278408',
+    'Shubham Soni - 7681918859',
+    'MBC',
+  ],
+  JAL: [
+    'Bhupinder - 8558892244',
+    'Karandeep - 9041285784',
+    'Neeraj - 9056735883',
+    'Jasmeet - 7696709951',
+    'MBC',
+  ],
+  JPR: [
+    'Mandeep - 9216854824',
+    'Brijesh - 7742582403',
+    'Niraj Kumar - 8340710549',
+    'Shubham Sharma - 7891585998',
+    'MBC',
+  ],
+  LKO: [
+    'Aleem - 6306373637',
+    'Sharique - 7525941591',
+    'Junaid - 7905950247',
+    'Mohd. Akhlaque - 7080809820',
+    'MBC',
+  ],
+  NWD: [
+    'Rahul Kumar - 8750245247',
+    'Rahul - 9359521911',
+    'Nitin Singh - 7007413101',
+    'Karan Gupta - 7838465084',
+    'MBC',
+  ],
+  JKP: [
+    'Monu - 8766395642',
+    'Nitish - 9911814167',
+    'Rajankumar Jha - 8595353451',
+    'MBC',
+  ],
+};
+const DELIVERY_PERSONS = { ...DP, MOH: DP.CHD, NOD: DP.NCR };
+const personsFor = (branch, current) => {
+  const list = (DELIVERY_PERSONS[branch] || ['MBC']).slice();
+  if (current && !list.includes(current)) list.unshift(current);
+  return list;
+};
+
+const VEHICLES = ['Auto-Rikshaw', 'Bike', 'Champion', 'Porter', 'Other'];
+const PAY_OPTIONS = [
+  'Cash',
+  'Cheque',
+  'Nil',
+  'QR',
+  'Through Link',
+  'Cash & Online (Both)',
+];
+
+/* ══════════════════════════════════════════════════════════════════════
+   LOGIN  ── store dropdown se choose karo. Password store-wise 1001 se shuru
+   hota hai aur aakhri store tak badhta hai. All stores (head) = 2222.
+   ══════════════════════════════════════════════════════════════════════ */
+const STORE_ORDER = [
+  'MOH',
+  'CHD',
+  'GGN',
+  'NCR',
+  'NOD',
+  'LDH',
+  'JAL',
+  'JPR',
+  'LKO',
+  'NWD',
+  'JKP',
+];
+/* NOTE: passwords ab client mein NAHI hain — DB (app_staff) mein hain aur
+   Supabase RPC verify karta hai. Ye sirf session object banata hai. */
+function sessionFor(branch) {
+  const isHead = branch === 'ALL';
+  return {
+    branch,
+    authStore: branch,
+    isHead,
+    name: isHead ? 'All stores' : branchLabel(branch),
+    storeName: isHead ? 'All stores' : branchLabel(branch),
+  };
+}
+
+/* ── STAGES ────────────────────────────────────────────────────────────── */
 const STAGES = [
-  { id: 'new',       label: 'New Pickup',       short: 'New',       status: 'New Pickup',       color: T.slate,  soft: T.slateSoft },
-  { id: 'contacted', label: 'Contacted',        short: 'Contacted', status: 'Contacted',        color: T.blue,   soft: T.blueSoft },
-  { id: 'scheduled', label: 'Pickup Scheduled', short: 'Scheduled', status: 'Pickup Scheduled', color: T.amber,  soft: T.amberSoft },
-  { id: 'outfor',    label: 'Out for Pickup',   short: 'Out',       status: 'Out for Pickup',   color: T.violet, soft: T.violetSoft },
-  { id: 'picked',    label: 'Picked Up',        short: 'Picked Up', status: 'Picked Up',        color: T.green,  soft: T.mint },
+  { id: 'new', label: 'New Pickup', short: 'New', status: 'New Pickup', color: T.slate, soft: T.slateSoft },
+  { id: 'talked', label: 'Contacted', short: 'Contacted', status: 'Contacted', color: T.blue, soft: T.blueSoft },
+  { id: 'scheduled', label: 'Pickup Scheduled', short: 'Scheduled', status: 'Pickup Scheduled', color: T.amber, soft: T.amberSoft },
+  { id: 'dispatched', label: 'Out for Pickup', short: 'Out for Pickup', status: 'Out for Pickup', color: T.violet, soft: T.violetSoft },
+  { id: 'delivered', label: 'Picked Up', short: 'Picked Up', status: 'Picked Up', color: T.green, soft: T.mint },
 ];
 const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
-const stageToStatus = (id) => (STAGES.find((s) => s.id === id) || {}).status || 'New Pickup';
-const CANCELLED_META = {
-  cancelled: { id: 'cancelled', label: 'Cancelled', short: 'Cancelled', color: T.red, soft: T.redSoft },
-  deleted:   { id: 'deleted',   label: 'Deleted',   short: 'Deleted',   color: T.slate, soft: T.slateSoft },
-};
-const stageMeta = (id) => STAGES[stageIndex(id)] || CANCELLED_META[id] || STAGES[0];
-const isClosed = (id) => id === 'cancelled' || id === 'deleted';
 
+// peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
+const STAGE_COLS = {
+  talked: { confirmed_date: null, confirmed_time: null, stage1_remarks: null },
+  scheduled: { app_pickup_person: null, app_vehicle: null, stage2_remarks: null },
+  dispatched: { app_eta: null, stage3_remarks: null },
+  delivered: {
+    item_inspected: false,
+    pickup_image: null,
+    actual_pickup_date: null,
+    pickup_charges_collected: null,
+    pickup_done: false,
+    stage4_remarks: null,
+  },
+};
+function clearAhead(toStage) {
+  const t = stageIndex(toStage);
+  let patch = {};
+  STAGES.forEach((s, i) => {
+    if (i > t && STAGE_COLS[s.id]) patch = { ...patch, ...STAGE_COLS[s.id] };
+  });
+  return patch;
+}
+
+/* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
+   Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
+const HINDI = {
+  new: { label: 'Nayi Pickup', short: 'Nayi' },
+  talked: { label: 'Customer se baat hui', short: 'Baat hui' },
+  scheduled: { label: 'Pickup schedule hui', short: 'Scheduled' },
+  dispatched: { label: 'Pickup ke liye nikle', short: 'Nikle' },
+  delivered: { label: 'Item utha liya', short: 'Utha liya' },
+};
+const HINDI_MOVE = {
+  talked: 'Customer se baat karo',
+  scheduled: 'Pickup schedule karo',
+  dispatched: 'Pickup ke liye niklo',
+  delivered: 'Item utha lo',
+};
+let HJS_LANG = 'en';
+try {
+  if (typeof localStorage !== 'undefined')
+    HJS_LANG = localStorage.getItem('hjsLang') === 'hi' ? 'hi' : 'en';
+} catch (_) {}
+function setHjsLang(l) {
+  HJS_LANG = l === 'hi' ? 'hi' : 'en';
+  try {
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem('hjsLang', HJS_LANG);
+  } catch (_) {}
+}
+// stage ka poora naam (Hindi on toggle; closed stages hamesha English)
+function sLabel(id) {
+  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].label : stageMeta(id).label;
+}
+// stage ka chhota naam
+function sShort(id) {
+  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].short : stageMeta(id).short;
+}
+// "Move to X" button text
+function moveText(id) {
+  if (HJS_LANG === 'hi' && HINDI_MOVE[id]) return HINDI_MOVE[id];
+  const s = STAGES[stageIndex(id)];
+  return `Move to ${s ? s.short : ''}`;
+}
+// timeline event ki line (Hindi on toggle)
+function eventLine(ev) {
+  if (HJS_LANG !== 'hi') return `${ev.action} ${ev.label}`;
+  const label = HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
+  const verb =
+    ev.action === 'Edited'
+      ? 'edit kiya'
+      : ev.action === 'Marked as'
+        ? 'mark kiya'
+        : 'pe pahuncha';
+  return `${label} ${verb}`;
+}
+const stageToStatus = (id) =>
+  (STAGES.find((s) => s.id === id) || {}).status || 'New Pickup';
 function statusToStage(s) {
   const t = String(s || '').toLowerCase();
   if (t.includes('delet')) return 'deleted';
   if (t.includes('cancel')) return 'cancelled';
   if (t.includes('new')) return 'new';
   if (t.includes('schedul')) return 'scheduled';
-  if (t.includes('out for')) return 'outfor';
-  if (t.includes('contact')) return 'contacted';
-  if (t.includes('picked')) return 'picked';
+  if (t.includes('out for')) return 'dispatched';
+  if (t.includes('contact')) return 'talked';
+  if (t.includes('picked')) return 'delivered';
   return 'new';
 }
 
-const STAGE_COLS = {
-  contacted: { confirmed_date: null, confirmed_time: null, stage1_remarks: null },
-  scheduled: { app_pickup_person: null, app_vehicle: null, stage2_remarks: null },
-  outfor:    { app_eta: null, stage3_remarks: null },
-  picked:    { item_inspected: false, actual_pickup_date: null, pickup_charges_collected: null, pickup_image: null, pickup_done: false, stage4_remarks: null },
+/* ── CLOSED STATES ──────────────────────────────────────────────────────
+   Cancelled / Duplicate / Renewal — teeno "closed" hain: active pipeline se
+   hat jaati hain, apne color mein dikhti hain, aur drawer khol ke pata lag
+   jaata hai. Status column mein hi likha jaata hai (koi naya column nahi). */
+const CLOSED = {
+  cancelled: {
+    id: 'cancelled',
+    label: 'Cancelled',
+    short: 'Cancelled',
+    color: T.red,
+    soft: T.redSoft,
+    title: 'This order has been cancelled',
+    note: 'Zoho Books se cancel hua hai. Stages edit nahi ho sakti — bas record ke liye dikha rahe hain.',
+    cust: 'This order has been cancelled. Please contact the store for any questions.',
+  },
+  duplicate: {
+    id: 'duplicate',
+    label: 'Duplicate Invoice',
+    short: 'Duplicate',
+    color: T.slate,
+    soft: T.slateSoft,
+    title: 'Marked as duplicate invoice',
+    note: 'Store manager ne isse duplicate invoice mark kiya hai — active delivery list se hata diya gaya hai.',
+    cust: 'This entry has been marked as a duplicate invoice. Please contact the store for any questions.',
+  },
+  renewal: {
+    id: 'renewal',
+    label: 'Renewal Invoice',
+    short: 'Renewal',
+    color: T.blue,
+    soft: T.blueSoft,
+    title: 'Marked as renewal invoice',
+    note: 'Store manager ne isse renewal invoice mark kiya hai — active delivery list se hata diya gaya hai.',
+    cust: 'This is a renewal invoice. Please contact the store for any questions.',
+  },
+  // deleted = soft delete. Row Supabase mein rehti hai (status="Deleted"),
+  // par app ke saare views se hata di jaati hai (scoped filter mein).
+  deleted: {
+    id: 'deleted',
+    label: 'Deleted',
+    short: 'Deleted',
+    color: T.slate,
+    soft: T.slateSoft,
+    title: 'This entry was deleted',
+    note: 'Head ne isse delete kiya hai — Supabase mein record ke liye rakha gaya hai.',
+    cust: 'This order is no longer active. Please contact the store for any questions.',
+  },
 };
-function clearAhead(toStage) {
-  const t = stageIndex(toStage); let patch = {};
-  STAGES.forEach((s, i) => { if (i > t && STAGE_COLS[s.id]) patch = { ...patch, ...STAGE_COLS[s.id] }; });
-  return patch;
+const CLOSED_STATUS = {
+  cancelled: 'Cancelled',
+};
+const isClosedStage = (s) => s === 'cancelled' || s === 'deleted';
+/* stage id → meta (STAGES ya CLOSED dono cover). Card/list ke colors ke liye. */
+function stageMeta(id) {
+  const s = STAGES[stageIndex(id)];
+  if (s) return s;
+  if (CLOSED[id]) return CLOSED[id];
+  return STAGES[0];
+}
+const stageColorOf = (id) => stageMeta(id).color;
+
+/* Drawer mein agli stage ke liye simple prompt (next stage id → message) */
+const STAGE_HINT = {
+  new: 'Pickup shuru karo',
+  talked: 'Customer se baat karke date tay karo',
+  scheduled: 'Banda aur gaadi arrange karo',
+  dispatched: 'Pickup ke liye nikle — ETA bharo',
+  delivered: 'Item inspect karke utha lo',
+};
+
+function deriveBranch(r) {
+  if (r.store_code && String(r.store_code).trim() && r.store_code !== 'null')
+    return String(r.store_code).trim().toUpperCase();
+  if (r.branch_code && String(r.branch_code).trim() && r.branch_code !== 'null')
+    return String(r.branch_code).trim().toUpperCase();
+  if (r.invoice_number)
+    return String(r.invoice_number).split('/')[0].trim().toUpperCase();
+  return '—';
+}
+function clean(v) {
+  return v !== null && v !== undefined && v !== 'null' && v !== ''
+    ? String(v)
+        .replace(/\s*\n+\s*/g, ', ')
+        .trim()
+    : '';
+}
+function equipmentText(r) {
+  let li = r.line_items;
+  // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo.
+  // NOTE: naye project mein line_items jsonb hai; track RPC ::text cast karti
+  // hai to wo "Oxymed..." (quotes ke saath) aati hai. '"' waali ko bhi parse
+  // karo taaki quotes hat jaayein.
+  if (typeof li === 'string') {
+    const t = li.trim();
+    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
+      try {
+        li = JSON.parse(t);
+      } catch (_) {}
+    }
+  }
+  if (Array.isArray(li)) {
+    const names = li
+      .map((x) => {
+        if (typeof x === 'string') return x;
+        if (x && x.name) {
+          const q = Number(x.quantity) || 0;
+          return q > 1 ? `${x.name} × ${q}` : x.name;
+        }
+        return '';
+      })
+      .filter(Boolean);
+    if (names.length) return names.join(', ');
+  } else if (typeof li === 'string' && li.trim() && li !== 'null') {
+    return li;
+  }
+  if (r.item_name && r.item_name !== 'null') {
+    const t = String(r.item_name)
+      .split('|')
+      .map((s) => s.split(' x')[0].trim())
+      .filter(Boolean)
+      .join(', ');
+    if (t) return t;
+  }
+  return 'Equipment';
+}
+/* line_items ko array of item-names mein todo (track page ki bullet list) */
+function equipmentList(r) {
+  let li = r.line_items;
+  if (typeof li === 'string') {
+    const t = li.trim();
+    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
+      try {
+        li = JSON.parse(t);
+      } catch (_) {}
+    }
+  }
+  if (Array.isArray(li)) {
+    const names = li
+      .map((x) => {
+        if (typeof x === 'string') return x;
+        if (x && x.name) {
+          const q = Number(x.quantity) || 0;
+          return q > 1 ? `${x.name} × ${q}` : x.name;
+        }
+        return '';
+      })
+      .filter(Boolean);
+    if (names.length) return names;
+  }
+  if (typeof li === 'string' && li.trim() && li !== 'null') {
+    return li
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (r.item_name && r.item_name !== 'null') {
+    const parts = String(r.item_name)
+      .split('|')
+      .map((s) => s.split(' x')[0].trim())
+      .filter(Boolean);
+    if (parts.length) return parts;
+  }
+  return ['Equipment'];
+}
+function equipIcon(text) {
+  const t = String(text || '').toLowerCase();
+  if (t.includes('oxygen') || t.includes('concentrat')) return Wind;
+  if (t.includes('bed')) return BedDouble;
+  if (t.includes('wheel')) return Accessibility;
+  if (t.includes('cpap') || t.includes('bipap')) return Stethoscope;
+  return Package;
+}
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+const show = (v) =>
+  v !== null && v !== undefined && v !== '' && v !== 'null' ? String(v) : '—';
+
+/* customer-friendly date/time */
+function niceDate(d) {
+  if (!d || d === 'null') return null;
+  const x = new Date(d);
+  if (isNaN(x)) return String(d);
+  return x.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+function niceTime(t) {
+  if (!t || t === 'null') return null;
+  const parts = String(t).split(':');
+  if (parts.length < 2) return String(t);
+  let hh = parseInt(parts[0], 10);
+  if (isNaN(hh)) return String(t);
+  const ap = hh >= 12 ? 'PM' : 'AM';
+  hh = hh % 12 || 12;
+  return `${hh}:${parts[1]} ${ap}`;
 }
 
-/* ── app_log timeline ─────────────────────────────────────────────────── */
+/* datetime (YYYY-MM-DD HH:MM ya ...THH:MM) → "17 Jul 2026, 3:30 PM" */
+function niceDateTime(v) {
+  if (!v || v === 'null') return null;
+  const t = String(v).replace(' ', 'T');
+  const d = niceDate(t.slice(0, 10));
+  const tm = niceTime(t.slice(11, 16));
+  if (!d && !tm) return String(v);
+  return [d, tm].filter(Boolean).join(', ');
+}
+/* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
+function toLocalInput(v) {
+  if (!v || v === 'null') return '';
+  return String(v).replace(' ', 'T').slice(0, 16);
+}
+
+/* app-controlled timeline: each move/edit logs an event with the fields entered */
 function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
-  if (toStage === 'contacted') return { Date: f.date || '—', Time: f.time || '—', ...rmk };
-  if (toStage === 'scheduled') return { Person: f.person || '—', Vehicle: f.vehicle || '—', ...rmk };
-  if (toStage === 'outfor') return { ETA: f.eta ? niceDateTime(f.eta) || f.eta : '—', ...rmk };
-  if (toStage === 'picked') return { Inspected: f.inspected ? 'Yes' : 'No', Date: f.pickDate || '—', Charges: `₹${f.charges || 0}`, Done: f.done ? 'Yes' : 'No', ...rmk };
+  if (toStage === 'new') return {};
+  if (toStage === 'talked')
+    return { Date: f.date || '—', Time: f.time || '—', ...rmk };
+  if (toStage === 'scheduled')
+    return { Person: f.person || '—', Transport: f.vehicle || '—', ...rmk };
+  if (toStage === 'dispatched')
+    return { 'Estimated arrival': f.eta ? niceDateTime(f.eta) || f.eta : '—', ...rmk };
+  if (toStage === 'delivered')
+    return {
+      Inspected: f.inspected ? 'Yes' : 'No',
+      Date: f.pickDate || '—',
+      Charges: `₹${f.charges || 0}`,
+      Done: f.done ? 'Yes' : 'No',
+      ...rmk,
+    };
   return {};
 }
 function makeEvent(toStage, fields, mode) {
   return {
-    ts: new Date().toISOString(), stage: toStage,
-    label: (STAGES[stageIndex(toStage)] || CANCELLED_META[toStage] || {}).label || toStage,
+    ts: new Date().toISOString(),
+    stage: toStage,
+    label: (STAGES[stageIndex(toStage)] || {}).label || toStage,
     action: mode === 'edit' ? 'Edited' : 'Moved to',
     fields: stageFields(toStage, fields || {}),
   };
 }
-const existingLog = (d) => (d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : []);
-
-/* ── date helpers ─────────────────────────────────────────────────────── */
-const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function niceDate(v) {
-  if (!v || v === 'null') return null;
-  const p = String(v).slice(0, 10).split('-');
-  if (p.length !== 3) return String(v);
-  return `${+p[2]} ${MON[+p[1] - 1] || ''} ${p[0]}`;
-}
-function niceTime(v) {
-  if (!v) return null;
-  const p = String(v).split(':'); if (p.length < 2) return String(v);
-  let hh = +p[0]; const ap = hh >= 12 ? 'PM' : 'AM'; hh = hh % 12 || 12;
-  return `${hh}:${p[1]} ${ap}`;
-}
-function niceDateTime(v) {
-  if (!v || v === 'null') return null;
-  const t = String(v).replace(' ', 'T');
-  return [niceDate(t.slice(0, 10)), niceTime(t.slice(11, 16))].filter(Boolean).join(', ');
-}
-const todayStr = () => new Date().toISOString().slice(0, 10);
-
-function equipIcon(items) {
-  const s = String(items || '').toLowerCase();
-  if (s.includes('oxygen') || s.includes('concentrator') || s.includes('cylinder') || s.includes('cpap') || s.includes('bipap')) return Wind;
-  if (s.includes('bed') || s.includes('mattress')) return BedDouble;
-  if (s.includes('wheel')) return Accessibility;
-  if (s.includes('dvt') || s.includes('pump') || s.includes('monitor')) return Stethoscope;
-  return Package;
-}
-
-function rowToPickup(r) {
+/* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
+function makeClosedEvent(flag, remarks) {
   return {
-    invoice_id: r.invoice_id, id: r.invoice_number || '—', store: r.store || '—',
-    customer: r.customer_name || 'Unknown', phone: r.phone || '', address: r.address || '',
-    manager: r.store_manager || '', salePerson: r.sale_person || '',
-    items: r.line_items || '', itemCount: r.item_count || 0, mentionedDate: r.mentioned_pickup_date || '',
-    stage: statusToStage(r.status), rawStatus: r.status, _raw: r,
+    ts: new Date().toISOString(),
+    stage: flag,
+    label: (CLOSED[flag] || {}).label || flag,
+    action: 'Marked as',
+    fields: remarks ? { Remarks: remarks } : {},
+  };
+}
+const existingLog = (d) =>
+  d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
+
+/* cancelled order: cancel hone se theek pehle jo aakhri (latest) stage set thi.
+   NOTE: max NAHI lete — app_log mein aage-peeche move ho sakta hai, isliye
+   sabse last event hi asli "current" stage hai jab cancel hua. */
+function reachedIdxFromLog(log) {
+  if (Array.isArray(log) && log.length) {
+    for (let i = log.length - 1; i >= 0; i--) {
+      const si = stageIndex(log[i] && log[i].stage);
+      if (si >= 0) return si;
+    }
+  }
+  return 0; // koi log nahi → New
+}
+
+/* ── Today vs Archived ─────────────────────────────────────────────────
+   Today = sirf aaj create hui entries (kisi bhi stage). Archived = sab.   */
+function isToday(ts) {
+  if (!ts) return false;
+  const d = new Date(ts);
+  if (isNaN(d)) return false;
+  const n = new Date();
+  return (
+    d.getFullYear() === n.getFullYear() &&
+    d.getMonth() === n.getMonth() &&
+    d.getDate() === n.getDate()
+  );
+}
+/* Supabase created time — row jab create hui. Agar tumhare table mein column
+   ka naam alag ho (e.g. created_time), ye list usko bhi cover karti hai. */
+function createdTs(x) {
+  const r = (x && x._raw) || {};
+  return (
+    r.created_at ||
+    r.created_time ||
+    r.inserted_at ||
+    r.synced_at ||
+    x.synced_at ||
+    r.updated_at ||
+    null
+  );
+}
+/* delivery kab hui — app_log ke aakhri 'delivered' event se. Fallback updated_at */
+function deliveredTs(x) {
+  const r = (x && x._raw) || {};
+  const log = Array.isArray(r.app_log) ? r.app_log : [];
+  for (let i = log.length - 1; i >= 0; i--) {
+    if (log[i] && log[i].stage === 'delivered' && log[i].ts) return log[i].ts;
+  }
+  return r.updated_at || null;
+}
+function inView(x, viewMode) {
+  const st = x.stage;
+  // pending = abhi kaam baaki (new / talked / scheduled)
+  const pending = st !== 'delivered' && !isClosedStage(st);
+  if (viewMode === 'archived') {
+    // Archived = ho-chuki entries: Delivered + Cancelled / Duplicate / Renewal
+    return !pending;
+  }
+  // Today (kaam waala view):
+  //   - saari pending (chahe purani ho)
+  //   - jo aaj create hui
+  //   - jo AAJ deliver hui (purani entry bhi) — kal se Today se hat jayegi,
+  //     par Archived mein hamesha rahegi.
+  return (
+    pending ||
+    isToday(createdTs(x)) ||
+    (st === 'delivered' && isToday(deliveredTs(x)))
+  );
+}
+
+/* stat categories jinpe collapsible entries khulti hain.
+   NOTE: "Total Pickups" ab yahan se hata diya — wo count Header ke
+   "Today/Archived · Total deliveries · N" chip mein dikhta hai. Pending +
+   Delivered + Cancelled se poori picture mil jaati hai.                 */
+const CATS = [
+  {
+    id: 'pending',
+    label: 'Pending',
+    icon: Package,
+    color: T.blue,
+    soft: T.blueSoft,
+    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
+  },
+  {
+    id: 'delivered',
+    label: 'Picked Up',
+    icon: CheckCircle2,
+    color: T.forestSoft,
+    soft: T.mint,
+    test: (x) => x.stage === 'delivered',
+  },
+  {
+    id: 'cancelled',
+    label: 'Cancelled',
+    icon: AlertTriangle,
+    color: T.red,
+    soft: T.redSoft,
+    test: (x) => x.stage === 'cancelled',
+  },
+];
+
+function rowToDelivery(r) {
+  const branch = deriveBranch(r);
+  return {
+    invoice_id: r.invoice_id,
+    id: r.invoice_number || r.invoice_id,
+    branch,
+    manager: clean(r.store_manager) || STORE_MANAGERS[branch] || '—',
+    customer: r.customer_name || '—',
+    phone: clean(r.phone) || '—',
+    area: clean(r.address) || '—',
+    equipment: equipmentText(r),
+    amount: Number(r.pickup_charges_collected) || 0,
+    expected:
+      r.confirmed_date && r.confirmed_date !== 'null'
+        ? r.confirmed_date
+        : r.mentioned_pickup_date && r.mentioned_pickup_date !== 'null'
+          ? r.mentioned_pickup_date
+          : '—',
+    person: clean(r.app_pickup_person) || null,
+    vehicle: clean(r.app_vehicle) || null,
+    stage: statusToStage(r.status),
+    rawStatus: r.status,
+    synced_at: r.synced_at || r.updated_at,
+    _raw: r,
   };
 }
 
-/* ══════════════════════════════════════════════════════════════════════ */
+/* Demo data (jab key khaali ho) */
+const DEMO = [
+  demo(
+    'MOH/25-26/041',
+    'MOH',
+    'Baldev Raj',
+    '+9198150xxxxx',
+    'Mohali',
+    'Oxygen Concentrator',
+    'Talked To Customer',
+    3500,
+    '2026-07-04',
+  ),
+  demo(
+    'CHD/25-26/010',
+    'CHD',
+    'Anil Kapoor',
+    '+9198140xxxxx',
+    'Chandigarh',
+    'CPAP',
+    'Delivery Scheduled',
+    4200,
+    '2026-07-02',
+  ),
+  demo(
+    'GGN/25-26/001',
+    'GGN',
+    'Ravi Menon',
+    '+9198110xxxxx',
+    'Gurgaon',
+    'Hospital Bed',
+    'Item Inspected',
+    6000,
+    '2026-07-05',
+    'Hemant - 9773641804',
+  ),
+  demo(
+    'NCR/25-26/007',
+    'NCR',
+    'Sunita Rao',
+    '+9198220xxxxx',
+    'Noida',
+    'Wheelchair',
+    'Item Delivered',
+    1500,
+    '2026-07-01',
+    'Shiva - 7303916944',
+  ),
+];
+function demo(inv, code, name, phone, city, equip, status, amt, due, person) {
+  return rowToDelivery({
+    invoice_id: inv,
+    invoice_number: inv,
+    store_code: code,
+    customer_name: name,
+    customer_phone: phone,
+    city,
+    line_items: equip,
+    status,
+    total_amount: amt,
+    due_date: due,
+    app_delivery_person: person || null,
+    synced_at: new Date().toISOString(),
+  });
+}
+
+/* mobile detection (behavior differs on phone vs laptop) */
+function useIsMobile(bp = 760) {
+  const q = `(max-width:${bp}px)`;
+  const [m, setM] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(q).matches : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(q);
+    const on = () => setM(mq.matches);
+    on();
+    mq.addEventListener
+      ? mq.addEventListener('change', on)
+      : mq.addListener(on);
+    return () => {
+      mq.removeEventListener
+        ? mq.removeEventListener('change', on)
+        : mq.removeListener(on);
+    };
+  }, [q]);
+  return m;
+}
+
+/* iframe ke andar chal raha hai? (Zoho landing page embed) */
+const EMBEDDED =
+  typeof window !== 'undefined' && window.parent && window.parent !== window;
+
+/* Embed mode: sirf ek class lagti hai (CSS ke liye). Height ab app khud
+   nahi bhejta — iframe ko fixed 100vh di jaati hai aur app usko poora bharta
+   hai, isliye na neeche white space aata hai na cut hota hai. */
+function useEmbedFlag() {
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    document.documentElement.classList.add('hjs-embed');
+  }, []);
+}
+
+/* ════════════════════════════════════════════════════════════════ APP */
 export default function App() {
-  const [dev, setDev] = useState(() => { try { return localStorage.getItem('hjsPickupDev') || ''; } catch (_) { return ''; } });
-  const [authed, setAuthed] = useState(false);
-  const [pickups, setPickups] = useState([]);
+  useEmbedFlag();
+  // Tracking routes (Netlify SPA — query params + optional /track path):
+  //   /track                → sales: number se saari deliveries + timeline
+  //   /track?inv=CHD/...     → customer: single invoice (phone verify)
+  //   ?inv=CHD/...           → customer (bina /track ke bhi chalega)
+  const params =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isTrackPath = /\/track\/?$/.test(path);
+  const inv = params.get('inv') || '';
+  // ?order  → STATIC customer link (WhatsApp CTA button ke liye). Koi invoice
+  // nahi chahiye — customer apna registered phone daale, uska latest order
+  // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
+  // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
+  // customer/sales track routes pickup app mein disabled
+
+  const [session, setSession] = useState(null);
+  const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeId, setActiveId] = useState(null);
+  const [modal, setModal] = useState(null); // { invoiceId, toStage, mode }
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
-  const ping = (m) => { setToast(m); setTimeout(() => setToast(null), 3000); };
+  const [viewMode, setViewMode] = useState('today'); // today | archived
+  const [layoutMode, setLayoutMode] = useState('board'); // board | categories
+  const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
+  const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
+  const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
+  const switchLang = (l) => {
+    setHjsLang(l);
+    setLang(HJS_LANG);
+  };
+  // har store (aur head) → chosen layout. Default Stages (board), toggle se Categories.
+  const effLayout = layoutMode;
 
-  const load = async (pw) => {
-    setLoading(true); setError(null);
-    try { setPickups(((await pkList(pw || dev)) || []).map(rowToPickup)); setAuthed(true); }
-    catch (e) { setError(e.message); if (/unauthorized/i.test(e.message)) { setAuthed(false); } }
+  const ping = (m) => {
+    setToast(m);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const load = async () => {
+    if (!CONFIGURED) {
+      setDeliveries(DEMO);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setDeliveries(
+        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+      );
+    } catch (e) {
+      setError(e.message || 'Fetch failed');
+    }
     setLoading(false);
   };
-  useEffect(() => { if (authed) load(); /* eslint-disable-next-line */ }, [authed]);
+  useEffect(() => {
+    if (session) load(); /* eslint-disable-next-line */
+  }, [session]);
 
-  const doLogin = async (pw) => { try { localStorage.setItem('hjsPickupDev', pw); } catch (_) {} setDev(pw); await load(pw); };
-  const logout = () => { try { localStorage.removeItem('hjsPickupDev'); } catch (_) {} setDev(''); setAuthed(false); setPickups([]); };
+  const scoped = useMemo(() => {
+    if (!session) return [];
+    // Deleted (soft-deleted) entries app ke kisi bhi view mein nahi aati —
+    // par Supabase mein status="Deleted" ke saath row bani rehti hai.
+    const base = deliveries.filter((x) => x.stage !== 'deleted');
+    if (session.branch === 'ALL') return base;
+    return base.filter((x) => x.branch === session.branch);
+  }, [deliveries, session]);
 
-  const active = pickups.find((x) => x.invoice_id === activeId) || null;
+  // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
+  const viewItems = useMemo(
+    () => scoped.filter((x) => inView(x, viewMode)),
+    [scoped, viewMode],
+  );
+
+  // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return scoped
+      .filter(
+        (x) =>
+          x.customer.toLowerCase().includes(q) ||
+          String(x.id).toLowerCase().includes(q) ||
+          x.area.toLowerCase().includes(q) ||
+          String(x.phone).toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  }, [scoped, search]);
+
+  const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
   const buildPatch = (toStage, f, mode) => {
-    const patch = {};
+    const patch = { updated_at: new Date().toISOString() };
     if (mode === 'move') patch.status = stageToStatus(toStage);
-    if (toStage === 'contacted') { patch.confirmed_date = f.date || null; patch.confirmed_time = f.time || null; patch.stage1_remarks = f.remarks || null; }
-    else if (toStage === 'scheduled') { patch.app_pickup_person = f.person || null; patch.app_vehicle = f.vehicle || null; patch.stage2_remarks = f.remarks || null; }
-    else if (toStage === 'outfor') { patch.app_eta = f.eta || null; patch.stage3_remarks = f.remarks || null; }
-    else if (toStage === 'picked') {
-      patch.item_inspected = !!f.inspected; patch.actual_pickup_date = f.pickDate || null;
-      patch.pickup_charges_collected = f.charges === '' || f.charges == null ? null : Number(f.charges);
-      patch.pickup_image = f.photo || null; patch.pickup_done = !!f.done; patch.stage4_remarks = f.remarks || null;
+    if (toStage === 'talked') {
+      patch.confirmed_date = f.date || null;
+      patch.confirmed_time = f.time || null;
+      patch.stage1_remarks = f.remarks || null;
+    } else if (toStage === 'scheduled') {
+      patch.app_pickup_person = f.person || null;
+      patch.app_vehicle = f.vehicle || null;
+      patch.stage2_remarks = f.remarks || null;
+    } else if (toStage === 'dispatched') {
+      patch.app_eta = f.eta || null;
+      patch.stage3_remarks = f.remarks || null;
+    } else if (toStage === 'delivered') {
+      patch.item_inspected = !!f.inspected;
+      patch.pickup_image = f.photoPicked || null;
+      patch.actual_pickup_date = f.pickDate || null;
+      patch.pickup_charges_collected =
+        f.charges === '' || f.charges == null ? null : Number(f.charges);
+      patch.pickup_done = !!f.done;
+      patch.stage4_remarks = f.remarks || null;
     }
     return patch;
   };
 
-  const applyMove = async (invoiceId, toStage, fields, mode) => {
-    const patch = buildPatch(toStage, fields, mode);
-    const cur = pickups.find((x) => x.invoice_id === invoiceId);
-    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
-    try { await pkUpdate(dev, invoiceId, patch); ping(mode === 'edit' ? 'Updated ✓' : `Saved ✓  ${stageMeta(toStage).label}`); load(); }
-    catch (e) { ping('Save failed: ' + e.message); }
+  // closed mark (cancelled/duplicate/renewal) — status column mein likha jaata hai
+  const closeEntry = async (invoiceId, flag, remarks) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const patch = {
+      status: CLOSED_STATUS[flag],
+      updated_at: new Date().toISOString(),
+      app_log: [...existingLog(cur), makeClosedEvent(flag, remarks)],
+    };
+    if (!CONFIGURED) {
+      setDeliveries((prev) =>
+        prev.map((x) =>
+          x.invoice_id === invoiceId
+            ? { ...x, stage: flag, rawStatus: patch.status }
+            : x,
+        ),
+      );
+      ping(`Demo — ${CLOSED[flag].label}`);
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      ping(`Marked as ${CLOSED[flag].label}`);
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
   };
 
+  // core move/edit apply — modal aur inline card dono use karte hain
+  const applyMove = async (invoiceId, toStage, fields, mode) => {
+    if (toStage === 'talked' && fields.invoiceFlag) {
+      return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
+    }
+    const patch = buildPatch(toStage, fields, mode);
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
+    if (!CONFIGURED) {
+      ping('Demo mode — save nahi hua');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      ping(
+        mode === 'edit'
+          ? 'Updated ✓'
+          : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
+      );
+      if (mode === 'move') jumpMobile(toStage);
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
+  const commitModal = async (fields) => {
+    const { invoiceId, toStage, mode } = modal;
+    setModal(null);
+    await applyMove(invoiceId, toStage, fields, mode);
+  };
+
+  // direct backward move (no form)
   const setStage = async (invoiceId, toStage) => {
-    const cur = pickups.find((x) => x.invoice_id === invoiceId);
-    const goingBack = cur && stageIndex(toStage) < stageIndex(cur.stage || 'new');
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const goingBack =
+      cur && stageIndex(toStage) < stageIndex(cur.stage || 'new');
     if (goingBack) {
-      const ok = typeof window === 'undefined' ? true : window.confirm(`Entry ko "${stageMeta(toStage).label}" pe wapas le jaayein?\n\nAage ki bhari hui details (person, gaadi, charges, photo) hat jaayengi.`);
+      const ok =
+        typeof window === 'undefined'
+          ? true
+          : window.confirm(
+              `Entry ko "${STAGES[stageIndex(toStage)].label}" pe wapas le jaayein?\n\nAage ki bhari hui details (person, photo, amount waghera) hat jaayengi — baad mein dobara bharni hongi.`,
+            );
       if (!ok) return;
     }
-    const patch = { status: stageToStatus(toStage), app_log: [...existingLog(cur), makeEvent(toStage, {}, 'move')] };
-    if (goingBack) Object.assign(patch, clearAhead(toStage));
-    try { await pkUpdate(dev, invoiceId, patch); ping(`Moved to ${stageMeta(toStage).label}`); load(); }
-    catch (e) { ping('Save failed: ' + e.message); }
-  };
-
-  const closeEntry = async (invoiceId, flag, remarks) => {
-    const cur = pickups.find((x) => x.invoice_id === invoiceId);
     const patch = {
-      status: flag === 'deleted' ? 'Deleted' : 'Cancelled',
-      app_log: [...existingLog(cur), { ts: new Date().toISOString(), stage: flag, label: CANCELLED_META[flag].label, action: 'Marked as', fields: remarks ? { Remarks: remarks } : {} }],
+      status: stageToStatus(toStage),
+      updated_at: new Date().toISOString(),
+      app_log: [...existingLog(cur), makeEvent(toStage, {}, 'move')],
     };
-    try { await pkUpdate(dev, invoiceId, patch); setActiveId(null); ping(flag === 'deleted' ? 'Deleted' : 'Cancelled'); load(); }
-    catch (e) { ping('Save failed: ' + e.message); }
+    if (goingBack) Object.assign(patch, clearAhead(toStage));
+    if (!CONFIGURED) {
+      setDeliveries((prev) =>
+        prev.map((x) =>
+          x.invoice_id === invoiceId
+            ? { ...x, stage: toStage, rawStatus: patch.status }
+            : x,
+        ),
+      );
+      ping('Demo mode — save nahi hua');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
+      jumpMobile(toStage);
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
   };
 
-  const visible = useMemo(() => {
-    let list = pickups.filter((x) => x.stage !== 'deleted');
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((x) => x.customer.toLowerCase().includes(q) || String(x.id).toLowerCase().includes(q) || String(x.phone).toLowerCase().includes(q) || x.items.toLowerCase().includes(q));
-    return list;
-  }, [pickups, search]);
+  // delete — sirf head. HARD delete NAHI: row Supabase mein rehti hai,
+  // bas status="Deleted" ho jaata hai aur app ke views se hat jaati hai.
+  const removeEntry = async (invoiceId) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const patch = {
+      status: 'Deleted',
+      updated_at: new Date().toISOString(),
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: new Date().toISOString(),
+          stage: 'deleted',
+          label: 'Deleted',
+          action: 'Marked as',
+          fields: {},
+        },
+      ],
+    };
+    if (!CONFIGURED) {
+      setDeliveries((prev) =>
+        prev.map((x) =>
+          x.invoice_id === invoiceId
+            ? { ...x, stage: 'deleted', rawStatus: 'Deleted' }
+            : x,
+        ),
+      );
+      setActiveId(null);
+      ping('Deleted (demo)');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      setActiveId(null);
+      ping('Deleted — Supabase mein "Deleted" mark ho gaya');
+      load();
+    } catch (e) {
+      ping('Delete failed: ' + e.message);
+    }
+  };
 
-  const stats = useMemo(() => {
-    const total = visible.length;
-    const done = visible.filter((x) => x.stage === 'picked').length;
-    const cancelled = visible.filter((x) => x.stage === 'cancelled').length;
-    const pending = visible.filter((x) => !isClosed(x.stage) && x.stage !== 'picked').length;
-    return { total, pending, done, cancelled };
-  }, [visible]);
-
-  if (!authed) return <Login onLogin={doLogin} error={error} />;
+  if (!session) return <Login onLogin={setSession} />;
 
   return (
-    <div style={{ display: 'flex', fontFamily: FONT, background: T.beige, minHeight: '100vh' }}>
+    <div
+      style={{
+        fontFamily: FONT,
+        background: T.beige,
+        minHeight: '100vh',
+        color: T.ink,
+      }}
+    >
       <StyleTag />
-      <Sidebar />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Topbar search={search} setSearch={setSearch} onReload={() => load()} onLogout={logout} loading={loading} />
-        <main style={{ padding: '24px 30px 70px' }}>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-            <h2 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.6, margin: '4px 0 0' }}>Pending Pickups</h2>
-          </div>
-
-          <div className="stat-grid">
-            <Stat ico={RotateCcw} color={T.forest} soft={T.mint} n={stats.total} label="Total Pickups" />
-            <Stat ico={Package} color={T.amber} soft={T.amberSoft} n={stats.pending} label="Pending" />
-            <Stat ico={CheckCircle2} color={T.green} soft={T.mint} n={stats.done} label="Picked Up" />
-            <Stat ico={AlertTriangle} color={T.red} soft={T.redSoft} n={stats.cancelled} label="Cancelled" />
-          </div>
-
-          <Board items={visible} loading={loading} onOpen={(x) => setActiveId(x.invoice_id)}
-            onCommit={(d, toStage, fields) => applyMove(d.invoice_id, toStage, fields, 'move')} />
-        </main>
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
+        <Sidebar session={session} />
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <Topbar
+            session={session}
+            search={search}
+            setSearch={setSearch}
+            results={searchResults}
+            onPick={(x) => {
+              setActiveId(x.invoice_id);
+              setSearch('');
+            }}
+            onReload={load}
+            loading={loading}
+            onLogout={() => setSession(null)}
+            lang={lang}
+            onLang={switchLang}
+          />
+          <main style={{ padding: '26px 30px 60px', flex: 1 }}>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={(b) =>
+                setSession((s) => ({
+                  ...s,
+                  branch: b,
+                  storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
+                }))
+              }
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>Supabase se connect nahi hua.</b> {error}
+                  <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+                    anon key + RLS SELECT policy check karo.
+                  </div>
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={effLayout}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
+          </main>
+        </div>
       </div>
 
       {active && (
-        <Drawer x={active} onClose={() => setActiveId(null)}
-          onSave={(toStage, fields, mode) => applyMove(active.invoice_id, toStage, fields, mode)}
-          onBack={(toStage) => setStage(active.invoice_id, toStage)}
-          onClosePickup={(flag, remarks) => closeEntry(active.invoice_id, flag, remarks)} />
+        <Drawer
+          d={active}
+          canDelete={session.isHead}
+          onDelete={() => removeEntry(active.invoice_id)}
+          onClose={() => setActiveId(null)}
+          onAdvance={(toStage) =>
+            setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
+          }
+          onSetStage={(toStage) => setStage(active.invoice_id, toStage)}
+          onEditStage={(sid) =>
+            setModal({
+              invoiceId: active.invoice_id,
+              toStage: sid,
+              mode: 'edit',
+            })
+          }
+        />
+      )}
+      {modal && (
+        <StageModal
+          delivery={deliveries.find((x) => x.invoice_id === modal.invoiceId)}
+          toStage={modal.toStage}
+          mode={modal.mode}
+          onClose={() => setModal(null)}
+          onSave={commitModal}
+        />
       )}
       {toast && <Toast msg={toast} />}
     </div>
   );
 }
 
-/* ── STAT CARD ────────────────────────────────────────────────────────── */
-function Stat({ ico: Ico, color, soft, n, label }) {
+/* ═══════════════════════════════════════════════════════════ ENTRIES VIEW
+   FIX: ye component missing tha isliye login ke baad screen crash ho rahi
+   thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
+   FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
+function EntriesView({
+  items,
+  viewMode,
+  layoutMode,
+  loading,
+  onOpen,
+  onMove,
+  onCommit,
+  focus,
+}) {
+  const isMobile = useIsMobile();
+  const [drill, setDrill] = useState(null); // null | total|pending|delivered|cancelled
+
+  // layout ya view badalte hi drill reset
+  useEffect(() => {
+    setDrill(null);
+  }, [layoutMode, viewMode]);
+
+  // drill khulne pe ek history entry push karo — phone/browser ka back button
+  // drill band karega (logout NAHI karega).
+  useEffect(() => {
+    if (!drill || typeof window === 'undefined') return;
+    window.history.pushState({ hjsDrill: drill }, '');
+    const onPop = () => setDrill(null);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [drill]);
+
+  const back = () => {
+    if (
+      typeof window !== 'undefined' &&
+      window.history.state &&
+      window.history.state.hjsDrill
+    ) {
+      window.history.back(); // popstate → setDrill(null)
+    } else {
+      setDrill(null);
+    }
+  };
+
+  // Categories layout → collapsible stat categories
+  if (layoutMode === 'categories') {
+    return (
+      <CategoriesView
+        items={items}
+        loading={loading}
+        onOpen={onOpen}
+        onMove={onMove}
+        onCommit={onCommit}
+      />
+    );
+  }
+
+  // Kisi stat card pe click → us category ki entries + Back button
+  if (drill) {
+    return (
+      <DrillView
+        cat={drill}
+        items={items}
+        viewMode={viewMode}
+        onBack={back}
+        onOpen={onOpen}
+        onMove={onMove}
+        onCommit={onCommit}
+      />
+    );
+  }
+
+  // Board layout → stage-wise kanban. Archived mein sirf Delivered list.
   return (
-    <div className="stat-card" style={{ cursor: 'default' }}>
-      <div className="stat-ico" style={{ background: soft }}><Ico size={22} color={color} /></div>
-      <div>
-        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.5, lineHeight: 1 }}>{n}</div>
-        <div style={{ fontSize: 12.5, color: T.inkSoft, fontWeight: 600, marginTop: 4 }}>{label}</div>
+    <>
+      {!isMobile && (
+        <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
+      )}
+      {viewMode === 'archived' ? (
+        <ArchivedList
+          items={items}
+          onOpen={onOpen}
+          onMove={onMove}
+          onCommit={onCommit}
+        />
+      ) : isMobile ? (
+        <MobileBoard
+          items={items}
+          loading={loading}
+          onOpen={onOpen}
+          onMove={onMove}
+          onCommit={onCommit}
+          focus={focus}
+        />
+      ) : (
+        <Board
+          items={items}
+          loading={loading}
+          onOpen={onOpen}
+          onMove={onMove}
+          onCommit={onCommit}
+        />
+      )}
+      {viewMode !== 'archived' && <FooterTotal items={items} />}
+    </>
+  );
+}
+
+/* stat card → kaunsi entries dikhani hain */
+const STAT_CATS = {
+  total: {
+    label: 'Total Pickups',
+    color: T.green,
+    soft: T.mint,
+    test: (x) => !isClosedStage(x.stage),
+  },
+  pending: {
+    label: 'Pending',
+    color: T.blue,
+    soft: T.blueSoft,
+    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
+  },
+  delivered: {
+    label: 'Picked Up',
+    color: T.forestSoft,
+    soft: T.mint,
+    test: (x) => x.stage === 'delivered',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    color: T.amber,
+    soft: T.amberSoft,
+    test: (x) => x.stage === 'cancelled',
+  },
+};
+
+/* Stat card click → us category ki entries grid + Back to stages */
+function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
+  const meta = STAT_CATS[cat] || STAT_CATS.total;
+  // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
+  const allArchived = cat === 'total' && viewMode === 'archived';
+  const rows = items.filter(allArchived ? () => true : meta.test);
+  const label = allArchived ? 'All archived' : meta.label;
+  return (
+    <div>
+      <button className="track-back" onClick={onBack}>
+        <ArrowLeft size={16} /> Back to stages
+      </button>
+      <div className="drill-head">
+        <span
+          className="col-pip"
+          style={{ background: meta.color, width: 10, height: 10 }}
+        />
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{label}</h3>
+        <span
+          className="col-count"
+          style={{ background: meta.soft, color: meta.color }}
+        >
+          {rows.length}
+        </span>
       </div>
+      {rows.length === 0 ? (
+        <div className="empty">Koi entry nahi</div>
+      ) : (
+        <div className="cat-grid">
+          {rows.map((x) => (
+            <Card
+              key={x.invoice_id}
+              d={x}
+              stage={stageMeta(x.stage)}
+              onOpen={() => onOpen(x)}
+              onMove={onMove}
+              onCommit={onCommit}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── LOGIN (split-screen, delivery jaisa) ─────────────────────────────── */
-function Login({ onLogin, error }) {
+/* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
+   color bhi badalta hai (green = delivered, red = cancelled). */
+function ArchivedList({ items, onOpen, onMove, onCommit }) {
+  const [mode, setMode] = useState('delivered');
+  const meta =
+    mode === 'cancelled'
+      ? {
+          label: 'Cancelled',
+          color: T.red,
+          soft: T.redSoft,
+          test: (x) => x.stage === 'cancelled',
+        }
+      : {
+          label: 'Picked Up',
+          color: T.green,
+          soft: T.mint,
+          test: (x) => x.stage === 'delivered',
+        };
+  const rows = items.filter(meta.test);
+  return (
+    <div>
+      <div className="drill-head">
+        <span
+          className="col-pip"
+          style={{ background: meta.color, width: 10, height: 10 }}
+        />
+        <select
+          className="arch-select"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+        >
+          <option value="delivered">Picked Up</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <span
+          className="col-count"
+          style={{ background: meta.soft, color: meta.color }}
+        >
+          {rows.length}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty">Koi {meta.label.toLowerCase()} entry nahi</div>
+      ) : (
+        <div className="cat-grid">
+          {rows.map((x) => (
+            <Card
+              key={x.invoice_id}
+              d={x}
+              stage={stageMeta(x.stage)}
+              onOpen={() => onOpen(x)}
+              onMove={onMove}
+              onCommit={onCommit}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
+   Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
+   har card clickable + collapsible. Click karo to us category ki entries
+   khulti hain. Ismein koi stage-wise board NAHI hota.                    */
+function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
+  const [open, setOpen] = useState('pending'); // default: Pending khula
+  if (loading && items.length === 0)
+    return <div className="loading">Pickups load ho rahe hain…</div>;
+  return (
+    <div className="cat-list">
+      {CATS.map((c) => {
+        const rows = items.filter(c.test);
+        const isOpen = open === c.id;
+        return (
+          <section
+            key={c.id}
+            className="cat-sec"
+            style={{ borderTopColor: c.color }}
+          >
+            <button
+              className="cat-head"
+              onClick={() => setOpen(isOpen ? null : c.id)}
+            >
+              <div className="cat-ico" style={{ background: c.soft }}>
+                <c.icon size={20} color={c.color} />
+              </div>
+              <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{c.label}</div>
+                <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 1 }}>
+                  {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
+                </div>
+              </div>
+              <span
+                className="col-count"
+                style={{ background: c.soft, color: c.color }}
+              >
+                {rows.length}
+              </span>
+              <ChevronRight
+                size={18}
+                color={T.inkSoft}
+                style={{
+                  transform: isOpen ? 'rotate(90deg)' : 'none',
+                  transition: 'transform .15s',
+                }}
+              />
+            </button>
+            {isOpen && (
+              <div className="cat-body">
+                {rows.length === 0 ? (
+                  <div className="empty">Koi entry nahi</div>
+                ) : (
+                  <div className="cat-grid">
+                    {rows.map((x) => {
+                      const stg = stageMeta(x.stage);
+                      return (
+                        <Card
+                          key={x.invoice_id}
+                          d={x}
+                          stage={stg}
+                          onOpen={() => onOpen(x)}
+                          onMove={onMove}
+                          onCommit={onCommit}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════ LOGIN */
+function Login({ onLogin }) {
   const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const go = async () => { if (!pw.trim()) return; setBusy(true); await onLogin(pw.trim()); setBusy(false); };
+  const go = async () => {
+    if (!pw.trim()) { setErr('Dev password daalo.'); return; }
+    setBusy(true); setErr('');
+    try {
+      await sbLogin('ALL', pw.trim());
+      onLogin({ ...sessionFor('ALL'), pw: pw.trim() });
+    } catch (e) {
+      setErr(/unauthorized/i.test(e.message || '') ? 'Galat password.' : 'Login error: ' + (e.message || 'unknown'));
+      setBusy(false);
+    }
+  };
   return (
     <div style={{ fontFamily: FONT }} className="login-wrap">
       <StyleTag />
@@ -305,7 +1605,7 @@ function Login({ onLogin, error }) {
             </div>
           </div>
           <h1 className="hero-h1">Har pickup,<br />ek hi jagah.</h1>
-          <p className="hero-p">Zoho Books se aane wali har return — customer se baat se lekar item collect hone tak, store-wise, live from Supabase.</p>
+          <p className="hero-p">Zoho Books se aane wali har return \u2014 customer se baat se lekar item collect hone tak, store-wise, live from Supabase.</p>
           <div className="hero-chips">
             {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map((c) => <span key={c} className="hero-chip">{c}</span>)}
           </div>
@@ -325,18 +1625,19 @@ function Login({ onLogin, error }) {
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4, display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShieldCheck size={20} color={T.green} /> Dev access
             </div>
-            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>Internal WIP — dev password daalo.</div>
+            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>Internal WIP \u2014 dev password daalo.</div>
           </div>
           <Field label="Password">
-            <input className="inp" type="password" placeholder="••••••" value={pw} autoFocus
-              onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} />
+            <input className="inp" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022" value={pw} autoFocus
+              onChange={(e) => { setPw(e.target.value); setErr(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && go()} />
           </Field>
-          {error && /unauthorized/i.test(error) && <div className="login-err">Galat password</div>}
+          {err && <div className="login-err">{err}</div>}
           <button className="btn-primary" style={{ width: '100%', marginTop: 4 }} disabled={!pw.trim() || busy} onClick={go}>
-            {busy ? 'Checking…' : <>Enter <ArrowRight size={17} /></>}
+            {busy ? 'Checking\u2026' : <>Enter <ArrowRight size={17} /></>}
           </button>
           <div style={{ textAlign: 'center', fontSize: 11.5, color: T.inkSoft, marginTop: 12, lineHeight: 1.6 }}>
-            Live · Supabase connected<br />Sirf internal team ke liye
+            Live \u00b7 Supabase connected<br />Sirf internal team ke liye
           </div>
         </div>
       </div>
@@ -344,71 +1645,443 @@ function Login({ onLogin, error }) {
   );
 }
 
-/* ── SIDEBAR ──────────────────────────────────────────────────────────── */
-function Sidebar() {
-  const goDelivery = () => { window.location.href = window.location.origin + window.location.pathname; };
+/* SIDEBAR */
+function Sidebar({ session }) {
   const nav = [
-    { icon: LayoutDashboard, label: 'Deliveries', onClick: goDelivery },
+    { icon: LayoutDashboard, label: 'Deliveries', onClick: () => { window.location.href = window.location.origin + window.location.pathname; } },
     { icon: RotateCcw, label: 'Pickups', active: true },
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
     { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
+  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
   return (
     <aside className="sidebar">
       <div className="brand" style={{ padding: '22px 20px 18px' }}>
-        <div className="brand-badge"><RotateCcw size={20} color="#fff" /></div>
+        <div className="brand-badge">
+          <Truck size={20} color="#fff" />
+        </div>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 15.5, color: '#fff' }}>HJS Pickups</div>
-          <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.6)' }}>Control Panel · DEV</div>
+          <div style={{ fontWeight: 800, fontSize: 15.5, color: '#fff' }}>
+            HJS Pickups
+          </div>
+          <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.6)' }}>
+            Control Panel · DEV
+          </div>
         </div>
       </div>
       <nav style={{ padding: '8px 12px', flex: 1 }}>
         {nav.map((n) => (
-          <div key={n.label} className="nav-item" onClick={n.onClick}
-            style={{ background: n.active ? 'rgba(255,255,255,.12)' : 'transparent', color: n.active ? '#fff' : 'rgba(255,255,255,.62)', cursor: n.soon ? 'default' : 'pointer' }}>
-            <n.icon size={18} /><span style={{ flex: 1 }}>{n.label}</span>{n.soon && <span className="soon">soon</span>}
+          <div
+            key={n.label}
+            className="nav-item"
+            onClick={n.onClick}
+            style={{
+              background: n.active ? 'rgba(255,255,255,.12)' : 'transparent',
+              color: n.active ? '#fff' : 'rgba(255,255,255,.62)',
+              cursor: n.soon ? 'default' : 'pointer',
+            }}
+          >
+            <n.icon size={18} />
+            <span style={{ flex: 1 }}>{n.label}</span>
+            {n.soon && <span className="soon">soon</span>}
           </div>
         ))}
       </nav>
       <div className="store-tag">
         <Building2 size={15} color={T.greenBright} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>All stores</div>
-          <div className="ellip" style={{ fontSize: 10.5, color: 'rgba(255,255,255,.6)' }}>Dev mode</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>
+            {session.branch === 'ALL'
+              ? 'All stores'
+              : branchLabel(session.branch)}
+          </div>
+          <div
+            className="ellip"
+            style={{ fontSize: 10.5, color: 'rgba(255,255,255,.6)' }}
+          >
+            {mgr ? `Mgr: ${mgr}` : 'All stores'}
+          </div>
         </div>
       </div>
     </aside>
   );
 }
 
-/* ── TOPBAR ───────────────────────────────────────────────────────────── */
-function Topbar({ search, setSearch, onReload, onLogout, loading }) {
+/* ══════════════════════════════════════════════════════════════ TOPBAR */
+function Topbar({
+  session,
+  search,
+  setSearch,
+  results,
+  onPick,
+  onReload,
+  loading,
+  onLogout,
+  lang,
+  onLang,
+}) {
   return (
-    <div className="topbar">
-      <div className="tb-brand"><RotateCcw size={18} color={T.forest} /><span>HJS Pickups</span></div>
+    <header className="topbar">
+      <div className="tb-brand">
+        <div
+          className="brand-badge"
+          style={{ width: 32, height: 32, borderRadius: 10 }}
+        >
+          <Truck size={17} color="#fff" />
+        </div>
+        <span>Healthy Jeena Sikho</span>
+      </div>
       <div className="tb-search">
-        <Search size={16} color={T.inkSoft} style={{ position: 'absolute', left: 14, top: 12 }} />
-        <input className="topbar-search" placeholder="Search by customer, invoice, phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Search
+          size={16}
+          color={T.inkSoft}
+          style={{ position: 'absolute', left: 14, top: 12 }}
+        />
+        <input
+          className="topbar-search"
+          placeholder="Search by customer, invoice, phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search.trim() && (
+          <div className="search-dd">
+            {!results || results.length === 0 ? (
+              <div className="search-empty">Koi match nahi mila</div>
+            ) : (
+              results.map((x) => {
+                const closed = isClosedStage(x.stage);
+                const today = isToday(createdTs(x));
+                const tagClass = closed
+                  ? 'search-tag cancel'
+                  : today
+                    ? 'search-tag today'
+                    : 'search-tag arch';
+                const tagText = closed
+                  ? stageMeta(x.stage).short
+                  : today
+                    ? 'Today'
+                    : 'Archived';
+                return (
+                  <button
+                    key={x.invoice_id}
+                    className={
+                      closed ? 'search-row is-cancelled' : 'search-row'
+                    }
+                    onClick={() => onPick(x)}
+                  >
+                    <div className="search-row-main">
+                      <span className="ellip search-name">{x.customer}</span>
+                      <span className={tagClass}>{tagText}</span>
+                    </div>
+                    <div className="ellip search-sub">
+                      ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
       <div className="tb-actions">
-        <button className="icon-btn" onClick={onReload} title="Refresh"><RefreshCw size={17} className={loading ? 'spin' : ''} /></button>
-        <button className="icon-btn" title="Notifications"><Bell size={17} /></button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div className="avatar">P</div>
-          <div className="tb-user-text">
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Dev</div>
-            <div style={{ fontSize: 11, color: T.inkSoft }}>Pickups</div>
+        <div className="lang-toggle">
+          <button
+            className={lang === 'en' ? 'lang-btn active' : 'lang-btn'}
+            onClick={() => onLang && onLang('en')}
+          >
+            EN
+          </button>
+          <button
+            className={lang === 'hi' ? 'lang-btn active' : 'lang-btn'}
+            onClick={() => onLang && onLang('hi')}
+          >
+            Hing
+          </button>
+        </div>
+        <button className="icon-btn" onClick={onReload} title="Reload">
+          <RefreshCw
+            size={17}
+            color={T.ink}
+            className={loading ? 'spin' : ''}
+          />
+        </button>
+        <button className="icon-btn">
+          <Bell size={18} color={T.ink} />
+          <span className="dot" />
+        </button>
+        <div className="tb-user" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="avatar">
+            {(session.name || 'M').slice(0, 1).toUpperCase()}
+          </div>
+          <div className="tb-user-text" style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
+            <div style={{ fontSize: 11, color: T.inkSoft }}>
+              {session.storeName}
+            </div>
           </div>
         </div>
-        <button className="icon-btn" onClick={onLogout} title="Logout"><LogOut size={17} /></button>
+        <button className="icon-btn" onClick={onLogout} title="Logout">
+          <LogOut size={17} color={T.ink} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function Header({
+  session,
+  live,
+  count,
+  viewMode,
+  onViewMode,
+  layoutMode,
+  onLayoutMode,
+  onSwitchStore,
+}) {
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
+  return (
+    <div
+      style={{
+        marginBottom: 22,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        flexWrap: 'wrap',
+        gap: 12,
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>
+          {today}
+        </div>
+        <h2
+          style={{
+            fontSize: 25,
+            fontWeight: 800,
+            letterSpacing: -0.5,
+            margin: '3px 0 0',
+            color: T.ink,
+          }}
+        >
+          {session.branch === 'ALL'
+            ? 'All stores'
+            : branchLabel(session.branch)}{' '}
+          pickups
+        </h2>
+        {mgr && (
+          <div
+            style={{
+              fontSize: 12.5,
+              color: T.inkSoft,
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <UserCog size={13} /> Store manager:{' '}
+            <b style={{ color: T.ink, fontWeight: 700 }}>{mgr}</b>
+          </div>
+        )}
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ position: 'relative' }}>
+          <Clock
+            size={15}
+            color={T.inkSoft}
+            style={{ position: 'absolute', left: 12, top: 11 }}
+          />
+          <select
+            className="store-switch"
+            value={viewMode}
+            onChange={(e) => onViewMode(e.target.value)}
+          >
+            <option value="today">Today</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
+        <div className="layout-toggle">
+          <button
+            className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
+            onClick={() => onLayoutMode('board')}
+          >
+            <LayoutDashboard size={14} /> Stages
+          </button>
+          <button
+            className={
+              layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'
+            }
+            onClick={() => onLayoutMode('categories')}
+          >
+            <Package size={14} /> Categories
+          </button>
+        </div>
+        {session.isHead && (
+          <div style={{ position: 'relative' }}>
+            <Building2
+              size={15}
+              color={T.inkSoft}
+              style={{ position: 'absolute', left: 12, top: 11 }}
+            />
+            <select
+              className="store-switch"
+              value={session.branch}
+              onChange={(e) => onSwitchStore(e.target.value)}
+            >
+              <option value="ALL">All stores</option>
+              {Object.keys(BRANCH_NAMES).map((c) => (
+                <option key={c} value={c}>
+                  {branchLabel(c)} ({c})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <span
+          className="live-chip"
+          style={{
+            background: live ? T.mint : T.amberSoft,
+            color: live ? T.green : T.amber,
+          }}
+        >
+          <span
+            className="col-pip"
+            style={{ background: live ? T.greenBright : T.amber }}
+          />
+          {live
+            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Pickups · ${count}`
+            : 'Demo data'}
+        </span>
       </div>
     </div>
   );
 }
 
-/* ── BOARD ────────────────────────────────────────────────────────────── */
-function Board({ items, loading, onOpen, onCommit }) {
-  if (loading && items.length === 0) return <div className="loading">Supabase se pickups load ho rahe hain…</div>;
+/* ═══════════════════════════════════════════════════════════════ STATS */
+function Stats({ items, viewMode, onDrill }) {
+  const board = items.filter((x) => !isClosedStage(x.stage));
+  const pending = board.filter((x) => x.stage !== 'delivered').length;
+  const done = board.filter((x) => x.stage === 'delivered').length;
+  const cancelled = items.filter((x) => x.stage === 'cancelled').length;
+  const archived = viewMode === 'archived';
+  const cards = archived
+    ? [
+        {
+          id: 'total',
+          label: 'Total Archived',
+          value: items.length,
+          icon: Truck,
+          color: T.green,
+          soft: T.mint,
+        },
+        {
+          id: 'delivered',
+          label: 'Picked Up',
+          value: done,
+          icon: CheckCircle2,
+          color: T.forestSoft,
+          soft: T.mint,
+        },
+        {
+          id: 'cancelled',
+          label: 'Cancelled',
+          value: cancelled,
+          icon: AlertTriangle,
+          color: T.amber,
+          soft: T.amberSoft,
+        },
+      ]
+    : [
+        {
+          id: 'total',
+          label: 'Total Pickups',
+          value: board.length,
+          icon: Truck,
+          color: T.green,
+          soft: T.mint,
+        },
+        {
+          id: 'pending',
+          label: 'Pending',
+          value: pending,
+          icon: Package,
+          color: T.blue,
+          soft: T.blueSoft,
+        },
+        {
+          id: 'delivered',
+          label: 'Picked Up',
+          value: done,
+          icon: CheckCircle2,
+          color: T.forestSoft,
+          soft: T.mint,
+        },
+        {
+          id: 'cancelled',
+          label: 'Cancelled',
+          value: cancelled,
+          icon: AlertTriangle,
+          color: T.amber,
+          soft: T.amberSoft,
+        },
+      ];
+  return (
+    <div className={archived ? 'stat-grid three' : 'stat-grid'}>
+      {cards.map((c) => (
+        <button
+          key={c.label}
+          className="stat-card"
+          onClick={() => onDrill && onDrill(c.id)}
+        >
+          <div className="stat-ico" style={{ background: c.soft }}>
+            <c.icon size={20} color={c.color} />
+          </div>
+          <div>
+            <div
+              style={{
+                fontSize: 28,
+                fontWeight: 800,
+                letterSpacing: -0.6,
+                lineHeight: 1,
+              }}
+            >
+              {c.value}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: T.inkSoft,
+                marginTop: 5,
+                fontWeight: 600,
+              }}
+            >
+              {c.label}
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════ BOARD */
+function Board({ items, loading, onOpen, onMove, onCommit }) {
+  if (loading && items.length === 0)
+    return (
+      <div className="loading">Supabase se pickups load ho rahe hain…</div>
+    );
   return (
     <div className="board">
       {STAGES.map((stage) => {
@@ -417,12 +2090,30 @@ function Board({ items, loading, onOpen, onCommit }) {
           <section key={stage.id} className="column">
             <div className="col-head">
               <span className="col-pip" style={{ background: stage.color }} />
-              <span style={{ fontWeight: 700, fontSize: 13.5 }}>{stage.label}</span>
-              <span className="col-count" style={{ background: stage.soft, color: stage.color }}>{cards.length}</span>
+              <span style={{ fontWeight: 700, fontSize: 13.5 }}>
+                {sLabel(stage.id)}
+              </span>
+              <span
+                className="col-count"
+                style={{ background: stage.soft, color: stage.color }}
+              >
+                {cards.length}
+              </span>
             </div>
             <div className="col-body">
-              {cards.length === 0 && <div className="empty">Koi pickup nahi</div>}
-              {cards.map((x) => <Card key={x.invoice_id} d={x} stage={stage} onOpen={() => onOpen(x)} onCommit={onCommit} />)}
+              {cards.length === 0 && (
+                <div className="empty">Koi pickup nahi</div>
+              )}
+              {cards.map((x) => (
+                <Card
+                  key={x.invoice_id}
+                  d={x}
+                  stage={stage}
+                  onOpen={() => onOpen(x)}
+                  onMove={onMove}
+                  onCommit={onCommit}
+                />
+              ))}
             </div>
           </section>
         );
@@ -431,416 +2122,1944 @@ function Board({ items, loading, onOpen, onCommit }) {
   );
 }
 
-function Card({ d, stage, onOpen, onCommit }) {
-  const Icon = equipIcon(d.items);
-  const next = STAGES[stageIndex(d.stage) + 1];
-  const [expand, setExpand] = useState(false);
+/* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
+function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
+  // Phone: sirf entry-waale stages dikhao. Accordion single-open.
+  const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
+  const activeIds = active.map((s) => s.id);
+  const sig = activeIds.join(',');
+  const [open, setOpen] = useState(activeIds[0] || null);
+  const consumed = React.useRef(0);
+  useEffect(() => {
+    setOpen((prev) => {
+      // abhi-abhi move hua → us DESTINATION stage ko kholo (chahe purane stage
+      // mein aur entries bachi ho). Har move ek hi baar consume hota hai.
+      if (
+        focus &&
+        focus.n !== consumed.current &&
+        activeIds.includes(focus.stage)
+      ) {
+        consumed.current = focus.n;
+        return focus.stage;
+      }
+      // khula stage mein abhi bhi entry hai → wahi rehne do
+      if (prev && activeIds.includes(prev)) return prev;
+      // warna aage ka pehla active stage
+      const prevIdx = prev ? stageIndex(prev) : -1;
+      const forward = active.find((s) => stageIndex(s.id) > prevIdx);
+      return forward ? forward.id : activeIds[0] || null;
+    });
+    // eslint-disable-next-line
+  }, [sig, focus && focus.n]);
+
+  if (loading && items.length === 0)
+    return <div className="loading">Pickups load ho rahe hain…</div>;
+  if (active.length === 0)
+    return (
+      <div className="empty" style={{ padding: '44px 0' }}>
+        Koi pickup nahi
+      </div>
+    );
+
   return (
-    <div className="card" onClick={onOpen}>
+    <div className="m-board">
+      {active.map((stage) => {
+        const cards = items.filter((x) => x.stage === stage.id);
+        const isOpen = open === stage.id;
+        return (
+          <section
+            key={stage.id}
+            className="m-sec"
+            style={{ borderTopColor: stage.color }}
+          >
+            <button
+              className="m-sec-head"
+              onClick={() => setOpen(isOpen ? null : stage.id)}
+            >
+              <span className="col-pip" style={{ background: stage.color }} />
+              <span style={{ fontWeight: 700, fontSize: 14.5 }}>
+                {sLabel(stage.id)}
+              </span>
+              <span
+                className="col-count"
+                style={{
+                  background: stage.soft,
+                  color: stage.color,
+                  marginLeft: 'auto',
+                }}
+              >
+                {cards.length}
+              </span>
+              <ChevronRight
+                size={17}
+                color={T.inkSoft}
+                style={{
+                  transform: isOpen ? 'rotate(90deg)' : 'none',
+                  transition: 'transform .15s',
+                }}
+              />
+            </button>
+            {isOpen && (
+              <div className="m-sec-body">
+                {cards.map((x) => (
+                  <Card
+                    key={x.invoice_id}
+                    d={x}
+                    stage={stage}
+                    onOpen={() => onOpen(x)}
+                    onMove={onMove}
+                    onCommit={onCommit}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function Card({ d, stage, onOpen, onMove, onCommit }) {
+  const Icon = equipIcon(d.equipment);
+  const closed = isClosedStage(d.stage);
+  const cancelled = d.stage === 'cancelled';
+  const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
+  const [expand, setExpand] = useState(false);
+  const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
+  return (
+    <div
+      className={cancelled ? 'card is-cancelled' : 'card'}
+      onClick={onOpen}
+    >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <div className="eq-ico" style={{ background: stage.soft }}><Icon size={17} color={stage.color} /></div>
+        <div className="eq-ico" style={{ background: stage.soft }}>
+          <Icon size={17} color={stage.color} />
+        </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="card-name">{d.customer}</div>
-          <div className="ellip card-id">{d.id} · {d.store}</div>
+          <div className="ellip card-id">{d.id}</div>
         </div>
       </div>
-      {d.items && <div className="card-equip">{d.items}</div>}
+      <div className="card-equip">{d.equipment}</div>
       <div className="card-meta">
-        {d.itemCount > 0 && <span style={{ color: T.forest, fontWeight: 800 }}><Package size={12} /> {d.itemCount} item{d.itemCount > 1 ? 's' : ''}</span>}
-        {d.mentionedDate && <span className="ellip" style={{ maxWidth: 130 }}><Calendar size={12} /> {niceDate(d.mentionedDate)}</span>}
+        <span style={{ color: T.green, fontWeight: 800 }}>
+          <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
+        </span>
+        <span className="ellip" style={{ maxWidth: 130 }}>
+          <MapPin size={12} /> {d.area}
+        </span>
       </div>
-      {d.phone && <div className="card-meta"><span className="ellip" style={{ maxWidth: '100%' }}><Phone size={12} /> {d.phone}</span></div>}
-      {d.manager && <div className="card-meta"><span className="ellip" style={{ maxWidth: '100%' }}><User size={12} /> {d.manager}</span></div>}
-      {next ? (
+      <div className="card-meta">
+        <span>
+          <Clock size={12} /> {d.expected}
+        </span>
+      </div>
+      {(d.person || d.manager) && (
+        <div className="card-meta">
+          <span className="ellip" style={{ maxWidth: '100%' }}>
+            <User size={12} /> {d.person || d.manager}
+          </span>
+        </div>
+      )}
+      {closed ? (
+        <div
+          className="card-done"
+          style={{ color: stage.color, background: stage.soft }}
+        >
+          {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
+          {stage.short}
+        </div>
+      ) : next ? (
         <>
-          <button className={expand ? 'card-next is-open' : 'card-next'} onClick={(e) => { e.stopPropagation(); setExpand((v) => !v); }}>
-            Move to {next.short} <ChevronRight size={14} style={{ transform: expand ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+          <button
+            className={expand ? 'card-next is-open' : 'card-next'}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canInline) setExpand((v) => !v);
+              else onMove(d, next.id);
+            }}
+          >
+            {moveText(next.id)}{' '}
+            {canInline ? (
+              <ChevronRight
+                size={14}
+                style={{
+                  transform: expand ? 'rotate(90deg)' : 'none',
+                  transition: 'transform .15s',
+                }}
+              />
+            ) : (
+              <ArrowRight size={13} />
+            )}
           </button>
-          {expand && (
-            <div onClick={(e) => e.stopPropagation()} className="inline-move">
-              <StageForm toStage={next.id} invoiceNumber={d.id} embedded onCancel={() => setExpand(false)}
-                onSave={(fields) => { setExpand(false); onCommit(d, next.id, fields); }} />
+          {canInline && expand && (
+            <div onClick={(e) => e.stopPropagation()}>
+              <StageModal
+                delivery={d}
+                toStage={next.id}
+                mode="move"
+                embedded
+                onClose={() => setExpand(false)}
+                onSave={(fields) => {
+                  setExpand(false);
+                  onCommit(d, next.id, fields);
+                }}
+              />
             </div>
           )}
         </>
       ) : (
-        <div className="card-done"><Check size={13} /> Picked Up</div>
+        <div className="card-done">
+          <Check size={13} /> Completed
+        </div>
       )}
     </div>
   );
 }
 
-/* ── DRAWER ───────────────────────────────────────────────────────────── */
-function Drawer({ x, onClose, onSave, onBack, onClosePickup }) {
-  const idx = stageIndex(x.stage);
-  const cancelled = x.stage === 'cancelled';
-  const next = STAGES[idx + 1] || null;
-  const [showForm, setShowForm] = useState(false);
-  const [danger, setDanger] = useState(false);
-  const log = existingLog(x);
-  const r = x._raw || {};
-  const meta = stageMeta(x.stage);
+function FooterTotal({ items }) {
+  const board = items.filter((x) => !isClosedStage(x.stage));
+  const per = STAGES.map(
+    (s) => `${s.short} ${items.filter((x) => x.stage === s.id).length}`,
+  ).join(' · ');
+  const can = items.filter((x) => x.stage === 'cancelled').length;
+  const dup = items.filter((x) => x.stage === 'duplicate').length;
+  const ren = items.filter((x) => x.stage === 'renewal').length;
+  const extra = [
+    can && `Cancelled ${can}`,
+    ren && `Renewal ${ren}`,
+    dup && `Duplicate ${dup}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div className="foot-total">
+      Total {board.length} pickups &nbsp;•&nbsp; {per}
+      {extra ? ` \u2022 ${extra}` : ''}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════ DRAWER */
+function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const Icon = equipIcon(d.equipment);
+  const closedMeta = CLOSED[d.stage] || null;
+  const cancelled = !!closedMeta; // "closed" = cancelled / duplicate / renewal
+  const idx = stageIndex(d.stage);
+  const stage = cancelled
+    ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
+    : STAGES[idx] || STAGES[0];
+  const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
+  // closed: yahan tak pahunchi thi (greyed dikhane ke liye)
+  const reachedIdx = cancelled ? reachedIdxFromLog(d._raw && d._raw.app_log) : idx;
+  const r = d._raw || {};
+  // app_log is the timeline source now (table is locked; no direct fetch)
+  const tl = [];
+
+  // per-stage field blocks (previous + current editable, future locked)
+  const blocks = [
+    {
+      id: 'talked',
+      i: 1,
+      rows: [
+        ['Pickup date', show(r.confirmed_date)],
+        ['Time', show(r.confirmed_time)],
+        ['Remarks', show(r.stage1_remarks)],
+      ],
+    },
+    {
+      id: 'scheduled',
+      i: 2,
+      rows: [
+        ['Pickup person', d.person || '\u2014'],
+        ['Transport', d.vehicle || '\u2014'],
+        ['Remarks', show(r.stage2_remarks)],
+      ],
+    },
+    {
+      id: 'dispatched',
+      i: 3,
+      rows: [
+        ['Estimated arrival', niceDateTime(r.app_eta) || '\u2014'],
+        ['Remarks', show(r.stage3_remarks)],
+      ],
+    },
+    {
+      id: 'delivered',
+      i: 4,
+      rows: [
+        ['Inspected', r.item_inspected ? 'Yes' : 'No'],
+        ['Picked up', r.pickup_done ? 'Yes' : 'No'],
+        ['Actual date', show(r.actual_pickup_date)],
+        [
+          'Charges',
+          r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
+            ? `\u20b9${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
+            : '\u2014',
+        ],
+        ['Remarks', show(r.stage4_remarks)],
+      ],
+      photo: r.pickup_image,
+    },
+  ];
+
+  const appLog = Array.isArray(r.app_log) ? r.app_log : [];
+  const hasClosedLog = appLog.some((e) => e && CLOSED[e.stage]);
 
   return (
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.4 }}>{x.customer}</div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>{x.id} · {x.store}</div>
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'center',
+              minWidth: 0,
+            }}
+          >
+            <div
+              className="eq-ico"
+              style={{ width: 42, height: 42, background: stage.soft }}
+            >
+              <Icon size={21} color={stage.color} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{d.customer}</div>
+              <div
+                className="ellip"
+                style={{ fontSize: 12.5, color: T.inkSoft }}
+              >
+                {d.id}
+              </div>
+            </div>
           </div>
-          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        <div className="stage-badge" style={{ background: meta.soft, color: meta.color }}>
-          <span className="col-pip" style={{ background: meta.color }} /> {meta.label}
-        </div>
-
-        <div className="kv-grid" style={{ marginTop: 14 }}>
-          <KV label="Phone" value={x.phone ? <a href={`tel:${x.phone}`} style={{ color: T.blue, fontWeight: 700, textDecoration: 'none' }}>{x.phone}</a> : null} />
-          <KV label="Items" value={x.items} />
-          <KV label="Item count" value={x.itemCount || null} />
-          <KV label="Store manager" value={x.manager} />
-          <KV label="Sale person" value={x.salePerson} />
-          <KV label="Customer ne kaha" value={niceDate(x.mentionedDate)} />
-          <KV label="Address" value={x.address} />
-          {r.confirmed_date && <KV label="Pickup date (tay)" value={`${niceDate(r.confirmed_date) || ''}${r.confirmed_time ? ', ' + niceTime(r.confirmed_time) : ''}`} />}
-          {r.app_pickup_person && <KV label="Pickup person" value={r.app_pickup_person} />}
-          {r.app_vehicle && <KV label="Transport" value={r.app_vehicle} />}
-          {r.app_eta && <KV label="ETA" value={niceDateTime(r.app_eta)} />}
-          {r.actual_pickup_date && <KV label="Actual pickup" value={niceDate(r.actual_pickup_date)} />}
-          {r.pickup_charges_collected != null && <KV label="Charges collected" value={`₹${r.pickup_charges_collected}`} />}
-          {r.item_inspected && <KV label="Inspected" value="Yes" />}
-          {r.pickup_done && <KV label="Pickup done" value="Yes" />}
-          {r.pickup_image && <a className="kv-photo" href={r.pickup_image} target="_blank" rel="noreferrer"><img src={r.pickup_image} alt="pickup" /></a>}
-        </div>
-
-        {!cancelled && next && !showForm && (
-          <div className="next-hint" style={{ marginTop: 16 }}>
-            <span className="col-pip" style={{ background: next.color }} />
-            <span>Agla step: <b>{next.label}</b></span>
-          </div>
-        )}
-        {!cancelled && next && !showForm && (
-          <button className="btn-primary" style={{ width: '100%', marginTop: 10 }} onClick={() => setShowForm(true)}>
-            Move to {next.short} <ArrowRight size={16} />
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
           </button>
-        )}
-        {!cancelled && !next && (
-          <div className="next-hint done" style={{ marginTop: 16 }}><CheckCircle2 size={16} /> Pickup complete</div>
-        )}
-        {showForm && next && (
-          <div style={{ marginTop: 14, background: '#fff', border: `1px solid ${T.line}`, borderRadius: 14, padding: 16 }}>
-            <StageForm toStage={next.id} invoiceNumber={x.id} onCancel={() => setShowForm(false)}
-              onSave={(fields) => { setShowForm(false); onSave(next.id, fields, 'move'); }} />
-          </div>
-        )}
+        </div>
 
-        {!cancelled && idx > 0 && (
-          <button className="edit-btn" onClick={() => onBack(STAGES[idx - 1].id)}>
-            <ArrowLeft size={15} /> {STAGES[idx - 1].short} pe wapas
-          </button>
-        )}
+        <span
+          className="stage-badge"
+          style={{ background: stage.soft, color: stage.color }}
+        >
+          <span className="col-pip" style={{ background: stage.color }} />{' '}
+          {cancelled ? stage.label : sLabel(d.stage)}
+        </span>
 
-        {log.length > 0 && (
+        {cancelled ? (
           <>
-            <div className="sec-title"><History size={14} /> Timeline</div>
-            <div className="timeline">
-              {[...log].reverse().map((ev, i, arr) => (
-                <div className="tl-row" key={i}>
-                  <div className="tl-marker">
-                    <span className="tl-dot" style={{ background: stageMeta(ev.stage).color }} />
-                    {i < arr.length - 1 && <span className="tl-line" style={{ background: T.line }} />}
-                  </div>
-                  <div style={{ paddingBottom: 14 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{ev.action} {ev.label}</div>
-                    {ev.fields && Object.entries(ev.fields).map(([k, v]) => <div className="tl-field" key={k}><b>{k}:</b> {String(v)}</div>)}
-                    <div className="tl-note">{niceDateTime(ev.ts)}</div>
-                  </div>
+            <div
+              className="cancel-note"
+              style={{
+                background: closedMeta.soft,
+                color: closedMeta.color,
+                borderColor: closedMeta.soft,
+              }}
+            >
+              {d.stage === 'cancelled' ? (
+                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              ) : (
+                <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              )}
+              <div>
+                <div style={{ fontWeight: 800 }}>{closedMeta.title}</div>
+                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                  {closedMeta.note}
                 </div>
-              ))}
+              </div>
+            </div>
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              Is se pehle ki stages
+            </div>
+            <div className="stage-picker">
+              {STAGES.map((s, i) => {
+                if (i > reachedIdx) return null; // jahan tak pahunchi thi
+                return (
+                  <button
+                    key={s.id}
+                    className="stage-pick-btn"
+                    disabled
+                    style={{
+                      background: '#EDEBE4',
+                      color: T.inkSoft,
+                      borderColor: T.line,
+                      cursor: 'default',
+                    }}
+                  >
+                    <Check
+                      size={12}
+                      style={{ marginRight: 4, verticalAlign: -1 }}
+                    />
+                    {sShort(s.id)}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              Move to stage
+            </div>
+            {next ? (
+              <div className="next-hint">
+                <span className="col-pip" style={{ background: next.color }} />
+                <span>
+                  Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
+                </span>
+              </div>
+            ) : (
+              <div className="next-hint done">
+                <Check size={14} /> Saari stages complete — pickup done
+              </div>
+            )}
+            <div className="stage-picker">
+              {STAGES.map((s, i) => {
+                if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
+                const filled = i <= idx; // bhar chuki → solid color
+                const isNext = i === idx + 1; // agli actionable stage → soft tint
+                return (
+                  <button
+                    key={s.id}
+                    className={
+                      isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'
+                    }
+                    style={{
+                      background: filled ? s.color : isNext ? s.soft : '#fff',
+                      color: filled ? '#fff' : s.color,
+                      borderColor: s.color,
+                    }}
+                    onClick={() => {
+                      if (i === idx) return;
+                      i > idx ? onAdvance(s.id) : onSetStage(s.id);
+                    }}
+                  >
+                    {filled && (
+                      <Check
+                        size={12}
+                        style={{ marginRight: 4, verticalAlign: -1 }}
+                      />
+                    )}
+                    {sShort(s.id)}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+              Bhari hui stages colored hain · agli stage bharne pe wo colored
+              hogi aur uske baad wali khulegi.
             </div>
           </>
         )}
 
-        {!cancelled && (
+        <div className="kv-grid" style={{ marginTop: 18 }}>
+          <KV label="Phone" value={d.phone} />
+          <KV label="Area" value={d.area} />
+          <KV label="Equipment" value={d.equipment} full />
+          <KV label="Amount" value={`₹${d.amount.toLocaleString('en-IN')}`} />
+          <KV label="Due date" value={d.expected} />
+          <KV label="Store manager" value={d.manager} full />
+        </div>
+
+        {/* stage-wise fields — normal: progressive; cancelled: reached blocks read-only */}
+        {blocks.map((b) => {
+          const limit = cancelled ? reachedIdx : idx + 1;
+          if (b.i > limit) return null;
+          const st = STAGES[b.i];
+          const filled = cancelled ? b.i <= reachedIdx : b.i <= idx;
+          const editable = filled && !cancelled;
+          return (
+            <div key={b.id} style={cancelled ? { opacity: 0.75 } : null}>
+              <div
+                className="sec-title stage-block-title"
+                style={{ justifyContent: 'space-between' }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span className="col-pip" style={{ background: st.color }} />{' '}
+                  {sLabel(st.id)}
+                </span>
+                {editable ? (
+                  <button
+                    className="mini-edit"
+                    onClick={() => onEditStage(b.id)}
+                  >
+                    <Pencil size={13} /> Edit
+                  </button>
+                ) : cancelled ? (
+                  <span
+                    className="next-badge"
+                    style={{ color: T.inkSoft, background: T.slateSoft }}
+                  >
+                    locked
+                  </span>
+                ) : (
+                  <span
+                    className="next-badge"
+                    style={{ color: st.color, background: st.soft }}
+                  >
+                    Agla step
+                  </span>
+                )}
+              </div>
+              {filled ? (
+                <div className="kv-grid">
+                  {b.rows.map(([k, v]) => (
+                    <KV key={k} label={k} value={v} full={k === 'Remarks'} />
+                  ))}
+                  {b.photo && b.photo !== 'null' && (
+                    <a
+                      className="kv-photo"
+                      href={b.photo}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img src={b.photo} alt="photo" />
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <div className="block-next-note">
+                  Ye stage bharne ke liye upar <b>{st.short}</b> button dabao.
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="sec-title" style={{ marginTop: 22 }}>
+          <History size={14} /> Timeline / history
+        </div>
+        {cancelled && !hasClosedLog && (
+          <div className="timeline">
+            <div className="tl-row">
+              <div className="tl-marker">
+                <span
+                  className="tl-dot"
+                  style={{ background: closedMeta.color }}
+                />
+                {appLog.length > 0 && (
+                  <span className="tl-line" style={{ background: T.line }} />
+                )}
+              </div>
+              <div style={{ paddingBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: closedMeta.color,
+                  }}
+                >
+                  {closedMeta.label}
+                </div>
+                <div className="tl-note">{closedMeta.title}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        {appLog.length > 0 ? (
+          <div className="timeline">
+            {appLog.map((ev, i) => {
+              const c = stageColorOf(ev.stage);
+              return (
+                <div key={i} className="tl-row">
+                  <div className="tl-marker">
+                    <span className="tl-dot" style={{ background: c }} />
+                    {i < appLog.length - 1 && (
+                      <span
+                        className="tl-line"
+                        style={{ background: T.line }}
+                      />
+                    )}
+                  </div>
+                  <div style={{ paddingBottom: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      {eventLine(ev)}
+                    </div>
+                    <div className="tl-note">{fmtDateTime(ev.ts)}</div>
+                    {ev.fields &&
+                      Object.entries(ev.fields).map(([k, v]) => (
+                        <div key={k} className="tl-field">
+                          <b>{k}:</b> {String(v)}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : tl && tl.length > 0 ? (
+          <div className="timeline">
+            {sortTimeline(tl).map((row, i, arr) => {
+              const { ts, status, note } = tlParse(row);
+              return (
+                <div key={i} className="tl-row">
+                  <div className="tl-marker">
+                    <span
+                      className="tl-dot"
+                      style={{
+                        background:
+                          STAGES[stageIndex(statusToStage(status))]?.color ||
+                          T.green,
+                      }}
+                    />
+                    {i < arr.length - 1 && (
+                      <span
+                        className="tl-line"
+                        style={{ background: T.line }}
+                      />
+                    )}
+                  </div>
+                  <div style={{ paddingBottom: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      {status || 'Updated'}
+                    </div>
+                    <div className="tl-note">{fmtDateTime(ts)}</div>
+                    {note && <div className="tl-field">{note}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: T.inkSoft }}>
+            Abhi koi history nahi. Jaise hi koi stage move/edit hoga, yahan
+            continuous log banega.
+          </div>
+        )}
+
+        {canDelete && (
           <div className="danger-zone">
-            {!danger ? (
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn-danger" style={{ flex: 1 }} onClick={() => { const rr = window.prompt('Cancel karein? Reason (optional):', ''); if (rr !== null) onClosePickup('cancelled', rr); }}><X size={15} /> Cancel pickup</button>
-                <button className="btn-danger" style={{ flex: 1 }} onClick={() => setDanger(true)}><Trash2 size={15} /> Delete</button>
+            {confirmDel ? (
+              <div className="danger-confirm">
+                <span
+                  style={{ fontSize: 13, fontWeight: 700, color: T.red }}
+                >
+                  Pakka delete karna hai?
+                </span>
+                <button className="btn-danger" onClick={onDelete}>
+                  <Trash2 size={15} /> Haan, delete
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setConfirmDel(false)}
+                >
+                  Rehne do
+                </button>
               </div>
             ) : (
-              <div className="danger-confirm">
-                <span style={{ fontSize: 13, fontWeight: 700, color: T.red }}>Pakka delete?</span>
-                <button className="btn-danger" onClick={() => onClosePickup('deleted', '')}>Haan, delete</button>
-                <button className="btn-ghost" onClick={() => setDanger(false)}>Nahi</button>
-              </div>
+              <button
+                className="btn-danger"
+                onClick={() => setConfirmDel(true)}
+              >
+                <Trash2 size={15} /> Delete this entry
+              </button>
             )}
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+              Sirf head delete kar sakta hai · view se hat jayega par Supabase
+              mein <b>status = "Deleted"</b> ke saath record safe rahega.
+            </div>
           </div>
         )}
       </div>
     </div>
   );
 }
-const KV = ({ label, value }) => (value === null || value === undefined || value === '') ? null : (
-  <div className="kv"><div className="kv-label">{label}</div><div className="kv-val">{value}</div></div>
-);
 
-/* ── STAGE FORM (per target stage) ────────────────────────────────────── */
-function StageForm({ toStage, invoiceNumber, onSave, onCancel, embedded }) {
-  const [f, setF] = useState({ date: todayStr(), time: '', remarks: '', person: '', vehicle: '', eta: '', inspected: false, pickDate: todayStr(), charges: '', done: false, photo: '' });
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  let canSave = true;
-  if (toStage === 'contacted') canSave = !!f.date;
-  if (toStage === 'scheduled') canSave = !!(f.person && f.vehicle);
-  if (toStage === 'outfor') canSave = !!f.eta;
-  if (toStage === 'picked') canSave = !!(f.inspected && f.done && f.photo);
-
+function KV({ label, value, full }) {
   return (
-    <div className="modal-body" style={{ padding: embedded ? 0 : undefined }}>
-      {toStage === 'contacted' && (
-        <div className="two-col">
-          <Field label="Pickup date (tay)"><input className="inp" type="date" value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
-          <Field label="Time (optional)"><input className="inp" type="time" value={f.time} onChange={(e) => set('time', e.target.value)} /></Field>
+    <div className="kv" style={full ? { gridColumn: '1 / -1' } : null}>
+      <div className="kv-label">{label}</div>
+      <div className="kv-val">{value}</div>
+    </div>
+  );
+}
+
+function sortTimeline(rows) {
+  const ts = (r) => tlParse(r).ts || '';
+  return [...rows].sort((a, b) => String(ts(b)).localeCompare(String(ts(a))));
+}
+function tlParse(r) {
+  const tsKeys = [
+    'created_at',
+    'inserted_at',
+    'logged_at',
+    'changed_at',
+    'timestamp',
+    'updated_at',
+    'time',
+    'at',
+  ];
+  const stKeys = [
+    'status',
+    'new_status',
+    'to_status',
+    'stage',
+    'new_stage',
+    'event',
+    'action',
+    'label',
+  ];
+  const noteKeys = [
+    'note',
+    'notes',
+    'remark',
+    'remarks',
+    'message',
+    'description',
+    'changed_fields',
+    'field',
+    'detail',
+    'details',
+  ];
+  const pick = (keys) => {
+    for (const k of keys)
+      if (r[k] !== undefined && r[k] !== null && r[k] !== '') return r[k];
+    return '';
+  };
+  return {
+    ts: pick(tsKeys),
+    status: String(pick(stKeys) || ''),
+    note: String(pick(noteKeys) || ''),
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════ STAGE MODAL */
+function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
+  const stage = STAGES[stageIndex(toStage)];
+  const r = (delivery && delivery._raw) || {};
+  const persons = personsFor(delivery.branch, delivery.person || '');
+  const _now = new Date();
+  const _pad = (n) => String(n).padStart(2, '0');
+  const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
+  const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
+  const nowDT = `${nowDate}T${nowTime}`;
+  const [f, setF] = useState({
+    date: mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null' ? r.confirmed_date : nowDate,
+    time: mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time).slice(0, 5) : nowTime,
+    remarks:
+      (toStage === 'delivered' ? r.stage4_remarks
+        : toStage === 'dispatched' ? r.stage3_remarks
+        : toStage === 'scheduled' ? r.stage2_remarks
+        : r.stage1_remarks) || '',
+    person: delivery.person || '',
+    vehicle: delivery.vehicle || 'Bike',
+    eta: mode === 'edit' && r.app_eta && r.app_eta !== 'null' ? toLocalInput(r.app_eta) : nowDT,
+    inspected: !!r.item_inspected,
+    photoPicked: r.pickup_image && r.pickup_image !== 'null' ? r.pickup_image : '',
+    pickDate: mode === 'edit' && r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : nowDate,
+    charges: r.pickup_charges_collected != null && r.pickup_charges_collected !== '' ? r.pickup_charges_collected : '',
+    done: !!r.pickup_done,
+  });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
+  const canSave =
+    toStage === 'talked' ? !!(f.date && f.time)
+    : toStage === 'scheduled' ? !!(f.person && f.vehicle)
+    : toStage === 'dispatched' ? !!f.eta
+    : toStage === 'delivered' ? !!(f.inspected && f.photoPicked && f.done)
+    : true;
+
+  const inner = (
+    <>
+      {!embedded && (
+        <div className="modal-head">
+          <div>
+            <span className="stage-badge" style={{ background: stage.soft, color: stage.color, marginBottom: 8 }}>
+              <span className="col-pip" style={{ background: stage.color }} />{' '}
+              {mode === 'edit' ? `Edit \u00b7 ${sLabel(toStage)}` : sLabel(toStage)}
+            </span>
+            <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
+              {delivery.customer} \u00b7 {delivery.id}
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
         </div>
       )}
-      {toStage === 'scheduled' && (
-        <>
-          <Field label="Pickup person"><input className="inp" value={f.person} onChange={(e) => set('person', e.target.value)} placeholder="Naam" /></Field>
-          <Field label="Transport / vehicle"><input className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)} placeholder="Bike / Van / Auto…" /></Field>
-        </>
+      <div className="modal-body">
+        {toStage === 'talked' && (
+          <>
+            <Field label="Pickup date *">
+              <input className="inp" type="date" value={f.date} min="2024-01-01" max="2099-12-31" onClick={openPicker}
+                onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('date', v); }} />
+            </Field>
+            <Field label="Time *">
+              <input className="inp" type="time" value={f.time} onClick={openPicker} onChange={(e) => set('time', e.target.value)} />
+              {f.time && <span className="tp-preview">\U0001f550 {niceTime(f.time)}</span>}
+            </Field>
+            {!(f.date && f.time) && <div className="req-note">Date aur Time dono bharo.</div>}
+          </>
+        )}
+        {toStage === 'scheduled' && (
+          <>
+            <Field label="Pickup person *">
+              <select className="inp" value={f.person} onChange={(e) => set('person', e.target.value)}>
+                <option value="">Select\u2026</option>
+                {persons.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </Field>
+            <Field label="Transport / vehicle *">
+              <select className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)}>
+                <option value="">Select\u2026</option>
+                {VEHICLES.map((v) => <option key={v} value={v}>{v}</option>)}
+                {f.vehicle && !VEHICLES.includes(f.vehicle) && <option value={f.vehicle}>{f.vehicle}</option>}
+              </select>
+            </Field>
+          </>
+        )}
+        {toStage === 'dispatched' && (
+          <>
+            <Field label="Estimated arrival (date & time) *">
+              <input className="inp" type="datetime-local" value={f.eta} min="2024-01-01T00:00" max="2099-12-31T23:59" onClick={openPicker}
+                onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('eta', v); }} />
+              {f.eta && <span className="tp-preview">\U0001f550 {niceDateTime(f.eta)}</span>}
+            </Field>
+            {!f.eta && <div className="req-note">ETA bharna zaroori hai.</div>}
+          </>
+        )}
+        {toStage === 'delivered' && (
+          <>
+            <Check1 checked={f.inspected} onChange={() => set('inspected', !f.inspected)} label="Item inspected" />
+            <Field label="Actual pickup date *">
+              <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
+            </Field>
+            <Field label="Pickup charges collected (\u20b9)">
+              <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
+                onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
+            </Field>
+            <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
+            {!f.photoPicked && <div className="req-note">Pickup photo lagana zaroori hai.</div>}
+            <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Pickup done" />
+          </>
+        )}
+        <Field label="Remarks">
+          <textarea className="inp" rows={2} placeholder="Optional notes\u2026" value={f.remarks} onChange={(e) => set('remarks', e.target.value)} />
+        </Field>
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" disabled={!canSave} onClick={() => onSave(f)}>
+          <ShieldCheck size={16} /> {mode === 'edit' ? 'Update' : 'Save & update'}
+        </button>
+      </div>
+    </>
+  );
+  if (embedded) return <div className="inline-move">{inner}</div>;
+  return (
+    <div className="overlay center" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>{inner}</div>
+    </div>
+  );
+}
+
+/* SMALL UI */
+function Field({ label, children }) {
+  // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
+  // jisse picker khulke turant band ho jaata tha (laptop pe).
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      {children}
+    </div>
+  );
+}
+function Check1({ checked, onChange, label }) {
+  return (
+    <button
+      className="check1"
+      onClick={onChange}
+      style={{ borderColor: checked ? T.green : T.line }}
+    >
+      <span
+        className="check-box"
+        style={{
+          background: checked ? T.green : '#fff',
+          borderColor: checked ? T.green : T.line,
+        }}
+      >
+        {checked && <Check size={13} color="#fff" />}
+      </span>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: T.ink }}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
+/* Photo upload — camera se click ya device se choose. Supabase Storage pe
+   upload hoke URL onChange se milta hai. */
+function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const camRef = React.useRef(null);
+  const fileRef = React.useRef(null);
+
+  const handle = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // same file dobara chun sakein
+    if (!file) return;
+    setErr('');
+    setBusy(true);
+    try {
+      const url = await sbUploadPhoto(invoiceNumber, kind, file);
+      onChange(url);
+    } catch (er) {
+      setErr('Upload fail hua, dobara try karo');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="photo-up">
+      <div className="photo-up-label">{label}</div>
+      {value ? (
+        <div className="photo-preview">
+          <img src={value} alt={label} />
+          <button
+            className="photo-remove"
+            onClick={() => onChange('')}
+            type="button"
+          >
+            <X size={13} /> Hatao
+          </button>
+        </div>
+      ) : (
+        <div className="photo-btns">
+          <button
+            type="button"
+            className="photo-btn"
+            onClick={() => camRef.current && camRef.current.click()}
+            disabled={busy}
+          >
+            <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
+          </button>
+          <button
+            type="button"
+            className="photo-btn alt"
+            onClick={() => fileRef.current && fileRef.current.click()}
+            disabled={busy}
+          >
+            <Upload size={15} /> Device se
+          </button>
+        </div>
       )}
-      {toStage === 'outfor' && (
-        <Field label="Estimated arrival"><input className="inp" type="datetime-local" value={f.eta} onChange={(e) => set('eta', e.target.value)} /></Field>
-      )}
-      {toStage === 'picked' && (
-        <>
-          <Check1 checked={f.inspected} onChange={(v) => set('inspected', v)} icon={ClipboardCheck} label="Item inspected" />
-          <Field label="Actual pickup date"><input className="inp" type="date" value={f.pickDate} onChange={(e) => set('pickDate', e.target.value)} /></Field>
-          <Field label="Pickup charges collected (₹)"><input className="inp" type="number" value={f.charges} onChange={(e) => set('charges', e.target.value)} placeholder="0" /></Field>
-          <PhotoUpload label="Pickup photo (proof)" invoiceNumber={invoiceNumber} kind="picked" value={f.photo} onChange={(url) => set('photo', url)} />
-          <Check1 checked={f.done} onChange={(v) => set('done', v)} icon={Check} label="Pickup done" />
-        </>
-      )}
-      <Field label="Remarks (optional)"><textarea className="inp" rows={2} value={f.remarks} onChange={(e) => set('remarks', e.target.value)} /></Field>
-      {!canSave && <div className="req-note">* Mandatory fields bharo</div>}
-      <div className="modal-foot" style={{ padding: embedded ? '12px 0 2px' : undefined }}>
-        <button className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn-primary" disabled={!canSave} onClick={() => onSave(f)}><Check size={15} /> Save</button>
+      <input
+        ref={camRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={handle}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handle}
+      />
+      {err && <div className="req-note">{err}</div>}
+    </div>
+  );
+}
+function Toast({ msg }) {
+  return (
+    <div className="toast">
+      <CheckCircle2 size={17} color={T.greenBright} /> {msg}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════ CUSTOMER TRACK PAGE */
+const TRACK_STEPS = [
+  {
+    id: 'new',
+    label: 'Order Registered',
+    desc: 'Your order has been registered. Our team will call you shortly to confirm the delivery date and time.',
+    icon: Package,
+  },
+  {
+    id: 'talked',
+    label: 'Confirmed With You',
+    desc: 'Our team has contacted you and your delivery date and time has been confirmed.',
+    icon: Phone,
+  },
+  {
+    id: 'scheduled',
+    label: 'Delivery Scheduled',
+    desc: 'Your item has passed the quality check and the delivery has been scheduled.',
+    icon: ClipboardCheck,
+  },
+  {
+    id: 'dispatched',
+    label: 'Out for Delivery',
+    desc: 'Your order has been dispatched and is on its way to your location.',
+    icon: Truck,
+  },
+  {
+    id: 'delivered',
+    label: 'Picked Up',
+    desc: 'Your order has been delivered successfully. Thank you for choosing Healthy Jeena Sikho.',
+    icon: CheckCircle2,
+  },
+];
+/* customer country-code dropdown — default +91 */
+const COUNTRY_CODES = ['+91', '+1', '+44', '+971', '+977', '+880', '+61'];
+function stepTime(log, stageId) {
+  if (!Array.isArray(log)) return null;
+  const evs = log.filter((e) => e && e.stage === stageId);
+  return evs.length ? evs[evs.length - 1].ts : null;
+}
+
+/* ── SALES TRACK PAGE ──────────────────────────────────────────────────
+   /track → sales team ek customer ka number daale, us number ki saari
+   deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
+   timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
+function SalesTrackPage() {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateErr, setGateErr] = useState('');
+  const [phone, setPhone] = useState('');
+  const [state, setState] = useState('idle'); // idle|loading|done|notfound|error
+  const [rows, setRows] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [err, setErr] = useState('');
+
+  // PIN verify: empty phone se call — sahi PIN pe [] aata hai, galat pe error
+  const unlock = async () => {
+    if (!pin) {
+      setGateErr('Enter the sales PIN.');
+      return;
+    }
+    setGateBusy(true);
+    setGateErr('');
+    try {
+      await sbTrackSearch('', pin);
+      setUnlocked(true);
+    } catch (e) {
+      const msg = String(e.message || '');
+      // RPC sirf galat PIN pe hi 'pin' waala error deta hai. Baaki errors
+      // (function missing / permission / naya project setup) alag dikhao.
+      if (/pin|invalid|unauthor/i.test(msg)) {
+        setGateErr('Wrong PIN. Try again.');
+      } else {
+        setGateErr('Access error: ' + msg);
+      }
+    }
+    setGateBusy(false);
+  };
+
+  const search = async () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) {
+      setErr('Please enter a full 10-digit mobile number.');
+      return;
+    }
+    setErr('');
+    setState('loading');
+    setSelected(null);
+    try {
+      const res = await sbTrackSearch(`+91${digits}`, pin);
+      if (!res || res.length === 0) {
+        setRows([]);
+        setState('notfound');
+        return;
+      }
+      setRows(res);
+      setState('done');
+    } catch (e) {
+      // PIN galat ho gaya (e.g. changed) → wapas gate pe
+      if (String(e.message || '').toLowerCase().includes('pin')) {
+        setUnlocked(false);
+        setGateErr('Session expired — enter PIN again.');
+        return;
+      }
+      setErr(e.message || 'Something went wrong');
+      setState('error');
+    }
+  };
+
+  return (
+    <div className="track-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="track-topbar">
+        <div className="brand">
+          <div className="brand-badge">
+            <Truck size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
+              Healthy Jeena Sikho
+            </div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
+              Delivery tracker · Sales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="track-body">
+        {!unlocked ? (
+          <div className="track-card">
+            <h1 className="track-h1">Sales access</h1>
+            <p className="track-sub">
+              Enter the sales PIN to look up customer deliveries.
+            </p>
+            <Field label="Sales PIN">
+              <input
+                className="inp"
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="••••"
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                  setGateErr('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && unlock()}
+              />
+            </Field>
+            {gateErr && <div className="login-err">{gateErr}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={!pin || gateBusy}
+              onClick={unlock}
+            >
+              {gateBusy ? (
+                'Checking…'
+              ) : (
+                <>
+                  Unlock <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            <div className="track-foot" style={{ marginTop: 6 }}>
+              Healthy Jeena Sikho · Internal use only
+            </div>
+          </div>
+        ) : selected ? (
+          <>
+            <button className="track-back" onClick={() => setSelected(null)}>
+              <ArrowLeft size={16} /> Back to list
+            </button>
+            <TrackResult row={selected} />
+          </>
+        ) : (
+          <div className="track-card">
+            <h1 className="track-h1">Track a customer's deliveries</h1>
+            <p className="track-sub">
+              Enter the customer's registered mobile number to see all their
+              orders, latest first.
+            </p>
+            <Field label="Customer mobile number">
+              <div className="phone-row">
+                <span className="code-fixed">+91</span>
+                <input
+                  className="inp phone-input"
+                  inputMode="numeric"
+                  placeholder="Enter mobile number"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value.replace(/\D/g, ''));
+                    setErr('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && search()}
+                />
+              </div>
+            </Field>
+            {err && <div className="login-err">{err}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={state === 'loading'}
+              onClick={search}
+            >
+              {state === 'loading' ? (
+                'Searching…'
+              ) : (
+                <>
+                  Search <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            {state === 'notfound' && (
+              <div className="track-msg">
+                No deliveries found for this number.
+              </div>
+            )}
+            {state === 'error' && (
+              <div className="track-msg">
+                Unable to search right now. Please try again.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!selected && state === 'done' && rows.length > 0 && (
+          <div className="sales-list">
+            <div className="sales-list-head">
+              {rows.length} {rows.length === 1 ? 'delivery' : 'deliveries'} ·
+              latest first
+            </div>
+            {rows.map((r) => {
+              const st = statusToStage(r.status);
+              const cancelled = st === 'cancelled';
+              const stg = stageMeta(st);
+              const equip = equipmentText({
+                line_items: r.line_items,
+                item_name: r.item_name,
+              });
+              const Icon = equipIcon(equip);
+              return (
+                <button
+                  key={r.invoice_number}
+                  className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
+                  onClick={() => setSelected(r)}
+                >
+                  <div className="eq-ico" style={{ background: stg.soft }}>
+                    <Icon size={17} color={stg.color} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="sales-row-top">
+                      <span
+                        className="ellip"
+                        style={{ fontWeight: 800, fontSize: 14.5 }}
+                      >
+                        {r.customer_name || 'Customer'}
+                      </span>
+                      <span
+                        className="sales-chip"
+                        style={{ background: stg.soft, color: stg.color }}
+                      >
+                        {stg.short}
+                      </span>
+                    </div>
+                    <div className="ellip sales-sub">{equip}</div>
+                    <div className="sales-meta">
+                      <span className="ellip">#{r.invoice_number}</span>
+                      <span>
+                        ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+                      </span>
+                      {niceDate(r.created_at) && (
+                        <span>{niceDate(r.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={T.inkSoft} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="track-foot">
+          Healthy Jeena Sikho · Internal delivery tracker
+        </div>
       </div>
     </div>
   );
 }
 
-/* ── small bits ───────────────────────────────────────────────────────── */
-const Field = ({ label, children }) => (<div className="field"><label className="field-label">{label}</label>{children}</div>);
+function TrackPage({ invoice }) {
+  const [phone, setPhone] = useState('');
+  const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
+  const [rows, setRows] = useState([]);
+  const [row, setRow] = useState(null);
+  const [err, setErr] = useState('');
 
-function Check1({ checked, onChange, icon: Ico, label }) {
-  return (
-    <button type="button" className="check1" onClick={() => onChange(!checked)}>
-      <span className="check-box" style={{ borderColor: checked ? T.green : T.line, background: checked ? T.green : '#fff' }}>{checked && <Check size={13} color="#fff" />}</span>
-      <Ico size={16} color={T.inkSoft} /><span style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</span>
-    </button>
-  );
-}
-
-function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
-  const camRef = React.useRef(null); const fileRef = React.useRef(null);
-  const handle = async (e) => {
-    const file = e.target.files && e.target.files[0]; e.target.value = ''; if (!file) return;
-    setErr(''); setBusy(true);
-    try { onChange(await pkUploadPhoto(invoiceNumber, kind, file)); } catch (er) { setErr('Upload fail — dobara try karo'); }
-    setBusy(false);
+  const track = async () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) {
+      setErr('Please enter your full registered mobile number.');
+      return;
+    }
+    setErr('');
+    setState('loading');
+    setRow(null);
+    try {
+      const all = await sbTrack(invoice || '', `+91${digits}`);
+      // Renewal / Duplicate / Deleted = internal cheezein — customer ko na dikhe.
+      // Cancelled dikhta hai (customer ko pata hona chahiye).
+      const res = (all || []).filter((r) => {
+        const st = statusToStage(r.status);
+        return st !== 'renewal' && st !== 'duplicate' && st !== 'deleted';
+      });
+      if (!res || res.length === 0) {
+        setState('notfound');
+        setRows([]);
+        return;
+      }
+      setRows(res);
+      // Ek hi order → seedha timeline. Ek se zyada (jaise oxygen + cannula
+      // alag invoices) → list dikhao, customer apna order chun le.
+      if (res.length === 1) setRow(res[0]);
+      setState('done');
+    } catch (e) {
+      setErr(e.message || 'Something went wrong');
+      setState('error');
+    }
   };
+
   return (
-    <div className="photo-up">
-      <div className="photo-up-label">{label}</div>
-      {value ? (
-        <div className="photo-preview"><img src={value} alt={label} /><button className="photo-remove" onClick={() => onChange('')} type="button"><X size={13} /> Hatao</button></div>
-      ) : (
-        <div className="photo-btns">
-          <button type="button" className="photo-btn" onClick={() => camRef.current && camRef.current.click()} disabled={busy}><Camera size={15} /> {busy ? 'Upload…' : 'Camera'}</button>
-          <button type="button" className="photo-btn alt" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}><Upload size={15} /> Device se</button>
+    <div className="track-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="track-topbar">
+        <div className="brand">
+          <div className="brand-badge">
+            <Truck size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
+              Healthy Jeena Sikho
+            </div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
+              Track your delivery
+            </div>
+          </div>
         </div>
-      )}
-      <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handle} />
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handle} />
-      {err && <div className="req-note">{err}</div>}
+      </div>
+
+      <div className="track-body">
+        <div className="track-card">
+          <h1 className="track-h1">Track your delivery</h1>
+          <p className="track-sub">
+            Welcome! Please enter your registered mobile number to see your
+            order status.
+          </p>
+          {invoice && (
+            <div className="track-inv">
+              Order&nbsp;<b>{invoice}</b>
+            </div>
+          )}
+          <Field label="Registered mobile number">
+            <div className="phone-row">
+              <span className="code-fixed">+91</span>
+              <input
+                className="inp phone-input"
+                inputMode="numeric"
+                placeholder="Enter mobile number"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value.replace(/\D/g, ''));
+                  setErr('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && track()}
+              />
+            </div>
+          </Field>
+          {err && <div className="login-err">{err}</div>}
+          <button
+            className="btn-primary"
+            style={{ width: '100%', marginTop: 4 }}
+            disabled={state === 'loading'}
+            onClick={track}
+          >
+            {state === 'loading' ? (
+              'Searching…'
+            ) : (
+              <>
+                Track order <ArrowRight size={17} />
+              </>
+            )}
+          </button>
+
+          {state === 'notfound' && (
+            <div className="track-msg">
+              No order found for this number. Please check and try again.
+            </div>
+          )}
+          {state === 'error' && (
+            <div className="track-msg">
+              Unable to track right now. Please try again in a bit.
+            </div>
+          )}
+        </div>
+
+        {/* 1 se zyada order → customer apna order chune */}
+        {state === 'done' && !row && rows.length > 1 && (
+          <div className="sales-list">
+            <div className="sales-list-head">
+              {rows.length} orders found · choose one
+            </div>
+            {rows.map((r) => {
+              const st = statusToStage(r.status);
+              const stg = stageMeta(st);
+              const equip = equipmentText({
+                line_items: r.line_items,
+                item_name: r.item_name,
+              });
+              const Icon = equipIcon(equip);
+              return (
+                <button
+                  key={r.invoice_number}
+                  className="sales-row"
+                  onClick={() => setRow(r)}
+                >
+                  <div className="eq-ico" style={{ background: stg.soft }}>
+                    <Icon size={17} color={stg.color} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="sales-row-top">
+                      <span
+                        className="ellip"
+                        style={{ fontWeight: 800, fontSize: 14 }}
+                      >
+                        {equip}
+                      </span>
+                      <span
+                        className="sales-chip"
+                        style={{ background: stg.soft, color: stg.color }}
+                      >
+                        {stg.short}
+                      </span>
+                    </div>
+                    <div className="sales-meta">
+                      <span className="ellip">#{r.invoice_number}</span>
+                      {niceDate(r.created_at) && (
+                        <span>{niceDate(r.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={T.inkSoft} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {state === 'done' && row && (
+          <>
+            {rows.length > 1 && (
+              <button
+                className="track-back"
+                style={{ marginTop: 16 }}
+                onClick={() => setRow(null)}
+              >
+                <ArrowLeft size={16} /> Back to my orders
+              </button>
+            )}
+            <TrackResult row={row} />
+          </>
+        )}
+
+        <div className="track-foot">
+          Healthy Jeena Sikho · Medical equipment rentals
+        </div>
+      </div>
     </div>
   );
 }
 
-function Toast({ msg }) { return <div className="toast"><CheckCircle2 size={17} color={T.greenBright} /> {msg}</div>; }
+function TrackResult({ row }) {
+  // row = safe fields from track_order RPC (poora delivery row NAHI)
+  const equipment = equipmentText({
+    line_items: row.line_items,
+    item_name: row.item_name,
+  });
+  const items = equipmentList({
+    line_items: row.line_items,
+    item_name: row.item_name,
+  });
+  const stage = statusToStage(row.status);
+  const closedMeta = CLOSED[stage] || null;
+  const cancelled = !!closedMeta;
+  const idx = stageIndex(stage);
+  const log = Array.isArray(row.app_log) ? row.app_log : [];
+  // closed: cancel/mark se pehle jahan tak pahunchi thi (app_log se)
+  const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
+  const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
+  const Icon = equipIcon(equipment);
+  const person = row.delivery_partner || null;
+  const orderId = row.invoice_number;
 
-/* ── STYLES (delivery se copy) ────────────────────────────────────────── */
-function StyleTag() {
-  return (<style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
-    body { color: ${T.ink}; background: ${T.beige}; }
-    #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
-    button { color: inherit; font-family: inherit; }
-    h1, h2, h3 { color: ${T.ink}; }
-    .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .spin { animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    ::-webkit-scrollbar { width: 9px; height: 9px; }
-    ::-webkit-scrollbar-thumb { background: #cfc8b8; border-radius: 8px; }
-    ::-webkit-scrollbar-track { background: transparent; }
+  const banner = cancelled
+    ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
+    : stage === 'delivered'
+      ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
+      : stage === 'dispatched'
+        ? {
+            text: 'Your order is out for delivery',
+            bg: T.violetSoft,
+            fg: T.violet,
+          }
+        : stage === 'scheduled'
+          ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
+          : stage === 'talked'
+            ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
+            : {
+                text: 'Your order has been received',
+                bg: T.slateSoft,
+                fg: T.slate,
+              };
 
-    .sidebar { width: 240px; flex-shrink: 0; background: linear-gradient(180deg,${T.forest},${T.forestSoft}); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
-    .brand { display: flex; align-items: center; gap: 11px; }
-    .brand-badge { width: 40px; height: 40px; border-radius: 12px; background: ${T.green}; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(46,125,50,.35); }
-    .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
-    .nav-item:hover { background: rgba(255,255,255,.07); }
-    .soon { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; color: rgba(255,255,255,.7); }
-    .store-tag { margin: 12px; padding: 12px 14px; border-radius: 13px; background: rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
+  const schedDate = niceDate(row.confirmed_date);
+  const schedTime = niceTime(row.confirmed_time);
 
-    .topbar { height: 64px; background: rgba(251,249,244,.85); backdrop-filter: blur(10px); border-bottom: 1px solid ${T.line}; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; position: sticky; top: 0; z-index: 20; gap: 20px; }
-    .topbar-search { width: 100%; height: 40px; border: 1px solid ${T.line}; border-radius: 11px; padding: 0 14px 0 40px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
-    .topbar-search:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-    .icon-btn { position: relative; width: 38px; height: 38px; border-radius: 10px; border: 1px solid ${T.line}; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-    .icon-btn:hover { background: ${T.beige}; }
-    .avatar { width: 36px; height: 36px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-    .tb-search { position: relative; flex: 1; max-width: 420px; }
-    .tb-brand { display: none; align-items: center; gap: 9px; }
-    .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
-    .tb-actions { display: flex; align-items: center; gap: 12px; }
-    .login-err { background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; padding: 10px 13px; border-radius: 11px; font-size: 12.5px; font-weight: 600; text-align: center; }
-    .loading { text-align: center; color: ${T.inkSoft}; padding: 50px; font-size: 14px; }
+  return (
+    <div className="track-result">
+      {/* order summary */}
+      <div className="track-order">
+        <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
+          <Icon size={22} color={T.green} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: T.ink }}>
+            {items.length > 1 ? `${items.length} items` : 'Order details'}
+          </div>
+          <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
+            Order #{orderId}
+          </div>
+        </div>
+      </div>
+      <ul className="eq-list">
+        {items.map((it, i) => (
+          <li key={i}>{it}</li>
+        ))}
+      </ul>
 
-    .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
-    .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); text-align: left; }
-    .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
+      <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
+        {banner.text}
+      </div>
 
-    .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
-    .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
-    .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
-    .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
-    .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
-    .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
-    .column:nth-child(5) { border-top: 3px solid ${T.green}; }
-    .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
-    .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
-    .col-body { display: flex; flex-direction: column; gap: 10px; padding: 4px; min-height: 40px; }
-    .empty { text-align: center; font-size: 12px; color: ${T.inkSoft}; padding: 18px 0; }
+      {/* the timeline */}
+      <div className="track-tl">
+        {TRACK_STEPS.map((step, i) => {
+          if (i > flowIdx) return null; // sirf reached stages dikhao
+          const current = !cancelled && i === idx;
+          // "reached this stage" time — har stage pe green chhota timestamp
+          const reachedTs =
+            stepTime(log, step.id) ||
+            (step.id === 'new'
+              ? row.created_at ||
+                row.created_time ||
+                row.inserted_at ||
+                row.synced_at ||
+                null
+              : null);
+          const StepIcon = step.icon;
+          // closed hua to aakhri reached stage bhi neeche closed-entry se jude
+          const showLine = i < flowIdx || cancelled;
+          return (
+            <div className="ttl-row" key={step.id}>
+              <div className="ttl-left">
+                <div
+                  className="ttl-dot"
+                  style={{
+                    background: T.green,
+                    borderColor: T.green,
+                    color: '#fff',
+                  }}
+                >
+                  <StepIcon size={16} />
+                </div>
+                {showLine && (
+                  <span className="ttl-line" style={{ background: T.green }} />
+                )}
+              </div>
+              <div className="ttl-content">
+                <div
+                  className="ttl-title"
+                  style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
+                >
+                  {step.label}
+                  {current && <ArrowLeft className="ttl-now-arrow" size={18} />}
+                </div>
+                <div className="ttl-desc">{step.desc}</div>
 
-    .card { background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 14px; cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
-    .card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
-    .eq-ico { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .card-name { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; line-height: 1.25; color: ${T.ink}; overflow-wrap: anywhere; }
-    .card-id { font-size: 11px; color: ${T.inkSoft}; margin-top: 2px; }
-    .card-equip { font-size: 12px; color: ${T.inkSoft}; margin-top: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .card-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; }
-    .card-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: ${T.inkSoft}; }
-    .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
-    .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
-    .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
-    .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
-    .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
-    .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+                {/* Stage 2 — confirmed delivery slot */}
+                {step.id === 'talked' && (schedDate || schedTime) && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Confirmed slot:</b> {schedDate || ''}
+                      {schedDate && schedTime ? ', ' : ''}
+                      {schedTime || ''}
+                    </div>
+                  </div>
+                )}
 
-    .overlay { position: fixed; inset: 0; background: rgba(20,40,32,.42); backdrop-filter: blur(3px); z-index: 50; display: flex; animation: fade .18s ease; }
-    @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
-    .drawer { margin-left: auto; width: 470px; max-width: 94vw; height: 100%; background: ${T.cream}; overflow-y: auto; padding: 22px; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
-    @keyframes slidein { from { transform: translateX(30px); opacity: .6 } to { transform: none; opacity: 1 } }
-    .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 10px; }
-    .stage-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 6px 11px; border-radius: 20px; }
+                {/* Stage 3 — delivery slot + partner */}
+                {step.id === 'scheduled' && (
+                  <div className="ttl-extra">
+                    {(schedDate || schedTime) && (
+                      <div>
+                        <b>Delivery slot:</b> {schedDate || ''}
+                        {schedDate && schedTime ? ', ' : ''}
+                        {schedTime || ''}
+                      </div>
+                    )}
+                    {person && (
+                      <div>
+                        <b>Delivery partner:</b> {person}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-    .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 14px; }
-    .kv { min-width: 0; }
-    .kv-label { font-size: 10px; color: ${T.inkSoft}; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
-    .kv-val { font-size: 13px; font-weight: 600; margin-top: 2px; color: ${T.ink}; word-break: break-word; }
-    .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
-    .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
-    .sec-title { font-size: 12.5px; font-weight: 800; margin: 18px 0 8px; color: ${T.ink}; display: flex; align-items: center; gap: 6px; }
-    .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .edit-btn:hover { background: #dcebdd; }
+                {/* Stage 4 — out for delivery: estimated arrival */}
+                {step.id === 'dispatched' && niceDateTime(row.app_eta) && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Estimated arrival:</b> {niceDateTime(row.app_eta)}
+                    </div>
+                  </div>
+                )}
 
-    .next-hint { display: flex; align-items: center; gap: 9px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 14px; color: ${T.ink}; line-height: 1.4; }
-    .next-hint b { font-weight: 800; }
-    .next-hint.done { background: ${T.mint}; border-color: #cfe3d0; color: ${T.green}; font-weight: 800; }
+                {/* har stage pe — kab update hua (green chhota) */}
+                {reachedTs && (
+                  <div className="ttl-time">
+                    Updated: {fmtDateTime(reachedTs)}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
 
-    .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
-    .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-    .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
-    .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; }
-
-    .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
-    .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
-    .photo-btns { display: flex; gap: 9px; }
-    .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
-    .photo-btn.alt { background: #fff; color: ${T.green}; }
-    .photo-btn:disabled { opacity: .6; cursor: default; }
-    .photo-preview { position: relative; }
-    .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
-    .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
-
-    .timeline { margin-bottom: 8px; }
-    .tl-row { display: flex; gap: 12px; }
-    .tl-marker { display: flex; flex-direction: column; align-items: center; }
-    .tl-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 3px; box-shadow: 0 0 0 3px ${T.cream}; z-index: 1; }
-    .tl-line { flex: 1; width: 2px; margin: 2px 0; min-height: 14px; }
-    .tl-note { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
-    .tl-field { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; font-weight: 500; line-height: 1.4; }
-    .tl-field b { font-weight: 700; color: ${T.ink}; }
-
-    .modal-body { padding: 0; display: flex; flex-direction: column; gap: 14px; }
-    .modal-foot { padding: 14px 0 2px; display: flex; gap: 10px; justify-content: flex-end; }
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
-    .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
-    .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-    .inp[type="date"], .inp[type="time"], .inp[type="datetime-local"] { cursor: pointer; }
-    textarea.inp { resize: vertical; }
-    .check1 { display: flex; align-items: center; gap: 10px; border: 1px solid ${T.line}; background: #fff; border-radius: 11px; padding: 12px 13px; cursor: pointer; font-family: inherit; text-align: left; width: 100%; }
-    .check-box { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-
-    .btn-primary { background: ${T.green}; color: #fff; border: none; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(46,125,50,.28); }
-    .btn-primary:hover { background: #276b2b; }
-    .btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
-    .btn-ghost { background: #fff; color: ${T.ink}; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; }
-    .btn-ghost:hover { background: ${T.beige}; }
-
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
-    @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
-
-    .login-wrap { display: grid; grid-template-columns: 1.05fr .95fr; min-height: 100vh; }
-    .login-hero { background: linear-gradient(150deg,${T.forest} 0%,${T.forestSoft} 55%,#256b45 100%); color: #fff; padding: 54px 56px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
-    .hero-glow { position: absolute; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(61,154,66,.5), transparent 65%); top: -120px; right: -120px; }
-    .hero-h1 { font-size: 44px; line-height: 1.06; font-weight: 800; letter-spacing: -1.2px; margin: 30px 0 16px; color: #fff; }
-    .hero-p { font-size: 15px; line-height: 1.6; opacity: .82; max-width: 400px; margin: 0; }
-    .hero-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
-    .hero-chip { font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 20px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); }
-    .hero-flow { display: flex; align-items: center; gap: 10px; margin-top: 40px; flex-wrap: wrap; padding-top: 26px; border-top: 1px solid rgba(255,255,255,.14); }
-    .flow-dot { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; opacity: .92; }
-    .flow-pip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .login-form { background: ${T.beige}; display: flex; align-items: center; justify-content: center; padding: 40px; }
-    .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
-
-    @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
-    @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-    @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
-    @media (max-width: 760px) {
-      .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
-      .tb-brand { display: flex; flex: 1 1 auto; min-width: 0; }
-      .tb-actions { flex: 0 0 auto; }
-      .tb-user-text { display: none; }
-      .tb-search { flex: 1 1 100%; max-width: none; }
-      .icon-btn { width: 34px; height: 34px; }
-      main { padding: 12px 14px 60px !important; }
-      h2 { font-size: 22px !important; }
-      .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
-      .glass-card { padding: 24px 20px; }
-    }
-    @media (max-width: 460px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .two-col { grid-template-columns: 1fr; } }
-    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-  `}</style>);
+        {/* closed → reached stages ke baad colored closed entry */}
+        {cancelled && (
+          <div className="ttl-row">
+            <div className="ttl-left">
+              <div
+                className="ttl-dot"
+                style={{
+                  background: closedMeta.color,
+                  borderColor: closedMeta.color,
+                  color: '#fff',
+                }}
+              >
+                {stage === 'cancelled' ? (
+                  <AlertTriangle size={16} />
+                ) : (
+                  <Info size={16} />
+                )}
+              </div>
+            </div>
+            <div className="ttl-content">
+              <div
+                className="ttl-title"
+                style={{ color: closedMeta.color, fontWeight: 800 }}
+              >
+                {closedMeta.label}
+              </div>
+              <div className="ttl-desc">{closedMeta.cust}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
+/* ══════════════════════════════════════════════════════════════ STYLES */
+function StyleTag() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+      body { color: ${T.ink}; background: ${T.beige}; }
+      #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
+
+      /* ── EMBED MODE (Zoho iframe): app poora frame bhare (100vh = iframe height) ── */
+      .hjs-embed .track-wrap, .hjs-embed .login-wrap { min-height: 100vh; }
+      button { color: inherit; font-family: inherit; }
+      h1, h2, h3 { color: ${T.ink}; }
+      .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .spin { animation: spin 1s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      ::-webkit-scrollbar { width: 9px; height: 9px; }
+      ::-webkit-scrollbar-thumb { background: #cfc8b8; border-radius: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+
+      .sidebar { width: 240px; flex-shrink: 0; background: linear-gradient(180deg,${T.forest},${T.forestSoft}); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+      .brand { display: flex; align-items: center; gap: 11px; }
+      .brand-badge { width: 40px; height: 40px; border-radius: 12px; background: ${T.green}; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(46,125,50,.35); }
+      .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
+      .nav-item:hover { background: rgba(255,255,255,.07); }
+      .soon { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; color: rgba(255,255,255,.7); }
+      .store-tag { margin: 12px; padding: 12px 14px; border-radius: 13px; background: rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
+
+      .topbar { height: 64px; background: rgba(251,249,244,.85); backdrop-filter: blur(10px); border-bottom: 1px solid ${T.line}; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; position: sticky; top: 0; z-index: 20; gap: 20px; }
+      .topbar-search { width: 100%; height: 40px; border: 1px solid ${T.line}; border-radius: 11px; padding: 0 14px 0 40px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
+      .topbar-search:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      .icon-btn { position: relative; width: 38px; height: 38px; border-radius: 10px; border: 1px solid ${T.line}; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+      .icon-btn:hover { background: ${T.beige}; }
+      .icon-btn .dot { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: ${T.amber}; border: 2px solid #fff; }
+      .avatar { width: 36px; height: 36px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+      .live-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; padding: 7px 13px; border-radius: 20px; }
+      .store-switch { border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 8px 12px 8px 34px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; outline: none; appearance: none; }
+      .store-switch:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      .login-err { background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; padding: 10px 13px; border-radius: 11px; font-size: 12.5px; font-weight: 600; text-align: center; }
+
+      .err { display: flex; gap: 12px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; padding: 14px 16px; border-radius: 14px; margin-bottom: 20px; font-size: 13.5px; }
+      .loading { text-align: center; color: ${T.inkSoft}; padding: 50px; font-size: 14px; }
+
+      .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
+      .stat-grid.three { grid-template-columns: repeat(3,minmax(0,1fr)); }
+      .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); cursor: pointer; text-align: left; font-family: inherit; color: ${T.ink}; width: 100%; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
+      .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
+      .drill-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+      .arch-select { font-size: 17px; font-weight: 800; font-family: inherit; color: ${T.ink}; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; outline: none; }
+      .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+
+      /* ── layout toggle (Stages / Categories) ── */
+      .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
+      .lt-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .lt-btn.active { background: ${T.forest}; color: #fff; }
+
+      /* ── categories (collapsible stat categories) ── */
+      .cat-list { display: flex; flex-direction: column; gap: 14px; }
+      .cat-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 2px rgba(20,57,43,.04); }
+      .cat-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: #fff; border: none; cursor: pointer; font-family: inherit; color: ${T.ink}; }
+      .cat-head:hover { background: ${T.cream}; }
+      .cat-ico { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
+      .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+
+      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
+      .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
+      .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
+      .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
+      .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
+      .column:nth-child(5) { border-top: 3px solid ${T.green}; }
+      .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
+      .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
+      .col-body { display: flex; flex-direction: column; gap: 10px; padding: 4px; min-height: 40px; }
+      .empty { text-align: center; font-size: 12px; color: ${T.inkSoft}; padding: 18px 0; }
+
+      .card { background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 14px; cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
+      .eq-ico { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .card-name { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; line-height: 1.25; color: ${T.ink}; overflow-wrap: anywhere; }
+      .card-id { font-size: 11px; color: ${T.inkSoft}; margin-top: 2px; }
+      .card-equip { font-size: 12px; color: ${T.inkSoft}; margin-top: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .card-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; }
+      .card-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: ${T.inkSoft}; }
+      .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
+      .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
+      .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
+      .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
+      .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
+      .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
+      .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+      .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
+      .card.is-cancelled:hover { border-color: #DFB9AC; }
+      .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
+
+      .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
+
+      .overlay { position: fixed; inset: 0; background: rgba(20,40,32,.42); backdrop-filter: blur(3px); z-index: 50; display: flex; animation: fade .18s ease; }
+      .overlay.center { align-items: center; justify-content: center; padding: 20px; }
+      @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+      .drawer { margin-left: auto; width: 470px; max-width: 94vw; height: 100%; background: ${T.cream}; overflow-y: auto; padding: 22px; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
+      @keyframes slidein { from { transform: translateX(30px); opacity: .6 } to { transform: none; opacity: 1 } }
+      .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 10px; }
+      .stage-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 6px 11px; border-radius: 20px; }
+
+      .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 14px; }
+      .kv { min-width: 0; }
+      .kv-label { font-size: 10px; color: ${T.inkSoft}; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+      .kv-val { font-size: 13px; font-weight: 600; margin-top: 2px; color: ${T.ink}; word-break: break-word; }
+      .sec-title { font-size: 12.5px; font-weight: 800; margin: 18px 0 8px; color: ${T.ink}; display: flex; align-items: center; gap: 6px; }
+      .mini-edit { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border: 1px solid ${T.mint}; border-radius: 8px; padding: 4px 9px; cursor: pointer; font-family: inherit; }
+      .mini-edit:hover { background: #dcebdd; }
+      .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+      .edit-btn:hover { background: #dcebdd; }
+
+      .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+      .flag-note b { font-weight: 800; }
+      .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
+      .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
+      .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
+      .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
+      .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
+      .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
+      .photo-btns { display: flex; gap: 9px; }
+      .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .photo-btn.alt { background: #fff; color: ${T.green}; }
+      .photo-btn:disabled { opacity: .6; cursor: default; }
+      .photo-preview { position: relative; }
+      .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
+      .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
+      .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+
+      .timeline { margin-bottom: 8px; }
+      .tl-row { display: flex; gap: 12px; }
+      .tl-marker { display: flex; flex-direction: column; align-items: center; }
+      .tl-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 3px; box-shadow: 0 0 0 3px ${T.cream}; z-index: 1; }
+      .tl-line { flex: 1; width: 2px; margin: 2px 0; min-height: 14px; }
+      .tl-note { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .tl-field { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; font-weight: 500; line-height: 1.4; }
+      .tl-field b { font-weight: 700; color: ${T.ink}; }
+
+      .stage-picker { display: flex; flex-wrap: wrap; gap: 10px; }
+      .stage-pick-btn { flex: 1 1 110px; min-width: 104px; border: 1.5px solid; border-radius: 12px; padding: 14px 10px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .1s, box-shadow .12s; }
+      .stage-pick-btn:hover { transform: translateY(-1px); }
+      .stage-pick-btn.is-next { border-width: 2.5px; box-shadow: 0 3px 12px rgba(20,57,43,.12); }
+
+      .next-hint { display: flex; align-items: center; gap: 9px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 14px; color: ${T.ink}; margin-bottom: 12px; line-height: 1.4; }
+      .next-hint b { font-weight: 800; }
+      .next-hint .col-pip { width: 10px; height: 10px; }
+      .next-hint.done { background: ${T.mint}; border-color: #cfe3d0; color: ${T.green}; font-weight: 800; }
+      .next-badge { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 4px 10px; border-radius: 8px; }
+      .sec-title.stage-block-title { font-size: 15px; }
+      .block-next-note { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 8px; background: ${T.cream}; border: 1px dashed ${T.line}; border-radius: 10px; padding: 8px 11px; }
+      .block-next-note b { color: ${T.ink}; font-weight: 800; }
+
+      .tb-search { position: relative; flex: 1; max-width: 420px; }
+      .tb-brand { display: none; align-items: center; gap: 9px; }
+      .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
+      .tb-actions { display: flex; align-items: center; gap: 12px; }
+      .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
+      .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .lang-btn.active { background: ${T.forest}; color: #fff; }
+      .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
+      .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
+      .search-row:hover { background: ${T.cream}; }
+      .search-row-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .search-name { font-size: 13.5px; font-weight: 700; color: ${T.ink}; min-width: 0; }
+      .search-tag { flex-shrink: 0; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 6px; }
+      .search-tag.today { background: ${T.mint}; color: ${T.green}; }
+      .search-tag.arch { background: ${T.slateSoft}; color: ${T.slate}; }
+      .search-tag.cancel { background: ${T.redSoft}; color: ${T.red}; }
+      .search-row.is-cancelled { background: #FCF2EF; }
+      .search-row.is-cancelled:hover { background: #F8E6E0; }
+      .search-sub { font-size: 11.5px; color: ${T.inkSoft}; }
+      .search-empty { padding: 14px; text-align: center; font-size: 12.5px; color: ${T.inkSoft}; }
+      .m-board { display: flex; flex-direction: column; gap: 12px; }
+      .m-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 14px; overflow: hidden; }
+      .m-sec-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 15px 14px; background: #fff; border: none; cursor: pointer; font-family: inherit; text-align: left; color: ${T.ink}; }
+      .m-sec-body { padding: 8px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
+
+      .modal { width: 470px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: ${T.cream}; border-radius: 20px; animation: pop .2s cubic-bezier(.2,.8,.2,1); text-align: left; }
+      @keyframes pop { from { transform: scale(.96); opacity: 0 } to { transform: none; opacity: 1 } }
+      .modal-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px 20px 14px; border-bottom: 1px solid ${T.line}; gap: 10px; }
+      .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+      .modal-foot { padding: 14px 20px; border-top: 1px solid ${T.line}; display: flex; gap: 10px; justify-content: flex-end; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+      .field { display: flex; flex-direction: column; gap: 6px; }
+      .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
+      .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
+      .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      /* native date/time picker icon — proper calendar / clock (green).
+         Manual typing bhi chalti hai; icon sirf picker kholne ke liye hai. */
+      .inp[type="date"], .inp[type="time"], .inp[type="datetime-local"] { cursor: pointer; }
+      .inp[type="date"]::-webkit-calendar-picker-indicator,
+      .inp[type="time"]::-webkit-calendar-picker-indicator,
+      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 19px; height: 19px; padding: 0; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 19px 19px; }
+      .inp[type="date"]::-webkit-calendar-picker-indicator,
+      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
+      .inp[type="time"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'/%3E%3Cpolyline%20points='12%206%2012%2012%2016%2014'/%3E%3C/svg%3E"); }
+      textarea.inp { resize: vertical; }
+
+      .check1 { display: flex; align-items: center; gap: 10px; border: 1px solid ${T.line}; background: #fff; border-radius: 11px; padding: 12px 13px; cursor: pointer; font-family: inherit; text-align: left; }
+      .check-box { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+      .btn-primary { background: ${T.green}; color: #fff; border: none; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(46,125,50,.28); }
+      .btn-primary:hover { background: #276b2b; }
+      .btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+      .btn-ghost { background: #fff; color: ${T.ink}; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .btn-ghost:hover { background: ${T.beige}; }
+
+      .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
+      @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
+
+      .login-wrap { display: grid; grid-template-columns: 1.05fr .95fr; min-height: 100vh; }
+      .login-hero { background: linear-gradient(150deg,${T.forest} 0%,${T.forestSoft} 55%,#256b45 100%); color: #fff; padding: 54px 56px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+      .hero-glow { position: absolute; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(61,154,66,.5), transparent 65%); top: -120px; right: -120px; }
+      .hero-h1 { font-size: 44px; line-height: 1.06; font-weight: 800; letter-spacing: -1.2px; margin: 30px 0 16px; color: #fff; }
+      .hero-p { font-size: 15px; line-height: 1.6; opacity: .82; max-width: 400px; margin: 0; }
+      .hero-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
+      .hero-chip { font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 20px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); }
+      .hero-flow { display: flex; align-items: center; gap: 10px; margin-top: 40px; flex-wrap: wrap; padding-top: 26px; border-top: 1px solid rgba(255,255,255,.14); }
+      .flow-dot { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; opacity: .92; }
+      .flow-pip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+      .login-form { background: ${T.beige}; display: flex; align-items: center; justify-content: center; padding: 40px; }
+      .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
+
+      /* ── customer track page ── */
+      .track-wrap { min-height: 100vh; background: ${T.beige}; }
+      .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
+      .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
+      .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
+      .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
+      .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
+      .phone-row { display: flex; gap: 10px; }
+      .track-inv { display: inline-flex; align-items: center; align-self: flex-start; background: ${T.mint}; color: ${T.green}; border: 1px solid #cfe3d0; border-radius: 10px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; margin: -2px 0 2px; }
+      .phone-row .code-fixed { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid ${T.line}; border-radius: 11px; background: ${T.beige}; font-size: 14px; font-weight: 800; color: ${T.ink}; }
+      .phone-row .phone-input { flex: 1 1 auto; min-width: 0; }
+      .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
+      .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
+      .track-order { display: flex; align-items: center; gap: 12px; }
+      .eq-list { margin: 12px 0 0; padding: 12px 14px; list-style: none; display: flex; flex-direction: column; gap: 7px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; }
+      .eq-list li { position: relative; padding-left: 17px; font-size: 12.5px; font-weight: 700; color: ${T.forestSoft}; line-height: 1.4; }
+      .eq-list li::before { content: ''; position: absolute; left: 2px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; }
+      .track-banner { text-align: center; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 13px; margin: 16px 0 4px; }
+      .track-tl { margin-top: 14px; }
+      .ttl-row { display: flex; gap: 14px; }
+      .ttl-left { display: flex; flex-direction: column; align-items: center; }
+      .ttl-dot { width: 38px; height: 38px; border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 0 0 4px #fff; z-index: 1; }
+      .ttl-line { flex: 1; width: 3px; margin: 3px 0; min-height: 26px; border-radius: 3px; }
+      .ttl-content { padding-bottom: 22px; padding-top: 4px; }
+      .ttl-title { font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .ttl-now { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; color: ${T.green}; padding: 3px 8px; border-radius: 20px; }
+      .ttl-now-arrow { color: ${T.green}; flex-shrink: 0; }
+      .ttl-desc { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .ttl-time { font-size: 12px; color: ${T.green}; font-weight: 700; margin-top: 4px; }
+      .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
+      .ttl-extra b { font-weight: 700; }
+      .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
+      .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
+      .track-back:hover { background: ${T.beige}; }
+      .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+      .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
+      .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
+      .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
+      .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
+      .sales-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .sales-chip { flex-shrink: 0; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 3px 9px; border-radius: 8px; }
+      .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
+      .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+      .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
+
+      @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
+      @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+      @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
+      @media (max-width: 760px) {
+        .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
+        .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
+        .tb-brand span { font-size: 14px; }
+        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; gap: 8px; }
+        .tb-user-text { display: none; }
+        .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
+        .lang-toggle { order: 3; }
+        .icon-btn { width: 34px; height: 34px; }
+        main { padding: 10px 14px 60px !important; }
+        main > div:first-child { margin-bottom: 14px !important; }
+        h2 { font-size: 22px !important; }
+        .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
+        .kv-grid { grid-template-columns: 1fr 1fr; }
+        .modal { width: 100%; border-radius: 18px; }
+        .glass-card { padding: 24px 20px; }
+        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
+        .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
+      }
+      @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
+      @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+    `}</style>
+  );
+}
