@@ -229,12 +229,14 @@ const DP = {
     'Rahul - 9359521911',
     'Nitin Singh - 7007413101',
     'Karan Gupta - 7838465084',
+    'Uday - 8595759588',
     'MBC',
   ],
   JKP: [
     'Monu - 8766395642',
     'Nitish - 9911814167',
     'Rajankumar Jha - 8595353451',
+    'Anil - 8178680581',
     'MBC',
   ],
 };
