@@ -3152,7 +3152,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 </div>
               ) : (
                 <>
-                  <Field label="Date *">
+                  <Field label="Confirmed Date *">
                     <input
                       className="inp"
                       type="date"
@@ -3168,7 +3168,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                       }}
                     />
                   </Field>
-                  <Field label="Time *">
+                  <Field label="Confirmed Time *">
                     <input
                       className="inp"
                       type="time"
