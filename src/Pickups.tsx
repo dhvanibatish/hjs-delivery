@@ -79,12 +79,12 @@ async function sbUpdate(store, pw, invoiceId, patch) {
 // public customer tracking — link se invoice + customer ka registered phone
 // NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
 async function sbTrack(invoice, phone) {
-  return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
+  return sbRpc('pickup_track', { p_invoice: invoice, p_phone: phone });
 }
 // sales team — sirf phone se us customer ki saari deliveries (latest→old).
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
 async function sbTrackSearch(phone, pin) {
-  return sbRpc('track_search', { p_phone: phone, p_pin: pin });
+  return sbRpc('pickup_track_search', { p_phone: phone, p_pin: pin });
 }
 // photo upload → Supabase Storage bucket 'pickup-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
@@ -894,7 +894,9 @@ export default function App() {
   // nahi chahiye — customer apna registered phone daale, uska latest order
   // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
   // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
-  // customer/sales track routes pickup app mein disabled
+  if (inv) return <TrackPage invoice={inv} />;
+  if (params.has('order') || params.has('my')) return <TrackPage invoice="" />;
+  if (params.has('track') || params.has('sales') || isTrackPath) return <SalesTrackPage />;
 
   const [session, setSession] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
@@ -3077,32 +3079,32 @@ function Toast({ msg }) {
 const TRACK_STEPS = [
   {
     id: 'new',
-    label: 'Order Registered',
-    desc: 'Your order has been registered. Our team will call you shortly to confirm the delivery date and time.',
+    label: 'Pickup Registered',
+    desc: 'Your pickup request has been registered. Our team will call you shortly to confirm the pickup date and time.',
     icon: Package,
   },
   {
     id: 'talked',
     label: 'Confirmed With You',
-    desc: 'Our team has contacted you and your delivery date and time has been confirmed.',
+    desc: 'Our team has contacted you and your pickup date and time has been confirmed.',
     icon: Phone,
   },
   {
     id: 'scheduled',
-    label: 'Delivery Scheduled',
-    desc: 'Your item has passed the quality check and the delivery has been scheduled.',
+    label: 'Pickup Scheduled',
+    desc: 'Your pickup has been scheduled. Our team will arrive to collect your item.',
     icon: ClipboardCheck,
   },
   {
     id: 'dispatched',
-    label: 'Out for Delivery',
-    desc: 'Your order has been dispatched and is on its way to your location.',
+    label: 'Out for Pickup',
+    desc: 'Our team is on the way to your location to collect your item.',
     icon: Truck,
   },
   {
     id: 'delivered',
     label: 'Picked Up',
-    desc: 'Your order has been delivered successfully. Thank you for choosing Healthy Jeena Sikho.',
+    desc: 'Your item has been picked up successfully. Thank you for choosing Healthy Jeena Sikho.',
     icon: CheckCircle2,
   },
 ];
@@ -3196,7 +3198,7 @@ function SalesTrackPage() {
               Healthy Jeena Sikho
             </div>
             <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Delivery tracker · Sales
+              Pickup tracker · Sales
             </div>
           </div>
         </div>
@@ -3252,7 +3254,7 @@ function SalesTrackPage() {
           </>
         ) : (
           <div className="track-card">
-            <h1 className="track-h1">Track a customer's deliveries</h1>
+            <h1 className="track-h1">Track a customer's pickups</h1>
             <p className="track-sub">
               Enter the customer's registered mobile number to see all their
               orders, latest first.
@@ -3359,7 +3361,7 @@ function SalesTrackPage() {
         )}
 
         <div className="track-foot">
-          Healthy Jeena Sikho · Internal delivery tracker
+          Healthy Jeena Sikho · Internal pickup tracker
         </div>
       </div>
     </div>
@@ -3419,7 +3421,7 @@ function TrackPage({ invoice }) {
               Healthy Jeena Sikho
             </div>
             <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Track your delivery
+              Track your pickup
             </div>
           </div>
         </div>
@@ -3427,7 +3429,7 @@ function TrackPage({ invoice }) {
 
       <div className="track-body">
         <div className="track-card">
-          <h1 className="track-h1">Track your delivery</h1>
+          <h1 className="track-h1">Track your pickup</h1>
           <p className="track-sub">
             Welcome! Please enter your registered mobile number to see your
             order status.
@@ -3581,19 +3583,19 @@ function TrackResult({ row }) {
   const banner = cancelled
     ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
-      ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
+      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
       : stage === 'dispatched'
         ? {
-            text: 'Your order is out for delivery',
+            text: 'Our team is on the way to pick up your item',
             bg: T.violetSoft,
             fg: T.violet,
           }
         : stage === 'scheduled'
-          ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
+          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
           : stage === 'talked'
-            ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
+            ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
             : {
-                text: 'Your order has been received',
+                text: 'Your pickup request has been received',
                 bg: T.slateSoft,
                 fg: T.slate,
               };
@@ -3688,14 +3690,14 @@ function TrackResult({ row }) {
                   <div className="ttl-extra">
                     {(schedDate || schedTime) && (
                       <div>
-                        <b>Delivery slot:</b> {schedDate || ''}
+                        <b>Pickup slot:</b> {schedDate || ''}
                         {schedDate && schedTime ? ', ' : ''}
                         {schedTime || ''}
                       </div>
                     )}
                     {person && (
                       <div>
-                        <b>Delivery partner:</b> {person}
+                        <b>Pickup person:</b> {person}
                       </div>
                     )}
                   </div>
