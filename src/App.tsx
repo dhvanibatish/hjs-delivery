@@ -10,6 +10,7 @@ import {
   Search,
   Bell,
   LayoutDashboard,
+  BarChart3,
   RotateCcw,
   AlertTriangle,
   ChevronRight,
@@ -987,6 +988,7 @@ export default function App() {
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
+  const [page, setPage] = useState('deliveries'); // deliveries | dashboard
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1232,7 +1234,11 @@ export default function App() {
     >
       <StyleTag />
       <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar session={session} />
+        <Sidebar
+          session={session}
+          page={session.branch === 'ALL' ? page : 'deliveries'}
+          onNav={setPage}
+        />
         <div
           style={{
             flex: 1,
@@ -1257,47 +1263,58 @@ export default function App() {
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            <Header
-              session={session}
-              live={CONFIGURED}
-              count={viewItems.length}
-              viewMode={viewMode}
-              onViewMode={setViewMode}
-              layoutMode={layoutMode}
-              onLayoutMode={setLayoutMode}
-              onSwitchStore={(b) =>
-                setSession((s) => ({
-                  ...s,
-                  branch: b,
-                  storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
-                }))
-              }
-            />
-            {error && (
-              <div className="err">
-                <CloudOff size={18} color={T.red} />
-                <div>
-                  <b>Supabase se connect nahi hua.</b> {error}
-                  <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
-                    anon key + RLS SELECT policy check karo.
+            {session.branch === 'ALL' && page === 'dashboard' ? (
+              <Dashboard
+                deliveries={scoped}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            ) : (
+              <>
+                <Header
+                  session={session}
+                  live={CONFIGURED}
+                  count={viewItems.length}
+                  viewMode={viewMode}
+                  onViewMode={setViewMode}
+                  layoutMode={layoutMode}
+                  onLayoutMode={setLayoutMode}
+                  onSwitchStore={(b) =>
+                    setSession((s) => ({
+                      ...s,
+                      branch: b,
+                      storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
+                    }))
+                  }
+                />
+                {error && (
+                  <div className="err">
+                    <CloudOff size={18} color={T.red} />
+                    <div>
+                      <b>Supabase se connect nahi hua.</b> {error}
+                      <div
+                        style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}
+                      >
+                        anon key + RLS SELECT policy check karo.
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                )}
+                <EntriesView
+                  items={viewItems}
+                  viewMode={viewMode}
+                  layoutMode={effLayout}
+                  loading={loading}
+                  onOpen={(x) => setActiveId(x.invoice_id)}
+                  onMove={(x, toStage) =>
+                    setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+                  }
+                  onCommit={(dd, toStage, fields) =>
+                    applyMove(dd.invoice_id, toStage, fields, 'move')
+                  }
+                  focus={lastMove}
+                />
+              </>
             )}
-            <EntriesView
-              items={viewItems}
-              viewMode={viewMode}
-              layoutMode={effLayout}
-              loading={loading}
-              onOpen={(x) => setActiveId(x.invoice_id)}
-              onMove={(x, toStage) =>
-                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-              }
-              onCommit={(dd, toStage, fields) =>
-                applyMove(dd.invoice_id, toStage, fields, 'move')
-              }
-              focus={lastMove}
-            />
           </main>
         </div>
       </div>
@@ -1339,6 +1356,362 @@ export default function App() {
    FIX: ye component missing tha isliye login ke baad screen crash ho rahi
    thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
    FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
+/* ═══════════════════════════════════════════════════════ DASHBOARD (all stores)
+   Store-wise daily MIS. Cards + table sab clickable → entries neeche table mein. */
+const DASH_STORES = [
+  'MOH',
+  'CHD',
+  'GGN',
+  'NCR',
+  'NOD',
+  'LDH',
+  'JAL',
+  'JPR',
+  'LKO',
+  'NWD',
+  'JKP',
+];
+
+function dayStr(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayStr() {
+  return dayStr(Date.now());
+}
+// item ki "scheduled/planned" date (confirmed_date) — future dated detect karne ko
+function plannedDate(x) {
+  const r = (x && x._raw) || {};
+  const v = r.confirmed_date;
+  return v && v !== 'null' ? String(v).slice(0, 10) : '';
+}
+
+function Dashboard({ deliveries, onOpen }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [sel, setSel] = useState({ kind: 'all', store: null }); // clicked filter
+
+  // date range → [start,end] (created date ke hisaab se base)
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'custom') return [from, to];
+    return ['0000-01-01', '9999-12-31']; // all
+  }, [range, from, to]);
+
+  // base = date-range + store filter (created date pe)
+  const base = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries.filter((x) => {
+      const cd = dayStr(createdTs(x));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && x.branch !== store) return false;
+      return true;
+    });
+  }, [deliveries, bounds, store]);
+
+  // ek item kis-kis metric mein aata hai
+  const today = todayStr();
+  const isClosed = (x) => isClosedStage(x.stage);
+  const metric = {
+    all: () => true,
+    delivered: (x) => x.stage === 'delivered',
+    pending: (x) => x.stage !== 'delivered' && !isClosed(x),
+    future: (x) =>
+      x.stage !== 'delivered' &&
+      !isClosed(x) &&
+      plannedDate(x) &&
+      plannedDate(x) > today,
+    issues: (x) => isClosed(x),
+    nophoto: (x) =>
+      x.stage === 'delivered' &&
+      !(x._raw && x._raw.photo_delivered && x._raw.photo_delivered !== 'null'),
+  };
+  const stageMetric = {
+    new: (x) => x.stage === 'new',
+    talked: (x) => x.stage === 'talked',
+    scheduled: (x) => x.stage === 'scheduled',
+    dispatched: (x) => x.stage === 'dispatched',
+    delivered: (x) => x.stage === 'delivered',
+  };
+
+  const cards = [
+    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
+    { kind: 'delivered', label: 'Delivered', color: T.green, soft: T.mint },
+    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
+    { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
+    { kind: 'issues', label: 'Cancelled/Dup/Renewal', color: T.red, soft: T.redSoft },
+    { kind: 'nophoto', label: 'Delivered · photo missing', color: T.violet, soft: T.violetSoft },
+  ];
+
+  // clicked subset for the entries table
+  const rows = useMemo(() => {
+    let list = base;
+    if (sel.store) list = list.filter((x) => x.branch === sel.store);
+    const fn =
+      metric[sel.kind] || stageMetric[sel.kind] || (() => true);
+    return list.filter(fn).sort((a, b) => (createdTs(b) || 0) - (createdTs(a) || 0));
+    // eslint-disable-next-line
+  }, [base, sel]);
+
+  const cnt = (fn, list) => list.filter(fn).length;
+  const rangeLabel =
+    range === 'today'
+      ? 'Aaj'
+      : range === 'yesterday'
+        ? 'Kal'
+        : range === '7d'
+          ? 'Pichhle 7 din'
+          : range === 'month'
+            ? 'Is mahine'
+            : range === 'all'
+              ? 'Sabhi'
+              : `${from} → ${to}`;
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · MIS</div>
+          <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
+        </div>
+        <div className="dash-filters">
+          <select
+            className="dash-inp"
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+          >
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="month">Is mahine</option>
+            <option value="all">Sabhi</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input
+                className="dash-inp"
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+              <input
+                className="dash-inp"
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel({ kind: 'all', store: null });
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>
+                {branchLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* summary cards */}
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const n = cnt(metric[c.kind], base);
+          const on = sel.kind === c.kind && !sel.store;
+          return (
+            <button
+              key={c.kind}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={on ? { borderColor: c.color } : {}}
+              onClick={() => setSel({ kind: c.kind, store: null })}
+            >
+              <div
+                className="dash-card-ico"
+                style={{ background: c.soft, color: c.color }}
+              >
+                <BarChart3 size={16} />
+              </div>
+              <div className="dash-card-n">{n}</div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* store-wise MIS table */}
+      <div className="dash-block">
+        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Total</th>
+                <th>New</th>
+                <th>Contacted</th>
+                <th>Scheduled</th>
+                <th>Out for Del</th>
+                <th>Delivered</th>
+                <th>Pending</th>
+                <th>Future</th>
+                <th>Issues</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DASH_STORES.filter(
+                (st) => store === 'ALL' || store === st,
+              ).map((st) => {
+                const list = base.filter((x) => x.branch === st);
+                if (list.length === 0) return null;
+                const cell = (kind, fn) => (
+                  <td
+                    className={fn(list) ? 'dash-td-click' : 'dash-td-zero'}
+                    onClick={() =>
+                      fn(list) && setSel({ kind, store: st })
+                    }
+                  >
+                    {cnt(
+                      metric[kind] || stageMetric[kind],
+                      list,
+                    )}
+                  </td>
+                );
+                const has = (kind) =>
+                  cnt(metric[kind] || stageMetric[kind], list) > 0;
+                return (
+                  <tr key={st}>
+                    <td className="dash-store">{branchLabel(st)}</td>
+                    <td
+                      className="dash-td-click"
+                      onClick={() => setSel({ kind: 'all', store: st })}
+                    >
+                      {list.length}
+                    </td>
+                    {['new', 'talked', 'scheduled', 'dispatched', 'delivered'].map(
+                      (k) => (
+                        <td
+                          key={k}
+                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                          onClick={() => has(k) && setSel({ kind: k, store: st })}
+                        >
+                          {cnt(stageMetric[k], list)}
+                        </td>
+                      ),
+                    )}
+                    {['pending', 'future', 'issues'].map((k) => (
+                      <td
+                        key={k}
+                        className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                        onClick={() => has(k) && setSel({ kind: k, store: st })}
+                      >
+                        {cnt(metric[k], list)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* drill: selected entries */}
+      <div className="dash-block">
+        <div className="dash-block-h">
+          {rows.length} entries
+          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+          {cards.find((c) => c.kind === sel.kind)?.label ||
+            sShort(sel.kind) ||
+            'All'}
+        </div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Store</th>
+                <th>Equipment</th>
+                <th>Stage</th>
+                <th>Amount</th>
+                <th>Created</th>
+                <th>Planned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="dash-empty">
+                    Koi entry nahi
+                  </td>
+                </tr>
+              ) : (
+                rows.map((x) => {
+                  const st = stageMeta(x.stage);
+                  return (
+                    <tr
+                      key={x.invoice_id}
+                      className="dash-row"
+                      onClick={() => onOpen(x)}
+                    >
+                      <td>{x.id}</td>
+                      <td>{x.customer}</td>
+                      <td>{branchLabel(x.branch)}</td>
+                      <td className="ellip" style={{ maxWidth: 200 }}>
+                        {x.equipment}
+                      </td>
+                      <td>
+                        <span
+                          className="dash-chip"
+                          style={{ background: st.soft, color: st.color }}
+                        >
+                          {st.short}
+                        </span>
+                      </td>
+                      <td>₹{x.amount.toLocaleString('en-IN')}</td>
+                      <td>{dayStr(createdTs(x)) || '—'}</td>
+                      <td>{plannedDate(x) || '—'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EntriesView({
   items,
   viewMode,
@@ -1820,12 +2193,15 @@ function Login({ onLogin }) {
 }
 
 /* ═════════════════════════════════════════════════════════════ SIDEBAR */
-function Sidebar({ session }) {
+function Sidebar({ session, page, onNav }) {
+  const isAll = session.branch === 'ALL';
   const nav = [
-    { icon: LayoutDashboard, label: 'Deliveries', active: true },
-    { icon: RotateCcw, label: 'Pickups', soon: true },
-    { icon: MessageSquareWarning, label: 'Complaints', soon: true },
-    { icon: ClipboardCheck, label: 'Reports', soon: true },
+    { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
+    ...(isAll
+      ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }]
+      : []),
+    { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
+    { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
   ];
   const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
   return (
@@ -1848,9 +2224,10 @@ function Sidebar({ session }) {
           <div
             key={n.label}
             className="nav-item"
+            onClick={() => !n.soon && onNav && onNav(n.id)}
             style={{
-              background: n.active ? 'rgba(255,255,255,.12)' : 'transparent',
-              color: n.active ? '#fff' : 'rgba(255,255,255,.62)',
+              background: page === n.id ? 'rgba(255,255,255,.12)' : 'transparent',
+              color: page === n.id ? '#fff' : 'rgba(255,255,255,.62)',
               cursor: n.soon ? 'default' : 'pointer',
             }}
           >
@@ -4212,6 +4589,34 @@ function StyleTag() {
       .brand-badge { width: 40px; height: 40px; border-radius: 12px; background: ${T.green}; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(46,125,50,.35); }
       .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
       .nav-item:hover { background: rgba(255,255,255,.07); }
+      /* ── DASHBOARD ── */
+      .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+      .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
+      .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+      .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
+      .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+      .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
+      .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
+      .dash-card.on { box-shadow: 0 4px 16px rgba(20,57,43,.12); }
+      .dash-card-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+      .dash-card-n { font-size: 26px; font-weight: 800; color: ${T.ink}; line-height: 1; }
+      .dash-card-l { font-size: 11.5px; font-weight: 600; color: ${T.inkSoft}; margin-top: 5px; }
+      .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
+      .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
+      .dash-table-wrap { overflow-x: auto; }
+      .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
+      .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
+      .dash-store { font-weight: 700; color: ${T.ink}; }
+      .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
+      .dash-td-click:hover { background: ${T.mint}; }
+      .dash-td-zero { color: ${T.line2 || '#C9C7BE'}; }
+      .dash-row { cursor: pointer; }
+      .dash-row:hover { background: ${T.cream}; }
+      .dash-chip { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+      .dash-empty { text-align: center; color: ${T.inkSoft}; padding: 26px !important; }
+      @media (max-width: 1100px) { .dash-cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+      @media (max-width: 760px) { .dash-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       .soon { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; color: rgba(255,255,255,.7); }
       .store-tag { margin: 12px; padding: 12px 14px; border-radius: 13px; background: rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
 
