@@ -3481,7 +3481,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           ? !!(
               f.person &&
               f.inspected &&
-              f.photoInspected &&
               f.delivered &&
               f.photoDelivered &&
               String(f.amount).trim() !== '' &&
@@ -3650,7 +3649,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 onChange={() => set('inspected', !f.inspected)}
                 label="Item inspected & ready"
               />
-              {f.inspected && (
+              {!mbc && f.inspected && (
                 <PhotoUpload
                   label="Inspection photo *"
                   invoiceNumber={delivery.id}
@@ -3659,7 +3658,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                   onChange={(url) => set('photoInspected', url)}
                 />
               )}
-              {f.inspected && !f.photoInspected && (
+              {!mbc && f.inspected && !f.photoInspected && (
                 <div className="req-note">Inspection photo lagana zaroori hai.</div>
               )}
 
