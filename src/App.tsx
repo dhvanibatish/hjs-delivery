@@ -1066,6 +1066,19 @@ export default function App() {
       patch.item_inspected = !!f.inspected;
       patch.photo_inspected = f.photoInspected || null;
       patch.stage3_remarks = f.remarks || null;
+      // MBC (Managed By Client) — customer khud le jaata hai. Gaadi/dispatch
+      // ki zarurat nahi: usi form mein final details bhar ke seedha Delivered.
+      if (f.mbcDirect) {
+        if (mode === 'move') patch.status = stageToStatus('delivered');
+        patch.app_vehicle = null; // MBC — koi gaadi nahi lagti
+        patch.item_delivered = !!f.delivered;
+        patch.photo_delivered = f.photoDelivered || null;
+        patch.amount_collected = Number(f.amount) || 0;
+        patch.amount_type = f.amountType || null;
+        patch.security_collected = Number(f.security) || 0;
+        patch.security_type = f.securityType || null;
+        patch.stage4_remarks = f.remarks || null;
+      }
     } else if (toStage === 'dispatched') {
       patch.app_eta = f.eta || null;
     } else if (toStage === 'delivered') {
@@ -1115,7 +1128,14 @@ export default function App() {
     }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
+    // MBC → ek hi save mein Scheduled + Delivered dono log ho
+    const mbc = toStage === 'scheduled' && fields.mbcDirect && mode === 'move';
+    patch.app_log = [
+      ...existingLog(cur),
+      makeEvent(toStage, fields, mode),
+      ...(mbc ? [makeEvent('delivered', fields, 'move')] : []),
+    ];
+    const landed = mbc ? 'delivered' : toStage;
     if (!CONFIGURED) {
       ping('Demo mode — save nahi hua');
       return;
@@ -1125,9 +1145,9 @@ export default function App() {
       ping(
         mode === 'edit'
           ? 'Updated ✓'
-          : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
+          : `Saved ✓  ${STAGES[stageIndex(landed)].label}`,
       );
-      if (mode === 'move') jumpMobile(toStage);
+      if (mode === 'move') jumpMobile(landed);
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
@@ -3449,12 +3469,27 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
   // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
   const flagSel = toStage === 'talked' && !!f.invoiceFlag;
+  // MBC = Managed By Client — customer khud le jaata hai. Scheduled form mein
+  // hi final details bhar ke entry seedha Item Delivered ho jaati hai.
+  const mbc = toStage === 'scheduled' && f.person === 'MBC';
   const canSave = flagSel
     ? true
     : toStage === 'talked'
       ? !!(f.date && f.time) // baat hui → date + time
       : toStage === 'scheduled'
-        ? !!(f.person && f.vehicle && f.inspected && f.photoInspected)
+        ? mbc
+          ? !!(
+              f.person &&
+              f.inspected &&
+              f.photoInspected &&
+              f.delivered &&
+              f.photoDelivered &&
+              String(f.amount).trim() !== '' &&
+              f.amountType &&
+              String(f.security).trim() !== '' &&
+              f.securityType
+            )
+          : !!(f.person && f.vehicle && f.inspected && f.photoInspected)
         : toStage === 'dispatched'
           ? !!f.eta
           : toStage === 'delivered'
@@ -3585,23 +3620,31 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                   ))}
                 </select>
               </Field>
-              <Field label="Vehicle *">
-                <select
-                  className="inp"
-                  value={f.vehicle}
-                  onChange={(e) => set('vehicle', e.target.value)}
-                >
-                  <option value="">Select…</option>
-                  {VEHICLES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                  {f.vehicle && !VEHICLES.includes(f.vehicle) && (
-                    <option value={f.vehicle}>{f.vehicle}</option>
-                  )}
-                </select>
-              </Field>
+              {mbc ? (
+                <div className="flag-note" style={{ background: T.mint, color: T.green }}>
+                  <b>MBC — Managed By Client.</b> Customer khud le ja raha hai, to
+                  gaadi/dispatch ki zarurat nahi. Neeche final details bhar do —
+                  entry seedha <b>Item Delivered</b> ho jayegi.
+                </div>
+              ) : (
+                <Field label="Vehicle *">
+                  <select
+                    className="inp"
+                    value={f.vehicle}
+                    onChange={(e) => set('vehicle', e.target.value)}
+                  >
+                    <option value="">Select…</option>
+                    {VEHICLES.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                    {f.vehicle && !VEHICLES.includes(f.vehicle) && (
+                      <option value={f.vehicle}>{f.vehicle}</option>
+                    )}
+                  </select>
+                </Field>
+              )}
               <Check1
                 checked={f.inspected}
                 onChange={() => set('inspected', !f.inspected)}
@@ -3618,6 +3661,80 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               )}
               {f.inspected && !f.photoInspected && (
                 <div className="req-note">Inspection photo lagana zaroori hai.</div>
+              )}
+
+              {/* MBC → yahin final details (photo + amount + security) */}
+              {mbc && (
+                <>
+                  <div className="mbc-divider">Final details · handover</div>
+                  <Check1
+                    checked={f.delivered}
+                    onChange={() => set('delivered', !f.delivered)}
+                    label="Item customer ko de diya"
+                  />
+                  {f.delivered && (
+                    <PhotoUpload
+                      label="Handover photo *"
+                      invoiceNumber={delivery.id}
+                      kind="delivered"
+                      value={f.photoDelivered}
+                      onChange={(url) => set('photoDelivered', url)}
+                    />
+                  )}
+                  {f.delivered && !f.photoDelivered && (
+                    <div className="req-note">Handover photo lagana zaroori hai.</div>
+                  )}
+                  <div className="two-col">
+                    <Field label="Amount collected *">
+                      <input
+                        className="inp"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={f.amount}
+                        onChange={(e) =>
+                          set('amount', e.target.value.replace(/[^0-9]/g, ''))
+                        }
+                      />
+                    </Field>
+                    <Field label="Amount type *">
+                      <select
+                        className="inp"
+                        value={f.amountType}
+                        onChange={(e) => set('amountType', e.target.value)}
+                      >
+                        {PAY_OPTIONS.map((p) => (
+                          <option key={p}>{p}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                  <div className="two-col">
+                    <Field label="Security collected *">
+                      <input
+                        className="inp"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={f.security}
+                        onChange={(e) =>
+                          set('security', e.target.value.replace(/[^0-9]/g, ''))
+                        }
+                      />
+                    </Field>
+                    <Field label="Security type *">
+                      <select
+                        className="inp"
+                        value={f.securityType}
+                        onChange={(e) => set('securityType', e.target.value)}
+                      >
+                        {PAY_OPTIONS.map((p) => (
+                          <option key={p}>{p}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                </>
               )}
             </>
           )}
@@ -3740,14 +3857,16 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           <button
             className="btn-primary"
             disabled={!canSave}
-            onClick={() => onSave(f)}
+            onClick={() => onSave(mbc ? { ...f, mbcDirect: true } : f)}
           >
             <ShieldCheck size={16} />{' '}
             {flagSel
               ? `Mark as ${CLOSED[f.invoiceFlag].short}`
               : mode === 'edit'
                 ? 'Update'
-                : 'Save & update'}
+                : mbc
+                  ? 'Save · Mark Delivered'
+                  : 'Save & update'}
           </button>
         </div>
     </>
@@ -4384,11 +4503,36 @@ function TrackResult({ row }) {
   const Icon = equipIcon(equipment);
   const person = row.delivery_partner || null;
   const orderId = row.invoice_number;
+  // MBC = Managed By Client — customer khud collect karta hai. Us case mein
+  // "Out for Delivery" step dikhana galat hai; wording bhi pickup waali honi
+  // chahiye. Isliye steps filter + override karte hain.
+  const mbc = String(person || '').trim().toUpperCase() === 'MBC';
+  const steps = mbc
+    ? TRACK_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
+        st.id === 'scheduled'
+          ? {
+              ...st,
+              label: 'Ready for Collection',
+              desc: 'Your item has passed the quality check and is ready. You will collect it as arranged with the store.',
+            }
+          : st.id === 'delivered'
+            ? {
+                ...st,
+                label: 'Handed Over',
+                desc: 'Your order has been handed over to you. Thank you for choosing Healthy Jeena Sikho.',
+              }
+            : st,
+      )
+    : TRACK_STEPS;
 
   const banner = cancelled
     ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
-      ? { text: 'Delivered successfully 🎉', bg: T.mint, fg: T.green }
+      ? {
+          text: mbc ? 'Handed over successfully 🎉' : 'Delivered successfully 🎉',
+          bg: T.mint,
+          fg: T.green,
+        }
       : stage === 'dispatched'
         ? {
             text: 'Your order is out for delivery',
@@ -4396,7 +4540,13 @@ function TrackResult({ row }) {
             fg: T.violet,
           }
         : stage === 'scheduled'
-          ? { text: 'Your delivery is scheduled', bg: T.amberSoft, fg: T.amber }
+          ? {
+              text: mbc
+                ? 'Your item is ready for collection'
+                : 'Your delivery is scheduled',
+              bg: T.amberSoft,
+              fg: T.amber,
+            }
           : stage === 'talked'
             ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
             : {
@@ -4436,9 +4586,12 @@ function TrackResult({ row }) {
 
       {/* the timeline */}
       <div className="track-tl">
-        {TRACK_STEPS.map((step, i) => {
-          if (i > flowIdx) return null; // sirf reached stages dikhao
-          const current = !cancelled && i === idx;
+        {steps.map((step) => {
+          // array-index nahi, asli stage-index dekho (MBC mein ek step hata
+          // diya jaata hai, isliye index shift ho jaata)
+          const si = stageIndex(step.id);
+          if (si > flowIdx) return null; // sirf reached stages dikhao
+          const current = !cancelled && si === idx;
           // "reached this stage" time — har stage pe green chhota timestamp
           const reachedTs =
             stepTime(log, step.id) ||
@@ -4451,7 +4604,7 @@ function TrackResult({ row }) {
               : null);
           const StepIcon = step.icon;
           // closed hua to aakhri reached stage bhi neeche closed-entry se jude
-          const showLine = i < flowIdx || cancelled;
+          const showLine = si < flowIdx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
               <div className="ttl-left">
@@ -4495,15 +4648,22 @@ function TrackResult({ row }) {
                   <div className="ttl-extra">
                     {(schedDate || schedTime) && (
                       <div>
-                        <b>Delivery slot:</b> {schedDate || ''}
+                        <b>{mbc ? 'Collection slot:' : 'Delivery slot:'}</b>{' '}
+                        {schedDate || ''}
                         {schedDate && schedTime ? ', ' : ''}
                         {schedTime || ''}
                       </div>
                     )}
-                    {person && (
+                    {mbc ? (
                       <div>
-                        <b>Delivery partner:</b> {person}
+                        <b>Collection:</b> Self pickup — arranged by you
                       </div>
+                    ) : (
+                      person && (
+                        <div>
+                          <b>Delivery partner:</b> {person}
+                        </div>
+                      )
                     )}
                   </div>
                 )}
@@ -4718,6 +4878,7 @@ function StyleTag() {
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
       .photo-btns { display: flex; gap: 9px; }
