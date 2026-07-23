@@ -169,8 +169,9 @@ const STORE_MANAGERS = {
 const DP = {
   CHD: [
     'Ghola Singh - 8360758647',
-    'Surinder - 9115445618',
     'Sanjay - 6239650644',
+    'Niranjan - 9811069030',
+    'Vikas - 8433051048',
     'MBC',
   ],
   NCR: [
@@ -224,12 +225,14 @@ const DP = {
     'Rahul - 9359521911',
     'Nitin Singh - 7007413101',
     'Karan Gupta - 7838465084',
+    'Uday - 8595759588',
     'MBC',
   ],
   JKP: [
     'Monu - 8766395642',
     'Nitish - 9911814167',
     'Rajankumar Jha - 8595353451',
+    'Anil - 8178680581',
     'MBC',
   ],
 };
@@ -2884,11 +2887,11 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
       <div className="modal-body">
         {toStage === 'talked' && (
           <>
-            <Field label="Pickup date *">
+            <Field label="Confirmed Pickup Date *">
               <input className="inp" type="date" value={f.date} min="2024-01-01" max="2099-12-31" onClick={openPicker}
                 onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('date', v); }} />
             </Field>
-            <Field label="Time *">
+            <Field label="Confirmed Time *">
               <input className="inp" type="time" value={f.time} onClick={openPicker} onChange={(e) => set('time', e.target.value)} />
               {f.time && <span className="tp-preview">🕐 {niceTime(f.time)}</span>}
             </Field>
