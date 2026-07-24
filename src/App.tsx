@@ -655,6 +655,21 @@ function niceDateTime(v) {
   if (!d && !tm) return String(v);
   return [d, tm].filter(Boolean).join(', ');
 }
+/* poori date + 12-ghante ka time — "23 Jul 2026, 5:43 PM" */
+function fmtFullDateTime(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d)) return String(ts);
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
 /* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
 function toLocalInput(v) {
   if (!v || v === 'null') return '';
@@ -666,7 +681,11 @@ function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
   if (toStage === 'new') return {};
   if (toStage === 'talked')
-    return { Date: f.date || '—', Time: f.time || '—', ...rmk };
+    return {
+      Date: f.date ? niceDate(f.date) || f.date : '—',
+      Time: f.time ? niceTime(f.time) || f.time : '—',
+      ...rmk,
+    };
   if (toStage === 'scheduled')
     return {
       'Delivery person': f.person || '—',
@@ -2934,8 +2953,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'talked',
       i: 1,
       rows: [
-        ['Date', show(r.confirmed_date)],
-        ['Time', show(r.confirmed_time)],
+        ['Date', niceDate(r.confirmed_date) || '—'],
+        ['Time', niceTime(r.confirmed_time) || '—'],
         ['Remarks', show(r.stage1_remarks)],
       ],
     },
@@ -3337,6 +3356,11 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
           </div>
         )}
+
+        {/* sabse neeche — ye entry app mein kab aayi (sirf yahin dikhta hai) */}
+        <div className="created-note">
+          Entry app mein aayi: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
+        </div>
       </div>
     </div>
   );
@@ -3490,7 +3514,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             )
           : !!(f.person && f.vehicle && f.inspected && f.photoInspected)
         : toStage === 'dispatched'
-          ? !!f.eta
+          ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
           : toStage === 'delivered'
             ? !!(
                 f.delivered &&
@@ -3582,16 +3606,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                     />
                   </Field>
                   <Field label="Confirmed Time *">
-                    <input
-                      className="inp"
-                      type="time"
+                    <TimePick12
                       value={f.time}
-                      onClick={openPicker}
-                      onChange={(e) => set('time', e.target.value)}
+                      onChange={(v) => set('time', v)}
                     />
-                    {f.time && (
-                      <span className="tp-preview">🕐 {niceTime(f.time)}</span>
-                    )}
                   </Field>
                   {!(f.date && f.time) && (
                     <div className="req-note">
@@ -3740,28 +3758,39 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
 
           {toStage === 'dispatched' && (
             <>
-              <Field label="Estimated arrival (date & time) *">
+              <Field label="Estimated arrival date *">
                 <input
                   className="inp"
-                  type="datetime-local"
-                  value={f.eta}
-                  min="2024-01-01T00:00"
-                  max="2099-12-31T23:59"
+                  type="date"
+                  value={(f.eta || '').slice(0, 10)}
+                  min="2024-01-01"
+                  max="2099-12-31"
                   onClick={openPicker}
                   onChange={(e) => {
                     const v = e.target.value;
                     if (v && Number(v.slice(0, 4)) > 2099) return;
-                    set('eta', v);
+                    set('eta', v ? `${v}T${(f.eta || '').slice(11, 16) || '00:00'}` : '');
                   }}
                 />
-                {f.eta && (
+              </Field>
+              <Field label="Estimated arrival time *">
+                <TimePick12
+                  value={(f.eta || '').slice(11, 16)}
+                  onChange={(t) =>
+                    set(
+                      'eta',
+                      `${(f.eta || '').slice(0, 10) || nowDate}T${t}`,
+                    )
+                  }
+                />
+                {f.eta && (f.eta || '').slice(11, 16) && (
                   <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
                 )}
               </Field>
-              {!f.eta && (
+              {!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16)) && (
                 <div className="req-note">
-                  Customer ko yahi time message mein jaayega — bharna zaroori
-                  hai.
+                  Customer ko yahi date &amp; time message mein jaayega — dono
+                  bharna zaroori hai.
                 </div>
               )}
             </>
@@ -3891,6 +3920,66 @@ function Field({ label, children }) {
     </div>
   );
 }
+/* 12-ghante ka time picker — hour (1-12) + minute + AM/PM.
+   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta),
+   isliye apna control: value andar "HH:MM" (24h) hi rehti hai. */
+function TimePick12({ value, onChange }) {
+  const [hh, mm] = String(value || '')
+    .split(':')
+    .map((x) => parseInt(x, 10));
+  const h24 = isNaN(hh) ? null : hh;
+  const ap = h24 == null ? 'AM' : h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 == null ? '' : h24 % 12 || 12;
+  const min = isNaN(mm) ? '' : String(mm).padStart(2, '0');
+
+  const push = (nh12, nmin, nap) => {
+    if (!nh12 || nmin === '' || !nap) return;
+    let h = Number(nh12) % 12;
+    if (nap === 'PM') h += 12;
+    onChange(`${String(h).padStart(2, '0')}:${nmin}`);
+  };
+
+  return (
+    <div className="tp12">
+      <select
+        className="inp"
+        value={h12}
+        onChange={(e) => push(e.target.value, min || '00', ap)}
+      >
+        <option value="">Hr</option>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+      <span className="tp12-sep">:</span>
+      <select
+        className="inp"
+        value={min}
+        onChange={(e) => push(h12 || 12, e.target.value, ap)}
+      >
+        <option value="">Min</option>
+        {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(
+          (m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ),
+        )}
+      </select>
+      <select
+        className="inp"
+        value={ap}
+        onChange={(e) => push(h12 || 12, min || '00', e.target.value)}
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+}
+
 function Check1({ checked, onChange, label }) {
   return (
     <button
@@ -4877,6 +4966,12 @@ function StyleTag() {
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .tp12 { display: flex; align-items: center; gap: 7px; }
+      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
+      .tp12 .inp:last-child { flex: 0 0 84px; }
+      .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
+      .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
+      .created-note b { color: ${T.ink}; font-weight: 700; }
       .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
