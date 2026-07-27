@@ -3,11 +3,14 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import Pickups from './Pickups.tsx'
+import ComplaintApp from './ComplaintApp.tsx'
 
-const isPickup = new URLSearchParams(window.location.search).has('pickups')
+const params = new URLSearchParams(window.location.search)
+const isPickup = params.has('pickups')
+const isComplaint = params.has('complaints')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isPickup ? <Pickups /> : <App />}
+    {isComplaint ? <ComplaintApp /> : isPickup ? <Pickups /> : <App />}
   </StrictMode>,
 )
