@@ -468,23 +468,41 @@ function createdTs(x) {
   const r = (x && x._raw) || {};
   return r.created_at || r.opening_time || r.updated_at || null;
 }
-function resolvedTs(x) {
+// ticket kab "band" hua — resolved ya closed (cancelled/duplicate/invalid).
+// app_log ke aakhri closing-event ka time; warna updated_at.
+function closedTs(x) {
   const r = (x && x._raw) || {};
   const log = Array.isArray(r.app_log) ? r.app_log : [];
   for (let i = log.length - 1; i >= 0; i--) {
-    if (log[i] && log[i].stage === 'resolution' && log[i].ts) return log[i].ts;
+    const ev = log[i];
+    if (ev && (ev.stage === 'resolution' || CLOSED[ev.stage]) && ev.ts)
+      return ev.ts;
   }
-  return r.updated_at || null;
+  return r.updated_at || r.created_at || null;
 }
+const HOUR = 3600000;
+function hoursSince(ts) {
+  if (!ts) return 0;
+  const d = new Date(ts);
+  if (isNaN(d)) return 0;
+  return (Date.now() - d.getTime()) / HOUR;
+}
+/*
+  Ek ticket kaha dikhe:
+  - PENDING (received/talk/status)  → hamesha "Today" me.
+  - BAND (resolved/cancelled/dup/invalid):
+      0–24 ghante   → "Today" me (abhi-abhi band hui).
+      24–48 ghante  → "Archived" me.
+      48+ ghante    → kahin nahi (view se gayab; Supabase me safe rehti hai).
+*/
 function inView(x, viewMode) {
   const st = x.stage;
   const pending = st !== 'resolution' && !isClosedStage(st);
-  if (viewMode === 'archived') return !pending;
-  return (
-    pending ||
-    isToday(createdTs(x)) ||
-    (st === 'resolution' && isToday(resolvedTs(x)))
-  );
+  if (pending) return viewMode === 'today';
+  const h = hoursSince(closedTs(x));
+  if (h < 24) return viewMode === 'today'; // abhi band hui
+  if (h < 48) return viewMode === 'archived'; // 24h baad archived
+  return false; // 48h baad view se gayab
 }
 
 const CATS = [
@@ -2812,9 +2830,12 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   const _pad = (n) => String(n).padStart(2, '0');
   const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
+  const nowSaveTs = _now.toISOString(); // talk stage — abhi ka time (display)
   const in3 = new Date(Date.now() + 3 * 86400000);
   const soonDate = `${in3.getFullYear()}-${_pad(in3.getMonth() + 1)}-${_pad(in3.getDate())}`;
   const [f, setF] = useState({
+    // talk ki date/time ab MANUAL nahi — save karte waqt abhi ka time
+    // apne aap bhar jayega (niche onSave me). Edit me purana rahega.
     date:
       mode === 'edit' && r.talk_date && r.talk_date !== 'null'
         ? r.talk_date
@@ -2849,7 +2870,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   const spot = toStage === 'status' && f.action === 'Store pe repair kiya';
   const canSave =
     toStage === 'talk'
-      ? !!(f.date && f.time)
+      ? !!f.remarks.trim() // customer ne kya kaha — MANDATORY
       : toStage === 'status'
         ? spot
           ? !!(f.action && f.resolved)
@@ -2899,40 +2920,13 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
       )}
       <div className="modal-body">
         {toStage === 'talk' && (
-          <>
-            <Field label="Baat ki Date *">
-              <input
-                className="inp"
-                type="date"
-                value={f.date}
-                min="2024-01-01"
-                max="2099-12-31"
-                onClick={openPicker}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v && Number(v.slice(0, 4)) > 2099) return;
-                  set('date', v);
-                }}
-              />
-            </Field>
-            <Field label="Baat ka Time *">
-              <input
-                className="inp"
-                type="time"
-                value={f.time}
-                onClick={openPicker}
-                onChange={(e) => set('time', e.target.value)}
-              />
-              {f.time && (
-                <span className="tp-preview">🕐 {niceTime(f.time)}</span>
-              )}
-            </Field>
-            {!(f.date && f.time) && (
-              <div className="req-note">
-                Date aur Time dono bharna zaroori hai.
-              </div>
-            )}
-          </>
+          <div className="auto-time">
+            <Clock size={15} />
+            <span>
+              Aaj ka time apne aap save hoga:{' '}
+              <b>{niceDateTime(nowSaveTs) || '—'}</b>
+            </span>
+          </div>
         )}
 
         {toStage === 'status' && (
@@ -3044,6 +3038,11 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
             onChange={(e) => set('remarks', e.target.value)}
           />
         </Field>
+        {toStage === 'talk' && !f.remarks.trim() && (
+          <div className="req-note">
+            Customer ne kya kaha — likhna zaroori hai.
+          </div>
+        )}
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>
@@ -3266,6 +3265,9 @@ function StyleTag() {
       .prev-line { display: flex; align-items: center; gap: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 13px; font-size: 13px; color: ${T.ink}; line-height: 1.4; }
       .prev-line b { font-weight: 800; }
       .prev-line svg { color: ${T.amber}; flex-shrink: 0; }
+      .auto-time { display: flex; align-items: center; gap: 8px; background: ${T.blueSoft}; border: 1px solid #cfe0f0; border-radius: 11px; padding: 11px 13px; font-size: 13px; color: ${T.blue}; line-height: 1.4; }
+      .auto-time b { font-weight: 800; }
+      .auto-time svg { flex-shrink: 0; }
 
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
