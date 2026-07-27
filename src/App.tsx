@@ -994,7 +994,24 @@ export default function App() {
   if (params.has('track') || params.has('sales') || isTrackPath)
     return <SalesTrackPage />; // sales — phone → list → timeline
 
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(() => {
+    // app switch / reload pe wapas login na maange — session yaad rakho
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem('hjsSession');
+        if (raw) return JSON.parse(raw);
+      }
+    } catch (_) {}
+    return null;
+  });
+  // session badle to localStorage mein rakho / hatao (logout pe)
+  useEffect(() => {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      if (session) localStorage.setItem('hjsSession', JSON.stringify(session));
+      else localStorage.removeItem('hjsSession');
+    } catch (_) {}
+  }, [session]);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
