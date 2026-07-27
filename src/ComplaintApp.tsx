@@ -42,7 +42,7 @@ import {
    ══════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
   url: 'https://bkiorfluddgdujpkcfjm.supabase.co',
-  key: '', // <- anon/publishable key yahan daalo (khaali = DEMO mode)
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraW9yZmx1ZGRnZHVqcGtjZmptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjE1MzEsImV4cCI6MjEwMDA5NzUzMX0.dqggpSuocXcxPYeCfXmVQqPrxfCbR2LiZ-lVN_mOJas',
   table: 'tickets',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
