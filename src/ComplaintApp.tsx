@@ -2826,11 +2826,18 @@ function KV({ label, value, full }) {
 function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   const stage = STAGES[stageIndex(toStage)];
   const r = (ticket && ticket._raw) || {};
-  const _now = new Date();
+  // Live ghadi — talk stage me "abhi ka time" har second update hota rahe,
+  // taaki save karte waqt bilkul current time save ho.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (toStage !== 'talk') return;
+    const id = setInterval(() => setNowTick(Date.now()), 20000);
+    return () => clearInterval(id);
+  }, [toStage]);
+  const _now = new Date(nowTick);
   const _pad = (n) => String(n).padStart(2, '0');
   const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
-  const nowSaveTs = _now.toISOString(); // talk stage — abhi ka time (display)
   const in3 = new Date(Date.now() + 3 * 86400000);
   const soonDate = `${in3.getFullYear()}-${_pad(in3.getMonth() + 1)}-${_pad(in3.getDate())}`;
   const [f, setF] = useState({
@@ -2923,8 +2930,17 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
           <div className="auto-time">
             <Clock size={15} />
             <span>
-              Aaj ka time apne aap save hoga:{' '}
-              <b>{niceDateTime(nowSaveTs) || '—'}</b>
+              Abhi ka time apne aap save hoga:{' '}
+              <b>
+                {_now.toLocaleString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true,
+                })}
+              </b>
             </span>
           </div>
         )}
@@ -3051,7 +3067,17 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
         <button
           className="btn-primary"
           disabled={!canSave}
-          onClick={() => onSave(spot ? { ...f, spotFix: true } : f)}
+          onClick={() => {
+            // talk stage — save ke exact waqt ka live time bhejo
+            let out = { ...f };
+            if (toStage === 'talk' && mode !== 'edit') {
+              const t = new Date();
+              const p = (n) => String(n).padStart(2, '0');
+              out.date = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+              out.time = `${p(t.getHours())}:${p(t.getMinutes())}`;
+            }
+            onSave(spot ? { ...out, spotFix: true } : out);
+          }}
         >
           <ShieldCheck size={16} />{' '}
           {mode === 'edit'
