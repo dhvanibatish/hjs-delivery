@@ -91,6 +91,10 @@ async function sbTrack(invoice, phone) {
 async function sbTrackSearch(phone, pin) {
   return sbRpc('track_search', { p_phone: phone, p_pin: pin });
 }
+// Sales console: store code se us store ki saari active deliveries (PIN-free)
+async function sbSalesByStore(store) {
+  return sbRpc('sales_by_store', { p_store: store });
+}
 // photo upload → Supabase Storage bucket 'delivery-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
@@ -4150,69 +4154,52 @@ function stepTime(log, stageId) {
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
 function SalesTrackPage() {
-  const [unlocked, setUnlocked] = useState(false);
-  const [pin, setPin] = useState('');
-  const [gateBusy, setGateBusy] = useState(false);
-  const [gateErr, setGateErr] = useState('');
-  const [phone, setPhone] = useState('');
-  const [state, setState] = useState('idle'); // idle|loading|done|notfound|error
+  // Naya flow (PIN-free): store chuno → us store ki naam-wise list → detail.
+  const [store, setStore] = useState(null); // chuna hua store code
+  const [state, setState] = useState('idle'); // idle|loading|done|error
   const [rows, setRows] = useState([]);
+  const [q, setQ] = useState(''); // list search
   const [selected, setSelected] = useState(null);
   const [err, setErr] = useState('');
 
-  // PIN verify: empty phone se call — sahi PIN pe [] aata hai, galat pe error
-  const unlock = async () => {
-    if (!pin) {
-      setGateErr('Enter the sales PIN.');
-      return;
-    }
-    setGateBusy(true);
-    setGateErr('');
-    try {
-      await sbTrackSearch('', pin);
-      setUnlocked(true);
-    } catch (e) {
-      const msg = String(e.message || '');
-      // RPC sirf galat PIN pe hi 'pin' waala error deta hai. Baaki errors
-      // (function missing / permission / naya project setup) alag dikhao.
-      if (/pin|invalid|unauthor/i.test(msg)) {
-        setGateErr('Wrong PIN. Try again.');
-      } else {
-        setGateErr('Access error: ' + msg);
-      }
-    }
-    setGateBusy(false);
-  };
+  const STORE_LIST = [
+    'NOD',
+    'JKP',
+    'NWD',
+    'GGN',
+    'JPR',
+    'LKO',
+    'MOH',
+    'JAL',
+    'LDH',
+    'CHD',
+    'NCR',
+  ];
 
-  const search = async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 10) {
-      setErr('Please enter a full 10-digit mobile number.');
-      return;
-    }
-    setErr('');
-    setState('loading');
+  const openStore = async (code) => {
+    setStore(code);
     setSelected(null);
+    setQ('');
+    setState('loading');
+    setErr('');
     try {
-      const res = await sbTrackSearch(`+91${digits}`, pin);
-      if (!res || res.length === 0) {
-        setRows([]);
-        setState('notfound');
-        return;
-      }
-      setRows(res);
+      const res = await sbSalesByStore(code);
+      setRows(res || []);
       setState('done');
     } catch (e) {
-      // PIN galat ho gaya (e.g. changed) → wapas gate pe
-      if (String(e.message || '').toLowerCase().includes('pin')) {
-        setUnlocked(false);
-        setGateErr('Session expired — enter PIN again.');
-        return;
-      }
       setErr(e.message || 'Something went wrong');
       setState('error');
     }
   };
+
+  // naam / invoice / product se filter
+  const shown = rows.filter((r) => {
+    if (!q.trim()) return true;
+    const hay = `${r.customer_name || ''} ${r.invoice_number || ''} ${equipmentText(
+      { line_items: r.line_items, item_name: r.item_name },
+    )}`.toLowerCase();
+    return hay.includes(q.trim().toLowerCase());
+  });
 
   return (
     <div className="track-wrap" style={{ fontFamily: FONT }}>
@@ -4234,158 +4221,112 @@ function SalesTrackPage() {
       </div>
 
       <div className="track-body">
-        {!unlocked ? (
-          <div className="track-card">
-            <h1 className="track-h1">Sales access</h1>
-            <p className="track-sub">
-              Enter the sales PIN to look up customer deliveries.
-            </p>
-            <Field label="Sales PIN">
-              <input
-                className="inp"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="••••"
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
-                  setGateErr('');
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && unlock()}
-              />
-            </Field>
-            {gateErr && <div className="login-err">{gateErr}</div>}
-            <button
-              className="btn-primary"
-              style={{ width: '100%', marginTop: 4 }}
-              disabled={!pin || gateBusy}
-              onClick={unlock}
-            >
-              {gateBusy ? (
-                'Checking…'
-              ) : (
-                <>
-                  Unlock <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-            <div className="track-foot" style={{ marginTop: 6 }}>
-              Healthy Jeena Sikho · Internal use only
-            </div>
+        {/* STEP 1 — store buttons (hamesha dikhte hain) */}
+        <div className="sales-stores">
+          <div className="sales-stores-label">Select a store</div>
+          <div className="sales-stores-row">
+            {STORE_LIST.map((code) => (
+              <button
+                key={code}
+                className={
+                  store === code ? 'store-pill is-active' : 'store-pill'
+                }
+                onClick={() => openStore(code)}
+              >
+                {branchLabel(code)}
+              </button>
+            ))}
           </div>
-        ) : selected ? (
+        </div>
+
+        {/* STEP 3 — customer detail */}
+        {selected ? (
           <>
             <button className="track-back" onClick={() => setSelected(null)}>
-              <ArrowLeft size={16} /> Back to list
+              <ArrowLeft size={16} /> Back to {branchLabel(store)} list
             </button>
             <TrackResult row={selected} />
           </>
+        ) : !store ? (
+          <div className="track-msg" style={{ marginTop: 4 }}>
+            Kisi store pe tap karke uski deliveries dekho.
+          </div>
+        ) : state === 'loading' ? (
+          <div className="track-msg">Loading {branchLabel(store)}…</div>
+        ) : state === 'error' ? (
+          <div className="track-msg">Unable to load. {err}</div>
         ) : (
-          <div className="track-card">
-            <h1 className="track-h1">Track a customer's deliveries</h1>
-            <p className="track-sub">
-              Enter the customer's registered mobile number to see all their
-              orders, latest first.
-            </p>
-            <Field label="Customer mobile number">
-              <div className="phone-row">
-                <span className="code-fixed">+91</span>
+          /* STEP 2 — us store ki naam-wise list */
+          <div className="sales-list">
+            <div className="sales-listbar">
+              <div className="sales-list-head">
+                {branchLabel(store)} · {shown.length}{' '}
+                {shown.length === 1 ? 'delivery' : 'deliveries'}
+              </div>
+              <div className="sales-search">
+                <Search size={15} color={T.inkSoft} />
                 <input
-                  className="inp phone-input"
-                  inputMode="numeric"
-                  placeholder="Enter mobile number"
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value.replace(/\D/g, ''));
-                    setErr('');
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && search()}
+                  placeholder="Search name, invoice, product…"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
                 />
               </div>
-            </Field>
-            {err && <div className="login-err">{err}</div>}
-            <button
-              className="btn-primary"
-              style={{ width: '100%', marginTop: 4 }}
-              disabled={state === 'loading'}
-              onClick={search}
-            >
-              {state === 'loading' ? (
-                'Searching…'
-              ) : (
-                <>
-                  Search <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-            {state === 'notfound' && (
-              <div className="track-msg">
-                No deliveries found for this number.
-              </div>
-            )}
-            {state === 'error' && (
-              <div className="track-msg">
-                Unable to search right now. Please try again.
-              </div>
-            )}
-          </div>
-        )}
-
-        {!selected && state === 'done' && rows.length > 0 && (
-          <div className="sales-list">
-            <div className="sales-list-head">
-              {rows.length} {rows.length === 1 ? 'delivery' : 'deliveries'} ·
-              latest first
             </div>
-            {rows.map((r) => {
-              const st = statusToStage(r.status);
-              const cancelled = st === 'cancelled';
-              const stg = stageMeta(st);
-              const equip = equipmentText({
-                line_items: r.line_items,
-                item_name: r.item_name,
-              });
-              const Icon = equipIcon(equip);
-              return (
-                <button
-                  key={r.invoice_number}
-                  className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
-                  onClick={() => setSelected(r)}
-                >
-                  <div className="eq-ico" style={{ background: stg.soft }}>
-                    <Icon size={17} color={stg.color} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="sales-row-top">
-                      <span
-                        className="ellip"
-                        style={{ fontWeight: 800, fontSize: 14.5 }}
-                      >
-                        {r.customer_name || 'Customer'}
-                      </span>
-                      <span
-                        className="sales-chip"
-                        style={{ background: stg.soft, color: stg.color }}
-                      >
-                        {stg.short}
-                      </span>
+
+            {shown.length === 0 ? (
+              <div className="track-msg">Koi delivery nahi mili.</div>
+            ) : (
+              shown.map((r) => {
+                const st = statusToStage(r.status);
+                const cancelled = st === 'cancelled';
+                const stg = stageMeta(st);
+                const equip = equipmentText({
+                  line_items: r.line_items,
+                  item_name: r.item_name,
+                });
+                const Icon = equipIcon(equip);
+                return (
+                  <button
+                    key={r.invoice_number}
+                    className={
+                      cancelled ? 'sales-row is-cancelled' : 'sales-row'
+                    }
+                    onClick={() => setSelected(r)}
+                  >
+                    <div className="eq-ico" style={{ background: stg.soft }}>
+                      <Icon size={17} color={stg.color} />
                     </div>
-                    <div className="ellip sales-sub">{equip}</div>
-                    <div className="sales-meta">
-                      <span className="ellip">#{r.invoice_number}</span>
-                      <span>
-                        ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
-                      </span>
-                      {niceDate(r.created_at) && (
-                        <span>{niceDate(r.created_at)}</span>
-                      )}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="sales-row-top">
+                        <span
+                          className="ellip"
+                          style={{ fontWeight: 800, fontSize: 14.5 }}
+                        >
+                          {r.customer_name || 'Customer'}
+                        </span>
+                        <span
+                          className="sales-chip"
+                          style={{ background: stg.soft, color: stg.color }}
+                        >
+                          {stg.short}
+                        </span>
+                      </div>
+                      <div className="ellip sales-sub">{equip}</div>
+                      <div className="sales-meta">
+                        <span className="ellip">#{r.invoice_number}</span>
+                        <span>
+                          ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+                        </span>
+                        {niceDate(r.created_at) && (
+                          <span>{niceDate(r.created_at)}</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <ChevronRight size={18} color={T.inkSoft} />
-                </button>
-              );
-            })}
+                    <ChevronRight size={18} color={T.inkSoft} />
+                  </button>
+                );
+              })
+            )}
           </div>
         )}
 
@@ -5134,6 +5075,15 @@ function StyleTag() {
       .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
       .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
       .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .sales-stores { margin-bottom: 16px; }
+      .sales-stores-label { font-size: 12px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 9px; }
+      .sales-stores-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .store-pill { border: 1.5px solid ${T.line}; background: #fff; color: ${T.ink}; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; transition: all .12s; }
+      .store-pill:hover { border-color: ${T.green}; }
+      .store-pill.is-active { background: ${T.forest}; border-color: ${T.forest}; color: #fff; }
+      .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+      .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
+      .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
