@@ -99,6 +99,10 @@ async function sbSalesByStore(store) {
 async function sbSalesMatrix(from, to) {
   return sbRpc('sales_matrix', { p_from: from, p_to: to });
 }
+// Global search: customer / invoice / salesperson
+async function sbSalesSearch(qq) {
+  return sbRpc('sales_search', { p_q: qq });
+}
 // Ek cell ki deliveries (salesperson + store, date range)
 async function sbSalesCell(sales, store, from, to) {
   return sbRpc('sales_cell', {
@@ -4177,9 +4181,38 @@ function SalesTrackPage() {
   const [cell, setCell] = useState(null); // {sales, store}
   const [rows, setRows] = useState([]);
   const [cState, setCState] = useState('idle');
-  const [q, setQ] = useState(''); // matrix search (salesperson naam)
-  const [lq, setLq] = useState(''); // list search
+  const [q, setQ] = useState(''); // global search (customer/invoice/salesperson)
+  const [sRows, setSRows] = useState([]);
+  const [sState, setSState] = useState('idle'); // idle|loading|done
+  const [lq, setLq] = useState(''); // list search (cell view)
   const [selected, setSelected] = useState(null);
+
+  // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) {
+      setSState('idle');
+      setSRows([]);
+      return;
+    }
+    let alive = true;
+    setSState('loading');
+    const t = setTimeout(async () => {
+      try {
+        const res = await sbSalesSearch(term);
+        if (alive) {
+          setSRows(res || []);
+          setSState('done');
+        }
+      } catch (_) {
+        if (alive) setSState('done');
+      }
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q]);
 
   const bounds = () => {
     const t = new Date();
@@ -4304,6 +4337,7 @@ function SalesTrackPage() {
             <button className="track-back" onClick={() => setSelected(null)}>
               <ArrowLeft size={16} /> Back to list
             </button>
+            <SalesOrderCard row={selected} />
             <TrackResult row={selected} />
           </>
         ) : cell ? (
@@ -4379,7 +4413,7 @@ function SalesTrackPage() {
               <div className="mx-search">
                 <Search size={16} color={T.inkSoft} />
                 <input
-                  placeholder="Search salesperson…"
+                  placeholder="Search customer, invoice, salesperson…"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
@@ -4420,10 +4454,79 @@ function SalesTrackPage() {
             </div>
 
             <div className="mx-caption">
-              Deliveries by salesperson &amp; store · {rangeLabel}
+              {sState === 'idle' &&
+                `Deliveries by salesperson & store · ${rangeLabel}`}
             </div>
 
-            {mState === 'loading' ? (
+            {sState !== 'idle' ? (
+              /* GLOBAL SEARCH RESULTS — matrix ki jagah */
+              <>
+                <div className="mx-caption">
+                  {sState === 'loading'
+                    ? 'Searching…'
+                    : `${sRows.length} result${sRows.length === 1 ? '' : 's'} for "${q.trim()}"`}
+                </div>
+                {sState === 'done' && sRows.length === 0 ? (
+                  <div className="track-msg">Kuch nahi mila.</div>
+                ) : (
+                  <div className="sales-list">
+                    {sRows.map((r) => {
+                      const st = statusToStage(r.status);
+                      const cancelled = st === 'cancelled';
+                      const stg = stageMeta(st);
+                      const equip = equipmentText({
+                        line_items: r.line_items,
+                        item_name: r.item_name,
+                      });
+                      const Icon = equipIcon(equip);
+                      return (
+                        <button
+                          key={r.invoice_number}
+                          className={
+                            cancelled ? 'sales-row is-cancelled' : 'sales-row'
+                          }
+                          onClick={() => setSelected(r)}
+                        >
+                          <div className="eq-ico" style={{ background: stg.soft }}>
+                            <Icon size={17} color={stg.color} />
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div className="sales-row-top">
+                              <span
+                                className="ellip"
+                                style={{ fontWeight: 800, fontSize: 14.5 }}
+                              >
+                                {r.customer_name || 'Customer'}
+                              </span>
+                              <span
+                                className="sales-chip"
+                                style={{ background: stg.soft, color: stg.color }}
+                              >
+                                {stg.short}
+                              </span>
+                            </div>
+                            <div className="ellip sales-sub">{equip}</div>
+                            <div className="sales-meta">
+                              <span className="ellip">#{r.invoice_number}</span>
+                              {r.salesperson && (
+                                <span className="ellip">{r.salesperson}</span>
+                              )}
+                              <span>
+                                ₹
+                                {Number(r.total_amount || 0).toLocaleString(
+                                  'en-IN',
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                          <ChevronRight size={18} color={T.inkSoft} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : mState === 'loading' ? (
               <div className="track-msg">Loading…</div>
             ) : mState === 'error' ? (
               <div className="track-msg">Unable to load. {mErr}</div>
@@ -4675,6 +4778,59 @@ function TrackPage({ invoice }) {
         <div className="track-foot">
           Healthy Jeena Sikho · Medical equipment rentals
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* Sales-only detail card — sab zaroori info ek jagah, systematically */
+function SalesOrderCard({ row }) {
+  const store = deriveBranch(row);
+  const manager = STORE_MANAGERS[store] || '—';
+  const stage = statusToStage(row.status);
+  const stg = stageMeta(stage);
+  const val = (x) => (x && x !== 'null' ? x : null);
+  const money = (n) =>
+    n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : null;
+
+  const rows = [
+    ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
+    ['Salesperson', val(row.salesperson) || '—'],
+    ['Store', branchLabel(store)],
+    ['Store manager', manager],
+    ['Talked to customer',
+      val(row.confirmed_date)
+        ? `${niceDate(row.confirmed_date)}${val(row.confirmed_time) ? ', ' + niceTime(row.confirmed_time) : ''}`
+        : '—'],
+    ['Delivery person', val(row.app_delivery_person) || '—'],
+    ['Mode of transport', val(row.app_vehicle) || '—'],
+    ['Estimated arrival', niceDateTime(row.app_eta) || '—'],
+    ['Amount collected',
+      money(row.amount_collected)
+        ? `${money(row.amount_collected)}${val(row.amount_type) ? ' · ' + row.amount_type : ''}`
+        : '—'],
+    ['Security collected',
+      money(row.security_collected)
+        ? `${money(row.security_collected)}${val(row.security_type) ? ' · ' + row.security_type : ''}`
+        : '—'],
+    ['Invoice total', money(row.total_amount) || '—'],
+  ];
+
+  return (
+    <div className="soc">
+      <div className="soc-head">
+        <div>
+          <div className="soc-cust">{row.customer_name || 'Customer'}</div>
+          <div className="soc-inv">#{row.invoice_number}</div>
+        </div>
+      </div>
+      <div className="soc-grid">
+        {rows.map(([k, v]) => (
+          <div className="soc-item" key={k}>
+            <div className="soc-k">{k}</div>
+            <div className="soc-v">{v}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -5273,6 +5429,17 @@ function StyleTag() {
       .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
       .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
       .mx-footer .mx-sticky { background: #F4F2EB !important; }
+      /* Sales-only order details card */
+      .soc { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 18px 18px 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
+      .soc-head { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #F1EFE8; margin-bottom: 4px; }
+      .soc-cust { font-size: 17px; font-weight: 800; color: ${T.ink}; }
+      .soc-inv { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; margin-top: 2px; }
+      .soc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+      .soc-item { padding: 11px 4px; border-bottom: 1px solid #F5F3EC; }
+      .soc-item:nth-child(odd) { padding-right: 16px; }
+      .soc-k { font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
+      .soc-v { font-size: 14px; font-weight: 600; color: ${T.ink}; }
+      @media (max-width: 560px) { .soc-grid { grid-template-columns: 1fr; } }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
