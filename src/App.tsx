@@ -4290,7 +4290,14 @@ function SalesTrackPage() {
     'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
   ];
   stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
-  people.sort((a, b) => (rowTotal[b] || 0) - (rowTotal[a] || 0));
+  // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
+  const hasNum = (p) => /\d{6,}/.test(String(p || ''));
+  people.sort((a, b) => {
+    const na = hasNum(a) ? 1 : 0;
+    const nb = hasNum(b) ? 1 : 0;
+    if (na !== nb) return nb - na; // number waale pehle
+    return (rowTotal[b] || 0) - (rowTotal[a] || 0);
+  });
   const shownPeople = people.filter(
     (p) => !q.trim() || p.toLowerCase().includes(q.trim().toLowerCase()),
   );
