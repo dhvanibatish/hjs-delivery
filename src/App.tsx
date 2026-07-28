@@ -4375,38 +4375,40 @@ function SalesTrackPage() {
         ) : (
           /* MATRIX OVERVIEW */
           <>
-            <div className="sales-listbar">
-              <div className="sales-filters">
-                <div className="date-chips">
-                  {[
-                    ['today', 'Aaj'],
-                    ['yesterday', 'Kal'],
-                    ['7d', '7 din'],
-                    ['month', 'Mahina'],
-                    ['all', 'Sabhi'],
-                    ['custom', 'Custom'],
-                  ].map(([id, lbl]) => (
-                    <button
-                      key={id}
-                      className={range === id ? 'date-chip on' : 'date-chip'}
-                      onClick={() => setRange(id)}
-                    >
-                      {lbl}
-                    </button>
-                  ))}
-                </div>
+            <div className="mx-toolbar">
+              <div className="mx-search">
+                <Search size={16} color={T.inkSoft} />
+                <input
+                  placeholder="Search salesperson…"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+              </div>
+              <div className="mx-daterow">
+                <select
+                  className="mx-select"
+                  value={range}
+                  onChange={(e) => setRange(e.target.value)}
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="month">This month</option>
+                  <option value="all">All time</option>
+                  <option value="custom">Custom range</option>
+                </select>
                 {range === 'custom' && (
-                  <div className="date-range">
+                  <div className="mx-range">
                     <input
-                      className="dash-inp"
+                      className="mx-date"
                       type="date"
                       value={from}
                       max={to}
                       onChange={(e) => setFrom(e.target.value)}
                     />
-                    <span className="date-arrow">→</span>
+                    <span className="mx-arrow">–</span>
                     <input
-                      className="dash-inp"
+                      className="mx-date"
                       type="date"
                       value={to}
                       min={from}
@@ -4415,18 +4417,10 @@ function SalesTrackPage() {
                   </div>
                 )}
               </div>
-              <div className="sales-search">
-                <Search size={15} color={T.inkSoft} />
-                <input
-                  placeholder="Search salesperson…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </div>
             </div>
 
-            <div className="sales-matrix-title">
-              Sales × Store · {rangeLabel}
+            <div className="mx-caption">
+              Deliveries by salesperson &amp; store · {rangeLabel}
             </div>
 
             {mState === 'loading' ? (
@@ -4442,7 +4436,9 @@ function SalesTrackPage() {
                     <tr>
                       <th className="mx-sticky">Salesperson</th>
                       {stores.map((s) => (
-                        <th key={s} className="mx-store">{branchLabel(s)}</th>
+                        <th key={s} className="mx-store" title={branchLabel(s)}>
+                          {s}
+                        </th>
                       ))}
                       <th className="mx-total">Total</th>
                     </tr>
@@ -4456,10 +4452,12 @@ function SalesTrackPage() {
                           return (
                             <td
                               key={s}
-                              className={n ? 'mx-cell mx-click' : 'mx-cell mx-zero'}
+                              className={
+                                n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
+                              }
                               onClick={() => n && openCell(person, s)}
                             >
-                              {n || ''}
+                              {n || '·'}
                             </td>
                           );
                         })}
@@ -4469,7 +4467,9 @@ function SalesTrackPage() {
                     <tr className="mx-footer">
                       <td className="mx-sticky">Total</td>
                       {stores.map((s) => (
-                        <td key={s} className="mx-total">{colTotal[s] || 0}</td>
+                        <td key={s} className="mx-total">
+                          {colTotal[s] || 0}
+                        </td>
                       ))}
                       <td className="mx-total">
                         {matrix.reduce((a, m) => a + Number(m.cnt), 0)}
@@ -5236,27 +5236,39 @@ function StyleTag() {
       .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
       .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
       .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
-      .sales-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-      .date-chips { display: inline-flex; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 3px; gap: 2px; flex-wrap: wrap; }
-      .date-chip { border: none; background: transparent; padding: 7px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
-      .date-chip.on { background: ${T.forest}; color: #fff; }
-      .date-range { display: inline-flex; align-items: center; gap: 7px; }
-      .date-arrow { color: ${T.inkSoft}; font-weight: 800; }
-      .sales-matrix-title { font-size: 12px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; margin: 14px 0 10px; }
-      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 14px; background: #fff; }
-      .matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
-      .matrix th, .matrix td { padding: 10px 12px; text-align: center; white-space: nowrap; border-bottom: 1px solid ${T.cream}; }
-      .matrix thead th { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; background: ${T.cream}; border-bottom: 1px solid ${T.line}; }
-      .mx-sticky { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left !important; }
-      .matrix thead .mx-sticky { background: ${T.cream}; }
-      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 170px; }
-      .mx-cell { font-weight: 700; }
+      /* Sales matrix — toolbar + polished light table */
+      .mx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+      .mx-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 10px 14px; flex: 1; min-width: 220px; }
+      .mx-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 14px; color: ${T.ink}; width: 100%; }
+      .mx-daterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .mx-select { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .mx-range { display: inline-flex; align-items: center; gap: 6px; }
+      .mx-date { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 9px 12px; font-size: 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
+      .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
+      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
+      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; }
+      .matrix th, .matrix td { padding: 13px 14px; text-align: center; white-space: nowrap; }
+      .matrix thead th { font-size: 11px; font-weight: 700; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
+      .matrix tbody td { border-bottom: 1px solid #F1EFE8; }
+      .matrix tbody tr:last-child td { border-bottom: none; }
+      .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
+      .matrix tbody tr:hover td { background: ${T.mint}; }
+      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: inherit; }
+      .matrix thead .mx-sticky { background: ${T.mint}; }
+      .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
+      .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
+      .matrix tbody tr:hover .mx-sticky { background: ${T.mint}; }
+      .mx-store { min-width: 52px; }
+      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 190px; font-size: 13.5px; }
+      .mx-cell { font-weight: 700; font-size: 14px; }
       .mx-click { color: ${T.green}; cursor: pointer; }
-      .mx-click:hover { background: ${T.mint}; }
-      .mx-zero { color: #C9C7BE; }
-      .mx-total { font-weight: 800; color: ${T.ink}; background: ${T.cream}; }
-      .mx-footer td { border-top: 2px solid ${T.line}; border-bottom: none; }
-      .mx-footer .mx-sticky { font-weight: 800; }
+      .mx-click:hover { text-decoration: underline; }
+      .mx-zero { color: #CFCDC4; font-weight: 500; }
+      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; }
+      .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
+      .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
+      .mx-footer .mx-sticky { background: #F4F2EB !important; }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
