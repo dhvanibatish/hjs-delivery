@@ -236,6 +236,8 @@ const HINDI = {
   talk: { label: 'Customer se baat hui', short: 'Baat hui' },
   status: { label: 'Kaam shuru hua', short: 'Shuru' },
   resolution: { label: 'Samasya suljh gayi', short: 'Suljh gayi' },
+  hold: { label: 'Hold pe dala gaya', short: 'Hold' },
+  unhold: { label: 'Unhold — dubara shuru', short: 'Unhold' },
 };
 const HINDI_MOVE = {
   talk: 'Customer se baat karo',
@@ -336,10 +338,35 @@ const CLOSED = {
 };
 const isClosedStage = (s) =>
   s === 'cancelled' || s === 'duplicate' || s === 'invalid' || s === 'deleted';
+
+/* ── HOLD (pause) ─────────────────────────────────────────────────────
+   Hold koi "stage" nahi — ek pause flag hai jo kisi bhi active stage
+   (received / talk / status) ke upar laga sakte hain. Ticket ka asli
+   `stage` waise ka waisa rehta hai, bas is_hold=true ho jaata hai, isliye
+   Unhold karte hi wahi purani stage se same process continue ho jaata hai. */
+const HOLD_META = {
+  hold: {
+    id: 'hold',
+    label: 'On Hold',
+    short: 'Hold',
+    color: T.amber,
+    soft: T.amberSoft,
+  },
+  unhold: {
+    id: 'unhold',
+    label: 'Resumed (Unhold)',
+    short: 'Unhold',
+    color: T.green,
+    soft: T.mint,
+  },
+};
+const isOnHold = (x) => !!(x && x.is_hold) && !isClosedStage(x.stage);
+
 function stageMeta(id) {
   const s = STAGES[stageIndex(id)];
   if (s) return s;
   if (CLOSED[id]) return CLOSED[id];
+  if (HOLD_META[id]) return HOLD_META[id];
   return STAGES[0];
 }
 const stageColorOf = (id) => stageMeta(id).color;
@@ -441,6 +468,20 @@ function makeEvent(toStage, fields, mode) {
 }
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
+
+function makeHoldEvent(kind, cur, reason) {
+  const atStage = (cur && cur.stage) || 'received';
+  return {
+    ts: new Date().toISOString(),
+    stage: kind, // 'hold' | 'unhold'
+    label: HOLD_META[kind].label,
+    action: 'Marked as',
+    fields:
+      kind === 'hold'
+        ? { 'Stage pe rukwaya': stageMeta(atStage).label, ...(reason ? { Wajah: reason } : {}) }
+        : { 'Dubara shuru': stageMeta(atStage).label },
+  };
+}
 
 function reachedIdxFromLog(log) {
   if (Array.isArray(log) && log.length) {
@@ -565,6 +606,9 @@ function rowToTicket(r) {
     expected: clean(r.expected_date) || '—',
     stage: statusToStage(r.status),
     rawStatus: r.status,
+    is_hold: !!r.is_hold,
+    hold_reason: clean(r.hold_reason) || '',
+    hold_since: r.hold_since || null,
     _raw: r,
   };
 }
@@ -627,7 +671,19 @@ const DEMO = [
   demo('1988005', '2336', 'Vikram Singh', '+91 90000 11122', 'Ludhiana',
     'BiPAP Machine', 'Display par error code', 'Open', { mins: 240 }),
   demo('1988006', '2337', 'Anjali Rao', '+91 93456 78901', 'Jaipur',
-    'Nebulizer', 'Pipe se hawa kam aa rahi hai', 'Talked To Customer', { mins: 410 }),
+    'Nebulizer', 'Pipe se hawa kam aa rahi hai', 'Talked To Customer', {
+      mins: 410,
+      talk_date: new Date().toISOString().slice(0, 10),
+      talk_time: '09:15',
+      stage1_remarks: 'Customer ne 2 din baad wapas call karne ko kaha hai.',
+      is_hold: true,
+      hold_reason: 'Customer 2 din ke liye bahar hai, waapas aake baat karega.',
+      hold_since: agoIso(30),
+      app_log: [
+        { ts: agoIso(380), stage: 'talk', label: 'Customer Se Baat', action: 'Moved to', fields: { Date: 'aaj', Time: '09:15' } },
+        { ts: agoIso(30), stage: 'hold', label: 'On Hold', action: 'Marked as', fields: { 'Stage pe rukwaya': 'Talked to Customer', Wajah: 'Customer 2 din ke liye bahar hai, waapas aake baat karega.' } },
+      ],
+    }),
   demo('1988007', '2338', 'Karan Gupta', '+91 97777 88899', 'Gurugram',
     'Pulse Oximeter', 'Reading galat aa rahi hai', 'Open', { mins: 70 }),
   demo('1988008', '2339', 'Sneha Iyer', '+91 96543 21098', 'Noida',
@@ -667,6 +723,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [modal, setModal] = useState(null); // { ticketId, toStage, mode }
+  const [holdModal, setHoldModal] = useState(null); // ticketId waiting for hold reason
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today | archived
@@ -846,6 +903,64 @@ export default function App() {
     }
   };
 
+  const putOnHold = async (ticketId, reason) => {
+    const cur = tickets.find((x) => x.ticket_id === ticketId);
+    const patch = {
+      is_hold: true,
+      hold_reason: reason || null,
+      hold_since: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      app_log: [...existingLog(cur), makeHoldEvent('hold', cur, reason)],
+    };
+    if (!CONFIGURED) {
+      setTickets((prev) =>
+        prev.map((x) =>
+          x.ticket_id === ticketId
+            ? rowToTicket({ ...(x._raw || {}), ...patch })
+            : x,
+        ),
+      );
+      ping('Hold pe daal diya (demo)');
+      return;
+    }
+    try {
+      await sbPatch(ticketId, patch);
+      ping('Hold pe daal diya ✓');
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
+  const unholdTicket = async (ticketId) => {
+    const cur = tickets.find((x) => x.ticket_id === ticketId);
+    const patch = {
+      is_hold: false,
+      hold_reason: null,
+      hold_since: null,
+      updated_at: new Date().toISOString(),
+      app_log: [...existingLog(cur), makeHoldEvent('unhold', cur)],
+    };
+    if (!CONFIGURED) {
+      setTickets((prev) =>
+        prev.map((x) =>
+          x.ticket_id === ticketId
+            ? rowToTicket({ ...(x._raw || {}), ...patch })
+            : x,
+        ),
+      );
+      ping('Unhold ✓ — same process continue (demo)');
+      return;
+    }
+    try {
+      await sbPatch(ticketId, patch);
+      ping('Unhold ✓ — same process continue');
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
   const removeEntry = async (ticketId) => {
     const cur = tickets.find((x) => x.ticket_id === ticketId);
     const patch = {
@@ -974,6 +1089,8 @@ export default function App() {
                   onCommit={(dd, toStage, fields) =>
                     applyMove(dd.ticket_id, toStage, fields, 'move')
                   }
+                  onHold={(x) => setHoldModal(x.ticket_id)}
+                  onUnhold={(x) => unholdTicket(x.ticket_id)}
                   focus={lastMove}
                 />
               </>
@@ -995,6 +1112,8 @@ export default function App() {
           onEditStage={(sid) =>
             setModal({ ticketId: active.ticket_id, toStage: sid, mode: 'edit' })
           }
+          onHold={() => setHoldModal(active.ticket_id)}
+          onUnhold={() => unholdTicket(active.ticket_id)}
         />
       )}
       {modal && (
@@ -1004,6 +1123,15 @@ export default function App() {
           mode={modal.mode}
           onClose={() => setModal(null)}
           onSave={commitModal}
+        />
+      )}
+      {holdModal && (
+        <HoldModal
+          onClose={() => setHoldModal(null)}
+          onSave={(reason) => {
+            putOnHold(holdModal, reason);
+            setHoldModal(null);
+          }}
         />
       )}
       {toast && <Toast msg={toast} />}
@@ -1337,6 +1465,8 @@ function EntriesView({
   onOpen,
   onMove,
   onCommit,
+  onHold,
+  onUnhold,
   focus,
 }) {
   const isMobile = useIsMobile();
@@ -1411,6 +1541,8 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          onHold={onHold}
+          onUnhold={onUnhold}
           focus={focus}
         />
       ) : (
@@ -1420,6 +1552,8 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          onHold={onHold}
+          onUnhold={onUnhold}
         />
       )}
       {viewMode !== 'archived' && <FooterTotal items={items} />}
@@ -1774,8 +1908,6 @@ function Login({ onLogin }) {
             {CONFIGURED
               ? 'Live · Supabase connected'
               : 'Demo mode · CONFIG.key khaali hai'}
-            <br />
-            Store PIN: <b>1001</b> se shuru · All stores: <b>2222</b>
           </div>
         </div>
       </div>
@@ -2210,13 +2342,14 @@ function Stats({ items, viewMode, onDrill }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ BOARD */
-function Board({ items, loading, onOpen, onMove, onCommit }) {
+function Board({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold }) {
   if (loading && items.length === 0)
     return <div className="loading">Supabase se tickets load ho rahe hain…</div>;
+  const held = items.filter((x) => isOnHold(x));
   return (
     <div className="board">
       {STAGES.map((stage) => {
-        const cards = items.filter((x) => x.stage === stage.id);
+        const cards = items.filter((x) => x.stage === stage.id && !isOnHold(x));
         return (
           <section key={stage.id} className="column">
             <div className="col-head">
@@ -2241,20 +2374,59 @@ function Board({ items, loading, onOpen, onMove, onCommit }) {
                   onOpen={() => onOpen(x)}
                   onMove={onMove}
                   onCommit={onCommit}
+                  onHold={onHold}
+                  onUnhold={onUnhold}
                 />
               ))}
             </div>
           </section>
         );
       })}
+      <section key="hold" className="column column-hold">
+        <div className="col-head">
+          <span className="col-pip" style={{ background: HOLD_META.hold.color }} />
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>
+            {sLabel('hold')}
+          </span>
+          <span
+            className="col-count"
+            style={{ background: HOLD_META.hold.soft, color: HOLD_META.hold.color }}
+          >
+            {held.length}
+          </span>
+        </div>
+        <div className="col-body">
+          {held.length === 0 && (
+            <div className="empty">Koi ticket hold pe nahi</div>
+          )}
+          {held.map((x) => (
+            <Card
+              key={x.ticket_id}
+              d={x}
+              stage={HOLD_META.hold}
+              onOpen={() => onOpen(x)}
+              onMove={onMove}
+              onCommit={onCommit}
+              onHold={onHold}
+              onUnhold={onUnhold}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
 /* Mobile: stage tabs (accordion). */
-function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
-  const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
-  const activeIds = active.map((s) => s.id);
+function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold, focus }) {
+  const active = STAGES.filter((s) =>
+    items.some((x) => x.stage === s.id && !isOnHold(x)),
+  );
+  const held = items.filter((x) => isOnHold(x));
+  const sections = held.length
+    ? [...active, { id: 'hold', color: HOLD_META.hold.color, __hold: true }]
+    : active;
+  const activeIds = sections.map((s) => s.id);
   const sig = activeIds.join(',');
   const [open, setOpen] = useState(activeIds[0] || null);
   const consumed = React.useRef(0);
@@ -2278,7 +2450,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
 
   if (loading && items.length === 0)
     return <div className="loading">Tickets load ho rahe hain…</div>;
-  if (active.length === 0)
+  if (sections.length === 0)
     return (
       <div className="empty" style={{ padding: '44px 0' }}>
         Koi ticket nahi
@@ -2287,8 +2459,10 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
 
   return (
     <div className="m-board">
-      {active.map((stage) => {
-        const cards = items.filter((x) => x.stage === stage.id);
+      {sections.map((stage) => {
+        const cards = stage.__hold
+          ? held
+          : items.filter((x) => x.stage === stage.id && !isOnHold(x));
         const isOpen = open === stage.id;
         return (
           <section
@@ -2307,7 +2481,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
               <span
                 className="col-count"
                 style={{
-                  background: stage.soft,
+                  background: stage.__hold ? HOLD_META.hold.soft : stage.soft,
                   color: stage.color,
                   marginLeft: 'auto',
                 }}
@@ -2329,10 +2503,12 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
                   <Card
                     key={x.ticket_id}
                     d={x}
-                    stage={stage}
+                    stage={stage.__hold ? HOLD_META.hold : stage}
                     onOpen={() => onOpen(x)}
                     onMove={onMove}
                     onCommit={onCommit}
+                    onHold={onHold}
+                    onUnhold={onUnhold}
                   />
                 ))}
               </div>
@@ -2344,15 +2520,21 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
   );
 }
 
-function Card({ d, stage, onOpen, onMove, onCommit }) {
+function Card({ d, stage, onOpen, onMove, onCommit, onHold, onUnhold }) {
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
-  const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
+  const held = isOnHold(d);
+  const next = closed || held ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
   return (
-    <div className={cancelled ? 'card is-cancelled' : 'card'} onClick={onOpen}>
+    <div
+      className={
+        cancelled ? 'card is-cancelled' : held ? 'card is-hold' : 'card'
+      }
+      onClick={onOpen}
+    >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -2388,7 +2570,25 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
           </span>
         </div>
       )}
-      {closed ? (
+      {held && (
+        <div className="card-hold-note">
+          <span>
+            Rukka hai: <b>{sShort(d.stage)}</b> pe
+          </span>
+          {d.hold_reason && <span className="ellip">{d.hold_reason}</span>}
+        </div>
+      )}
+      {held ? (
+        <button
+          className="card-next is-hold-resume"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnhold && onUnhold(d);
+          }}
+        >
+          <RefreshCw size={14} /> Unhold — {sShort(d.stage)} se continue
+        </button>
+      ) : closed ? (
         <div
           className="card-done"
           style={{ color: stage.color, background: stage.soft }}
@@ -2440,6 +2640,17 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
           <Check size={13} /> Completed
         </div>
       )}
+      {!held && !closed && d.stage === 'received' && onHold && (
+        <button
+          className="card-hold-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onHold(d);
+          }}
+        >
+          <Clock size={12} /> Hold pe daalo
+        </button>
+      )}
     </div>
   );
 }
@@ -2452,7 +2663,9 @@ function FooterTotal({ items }) {
   const can = items.filter((x) => x.stage === 'cancelled').length;
   const dup = items.filter((x) => x.stage === 'duplicate').length;
   const inv = items.filter((x) => x.stage === 'invalid').length;
+  const hold = items.filter((x) => isOnHold(x)).length;
   const extra = [
+    hold && `Hold ${hold}`,
     can && `Cancelled ${can}`,
     inv && `Invalid ${inv}`,
     dup && `Duplicate ${dup}`,
@@ -2468,11 +2681,22 @@ function FooterTotal({ items }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
+function Drawer({
+  d,
+  onClose,
+  onAdvance,
+  onSetStage,
+  onEditStage,
+  canDelete,
+  onDelete,
+  onHold,
+  onUnhold,
+}) {
   const [confirmDel, setConfirmDel] = useState(false);
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
   const cancelled = !!closedMeta;
+  const held = isOnHold(d);
   const idx = stageIndex(d.stage);
   const stage = cancelled
     ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
@@ -2547,13 +2771,47 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           </button>
         </div>
 
-        <span
-          className="stage-badge"
-          style={{ background: stage.soft, color: stage.color }}
-        >
-          <span className="col-pip" style={{ background: stage.color }} />{' '}
-          {cancelled ? stage.label : sLabel(d.stage)}
-        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <span
+            className="stage-badge"
+            style={{ background: stage.soft, color: stage.color }}
+          >
+            <span className="col-pip" style={{ background: stage.color }} />{' '}
+            {cancelled ? stage.label : sLabel(d.stage)}
+          </span>
+          {held && (
+            <span
+              className="stage-badge"
+              style={{ background: HOLD_META.hold.soft, color: HOLD_META.hold.color }}
+            >
+              <Clock size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
+              On Hold
+            </span>
+          )}
+        </div>
+
+        {!cancelled && held && (
+          <div className="hold-banner">
+            <div className="hold-banner-head">
+              <Clock size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div style={{ fontWeight: 800 }}>
+                  Ye ticket hold pe hai — {sLabel(d.stage)} pe rukka hai
+                </div>
+                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                  {d.hold_reason
+                    ? `Wajah: ${d.hold_reason}`
+                    : 'Customer side se waiting ki wajah se hold kiya gaya.'}
+                  {d.hold_since ? ` · ${fmtDateTime(d.hold_since)} se` : ''}
+                </div>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={onUnhold}>
+              <RefreshCw size={15} /> Unhold — {sShort(d.stage)} se dubara
+              shuru karo
+            </button>
+          </div>
+        )}
 
         {cancelled ? (
           <>
@@ -2605,10 +2863,27 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
               })}
             </div>
           </>
+        ) : held ? (
+          <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+            Ticket hold pe hai, isliye stage aage nahi badhayi ja sakti.
+            Unhold karo — turant <b>{sLabel(d.stage)}</b> se same process
+            continue ho jayega.
+          </div>
         ) : (
           <>
-            <div className="sec-title" style={{ marginTop: 16 }}>
-              Move to stage
+            <div
+              className="sec-title"
+              style={{
+                marginTop: 16,
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>Move to stage</span>
+              {onHold && d.stage === 'received' && (
+                <button className="mini-edit" onClick={onHold}>
+                  <Clock size={13} /> Hold pe daalo
+                </button>
+              )}
             </div>
             {next ? (
               <div className="next-hint">
@@ -2818,6 +3093,59 @@ function KV({ label, value, full }) {
     <div className="kv" style={full ? { gridColumn: '1 / -1' } : null}>
       <div className="kv-label">{label}</div>
       <div className="kv-val">{value}</div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════ HOLD MODAL */
+function HoldModal({ onClose, onSave }) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16 }}>
+              <Clock size={16} style={{ verticalAlign: -3, marginRight: 6 }} />
+              Ticket ko Hold pe daalein
+            </div>
+            <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+              Jahan hai wahin ruk jayega — Unhold karte hi wahin se same
+              process dobara continue ho jayega.
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <div className="field-label">
+              Wajah (optional) — jaise "customer abhi available nahi",
+              "part ka wait", "waqt maanga hai"
+            </div>
+            <textarea
+              className="inp"
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Kyun hold pe daal rahe ho…"
+            />
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn-primary"
+            style={{ background: T.amber, boxShadow: 'none' }}
+            onClick={() => onSave(reason.trim())}
+          >
+            <Clock size={15} /> Hold pe daalo
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3230,7 +3558,7 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
       .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
@@ -3259,6 +3587,18 @@ function StyleTag() {
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
+      .card.is-hold { background: ${T.amberSoft}; border-color: #EAD5AE; }
+      .card.is-hold:hover { border-color: #DDBD84; }
+      .card-hold-note { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; font-size: 11.5px; color: ${T.amber}; font-weight: 600; }
+      .card-next.is-hold-resume { color: ${T.amber}; border-color: #EAD5AE; background: #fff; }
+      .card-next.is-hold-resume:hover { background: ${T.amberSoft}; }
+      .card-hold-btn { width: 100%; margin-top: 8px; border: none; background: transparent; color: ${T.inkSoft}; font-size: 11.5px; font-weight: 700; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 4px; }
+      .card-hold-btn:hover { color: ${T.amber}; }
+      .column-hold .col-head { border-bottom: 2px solid ${T.amberSoft}; }
+      .hold-banner { margin-top: 14px; background: ${T.amberSoft}; border: 1px solid #EAD5AE; border-radius: 13px; padding: 13px 14px; display: flex; flex-direction: column; gap: 12px; color: ${T.ink}; }
+      .hold-banner-head { display: flex; gap: 10px; align-items: flex-start; color: ${T.amber}; font-size: 13px; }
+      .hold-banner .btn-primary { background: ${T.amber}; box-shadow: none; align-self: flex-start; }
+      .hold-banner .btn-primary:hover { background: #b26f22; }
       .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
 
       .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
