@@ -3249,16 +3249,22 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                   ))}
-                  {b.photo && b.photo !== 'null' && (
-                    <a
-                      className="kv-photo"
-                      href={b.photo}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <img src={b.photo} alt="photo" />
-                    </a>
-                  )}
+                  {b.photo &&
+                    b.photo !== 'null' &&
+                    String(b.photo)
+                      .split('|')
+                      .filter(Boolean)
+                      .map((ph, i) => (
+                        <a
+                          key={ph + i}
+                          className="kv-photo"
+                          href={ph}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img src={ph} alt={`photo ${i + 1}`} />
+                        </a>
+                      ))}
                 </div>
               ) : (
                 <div className="block-next-note">
@@ -4057,56 +4063,77 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
   const [err, setErr] = useState('');
   const camRef = React.useRef(null);
   const fileRef = React.useRef(null);
+  // value = pipe-joined URLs (multiple photos)
+  const urls = value ? String(value).split('|').filter(Boolean) : [];
 
   const handle = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = ''; // same file dobara chun sakein
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
     setErr('');
     setBusy(true);
-    try {
-      const url = await sbUploadPhoto(invoiceNumber, kind, file);
-      onChange(url);
-    } catch (er) {
-      setErr('Upload fail hua, dobara try karo');
+    const added = [];
+    for (const file of files) {
+      try {
+        const url = await sbUploadPhoto(invoiceNumber, kind, file);
+        added.push(url);
+      } catch (er) {
+        setErr('Kuch photos upload nahi hue, dobara try karo');
+      }
     }
+    if (added.length) onChange([...urls, ...added].join('|'));
     setBusy(false);
+  };
+
+  const removeAt = (i) => {
+    const next = urls.filter((_, idx) => idx !== i);
+    onChange(next.join('|'));
   };
 
   return (
     <div className="photo-up">
-      <div className="photo-up-label">{label}</div>
-      {value ? (
-        <div className="photo-preview">
-          <img src={value} alt={label} />
-          <button
-            className="photo-remove"
-            onClick={() => onChange('')}
-            type="button"
-          >
-            <X size={13} /> Hatao
-          </button>
-        </div>
-      ) : (
-        <div className="photo-btns">
-          <button
-            type="button"
-            className="photo-btn"
-            onClick={() => camRef.current && camRef.current.click()}
-            disabled={busy}
-          >
-            <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
-          </button>
-          <button
-            type="button"
-            className="photo-btn alt"
-            onClick={() => fileRef.current && fileRef.current.click()}
-            disabled={busy}
-          >
-            <Upload size={15} /> Device se
-          </button>
+      <div className="photo-up-label">
+        {label}
+        {urls.length > 0 && (
+          <span className="photo-count"> · {urls.length}</span>
+        )}
+      </div>
+      {urls.length > 0 && (
+        <div className="photo-grid">
+          {urls.map((u, i) => (
+            <div className="photo-thumb" key={u + i}>
+              <img src={u} alt={`${label} ${i + 1}`} />
+              <button
+                className="photo-x"
+                onClick={() => removeAt(i)}
+                type="button"
+                title="Hatao"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
+      <div className="photo-btns">
+        <button
+          type="button"
+          className="photo-btn"
+          onClick={() => camRef.current && camRef.current.click()}
+          disabled={busy}
+        >
+          <Camera size={15} />{' '}
+          {busy ? 'Upload ho raha…' : urls.length ? 'Aur photo' : 'Camera'}
+        </button>
+        <button
+          type="button"
+          className="photo-btn alt"
+          onClick={() => fileRef.current && fileRef.current.click()}
+          disabled={busy}
+        >
+          <Upload size={15} /> Device se
+        </button>
+      </div>
       <input
         ref={camRef}
         type="file"
@@ -4119,6 +4146,7 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
         ref={fileRef}
         type="file"
         accept="image/*"
+        multiple
         style={{ display: 'none' }}
         onChange={handle}
       />
@@ -5325,9 +5353,11 @@ function StyleTag() {
       .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .photo-btn.alt { background: #fff; color: ${T.green}; }
       .photo-btn:disabled { opacity: .6; cursor: default; }
-      .photo-preview { position: relative; }
-      .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
-      .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
+      .photo-count { color: ${T.green}; font-weight: 800; }
+      .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+      .photo-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; aspect-ratio: 1 / 1; }
+      .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .photo-x { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: rgba(20,32,26,.85); color: #fff; border: none; border-radius: 7px; cursor: pointer; }
       .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
       .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 
