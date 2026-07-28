@@ -95,6 +95,19 @@ async function sbTrackSearch(phone, pin) {
 async function sbSalesByStore(store) {
   return sbRpc('sales_by_store', { p_store: store });
 }
+// Sales matrix: salesperson × store counts (date range)
+async function sbSalesMatrix(from, to) {
+  return sbRpc('sales_matrix', { p_from: from, p_to: to });
+}
+// Ek cell ki deliveries (salesperson + store, date range)
+async function sbSalesCell(sales, store, from, to) {
+  return sbRpc('sales_cell', {
+    p_sales: sales,
+    p_store: store,
+    p_from: from,
+    p_to: to,
+  });
+}
 // photo upload → Supabase Storage bucket 'delivery-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
@@ -4154,52 +4167,116 @@ function stepTime(log, stageId) {
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
 function SalesTrackPage() {
-  // Naya flow (PIN-free): store chuno → us store ki naam-wise list → detail.
-  const [store, setStore] = useState(null); // chuna hua store code
-  const [state, setState] = useState('idle'); // idle|loading|done|error
+  // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
+  const [range, setRange] = useState('today');
+  const [from, setFrom] = useState(dayStr(Date.now()));
+  const [to, setTo] = useState(dayStr(Date.now()));
+  const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
+  const [mState, setMState] = useState('loading'); // loading|done|error
+  const [mErr, setMErr] = useState('');
+  const [cell, setCell] = useState(null); // {sales, store}
   const [rows, setRows] = useState([]);
-  const [q, setQ] = useState(''); // list search
+  const [cState, setCState] = useState('idle');
+  const [q, setQ] = useState(''); // matrix search (salesperson naam)
+  const [lq, setLq] = useState(''); // list search
   const [selected, setSelected] = useState(null);
-  const [err, setErr] = useState('');
 
-  const STORE_LIST = [
-    'NOD',
-    'JKP',
-    'NWD',
-    'GGN',
-    'JPR',
-    'LKO',
-    'MOH',
-    'JAL',
-    'LDH',
-    'CHD',
-    'NCR',
-  ];
+  const bounds = () => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'custom') return [from, to];
+    return ['2000-01-01', '2999-12-31'];
+  };
 
-  const openStore = async (code) => {
-    setStore(code);
+  const loadMatrix = async () => {
+    setMState('loading');
+    setCell(null);
     setSelected(null);
-    setQ('');
-    setState('loading');
-    setErr('');
+    const [f, t] = bounds();
     try {
-      const res = await sbSalesByStore(code);
-      setRows(res || []);
-      setState('done');
+      const res = await sbSalesMatrix(f, t);
+      setMatrix(res || []);
+      setMState('done');
     } catch (e) {
-      setErr(e.message || 'Something went wrong');
-      setState('error');
+      setMErr(e.message || 'error');
+      setMState('error');
     }
   };
 
-  // naam / invoice / product se filter
-  const shown = rows.filter((r) => {
-    if (!q.trim()) return true;
+  useEffect(() => {
+    loadMatrix();
+    // eslint-disable-next-line
+  }, [range, from, to]);
+
+  const openCell = async (sales, store) => {
+    setCell({ sales, store });
+    setSelected(null);
+    setLq('');
+    setCState('loading');
+    const [f, t] = bounds();
+    try {
+      const res = await sbSalesCell(sales, store, f, t);
+      setRows(res || []);
+      setCState('done');
+    } catch (e) {
+      setCState('error');
+    }
+  };
+
+  // matrix ko pivot karo: salespeople (rows) × stores (cols jinme data hai)
+  const stores = [];
+  const people = [];
+  const map = {}; // sales|store -> cnt
+  const rowTotal = {};
+  const colTotal = {};
+  matrix.forEach((m) => {
+    if (!stores.includes(m.store)) stores.push(m.store);
+    if (!people.includes(m.salesperson)) people.push(m.salesperson);
+    map[`${m.salesperson}|${m.store}`] = Number(m.cnt);
+    rowTotal[m.salesperson] = (rowTotal[m.salesperson] || 0) + Number(m.cnt);
+    colTotal[m.store] = (colTotal[m.store] || 0) + Number(m.cnt);
+  });
+  // store order fixed rakho jaha possible
+  const STORE_ORDER = [
+    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
+  ];
+  stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
+  people.sort((a, b) => (rowTotal[b] || 0) - (rowTotal[a] || 0));
+  const shownPeople = people.filter(
+    (p) => !q.trim() || p.toLowerCase().includes(q.trim().toLowerCase()),
+  );
+
+  const shownRows = rows.filter((r) => {
+    if (!lq.trim()) return true;
     const hay = `${r.customer_name || ''} ${r.invoice_number || ''} ${equipmentText(
       { line_items: r.line_items, item_name: r.item_name },
     )}`.toLowerCase();
-    return hay.includes(q.trim().toLowerCase());
+    return hay.includes(lq.trim().toLowerCase());
   });
+
+  const rangeLabel =
+    range === 'today' ? 'Aaj'
+    : range === 'yesterday' ? 'Kal'
+    : range === '7d' ? 'Pichhle 7 din'
+    : range === 'month' ? 'Is mahine'
+    : range === 'all' ? 'Sabhi'
+    : `${from} → ${to}`;
 
   return (
     <div className="track-wrap" style={{ fontFamily: FONT }}>
@@ -4221,113 +4298,188 @@ function SalesTrackPage() {
       </div>
 
       <div className="track-body">
-        {/* STEP 1 — store buttons (hamesha dikhte hain) */}
-        <div className="sales-stores">
-          <div className="sales-stores-label">Select a store</div>
-          <div className="sales-stores-row">
-            {STORE_LIST.map((code) => (
-              <button
-                key={code}
-                className={
-                  store === code ? 'store-pill is-active' : 'store-pill'
-                }
-                onClick={() => openStore(code)}
-              >
-                {branchLabel(code)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* STEP 3 — customer detail */}
+        {/* DETAIL VIEW */}
         {selected ? (
           <>
             <button className="track-back" onClick={() => setSelected(null)}>
-              <ArrowLeft size={16} /> Back to {branchLabel(store)} list
+              <ArrowLeft size={16} /> Back to list
             </button>
             <TrackResult row={selected} />
           </>
-        ) : !store ? (
-          <div className="track-msg" style={{ marginTop: 4 }}>
-            Kisi store pe tap karke uski deliveries dekho.
-          </div>
-        ) : state === 'loading' ? (
-          <div className="track-msg">Loading {branchLabel(store)}…</div>
-        ) : state === 'error' ? (
-          <div className="track-msg">Unable to load. {err}</div>
-        ) : (
-          /* STEP 2 — us store ki naam-wise list */
-          <div className="sales-list">
+        ) : cell ? (
+          /* CELL LIST VIEW */
+          <>
+            <button className="track-back" onClick={() => setCell(null)}>
+              <ArrowLeft size={16} /> Back to overview
+            </button>
             <div className="sales-listbar">
               <div className="sales-list-head">
-                {branchLabel(store)} · {shown.length}{' '}
-                {shown.length === 1 ? 'delivery' : 'deliveries'}
+                {cell.sales} · {branchLabel(cell.store)} · {shownRows.length}
               </div>
               <div className="sales-search">
                 <Search size={15} color={T.inkSoft} />
                 <input
                   placeholder="Search name, invoice, product…"
+                  value={lq}
+                  onChange={(e) => setLq(e.target.value)}
+                />
+              </div>
+            </div>
+            {cState === 'loading' ? (
+              <div className="track-msg">Loading…</div>
+            ) : shownRows.length === 0 ? (
+              <div className="track-msg">Koi delivery nahi mili.</div>
+            ) : (
+              <div className="sales-list">
+                {shownRows.map((r) => {
+                  const st = statusToStage(r.status);
+                  const cancelled = st === 'cancelled';
+                  const stg = stageMeta(st);
+                  const equip = equipmentText({
+                    line_items: r.line_items,
+                    item_name: r.item_name,
+                  });
+                  const Icon = equipIcon(equip);
+                  return (
+                    <button
+                      key={r.invoice_number}
+                      className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
+                      onClick={() => setSelected(r)}
+                    >
+                      <div className="eq-ico" style={{ background: stg.soft }}>
+                        <Icon size={17} color={stg.color} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="sales-row-top">
+                          <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
+                            {r.customer_name || 'Customer'}
+                          </span>
+                          <span className="sales-chip" style={{ background: stg.soft, color: stg.color }}>
+                            {stg.short}
+                          </span>
+                        </div>
+                        <div className="ellip sales-sub">{equip}</div>
+                        <div className="sales-meta">
+                          <span className="ellip">#{r.invoice_number}</span>
+                          <span>₹{Number(r.total_amount || 0).toLocaleString('en-IN')}</span>
+                          {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
+                        </div>
+                      </div>
+                      <ChevronRight size={18} color={T.inkSoft} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : (
+          /* MATRIX OVERVIEW */
+          <>
+            <div className="sales-listbar">
+              <div className="sales-filters">
+                <div className="date-chips">
+                  {[
+                    ['today', 'Aaj'],
+                    ['yesterday', 'Kal'],
+                    ['7d', '7 din'],
+                    ['month', 'Mahina'],
+                    ['all', 'Sabhi'],
+                    ['custom', 'Custom'],
+                  ].map(([id, lbl]) => (
+                    <button
+                      key={id}
+                      className={range === id ? 'date-chip on' : 'date-chip'}
+                      onClick={() => setRange(id)}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                {range === 'custom' && (
+                  <div className="date-range">
+                    <input
+                      className="dash-inp"
+                      type="date"
+                      value={from}
+                      max={to}
+                      onChange={(e) => setFrom(e.target.value)}
+                    />
+                    <span className="date-arrow">→</span>
+                    <input
+                      className="dash-inp"
+                      type="date"
+                      value={to}
+                      min={from}
+                      onChange={(e) => setTo(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="sales-search">
+                <Search size={15} color={T.inkSoft} />
+                <input
+                  placeholder="Search salesperson…"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
               </div>
             </div>
 
-            {shown.length === 0 ? (
-              <div className="track-msg">Koi delivery nahi mili.</div>
+            <div className="sales-matrix-title">
+              Sales × Store · {rangeLabel}
+            </div>
+
+            {mState === 'loading' ? (
+              <div className="track-msg">Loading…</div>
+            ) : mState === 'error' ? (
+              <div className="track-msg">Unable to load. {mErr}</div>
+            ) : shownPeople.length === 0 ? (
+              <div className="track-msg">Is duration mein koi delivery nahi.</div>
             ) : (
-              shown.map((r) => {
-                const st = statusToStage(r.status);
-                const cancelled = st === 'cancelled';
-                const stg = stageMeta(st);
-                const equip = equipmentText({
-                  line_items: r.line_items,
-                  item_name: r.item_name,
-                });
-                const Icon = equipIcon(equip);
-                return (
-                  <button
-                    key={r.invoice_number}
-                    className={
-                      cancelled ? 'sales-row is-cancelled' : 'sales-row'
-                    }
-                    onClick={() => setSelected(r)}
-                  >
-                    <div className="eq-ico" style={{ background: stg.soft }}>
-                      <Icon size={17} color={stg.color} />
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div className="sales-row-top">
-                        <span
-                          className="ellip"
-                          style={{ fontWeight: 800, fontSize: 14.5 }}
-                        >
-                          {r.customer_name || 'Customer'}
-                        </span>
-                        <span
-                          className="sales-chip"
-                          style={{ background: stg.soft, color: stg.color }}
-                        >
-                          {stg.short}
-                        </span>
-                      </div>
-                      <div className="ellip sales-sub">{equip}</div>
-                      <div className="sales-meta">
-                        <span className="ellip">#{r.invoice_number}</span>
-                        <span>
-                          ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
-                        </span>
-                        {niceDate(r.created_at) && (
-                          <span>{niceDate(r.created_at)}</span>
-                        )}
-                      </div>
-                    </div>
-                    <ChevronRight size={18} color={T.inkSoft} />
-                  </button>
-                );
-              })
+              <div className="matrix-wrap">
+                <table className="matrix">
+                  <thead>
+                    <tr>
+                      <th className="mx-sticky">Salesperson</th>
+                      {stores.map((s) => (
+                        <th key={s} className="mx-store">{branchLabel(s)}</th>
+                      ))}
+                      <th className="mx-total">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownPeople.map((person) => (
+                      <tr key={person}>
+                        <td className="mx-sticky mx-name">{person}</td>
+                        {stores.map((s) => {
+                          const n = map[`${person}|${s}`] || 0;
+                          return (
+                            <td
+                              key={s}
+                              className={n ? 'mx-cell mx-click' : 'mx-cell mx-zero'}
+                              onClick={() => n && openCell(person, s)}
+                            >
+                              {n || ''}
+                            </td>
+                          );
+                        })}
+                        <td className="mx-total">{rowTotal[person] || 0}</td>
+                      </tr>
+                    ))}
+                    <tr className="mx-footer">
+                      <td className="mx-sticky">Total</td>
+                      {stores.map((s) => (
+                        <td key={s} className="mx-total">{colTotal[s] || 0}</td>
+                      ))}
+                      <td className="mx-total">
+                        {matrix.reduce((a, m) => a + Number(m.cnt), 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             )}
-          </div>
+          </>
         )}
 
         <div className="track-foot">
@@ -5084,6 +5236,27 @@ function StyleTag() {
       .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
       .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
       .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .sales-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      .date-chips { display: inline-flex; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+      .date-chip { border: none; background: transparent; padding: 7px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .date-chip.on { background: ${T.forest}; color: #fff; }
+      .date-range { display: inline-flex; align-items: center; gap: 7px; }
+      .date-arrow { color: ${T.inkSoft}; font-weight: 800; }
+      .sales-matrix-title { font-size: 12px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; margin: 14px 0 10px; }
+      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 14px; background: #fff; }
+      .matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+      .matrix th, .matrix td { padding: 10px 12px; text-align: center; white-space: nowrap; border-bottom: 1px solid ${T.cream}; }
+      .matrix thead th { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; background: ${T.cream}; border-bottom: 1px solid ${T.line}; }
+      .mx-sticky { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left !important; }
+      .matrix thead .mx-sticky { background: ${T.cream}; }
+      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 170px; }
+      .mx-cell { font-weight: 700; }
+      .mx-click { color: ${T.green}; cursor: pointer; }
+      .mx-click:hover { background: ${T.mint}; }
+      .mx-zero { color: #C9C7BE; }
+      .mx-total { font-weight: 800; color: ${T.ink}; background: ${T.cream}; }
+      .mx-footer td { border-top: 2px solid ${T.line}; border-bottom: none; }
+      .mx-footer .mx-sticky { font-weight: 800; }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
