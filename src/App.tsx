@@ -103,6 +103,15 @@ async function sbSalesMatrix(from, to) {
 async function sbSalesSearch(qq) {
   return sbRpc('sales_search', { p_q: qq });
 }
+// Flexible list: store / salesperson / cell / all (date range)
+async function sbSalesList(sales, store, from, to) {
+  return sbRpc('sales_list', {
+    p_sales: sales || '',
+    p_store: store || '',
+    p_from: from,
+    p_to: to,
+  });
+}
 // Ek cell ki deliveries (salesperson + store, date range)
 async function sbSalesCell(sales, store, from, to) {
   return sbRpc('sales_cell', {
@@ -4175,6 +4184,7 @@ function SalesTrackPage() {
   const [range, setRange] = useState('today');
   const [from, setFrom] = useState(dayStr(Date.now()));
   const [to, setTo] = useState(dayStr(Date.now()));
+  const [storeFilter, setStoreFilter] = useState(''); // '' = all stores
   const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
   const [mState, setMState] = useState('loading'); // loading|done|error
   const [mErr, setMErr] = useState('');
@@ -4258,13 +4268,24 @@ function SalesTrackPage() {
   }, [range, from, to]);
 
   const openCell = async (sales, store) => {
-    setCell({ sales, store });
+    setCell({
+      sales,
+      store,
+      title:
+        sales && store
+          ? `${sales} · ${branchLabel(store)}`
+          : sales
+            ? sales
+            : store
+              ? branchLabel(store)
+              : 'All',
+    });
     setSelected(null);
     setLq('');
     setCState('loading');
     const [f, t] = bounds();
     try {
-      const res = await sbSalesCell(sales, store, f, t);
+      const res = await sbSalesList(sales, store, f, t);
       setRows(res || []);
       setCState('done');
     } catch (e) {
@@ -4290,6 +4311,7 @@ function SalesTrackPage() {
     'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
   ];
   stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
+  const shownStores = stores;
   // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
   const hasNum = (p) => /\d{6,}/.test(String(p || ''));
   people.sort((a, b) => {
@@ -4350,12 +4372,18 @@ function SalesTrackPage() {
         ) : cell ? (
           /* CELL LIST VIEW */
           <>
-            <button className="track-back" onClick={() => setCell(null)}>
+            <button
+              className="track-back"
+              onClick={() => {
+                setCell(null);
+                setStoreFilter('');
+              }}
+            >
               <ArrowLeft size={16} /> Back to overview
             </button>
             <div className="sales-listbar">
               <div className="sales-list-head">
-                {cell.sales} · {branchLabel(cell.store)} · {shownRows.length}
+                {cell.title} · {shownRows.length}
               </div>
               <div className="sales-search">
                 <Search size={15} color={T.inkSoft} />
@@ -4426,6 +4454,26 @@ function SalesTrackPage() {
                 />
               </div>
               <div className="mx-daterow">
+                <select
+                  className="mx-select"
+                  value={storeFilter}
+                  onChange={(e) => {
+                    const s = e.target.value;
+                    setStoreFilter(s);
+                    if (s) openCell('', s);
+                    else setCell(null);
+                  }}
+                >
+                  <option value="">All stores</option>
+                  {[
+                    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL',
+                    'LDH', 'CHD', 'NCR',
+                  ].map((s) => (
+                    <option key={s} value={s}>
+                      {branchLabel(s)}
+                    </option>
+                  ))}
+                </select>
                 <select
                   className="mx-select"
                   value={range}
@@ -4545,8 +4593,13 @@ function SalesTrackPage() {
                   <thead>
                     <tr>
                       <th className="mx-sticky">Salesperson</th>
-                      {stores.map((s) => (
-                        <th key={s} className="mx-store" title={branchLabel(s)}>
+                      {shownStores.map((s) => (
+                        <th
+                          key={s}
+                          className="mx-store mx-hclick"
+                          title={`${branchLabel(s)} — click for all`}
+                          onClick={() => colTotal[s] && openCell('', s)}
+                        >
                           {s}
                         </th>
                       ))}
@@ -4554,30 +4607,50 @@ function SalesTrackPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shownPeople.map((person) => (
-                      <tr key={person}>
-                        <td className="mx-sticky mx-name">{person}</td>
-                        {stores.map((s) => {
-                          const n = map[`${person}|${s}`] || 0;
-                          return (
-                            <td
-                              key={s}
-                              className={
-                                n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
-                              }
-                              onClick={() => n && openCell(person, s)}
-                            >
-                              {n || '·'}
-                            </td>
-                          );
-                        })}
-                        <td className="mx-total">{rowTotal[person] || 0}</td>
-                      </tr>
-                    ))}
+                    {shownPeople.map((person) => {
+                      const rt = rowTotal[person] || 0;
+                      return (
+                        <tr key={person}>
+                          <td
+                            className="mx-sticky mx-name mx-nclick"
+                            onClick={() => openCell(person, '')}
+                            title="Click for all deliveries"
+                          >
+                            {person}
+                          </td>
+                          {shownStores.map((s) => {
+                            const n = map[`${person}|${s}`] || 0;
+                            return (
+                              <td
+                                key={s}
+                                className={
+                                  n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
+                                }
+                                onClick={() => n && openCell(person, s)}
+                              >
+                                {n || '·'}
+                              </td>
+                            );
+                          })}
+                          <td
+                            className={rt ? 'mx-total mx-tclick' : 'mx-total'}
+                            onClick={() => rt && openCell(person, '')}
+                          >
+                            {rt}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     <tr className="mx-footer">
                       <td className="mx-sticky">Total</td>
-                      {stores.map((s) => (
-                        <td key={s} className="mx-total">
+                      {shownStores.map((s) => (
+                        <td
+                          key={s}
+                          className={
+                            colTotal[s] ? 'mx-total mx-tclick' : 'mx-total'
+                          }
+                          onClick={() => colTotal[s] && openCell('', s)}
+                        >
                           {colTotal[s] || 0}
                         </td>
                       ))}
@@ -5414,9 +5487,11 @@ function StyleTag() {
       .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
       .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; }
-      .matrix th, .matrix td { padding: 13px 14px; text-align: center; white-space: nowrap; }
-      .matrix thead th { font-size: 11px; font-weight: 700; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
+      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
+      .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
+      .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
+      .mx-hclick { cursor: pointer; }
+      .mx-hclick:hover { background: ${T.green}; color: #fff; }
       .matrix tbody td { border-bottom: 1px solid #F1EFE8; }
       .matrix tbody tr:last-child td { border-bottom: none; }
       .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
@@ -5426,13 +5501,17 @@ function StyleTag() {
       .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
       .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
       .matrix tbody tr:hover .mx-sticky { background: ${T.mint}; }
-      .mx-store { min-width: 52px; }
-      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 190px; font-size: 13.5px; }
-      .mx-cell { font-weight: 700; font-size: 14px; }
+      .mx-store { min-width: 64px; }
+      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 210px; font-size: 14px; }
+      .mx-nclick { cursor: pointer; }
+      .mx-nclick:hover { color: ${T.green}; text-decoration: underline; }
+      .mx-cell { font-weight: 800; font-size: 15.5px; }
       .mx-click { color: ${T.green}; cursor: pointer; }
       .mx-click:hover { text-decoration: underline; }
-      .mx-zero { color: #CFCDC4; font-weight: 500; }
-      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; }
+      .mx-zero { color: #D0CEC4; font-weight: 500; }
+      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; font-size: 15px; }
+      .mx-tclick { cursor: pointer; }
+      .mx-tclick:hover { color: ${T.green}; text-decoration: underline; }
       .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
       .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
       .mx-footer .mx-sticky { background: #F4F2EB !important; }
