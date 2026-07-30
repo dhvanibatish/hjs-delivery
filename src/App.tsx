@@ -1918,8 +1918,6 @@ const slaMins = (m) => {
   if (a < 2880) return Math.round(a / 60) + 'h';
   return (a / 1440).toFixed(1) + 'd';
 };
-const slaTone = (s) => (s == null ? '#C9C7BE' : s >= 85 ? T.green : s >= 70 ? T.amber : T.red);
-const slaBand = (s) => (s == null ? 'No data' : s >= 85 ? 'Good' : s >= 70 ? 'Needs work' : 'Critical');
 
 /* ── ek order ka poora SLA picture ── */
 function slaAnalyze(x) {
@@ -2055,29 +2053,8 @@ function SlaReport({ deliveries, onOpen }) {
     del: (a) => a.delBreach,
   };
 
-  /* delOnly = delivery boy ka score. Response manager ka kaam hai, boy ko
-     uske liye penalize karna galat hoga. */
-  const statOf = (list, ov, delOnly) => {
+  const statOf = (list, ov) => {
     const dl = list.filter((a) => a.delivered);
-
-    /* Overdue orders bhi breach hain — chahe wo is date range ke bahar bane ho.
-       Warna 13 order atke hue store ka score 100 (green) dikh raha tha. */
-    const ids = new Set(list.map((a) => a.x.invoice_id));
-    const extraOv = ov.filter((a) => !ids.has(a.x.invoice_id));
-    const scored = [...list, ...extraOv];
-    let graded = 0;
-    let breach = 0;
-    scored.forEach((a) => {
-      if (!delOnly && a.respDeadline) {
-        graded++;
-        if (a.respBreach) breach++;
-      }
-      if (a.promise) {
-        graded++;
-        if (a.delBreach) breach++;
-      }
-    });
-    const slaPct = graded ? Math.round(((graded - breach) / graded) * 100) : null;
 
     const avg = (k) => {
       const v = dl.map((a) => a[k]).filter((n) => n != null);
@@ -2101,8 +2078,6 @@ function SlaReport({ deliveries, onOpen }) {
         return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
       })(),
       overdue: ov.length,
-      slaPct,
-      score: slaPct,
       avgCycle: avg('totalHrs'),
       avgResp: avgAll('respHrs'),
       avgDel: avg('delHrs'),
@@ -2138,15 +2113,7 @@ function SlaReport({ deliveries, onOpen }) {
     // eslint-disable-next-line
   }, [rows, overdueAll, sel]);
 
-  /* Best performer sabse upar */
-  const rank = (a, b) => {
-    if (a.s.score == null && b.s.score == null) return b.s.total - a.s.total;
-    if (a.s.score == null) return 1;
-    if (b.s.score == null) return -1;
-    if (b.s.score !== a.s.score) return b.s.score - a.s.score;
-    return b.s.delivered - a.s.delivered; // barabar score pe zyada delivery upar
-  };
-
+  /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
     .map((st) => ({
       st,
@@ -2155,8 +2122,7 @@ function SlaReport({ deliveries, onOpen }) {
         overdueAll.filter((a) => a.branch === st),
       ),
     }))
-    .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-    .sort(rank);
+    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
 
   /* delivery boy wise — person + store ke hisaab se group */
   const boyStats = useMemo(() => {
@@ -2179,12 +2145,11 @@ function SlaReport({ deliveries, onOpen }) {
           s: statOf(
             rows.filter((a) => personOf(a) === person && a.branch === br),
             overdueAll.filter((a) => personOf(a) === person && a.branch === br),
-            true, // delivery-only score
           ),
         };
       })
       .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-      .sort(rank);
+      .sort((a, b) => a.person.localeCompare(b.person));
     // eslint-disable-next-line
   }, [rows, overdueAll]);
 
@@ -2205,18 +2170,6 @@ function SlaReport({ deliveries, onOpen }) {
     >
       {n}
     </td>
-  );
-
-  const scoreChip = (s) => (
-    <span
-      className="dash-chip"
-      style={{
-        background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
-        color: s.score == null ? T.inkSoft : slaTone(s.score),
-      }}
-    >
-      {s.score == null ? '—' : s.score}
-    </span>
   );
 
   return (
@@ -2303,9 +2256,6 @@ function SlaReport({ deliveries, onOpen }) {
         <div className="dash-block">
           <div className="dash-block-h">
             Store-wise · {rangeLabel}
-            <span style={{ fontWeight: 600, color: T.inkSoft }}>
-              {'  ·  '}best performer sabse upar
-            </span>
           </div>
           <div className="dash-table-wrap">
             <table className="dash-table">
@@ -2320,27 +2270,22 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
                   <th>Overdue Now</th>
-                  <th>Score</th>
                   <th>Alert</th>
                 </tr>
               </thead>
               <tbody>
                 {storeStats.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="dash-empty">
+                    <td colSpan={10} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
                 ) : (
-                  storeStats.map(({ st, s }, i) => {
+                  storeStats.map(({ st, s }) => {
                     const cell = cellFor({ store: st, person: null });
-                    const top = i === 0 && s.score != null && s.score >= 85;
                     return (
                       <tr key={st}>
-                        <td className="dash-store">
-                          {top && <span style={{ marginRight: 6 }}>🏆</span>}
-                          {branchLabel(st)}
-                        </td>
+                        <td className="dash-store">{branchLabel(st)}</td>
                         {cell('all', s.total, T.green)}
                         {cell('delivered', s.delivered, T.green)}
                         <td>{slaHrs(s.avgResp)}</td>
@@ -2351,12 +2296,11 @@ function SlaReport({ deliveries, onOpen }) {
                         <td>{slaHrs(s.avgCycle)}</td>
                         {cell('del', s.delBreach, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
-                        <td>{scoreChip(s)}</td>
                         <td>
                           <button
                             className="mini-edit"
                             style={
-                              s.overdue || (s.score != null && s.score < 70)
+                              s.overdue || s.respBreach || s.delBreach
                                 ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
                                 : {}
                             }
@@ -2377,9 +2321,6 @@ function SlaReport({ deliveries, onOpen }) {
         <div className="dash-block">
           <div className="dash-block-h">
             Delivery boy wise · {rangeLabel}
-            <span style={{ fontWeight: 600, color: T.inkSoft }}>
-              {'  ·  '}best performer sabse upar
-            </span>
           </div>
           <div className="dash-table-wrap">
             <table className="dash-table">
@@ -2393,26 +2334,21 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
                   <th>Overdue Now</th>
-                  <th>Score</th>
                 </tr>
               </thead>
               <tbody>
                 {boyStats.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="dash-empty">
+                    <td colSpan={8} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
                 ) : (
-                  boyStats.map(({ person, br, s }, i) => {
+                  boyStats.map(({ person, br, s }) => {
                     const cell = cellFor({ person, store: null });
-                    const top = i === 0 && s.score != null && s.score >= 85;
                     return (
                       <tr key={person + br}>
-                        <td className="dash-store">
-                          {top && <span style={{ marginRight: 6 }}>🏆</span>}
-                          {person}
-                        </td>
+                        <td className="dash-store">{person}</td>
                         <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
                         {cell('all', s.total, T.green)}
                         {cell('delivered', s.delivered, T.green)}
@@ -2420,7 +2356,6 @@ function SlaReport({ deliveries, onOpen }) {
                         <td>{slaHrs(s.avgCycle)}</td>
                         {cell('del', s.delBreach, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
-                        <td>{scoreChip(s)}</td>
                       </tr>
                     );
                   })
@@ -2509,10 +2444,8 @@ function SlaReport({ deliveries, onOpen }) {
         kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
         <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
         <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue Now</b> hamesha aaj ki haalat
-        dikhata hai, date range se filter nahi hota · <b>Score</b> = SLA met %; store ka score dono
-        breach se banta hai, delivery boy ka sirf delivery breach se (response manager ka kaam hai).
-        Overdue orders bhi breach ginte hain. Delivery boys view mein MBC (self pickup) aur bina-assign
-        wale orders nahi aate, isliye uske totals stores view se kam honge.
+        dikhata hai, date range se filter nahi hota. Delivery boys view mein MBC (self pickup) aur
+        bina-assign wale orders nahi aate, isliye uske totals stores view se kam honge.
       </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
@@ -2538,17 +2471,6 @@ function SlaAlert({ title, s, onClose }) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <span
-              className="stage-badge"
-              style={{
-                background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
-                color: s.score == null ? T.inkSoft : slaTone(s.score),
-                marginBottom: 8,
-              }}
-            >
-              <span className="col-pip" style={{ background: slaTone(s.score) }} /> Score{' '}
-              {s.score == null ? '—' : s.score} · {slaBand(s.score)}
-            </span>
             <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
             <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
           </div>
@@ -2558,7 +2480,6 @@ function SlaAlert({ title, s, onClose }) {
         </div>
         <div className="modal-body">
           <div className="kv-grid">
-            <KV label="SLA met" value={s.slaPct == null ? '—' : s.slaPct + '%'} />
             <KV label="Overdue now" value={s.overdue} />
             <KV label="Avg response time" value={slaHrs(s.avgResp)} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
