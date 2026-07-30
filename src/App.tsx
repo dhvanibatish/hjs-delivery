@@ -2051,19 +2051,33 @@ function SlaReport({ deliveries, onOpen }) {
     all: () => true,
     delivered: (a) => a.delivered,
     pending: (a) => !a.delivered,
-    breach: (a) => a.delBreach,
+    resp: (a) => a.respBreach,
+    del: (a) => a.delBreach,
     notdel: (a) => a.delBreach && !a.delivered,
   };
 
-  const statOf = (list, ov) => {
+  /* delOnly = delivery boy ka score. Response manager ka kaam hai, boy ko
+     uske liye penalize karna galat hoga. */
+  const statOf = (list, ov, delOnly) => {
     const dl = list.filter((a) => a.delivered);
 
     /* Overdue orders bhi breach hain — chahe wo is date range ke bahar bane ho.
-       Warna 12 order atke hue store ka score 100 (green) dikh raha tha. */
+       Warna 13 order atke hue store ka score 100 (green) dikh raha tha. */
     const ids = new Set(list.map((a) => a.x.invoice_id));
     const extraOv = ov.filter((a) => !ids.has(a.x.invoice_id));
-    const graded = list.filter((a) => a.promise).length + extraOv.length;
-    const breach = list.filter((a) => a.delBreach).length + extraOv.length;
+    const scored = [...list, ...extraOv];
+    let graded = 0;
+    let breach = 0;
+    scored.forEach((a) => {
+      if (!delOnly && a.respDeadline) {
+        graded++;
+        if (a.respBreach) breach++;
+      }
+      if (a.promise) {
+        graded++;
+        if (a.delBreach) breach++;
+      }
+    });
     const slaPct = graded ? Math.round(((graded - breach) / graded) * 100) : null;
 
     const avg = (k) => {
@@ -2080,7 +2094,8 @@ function SlaReport({ deliveries, onOpen }) {
       total: list.length,
       delivered: dl.length,
       pending: list.length - dl.length,
-      breach: list.filter((a) => a.delBreach).length,
+      respBreach: list.filter((a) => a.respBreach).length,
+      delBreach: list.filter((a) => a.delBreach).length,
       notDel: list.filter((a) => a.delBreach && !a.delivered).length,
       overdue: ov.length,
       slaPct,
@@ -2096,8 +2111,8 @@ function SlaReport({ deliveries, onOpen }) {
   const cards = [
     { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
     { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'pending', label: 'Pending', n: overall.pending, icon: Clock, color: T.blue, soft: T.blueSoft },
-    { kind: 'breach', label: 'SLA breach', n: overall.breach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
+    { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
     { kind: 'notdel', label: 'Promise nikla, delivery nahi', n: overall.notDel, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
     { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
@@ -2155,6 +2170,7 @@ function SlaReport({ deliveries, onOpen }) {
           s: statOf(
             rows.filter((a) => personOf(a) === person && a.branch === br),
             overdueAll.filter((a) => personOf(a) === person && a.branch === br),
+            true, // delivery-only score
           ),
         };
       })
@@ -2290,8 +2306,9 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Total</th>
                   <th>Delivered</th>
                   <th>Response Time</th>
+                  <th>Resp Breach</th>
                   <th>Avg Time</th>
-                  <th>SLA Breach</th>
+                  <th>Del Breach</th>
                   <th>Not Delivered</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
@@ -2301,7 +2318,7 @@ function SlaReport({ deliveries, onOpen }) {
               <tbody>
                 {storeStats.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="dash-empty">
+                    <td colSpan={11} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -2318,8 +2335,9 @@ function SlaReport({ deliveries, onOpen }) {
                         {cell('all', s.total, T.green)}
                         {cell('delivered', s.delivered, T.green)}
                         <td>{slaHrs(s.avgResp)}</td>
+                        {cell('resp', s.respBreach, T.red)}
                         <td>{slaHrs(s.avgCycle)}</td>
-                        {cell('breach', s.breach, T.red)}
+                        {cell('del', s.delBreach, T.red)}
                         {cell('notdel', s.notDel, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
                         <td>{scoreChip(s)}</td>
@@ -2362,7 +2380,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Delivered</th>
                   <th>Del Time</th>
                   <th>Avg Time</th>
-                  <th>SLA Breach</th>
+                  <th>Del Breach</th>
                   <th>Not Delivered</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
@@ -2394,7 +2412,7 @@ function SlaReport({ deliveries, onOpen }) {
                         {cell('delivered', s.delivered, T.green)}
                         <td>{slaHrs(s.avgDel)}</td>
                         <td>{slaHrs(s.avgCycle)}</td>
-                        {cell('breach', s.breach, T.red)}
+                        {cell('del', s.delBreach, T.red)}
                         {cell('notdel', s.notDel, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
                         <td>{scoreChip(s)}</td>
@@ -2452,7 +2470,9 @@ function SlaReport({ deliveries, onOpen }) {
                           {stg.short}
                         </span>
                       </td>
-                      <td>{a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}</td>
+                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
+                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
+                      </td>
                       <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
                       <td>
                         {a.delAt && !isNaN(a.delAt) ? (
@@ -2477,13 +2497,15 @@ function SlaReport({ deliveries, onOpen }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
-        <b>SLA Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
-        <b>Not Delivered</b> = usme se wo orders jinka promise time nikal gaya par delivery abhi tak
-        nahi hui · <b>Response Time</b> = entry aane se Talked to Customer tak ka average, business
-        hours ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM) mein · <b>Del Time</b> = Out for Delivery se
-        Delivered tak (MBC mein nahi banta) · <b>Avg Time</b> = entry se delivery tak ka poora average ·{' '}
-        <b>Overdue Now</b> hamesha aaj ki haalat dikhata hai, date range se filter nahi hota ·{' '}
-        <b>Score</b> = SLA met %, isme overdue orders bhi breach ginte hain.
+        <b>Resp Breach</b> = entry aane ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–
+        {SLA_BIZ_END - 12}PM business hours) mein Talked to Customer pe move nahi hua — ye store
+        manager ki zimmedari · <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak
+        nahi hui · <b>Not Delivered</b> = usme se wo orders jinka promise time nikal gaya par delivery
+        abhi tak nahi hui · <b>Response Time</b> = entry se Talked tak ka average · <b>Del Time</b> =
+        Out for Delivery se Delivered tak (MBC mein nahi banta) · <b>Avg Time</b> = entry se delivery
+        tak ka poora average · <b>Overdue Now</b> hamesha aaj ki haalat dikhata hai, date range se
+        filter nahi hota · <b>Score</b> = SLA met %; store ka score dono breach se banta hai, delivery
+        boy ka sirf delivery breach se (response manager ka kaam hai). Overdue orders bhi breach ginte hain.
       </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
@@ -2500,7 +2522,13 @@ function SlaAlert({ title, s, onClose }) {
       'Promise nikla, delivery nahi hui',
       `${s.notDel} order ka diya hua time nikal gaya par abhi tak deliver nahi hue.`,
     ]);
-  if (s.breach) problems.push(['SLA breach', `${s.breach} order customer ko diye time se late gaye.`]);
+  if (s.respBreach)
+    problems.push([
+      'Response late',
+      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui.`,
+    ]);
+  if (s.delBreach)
+    problems.push(['Delivery breach', `${s.delBreach} order customer ko diye time se late gaye.`]);
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2531,8 +2559,8 @@ function SlaAlert({ title, s, onClose }) {
             <KV label="Overdue now" value={s.overdue} />
             <KV label="Response time" value={slaHrs(s.avgResp)} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
-            <KV label="Delivered" value={s.delivered} />
-            <KV label="Pending" value={s.pending} />
+            <KV label="Response breach" value={s.respBreach} />
+            <KV label="Delivery breach" value={s.delBreach} />
           </div>
 
           <div className="sec-title" style={{ margin: '4px 0 0' }}>
