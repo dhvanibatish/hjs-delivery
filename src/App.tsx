@@ -2314,10 +2314,10 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Store</th>
                   <th>Total</th>
                   <th>Delivered</th>
-                  <th>Avg Response</th>
+                  <th>Avg Response Time</th>
                   <th>Resp Breach</th>
-                  <th>Avg Resp Late</th>
-                  <th>Avg Delivery</th>
+                  <th>Avg Response Breach Time</th>
+                  <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
@@ -2390,7 +2390,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Total</th>
                   <th>Delivered</th>
                   <th>Del Time</th>
-                  <th>Avg Delivery</th>
+                  <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
@@ -2502,16 +2502,17 @@ function SlaReport({ deliveries, onOpen }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
-        <b>Resp Breach</b> = entry aane ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–
-        {SLA_BIZ_END - 12}PM business hours) mein Talked to Customer pe move nahi hua — ye store
-        manager ki zimmedari · <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak
-        nahi hui · <b>Not Delivered</b> = usme se wo orders jinka promise time nikal gaya par delivery
-        abhi tak nahi hui · <b>Response Time</b> = entry se Talked tak ka average · <b>Del Time</b> =
-        Out for Delivery se Delivered tak · Delivery boys view mein MBC (self pickup) aur bina-assign
-        wale orders nahi aate, isliye uske totals stores view se kam honge · <b>Avg Time</b> = entry se delivery
-        tak ka poora average · <b>Overdue Now</b> hamesha aaj ki haalat dikhata hai, date range se
-        filter nahi hota · <b>Score</b> = SLA met %; store ka score dono breach se banta hai, delivery
-        boy ka sirf delivery breach se (response manager ka kaam hai). Overdue orders bhi breach ginte hain.
+        <b>Avg Response Time</b> = entry aane se Talked to Customer tak ka average ·{' '}
+        <b>Resp Breach</b> = entry ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM
+        business hours) mein Talked pe move nahi hua — store manager ki zimmedari ·{' '}
+        <b>Avg Response Breach Time</b> = jo orders wo {SLA_RESPONSE_MIN} min paar kar gaye, unka average
+        kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
+        <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
+        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue Now</b> hamesha aaj ki haalat
+        dikhata hai, date range se filter nahi hota · <b>Score</b> = SLA met %; store ka score dono
+        breach se banta hai, delivery boy ka sirf delivery breach se (response manager ka kaam hai).
+        Overdue orders bhi breach ginte hain. Delivery boys view mein MBC (self pickup) aur bina-assign
+        wale orders nahi aate, isliye uske totals stores view se kam honge.
       </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
@@ -2559,7 +2560,7 @@ function SlaAlert({ title, s, onClose }) {
           <div className="kv-grid">
             <KV label="SLA met" value={s.slaPct == null ? '—' : s.slaPct + '%'} />
             <KV label="Overdue now" value={s.overdue} />
-            <KV label="Response time" value={slaHrs(s.avgResp)} />
+            <KV label="Avg response time" value={slaHrs(s.avgResp)} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
             <KV label="Response breach" value={s.respBreach} />
             <KV label="Delivery breach" value={s.delBreach} />
