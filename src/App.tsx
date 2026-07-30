@@ -2017,7 +2017,7 @@ function SlaReport({ deliveries, onOpen }) {
     return [from, to];
   }, [range, from, to]);
 
-  /* Closed entries (cancelled / duplicate / renewal / deleted) SLA mein nahi aati */
+  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati */
   const live = useMemo(
     () => deliveries.filter((d) => !isClosedStage(d.stage)),
     [deliveries],
@@ -2035,8 +2035,8 @@ function SlaReport({ deliveries, onOpen }) {
 
   const rows = useMemo(() => inRange.map(slaAnalyze), [inRange]);
 
-  /* Overdue hamesha "abhi" ka metric hai — date range se filter nahi hota,
-     warna 3 din se atka order "Aaj" filter mein chhup jaata. */
+  /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
+     order "Aaj" filter mein chhup jaata to report jhooth bolti. */
   const overdueAll = useMemo(
     () =>
       live
@@ -2049,45 +2049,41 @@ function SlaReport({ deliveries, onOpen }) {
   const pick = {
     all: () => true,
     delivered: (a) => a.delivered,
-    resp: (a) => a.respBreach,
-    del: (a) => a.delBreach,
-    skipped: (a) => a.skipped,
+    pending: (a) => !a.delivered,
+    breach: (a) => a.delBreach,
   };
 
   const statOf = (list, ov) => {
     const dl = list.filter((a) => a.delivered);
-    const graded = list.reduce((n, a) => n + a.graded, 0);
-    const br = list.reduce((n, a) => n + a.breaches, 0);
-    const slaPct = graded ? Math.round(((graded - br) / graded) * 100) : null;
-    const skipped = dl.filter((a) => a.skipped).length;
-    const adherence = dl.length ? Math.round(100 - (skipped / dl.length) * 100) : null;
+
+    /* Overdue orders bhi breach hain — chahe wo is date range ke bahar bane ho.
+       Warna 12 order atke hue store ka score 100 (green) dikh raha tha. */
+    const ids = new Set(list.map((a) => a.x.invoice_id));
+    const extraOv = ov.filter((a) => !ids.has(a.x.invoice_id));
+    const graded = list.filter((a) => a.promise).length + extraOv.length;
+    const breach = list.filter((a) => a.delBreach).length + extraOv.length;
+    const slaPct = graded ? Math.round(((graded - breach) / graded) * 100) : null;
+
     const avg = (k) => {
       const v = dl.map((a) => a[k]).filter((n) => n != null);
       return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
     };
-    // response time delivered hone ka intezaar nahi karta — pending orders bhi count
+    /* response time delivered hone ka intezaar nahi karta — pending bhi count */
     const avgAll = (k) => {
       const v = list.map((a) => a[k]).filter((n) => n != null);
       return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
     };
+
     return {
       total: list.length,
       delivered: dl.length,
-      resp: list.filter((a) => a.respBreach).length,
-      del: list.filter((a) => a.delBreach).length,
-      skipped,
+      pending: list.length - dl.length,
+      breach: list.filter((a) => a.delBreach).length,
       overdue: ov.length,
       slaPct,
-      adherence,
-      score:
-        dl.length && slaPct != null
-          ? Math.round(adherence * 0.5 + slaPct * 0.5)
-          : dl.length
-            ? adherence
-            : slaPct,
+      score: slaPct,
       avgCycle: avg('totalHrs'),
       avgResp: avgAll('respHrs'),
-      avgDel: avg('delHrs'),
     };
   };
 
@@ -2096,13 +2092,20 @@ function SlaReport({ deliveries, onOpen }) {
   const cards = [
     { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
     { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'resp', label: 'Response breach', n: overall.resp, icon: Clock, color: T.red, soft: T.redSoft },
-    { kind: 'del', label: 'Delivery SLA breach', n: overall.del, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'pending', label: 'Pending', n: overall.pending, icon: Clock, color: T.blue, soft: T.blueSoft },
+    { kind: 'breach', label: 'SLA breach', n: overall.breach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
     { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
-    { kind: 'skipped', label: 'Stage skipped', n: overall.skipped, icon: Copy, color: T.violet, soft: T.violetSoft },
+    {
+      kind: 'all',
+      label: 'SLA met',
+      n: overall.slaPct == null ? '—' : overall.slaPct + '%',
+      icon: BarChart3,
+      color: slaTone(overall.slaPct),
+      soft: T.mint,
+      plain: true,
+    },
   ];
 
-  /* drill list */
   const drill = useMemo(() => {
     let list = sel.kind === 'overdue' ? overdueAll : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
@@ -2113,6 +2116,7 @@ function SlaReport({ deliveries, onOpen }) {
     // eslint-disable-next-line
   }, [rows, overdueAll, sel]);
 
+  /* Best performer sabse upar */
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
     .map((st) => ({
       st,
@@ -2123,10 +2127,11 @@ function SlaReport({ deliveries, onOpen }) {
     }))
     .filter((r) => r.s.total > 0 || r.s.overdue > 0)
     .sort((a, b) => {
-      if (a.s.score == null && b.s.score == null) return 0;
+      if (a.s.score == null && b.s.score == null) return b.s.total - a.s.total;
       if (a.s.score == null) return 1;
       if (b.s.score == null) return -1;
-      return a.s.score - b.s.score; // kharab store sabse upar
+      if (b.s.score !== a.s.score) return b.s.score - a.s.score;
+      return b.s.delivered - a.s.delivered; // barabar score pe zyada delivery upar
     });
 
   const rangeLabel =
@@ -2178,10 +2183,10 @@ function SlaReport({ deliveries, onOpen }) {
 
       <div className="dash-cards">
         {cards.map((c) => {
-          const on = sel.kind === c.kind && !sel.store;
+          const on = !c.plain && sel.kind === c.kind && !sel.store;
           return (
             <button
-              key={c.kind}
+              key={c.label}
               className={on ? 'dash-card on' : 'dash-card'}
               style={on ? { borderColor: c.color } : {}}
               onClick={() => setSel({ kind: c.kind, store: null })}
@@ -2198,16 +2203,12 @@ function SlaReport({ deliveries, onOpen }) {
         })}
       </div>
 
-      {/* store-wise SLA table */}
+      {/* store-wise — best performer top pe */}
       <div className="dash-block">
         <div className="dash-block-h">
           Store-wise · {rangeLabel}
           <span style={{ fontWeight: 600, color: T.inkSoft }}>
-            {'  ·  '}SLA met{' '}
-            <b style={{ color: slaTone(overall.slaPct) }}>
-              {overall.slaPct == null ? '—' : overall.slaPct + '%'}
-            </b>
-            {'  ·  '}Avg delivery time <b style={{ color: T.ink }}>{slaHrs(overall.avgCycle)}</b>
+            {'  ·  '}best performer sabse upar
           </span>
         </div>
         <div className="dash-table-wrap">
@@ -2217,14 +2218,10 @@ function SlaReport({ deliveries, onOpen }) {
                 <th>Store</th>
                 <th>Total</th>
                 <th>Delivered</th>
-                <th>Resp Breach</th>
-                <th>Del Breach</th>
-                <th>Overdue Now</th>
-                <th>Skipped</th>
-                <th>Avg Time</th>
                 <th>Response Time</th>
-                <th>Del Time</th>
-                <th>SLA %</th>
+                <th>Avg Time</th>
+                <th>SLA Breach</th>
+                <th>Overdue Now</th>
                 <th>Score</th>
                 <th>Alert</th>
               </tr>
@@ -2232,12 +2229,12 @@ function SlaReport({ deliveries, onOpen }) {
             <tbody>
               {storeStats.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="dash-empty">
+                  <td colSpan={9} className="dash-empty">
                     Is duration mein koi entry nahi
                   </td>
                 </tr>
               ) : (
-                storeStats.map(({ st, s }) => {
+                storeStats.map(({ st, s }, i) => {
                   const cell = (kind, n, color) => (
                     <td
                       className={n ? 'dash-td-click' : 'dash-td-zero'}
@@ -2247,21 +2244,19 @@ function SlaReport({ deliveries, onOpen }) {
                       {n}
                     </td>
                   );
+                  const top = i === 0 && s.score != null && s.score >= 85;
                   return (
                     <tr key={st}>
-                      <td className="dash-store">{branchLabel(st)}</td>
+                      <td className="dash-store">
+                        {top && <span style={{ marginRight: 6 }}>🏆</span>}
+                        {branchLabel(st)}
+                      </td>
                       {cell('all', s.total, T.green)}
                       {cell('delivered', s.delivered, T.green)}
-                      {cell('resp', s.resp, T.red)}
-                      {cell('del', s.del, T.red)}
-                      {cell('overdue', s.overdue, T.amber)}
-                      {cell('skipped', s.skipped, T.violet)}
-                      <td>{slaHrs(s.avgCycle)}</td>
                       <td>{slaHrs(s.avgResp)}</td>
-                      <td>{slaHrs(s.avgDel)}</td>
-                      <td style={{ fontWeight: 700, color: slaTone(s.slaPct) }}>
-                        {s.slaPct == null ? '—' : s.slaPct + '%'}
-                      </td>
+                      <td>{slaHrs(s.avgCycle)}</td>
+                      {cell('breach', s.breach, T.red)}
+                      {cell('overdue', s.overdue, T.amber)}
                       <td>
                         <span
                           className="dash-chip"
@@ -2328,7 +2323,6 @@ function SlaReport({ deliveries, onOpen }) {
               ) : (
                 drill.map((a) => {
                   const stg = stageMeta(a.x.stage);
-                  const late = a.delBreach ? a.delLateBy : a.respBreach ? a.respLateBy : null;
                   return (
                     <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
                       <td>{a.x.id}</td>
@@ -2339,13 +2333,11 @@ function SlaReport({ deliveries, onOpen }) {
                           {stg.short}
                         </span>
                       </td>
-                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
-                        {a.respOpen ? 'abhi tak nahi' : slaMins(a.respLateBy) + (a.respBreach ? ' late' : ' ok')}
-                      </td>
+                      <td>{a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}</td>
                       <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
                       <td>{a.delAt && !isNaN(a.delAt) ? fmtDateTime(a.delAt.toISOString()) : '—'}</td>
-                      <td style={{ color: late ? T.red : T.inkSoft, fontWeight: late ? 700 : 500 }}>
-                        {late ? slaMins(late) : '—'}
+                      <td style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
+                        {a.delBreach ? slaMins(a.delLateBy) : '—'}
                       </td>
                       <td>{a.x.person || '—'}</td>
                     </tr>
@@ -2358,23 +2350,15 @@ function SlaReport({ deliveries, onOpen }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
-        <b>Response</b> = order aane ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM
-        business hours) mein Talked to Customer pe move hona chahiye ·{' '}
-        <b>Del Breach</b> = confirmed date+time se late delivery (ya abhi tak nahi) ·{' '}
-        <b>Response Time</b> = entry aane se Talked to Customer tak ka average (manager kitni
-        jaldi order pakadta hai) · <b>Del Time</b> = Out for Delivery se Delivered tak — dono
-        business hours mein, band ghante count nahi hote ·{' '}
-        <b>Overdue Now</b> hamesha abhi ke pending orders pe hai, date range pe nahi ·{' '}
-        MBC orders mein Out for Delivery skip count nahi hota · Score = 50% stage adherence + 50% SLA.
+        <b>SLA Breach</b> = jo date aur time customer ko promise kiya, us se late delivery hui (ya abhi
+        tak nahi hui) · <b>Response Time</b> = entry aane se Talked to Customer tak ka average, business
+        hours ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM) mein · <b>Avg Time</b> = entry se delivery tak ka
+        poora average · <b>Overdue Now</b> = abhi pending orders jinka promise time nikal chuka hai (ya{' '}
+        {SLA_RESPONSE_MIN} min se koi response nahi) — ye hamesha aaj ki haalat dikhata hai, date range
+        se filter nahi hota · <b>Score</b> = SLA met %, isme overdue orders bhi breach ginte hain.
       </div>
 
-      {alertOn && (
-        <SlaAlert
-          st={alertOn.st}
-          s={alertOn.s}
-          onClose={() => setAlertOn(null)}
-        />
-      )}
+      {alertOn && <SlaAlert st={alertOn.st} s={alertOn.s} onClose={() => setAlertOn(null)} />}
     </div>
   );
 }
@@ -2382,18 +2366,10 @@ function SlaReport({ deliveries, onOpen }) {
 /* ── Alert modal — abhi sirf UI, backend baad mein ── */
 function SlaAlert({ st, s, onClose }) {
   const problems = [];
-  if (s.overdue) problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
-  if (s.resp)
-    problems.push([
-      'Response late',
-      `${s.resp} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui.`,
-    ]);
-  if (s.del) problems.push(['Delivery SLA breach', `${s.del} order customer ko diye time se late gaye.`]);
-  if (s.skipped)
-    problems.push([
-      'Stages skip ho rahe hain',
-      `${s.skipped} delivered order mein stage log missing — app real-time update nahi ho raha.`,
-    ]);
+  if (s.overdue)
+    problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
+  if (s.breach)
+    problems.push(['SLA breach', `${s.breach} order customer ko diye time se late gaye.`]);
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2408,8 +2384,8 @@ function SlaAlert({ st, s, onClose }) {
                 marginBottom: 8,
               }}
             >
-              <span className="col-pip" style={{ background: slaTone(s.score) }} />{' '}
-              Score {s.score == null ? '—' : s.score} · {slaBand(s.score)}
+              <span className="col-pip" style={{ background: slaTone(s.score) }} /> Score{' '}
+              {s.score == null ? '—' : s.score} · {slaBand(s.score)}
             </span>
             <div style={{ fontWeight: 800, fontSize: 17 }}>{branchLabel(st)}</div>
             <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
@@ -2422,10 +2398,10 @@ function SlaAlert({ st, s, onClose }) {
           <div className="kv-grid">
             <KV label="SLA met" value={s.slaPct == null ? '—' : s.slaPct + '%'} />
             <KV label="Overdue now" value={s.overdue} />
+            <KV label="Response time" value={slaHrs(s.avgResp)} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
-            <KV label="Stage adherence" value={s.adherence == null ? '—' : s.adherence + '%'} />
-            <KV label="Avg response" value={slaHrs(s.avgResp)} />
-            <KV label="Delivery time" value={slaHrs(s.avgDel)} />
+            <KV label="Delivered" value={s.delivered} />
+            <KV label="Pending" value={s.pending} />
           </div>
 
           <div className="sec-title" style={{ margin: '4px 0 0' }}>
@@ -2434,12 +2410,8 @@ function SlaAlert({ st, s, onClose }) {
           {problems.length === 0 ? (
             <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
           ) : (
-            problems.slice(0, 2).map(([t, d], i) => (
-              <div
-                key={i}
-                className="flag-note"
-                style={{ background: T.redSoft, color: T.red }}
-              >
+            problems.map(([t, d], i) => (
+              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
                 <b>{t}</b>
                 <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
               </div>
