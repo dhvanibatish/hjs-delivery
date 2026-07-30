@@ -1842,6 +1842,29 @@ function slaBizAdd(from, mins) {
   return d;
 }
 
+/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi).
+   Mgr/Del/Avg time isse nikalte hain, warna raat ke ghante jud kar store
+   bekaar mein kharab dikhta hai. */
+function slaBizMins(a, b) {
+  if (!a || !b || b <= a) return 0;
+  let total = 0;
+  let cur = new Date(a);
+  for (let g = 0; g < 400 && cur < b; g++) {
+    const s0 = new Date(cur);
+    s0.setHours(SLA_BIZ_START, 0, 0, 0);
+    const e0 = new Date(cur);
+    e0.setHours(SLA_BIZ_END, 0, 0, 0);
+    const s = cur < s0 ? s0 : cur;
+    const e = b < e0 ? b : e0;
+    if (e > s) total += (e - s) / 60000;
+    const nx = new Date(cur);
+    nx.setDate(nx.getDate() + 1);
+    nx.setHours(0, 0, 0, 0);
+    cur = nx;
+  }
+  return total;
+}
+
 const slaLog = (x) => {
   const r = (x && x._raw) || {};
   return Array.isArray(r.app_log) ? r.app_log : [];
@@ -1905,7 +1928,8 @@ function slaAnalyze(x) {
   const now = new Date();
   const created = new Date(createdTs(x));
   const okStart = !isNaN(created);
-  const span = (a, b) => (a && b && b >= a ? (b - a) / 3600000 : null);
+  // saare duration business hours mein — deadline logic ke saath consistent
+  const span = (a, b) => (a && b && b >= a ? slaBizMins(a, b) / 60 : null);
 
   const delivered = x.stage === 'delivered';
   const delAt = delivered ? new Date(deliveredTs(x)) : null;
@@ -1928,17 +1952,15 @@ function slaAnalyze(x) {
   const need = mbc ? ['talked', 'scheduled'] : ['talked', 'scheduled', 'dispatched'];
   const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
 
-  /* kiski deri — manager vs delivery person */
+  /* Manager response — entry aane se agli stage (Talked to Customer) tak.
+     Jo order abhi Talked pe pahuncha hi nahi, uska respHrs null (average
+     mein count nahi hoga — wo Response Breach column mein pakda jaata hai). */
+  const respHrs = okStart && talkedAt ? span(created, talkedAt) : null;
+
+  /* Delivery person ka hissa — Out for Delivery se Delivered tak */
   const dispAt = slaFirst(cycle, 'dispatched');
-  let mgrHrs = null;
   let delHrs = null;
-  if (okStart && delAt && !isNaN(delAt)) {
-    if (mbc || !dispAt) mgrHrs = span(created, delAt);
-    else {
-      mgrHrs = span(created, dispAt);
-      delHrs = span(dispAt, delAt);
-    }
-  }
+  if (delAt && !isNaN(delAt) && dispAt && !mbc) delHrs = span(dispAt, delAt);
 
   const graded = (respDeadline ? 1 : 0) + (promise ? 1 : 0);
   const breaches = (respBreach ? 1 : 0) + (delBreach ? 1 : 0);
@@ -1964,7 +1986,7 @@ function slaAnalyze(x) {
     overdue: !delivered && ((respOpen && respBreach) || delBreach),
     totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
     openHrs: okStart && !delivered ? span(created, now) : null,
-    mgrHrs,
+    respHrs,
     delHrs,
   };
 }
@@ -2043,6 +2065,11 @@ function SlaReport({ deliveries, onOpen }) {
       const v = dl.map((a) => a[k]).filter((n) => n != null);
       return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
     };
+    // response time delivered hone ka intezaar nahi karta — pending orders bhi count
+    const avgAll = (k) => {
+      const v = list.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
     return {
       total: list.length,
       delivered: dl.length,
@@ -2059,7 +2086,7 @@ function SlaReport({ deliveries, onOpen }) {
             ? adherence
             : slaPct,
       avgCycle: avg('totalHrs'),
-      avgMgr: avg('mgrHrs'),
+      avgResp: avgAll('respHrs'),
       avgDel: avg('delHrs'),
     };
   };
@@ -2195,7 +2222,7 @@ function SlaReport({ deliveries, onOpen }) {
                 <th>Overdue Now</th>
                 <th>Skipped</th>
                 <th>Avg Time</th>
-                <th>Mgr Time</th>
+                <th>Response Time</th>
                 <th>Del Time</th>
                 <th>SLA %</th>
                 <th>Score</th>
@@ -2230,7 +2257,7 @@ function SlaReport({ deliveries, onOpen }) {
                       {cell('overdue', s.overdue, T.amber)}
                       {cell('skipped', s.skipped, T.violet)}
                       <td>{slaHrs(s.avgCycle)}</td>
-                      <td>{slaHrs(s.avgMgr)}</td>
+                      <td>{slaHrs(s.avgResp)}</td>
                       <td>{slaHrs(s.avgDel)}</td>
                       <td style={{ fontWeight: 700, color: slaTone(s.slaPct) }}>
                         {s.slaPct == null ? '—' : s.slaPct + '%'}
@@ -2334,7 +2361,9 @@ function SlaReport({ deliveries, onOpen }) {
         <b>Response</b> = order aane ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM
         business hours) mein Talked to Customer pe move hona chahiye ·{' '}
         <b>Del Breach</b> = confirmed date+time se late delivery (ya abhi tak nahi) ·{' '}
-        <b>Mgr Time</b> order aane se Out for Delivery tak, <b>Del Time</b> uske baad delivery tak ·{' '}
+        <b>Response Time</b> = entry aane se Talked to Customer tak ka average (manager kitni
+        jaldi order pakadta hai) · <b>Del Time</b> = Out for Delivery se Delivered tak — dono
+        business hours mein, band ghante count nahi hote ·{' '}
         <b>Overdue Now</b> hamesha abhi ke pending orders pe hai, date range pe nahi ·{' '}
         MBC orders mein Out for Delivery skip count nahi hota · Score = 50% stage adherence + 50% SLA.
       </div>
@@ -2395,7 +2424,7 @@ function SlaAlert({ st, s, onClose }) {
             <KV label="Overdue now" value={s.overdue} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
             <KV label="Stage adherence" value={s.adherence == null ? '—' : s.adherence + '%'} />
-            <KV label="Manager time" value={slaHrs(s.avgMgr)} />
+            <KV label="Avg response" value={slaHrs(s.avgResp)} />
             <KV label="Delivery time" value={slaHrs(s.avgDel)} />
           </div>
 
