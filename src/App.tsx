@@ -1354,6 +1354,11 @@ export default function App() {
                 deliveries={scoped}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
+            ) : session.branch === 'ALL' && page === 'sla' ? (
+              <SlaReport
+                deliveries={scoped}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
             ) : (
               <>
                 <Header
@@ -1792,6 +1797,633 @@ function Dashboard({ deliveries, onOpen }) {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════ PROCESS & SLA (all stores)
+   Do SLA:
+   1. RESPONSE  — order aane ke 30 min (business hours 10AM–8PM) mein
+                  "Talked to Customer" pe move hona chahiye
+   2. DELIVERY  — jo confirmed date+time customer ko diya, us tak
+                  "Item Delivered" ho jaana chahiye (exact wall clock)
+   Dashboard ke hi dash-* classes use karta hai — koi naya CSS nahi.        */
+
+const SLA_BIZ_START = 10; // 10 AM
+const SLA_BIZ_END = 20; // 8 PM
+const SLA_RESPONSE_MIN = 30; // business minutes
+
+/* 30-min SLA duration hai isliye business-hours clock pe chalta hai.
+   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
+   normal wall clock. */
+function slaBizAdd(from, mins) {
+  const shift = (x) => {
+    const y = new Date(x);
+    const h = y.getHours() + y.getMinutes() / 60;
+    if (h < SLA_BIZ_START) y.setHours(SLA_BIZ_START, 0, 0, 0);
+    else if (h >= SLA_BIZ_END) {
+      y.setDate(y.getDate() + 1);
+      y.setHours(SLA_BIZ_START, 0, 0, 0);
+    }
+    return y;
+  };
+  let d = shift(new Date(from));
+  let left = mins;
+  for (let g = 0; g < 400 && left > 0; g++) {
+    const end = new Date(d);
+    end.setHours(SLA_BIZ_END, 0, 0, 0);
+    const avail = (end - d) / 60000;
+    if (left <= avail) return new Date(d.getTime() + left * 60000);
+    left -= avail;
+    d = shift(new Date(end.getTime() + 60000));
+  }
+  return d;
+}
+
+const slaLog = (x) => {
+  const r = (x && x._raw) || {};
+  return Array.isArray(r.app_log) ? r.app_log : [];
+};
+
+/* Current cycle = aakhri baar "New Delivery" pe wapas jaane ke baad ka hissa.
+   Iske bina re-opened orders galti se "stage skipped" dikhte hain.
+   "Edited" stage move nahi hai, isliye chhod dete hain. */
+function slaCycle(x) {
+  const mv = slaLog(x)
+    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
+    .slice()
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  let start = 0;
+  for (let i = mv.length - 1; i >= 0; i--)
+    if (mv[i].stage === 'new') {
+      start = i;
+      break;
+    }
+  return mv.slice(start);
+}
+function slaFirst(cycle, stage) {
+  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
+  return null;
+}
+/* MBC = customer khud le jaata hai — Scheduled se seedha Delivered.
+   Ispe "Out for Delivery skip hua" count nahi hona chahiye. */
+function slaIsMbc(x, cycle) {
+  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
+  return cycle.some((e) =>
+    String((e.fields && e.fields['Delivery person']) || '').toUpperCase().includes('MBC'),
+  );
+}
+/* Promise = confirmed_date + confirmed_time (buildPatch inhe hamesha likhta hai) */
+function slaPromise(x) {
+  const r = (x && x._raw) || {};
+  const d = r.confirmed_date;
+  if (!d || d === 'null') return null;
+  let t = r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time) : '20:00:00';
+  if (t.length === 5) t += ':00';
+  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
+  return isNaN(dt) ? null : dt;
+}
+
+const slaHrs = (h) =>
+  h == null ? '—' : h < 1 ? Math.round(h * 60) + 'm' : h < 48 ? Math.round(h) + 'h' : (h / 24).toFixed(1) + 'd';
+const slaMins = (m) => {
+  if (m == null) return '—';
+  const a = Math.abs(m);
+  if (a < 60) return Math.round(a) + 'm';
+  if (a < 2880) return Math.round(a / 60) + 'h';
+  return (a / 1440).toFixed(1) + 'd';
+};
+const slaTone = (s) => (s == null ? '#C9C7BE' : s >= 85 ? T.green : s >= 70 ? T.amber : T.red);
+const slaBand = (s) => (s == null ? 'No data' : s >= 85 ? 'Good' : s >= 70 ? 'Needs work' : 'Critical');
+
+/* ── ek order ka poora SLA picture ── */
+function slaAnalyze(x) {
+  const cycle = slaCycle(x);
+  const mbc = slaIsMbc(x, cycle);
+  const now = new Date();
+  const created = new Date(createdTs(x));
+  const okStart = !isNaN(created);
+  const span = (a, b) => (a && b && b >= a ? (b - a) / 3600000 : null);
+
+  const delivered = x.stage === 'delivered';
+  const delAt = delivered ? new Date(deliveredTs(x)) : null;
+
+  /* SLA 1 — Response */
+  const talkedAt = slaFirst(cycle, 'talked');
+  const respDeadline = okStart ? slaBizAdd(created, SLA_RESPONSE_MIN) : null;
+  const respEnd = talkedAt || now;
+  const respBreach = !!(respDeadline && respEnd > respDeadline);
+  const respOpen = !talkedAt;
+  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
+
+  /* SLA 2 — Delivery */
+  const promise = slaPromise(x);
+  const delEnd = delAt || now;
+  const delBreach = !!(promise && delEnd > promise);
+  const delLateBy = delBreach ? (delEnd - promise) / 60000 : 0;
+
+  /* stage skip */
+  const need = mbc ? ['talked', 'scheduled'] : ['talked', 'scheduled', 'dispatched'];
+  const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
+
+  /* kiski deri — manager vs delivery person */
+  const dispAt = slaFirst(cycle, 'dispatched');
+  let mgrHrs = null;
+  let delHrs = null;
+  if (okStart && delAt && !isNaN(delAt)) {
+    if (mbc || !dispAt) mgrHrs = span(created, delAt);
+    else {
+      mgrHrs = span(created, dispAt);
+      delHrs = span(dispAt, delAt);
+    }
+  }
+
+  const graded = (respDeadline ? 1 : 0) + (promise ? 1 : 0);
+  const breaches = (respBreach ? 1 : 0) + (delBreach ? 1 : 0);
+
+  return {
+    x,
+    branch: x.branch,
+    delivered,
+    mbc,
+    respBreach,
+    respOpen,
+    respLateBy,
+    respDeadline,
+    talkedAt,
+    promise,
+    delBreach,
+    delLateBy,
+    delAt,
+    skipped: delivered && missing.length > 0,
+    missing,
+    graded,
+    breaches,
+    overdue: !delivered && ((respOpen && respBreach) || delBreach),
+    totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
+    openHrs: okStart && !delivered ? span(created, now) : null,
+    mgrHrs,
+    delHrs,
+  };
+}
+
+function SlaReport({ deliveries, onOpen }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [sel, setSel] = useState({ kind: 'all', store: null });
+  const [alertOn, setAlertOn] = useState(null);
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    return [from, to];
+  }, [range, from, to]);
+
+  /* Closed entries (cancelled / duplicate / renewal / deleted) SLA mein nahi aati */
+  const live = useMemo(
+    () => deliveries.filter((d) => !isClosedStage(d.stage)),
+    [deliveries],
+  );
+
+  const inRange = useMemo(() => {
+    const [s, e] = bounds;
+    return live.filter((d) => {
+      const cd = dayStr(createdTs(d));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && d.branch !== store) return false;
+      return true;
+    });
+  }, [live, bounds, store]);
+
+  const rows = useMemo(() => inRange.map(slaAnalyze), [inRange]);
+
+  /* Overdue hamesha "abhi" ka metric hai — date range se filter nahi hota,
+     warna 3 din se atka order "Aaj" filter mein chhup jaata. */
+  const overdueAll = useMemo(
+    () =>
+      live
+        .filter((d) => d.stage !== 'delivered')
+        .map(slaAnalyze)
+        .filter((a) => a.overdue && (store === 'ALL' || a.branch === store)),
+    [live, store],
+  );
+
+  const pick = {
+    all: () => true,
+    delivered: (a) => a.delivered,
+    resp: (a) => a.respBreach,
+    del: (a) => a.delBreach,
+    skipped: (a) => a.skipped,
+  };
+
+  const statOf = (list, ov) => {
+    const dl = list.filter((a) => a.delivered);
+    const graded = list.reduce((n, a) => n + a.graded, 0);
+    const br = list.reduce((n, a) => n + a.breaches, 0);
+    const slaPct = graded ? Math.round(((graded - br) / graded) * 100) : null;
+    const skipped = dl.filter((a) => a.skipped).length;
+    const adherence = dl.length ? Math.round(100 - (skipped / dl.length) * 100) : null;
+    const avg = (k) => {
+      const v = dl.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
+    return {
+      total: list.length,
+      delivered: dl.length,
+      resp: list.filter((a) => a.respBreach).length,
+      del: list.filter((a) => a.delBreach).length,
+      skipped,
+      overdue: ov.length,
+      slaPct,
+      adherence,
+      score:
+        dl.length && slaPct != null
+          ? Math.round(adherence * 0.5 + slaPct * 0.5)
+          : dl.length
+            ? adherence
+            : slaPct,
+      avgCycle: avg('totalHrs'),
+      avgMgr: avg('mgrHrs'),
+      avgDel: avg('delHrs'),
+    };
+  };
+
+  const overall = statOf(rows, overdueAll);
+
+  const cards = [
+    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
+    { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { kind: 'resp', label: 'Response breach', n: overall.resp, icon: Clock, color: T.red, soft: T.redSoft },
+    { kind: 'del', label: 'Delivery SLA breach', n: overall.del, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+    { kind: 'skipped', label: 'Stage skipped', n: overall.skipped, icon: Copy, color: T.violet, soft: T.violetSoft },
+  ];
+
+  /* drill list */
+  const drill = useMemo(() => {
+    let list = sel.kind === 'overdue' ? overdueAll : rows;
+    if (sel.store) list = list.filter((a) => a.branch === sel.store);
+    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
+    // eslint-disable-next-line
+  }, [rows, overdueAll, sel]);
+
+  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
+    .map((st) => ({
+      st,
+      s: statOf(
+        rows.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+    }))
+    .filter((r) => r.s.total > 0 || r.s.overdue > 0)
+    .sort((a, b) => {
+      if (a.s.score == null && b.s.score == null) return 0;
+      if (a.s.score == null) return 1;
+      if (b.s.score == null) return -1;
+      return a.s.score - b.s.score; // kharab store sabse upar
+    });
+
+  const rangeLabel =
+    range === 'today'
+      ? 'Aaj'
+      : range === 'yesterday'
+        ? 'Kal'
+        : range === '7d'
+          ? 'Pichhle 7 din'
+          : `${from} → ${to}`;
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Process &amp; SLA</div>
+          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
+        </div>
+        <div className="dash-filters">
+          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel({ kind: 'all', store: null });
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>
+                {branchLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const on = sel.kind === c.kind && !sel.store;
+          return (
+            <button
+              key={c.kind}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={on ? { borderColor: c.color } : {}}
+              onClick={() => setSel({ kind: c.kind, store: null })}
+            >
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
+                <c.icon size={16} />
+              </div>
+              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
+                {c.n}
+              </div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* store-wise SLA table */}
+      <div className="dash-block">
+        <div className="dash-block-h">
+          Store-wise · {rangeLabel}
+          <span style={{ fontWeight: 600, color: T.inkSoft }}>
+            {'  ·  '}SLA met{' '}
+            <b style={{ color: slaTone(overall.slaPct) }}>
+              {overall.slaPct == null ? '—' : overall.slaPct + '%'}
+            </b>
+            {'  ·  '}Avg delivery time <b style={{ color: T.ink }}>{slaHrs(overall.avgCycle)}</b>
+          </span>
+        </div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Total</th>
+                <th>Delivered</th>
+                <th>Resp Breach</th>
+                <th>Del Breach</th>
+                <th>Overdue Now</th>
+                <th>Skipped</th>
+                <th>Avg Time</th>
+                <th>Mgr Time</th>
+                <th>Del Time</th>
+                <th>SLA %</th>
+                <th>Score</th>
+                <th>Alert</th>
+              </tr>
+            </thead>
+            <tbody>
+              {storeStats.length === 0 ? (
+                <tr>
+                  <td colSpan={13} className="dash-empty">
+                    Is duration mein koi entry nahi
+                  </td>
+                </tr>
+              ) : (
+                storeStats.map(({ st, s }) => {
+                  const cell = (kind, n, color) => (
+                    <td
+                      className={n ? 'dash-td-click' : 'dash-td-zero'}
+                      style={n ? { color } : {}}
+                      onClick={() => n && setSel({ kind, store: st })}
+                    >
+                      {n}
+                    </td>
+                  );
+                  return (
+                    <tr key={st}>
+                      <td className="dash-store">{branchLabel(st)}</td>
+                      {cell('all', s.total, T.green)}
+                      {cell('delivered', s.delivered, T.green)}
+                      {cell('resp', s.resp, T.red)}
+                      {cell('del', s.del, T.red)}
+                      {cell('overdue', s.overdue, T.amber)}
+                      {cell('skipped', s.skipped, T.violet)}
+                      <td>{slaHrs(s.avgCycle)}</td>
+                      <td>{slaHrs(s.avgMgr)}</td>
+                      <td>{slaHrs(s.avgDel)}</td>
+                      <td style={{ fontWeight: 700, color: slaTone(s.slaPct) }}>
+                        {s.slaPct == null ? '—' : s.slaPct + '%'}
+                      </td>
+                      <td>
+                        <span
+                          className="dash-chip"
+                          style={{
+                            background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
+                            color: s.score == null ? T.inkSoft : slaTone(s.score),
+                          }}
+                        >
+                          {s.score == null ? '—' : s.score}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className="mini-edit"
+                          style={
+                            s.overdue || (s.score != null && s.score < 70)
+                              ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
+                              : {}
+                          }
+                          onClick={() => setAlertOn({ st, s })}
+                        >
+                          <Bell size={12} /> Alert
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* drill: selected entries */}
+      <div className="dash-block">
+        <div className="dash-block-h">
+          {drill.length} entries
+          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+          {cards.find((c) => c.kind === sel.kind)?.label ||
+            (sel.kind === 'overdue' ? 'Abhi SLA se bahar' : 'All')}
+        </div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Store</th>
+                <th>Stage</th>
+                <th>Response</th>
+                <th>Promise</th>
+                <th>Delivered</th>
+                <th>Late by</th>
+                <th>Person</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drill.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="dash-empty">
+                    Koi entry nahi
+                  </td>
+                </tr>
+              ) : (
+                drill.map((a) => {
+                  const stg = stageMeta(a.x.stage);
+                  const late = a.delBreach ? a.delLateBy : a.respBreach ? a.respLateBy : null;
+                  return (
+                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
+                      <td>{a.x.id}</td>
+                      <td>{a.x.customer}</td>
+                      <td>{branchLabel(a.branch)}</td>
+                      <td>
+                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
+                          {stg.short}
+                        </span>
+                      </td>
+                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
+                        {a.respOpen ? 'abhi tak nahi' : slaMins(a.respLateBy) + (a.respBreach ? ' late' : ' ok')}
+                      </td>
+                      <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
+                      <td>{a.delAt && !isNaN(a.delAt) ? fmtDateTime(a.delAt.toISOString()) : '—'}</td>
+                      <td style={{ color: late ? T.red : T.inkSoft, fontWeight: late ? 700 : 500 }}>
+                        {late ? slaMins(late) : '—'}
+                      </td>
+                      <td>{a.x.person || '—'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
+        <b>Response</b> = order aane ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM
+        business hours) mein Talked to Customer pe move hona chahiye ·{' '}
+        <b>Del Breach</b> = confirmed date+time se late delivery (ya abhi tak nahi) ·{' '}
+        <b>Mgr Time</b> order aane se Out for Delivery tak, <b>Del Time</b> uske baad delivery tak ·{' '}
+        <b>Overdue Now</b> hamesha abhi ke pending orders pe hai, date range pe nahi ·{' '}
+        MBC orders mein Out for Delivery skip count nahi hota · Score = 50% stage adherence + 50% SLA.
+      </div>
+
+      {alertOn && (
+        <SlaAlert
+          st={alertOn.st}
+          s={alertOn.s}
+          onClose={() => setAlertOn(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Alert modal — abhi sirf UI, backend baad mein ── */
+function SlaAlert({ st, s, onClose }) {
+  const problems = [];
+  if (s.overdue) problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
+  if (s.resp)
+    problems.push([
+      'Response late',
+      `${s.resp} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui.`,
+    ]);
+  if (s.del) problems.push(['Delivery SLA breach', `${s.del} order customer ko diye time se late gaye.`]);
+  if (s.skipped)
+    problems.push([
+      'Stages skip ho rahe hain',
+      `${s.skipped} delivered order mein stage log missing — app real-time update nahi ho raha.`,
+    ]);
+
+  return (
+    <div className="overlay center" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span
+              className="stage-badge"
+              style={{
+                background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
+                color: s.score == null ? T.inkSoft : slaTone(s.score),
+                marginBottom: 8,
+              }}
+            >
+              <span className="col-pip" style={{ background: slaTone(s.score) }} />{' '}
+              Score {s.score == null ? '—' : s.score} · {slaBand(s.score)}
+            </span>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{branchLabel(st)}</div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="kv-grid">
+            <KV label="SLA met" value={s.slaPct == null ? '—' : s.slaPct + '%'} />
+            <KV label="Overdue now" value={s.overdue} />
+            <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
+            <KV label="Stage adherence" value={s.adherence == null ? '—' : s.adherence + '%'} />
+            <KV label="Manager time" value={slaHrs(s.avgMgr)} />
+            <KV label="Delivery time" value={slaHrs(s.avgDel)} />
+          </div>
+
+          <div className="sec-title" style={{ margin: '4px 0 0' }}>
+            Main problems
+          </div>
+          {problems.length === 0 ? (
+            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
+          ) : (
+            problems.slice(0, 2).map(([t, d], i) => (
+              <div
+                key={i}
+                className="flag-note"
+                style={{ background: T.redSoft, color: T.red }}
+              >
+                <b>{t}</b>
+                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn-primary" disabled>
+            <Bell size={15} /> Send alert
+          </button>
         </div>
       </div>
     </div>
@@ -2284,7 +2916,10 @@ function Sidebar({ session, page, onNav }) {
   const nav = [
     { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
     ...(isAll
-      ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }]
+      ? [
+          { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+          { id: 'sla', icon: Clock, label: 'Process & SLA' },
+        ]
       : []),
     { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
     { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
