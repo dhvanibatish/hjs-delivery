@@ -2053,7 +2053,6 @@ function SlaReport({ deliveries, onOpen }) {
     pending: (a) => !a.delivered,
     resp: (a) => a.respBreach,
     del: (a) => a.delBreach,
-    notdel: (a) => a.delBreach && !a.delivered,
   };
 
   /* delOnly = delivery boy ka score. Response manager ka kaam hai, boy ko
@@ -2096,7 +2095,11 @@ function SlaReport({ deliveries, onOpen }) {
       pending: list.length - dl.length,
       respBreach: list.filter((a) => a.respBreach).length,
       delBreach: list.filter((a) => a.delBreach).length,
-      notDel: list.filter((a) => a.delBreach && !a.delivered).length,
+      /* sirf breach hue orders ka average — deadline se kitna upar nikle */
+      avgRespLate: (() => {
+        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
+        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+      })(),
       overdue: ov.length,
       slaPct,
       score: slaPct,
@@ -2111,9 +2114,9 @@ function SlaReport({ deliveries, onOpen }) {
   const cards = [
     { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
     { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { kind: 'pending', label: 'Pending', n: overall.pending, icon: MessageSquareWarning, color: T.blue, soft: T.blueSoft },
     { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
     { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'notdel', label: 'Promise nikla, delivery nahi', n: overall.notDel, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
     { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
 
@@ -2157,9 +2160,15 @@ function SlaReport({ deliveries, onOpen }) {
 
   /* delivery boy wise — person + store ke hisaab se group */
   const boyStats = useMemo(() => {
+    // MBC (self pickup) aur bina-assign wale orders kisi bande ki performance
+    // nahi hain, isliye is view mein nahi dikhte
+    const skip = (a) => {
+      const p = personOf(a);
+      return p === 'MBC' || p === 'Not assigned';
+    };
     const keys = new Set();
-    rows.forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    overdueAll.forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
     return [...keys]
       .map((k) => {
         const [person, br] = k.split('|');
@@ -2305,11 +2314,11 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Store</th>
                   <th>Total</th>
                   <th>Delivered</th>
-                  <th>Response Time</th>
+                  <th>Avg Response</th>
                   <th>Resp Breach</th>
-                  <th>Avg Time</th>
+                  <th>Avg Resp Late</th>
+                  <th>Avg Delivery</th>
                   <th>Del Breach</th>
-                  <th>Not Delivered</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
                   <th>Alert</th>
@@ -2336,9 +2345,11 @@ function SlaReport({ deliveries, onOpen }) {
                         {cell('delivered', s.delivered, T.green)}
                         <td>{slaHrs(s.avgResp)}</td>
                         {cell('resp', s.respBreach, T.red)}
+                        <td style={{ color: s.avgRespLate == null ? '#C9C7BE' : T.red }}>
+                          {s.avgRespLate == null ? '—' : '+' + slaMins(s.avgRespLate)}
+                        </td>
                         <td>{slaHrs(s.avgCycle)}</td>
                         {cell('del', s.delBreach, T.red)}
-                        {cell('notdel', s.notDel, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
                         <td>{scoreChip(s)}</td>
                         <td>
@@ -2379,9 +2390,8 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Total</th>
                   <th>Delivered</th>
                   <th>Del Time</th>
-                  <th>Avg Time</th>
+                  <th>Avg Delivery</th>
                   <th>Del Breach</th>
-                  <th>Not Delivered</th>
                   <th>Overdue Now</th>
                   <th>Score</th>
                 </tr>
@@ -2389,23 +2399,19 @@ function SlaReport({ deliveries, onOpen }) {
               <tbody>
                 {boyStats.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="dash-empty">
+                    <td colSpan={9} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
                 ) : (
                   boyStats.map(({ person, br, s }, i) => {
                     const cell = cellFor({ person, store: null });
-                    const real = person !== 'MBC' && person !== 'Not assigned';
-                    const top = i === 0 && real && s.score != null && s.score >= 85;
+                    const top = i === 0 && s.score != null && s.score >= 85;
                     return (
                       <tr key={person + br}>
-                        <td className="dash-store" style={real ? {} : { color: T.inkSoft, fontWeight: 600 }}>
+                        <td className="dash-store">
                           {top && <span style={{ marginRight: 6 }}>🏆</span>}
                           {person}
-                          {person === 'MBC' && (
-                            <span style={{ fontWeight: 500, fontSize: 11 }}> · self pickup</span>
-                          )}
                         </td>
                         <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
                         {cell('all', s.total, T.green)}
@@ -2413,7 +2419,6 @@ function SlaReport({ deliveries, onOpen }) {
                         <td>{slaHrs(s.avgDel)}</td>
                         <td>{slaHrs(s.avgCycle)}</td>
                         {cell('del', s.delBreach, T.red)}
-                        {cell('notdel', s.notDel, T.red)}
                         {cell('overdue', s.overdue, T.amber)}
                         <td>{scoreChip(s)}</td>
                       </tr>
@@ -2502,7 +2507,8 @@ function SlaReport({ deliveries, onOpen }) {
         manager ki zimmedari · <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak
         nahi hui · <b>Not Delivered</b> = usme se wo orders jinka promise time nikal gaya par delivery
         abhi tak nahi hui · <b>Response Time</b> = entry se Talked tak ka average · <b>Del Time</b> =
-        Out for Delivery se Delivered tak (MBC mein nahi banta) · <b>Avg Time</b> = entry se delivery
+        Out for Delivery se Delivered tak · Delivery boys view mein MBC (self pickup) aur bina-assign
+        wale orders nahi aate, isliye uske totals stores view se kam honge · <b>Avg Time</b> = entry se delivery
         tak ka poora average · <b>Overdue Now</b> hamesha aaj ki haalat dikhata hai, date range se
         filter nahi hota · <b>Score</b> = SLA met %; store ka score dono breach se banta hai, delivery
         boy ka sirf delivery breach se (response manager ka kaam hai). Overdue orders bhi breach ginte hain.
@@ -2517,15 +2523,11 @@ function SlaReport({ deliveries, onOpen }) {
 function SlaAlert({ title, s, onClose }) {
   const problems = [];
   if (s.overdue) problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
-  if (s.notDel)
-    problems.push([
-      'Promise nikla, delivery nahi hui',
-      `${s.notDel} order ka diya hua time nikal gaya par abhi tak deliver nahi hue.`,
-    ]);
   if (s.respBreach)
     problems.push([
       'Response late',
-      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui.`,
+      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
+        (s.avgRespLate ? ` — average ${slaMins(s.avgRespLate)} deadline se upar.` : '.'),
     ]);
   if (s.delBreach)
     problems.push(['Delivery breach', `${s.delBreach} order customer ko diye time se late gaye.`]);
