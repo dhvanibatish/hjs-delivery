@@ -1994,6 +1994,67 @@ function slaAnalyze(x) {
   };
 }
 
+/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka chhota box.
+   position:fixed use karte hain kyunki dash-block mein overflow:hidden hai —
+   warna kam rows hone pe tooltip cut ho jaata. */
+function SlaTh({ label, info }) {
+  const [pos, setPos] = useState(null);
+  const ref = React.useRef(null);
+  if (!info) return <th>{label}</th>;
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const w = 250;
+    setPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 12)),
+      top: r.bottom + 6,
+      w,
+    });
+  };
+
+  return (
+    <th>
+      <span
+        ref={ref}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'help' }}
+        onMouseEnter={show}
+        onMouseLeave={() => setPos(null)}
+        onClick={() => (pos ? setPos(null) : show())}
+      >
+        {label}
+        <Info size={12} color="#B3AFA4" style={{ flexShrink: 0 }} />
+      </span>
+      {pos && (
+        <div
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            top: pos.top,
+            width: pos.w,
+            zIndex: 90,
+            background: T.forest,
+            color: '#fff',
+            borderRadius: 10,
+            padding: '10px 12px',
+            fontSize: 11.5,
+            fontWeight: 500,
+            lineHeight: 1.55,
+            letterSpacing: 0,
+            textTransform: 'none',
+            whiteSpace: 'normal',
+            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
+            pointerEvents: 'none',
+          }}
+        >
+          {info}
+        </div>
+      )}
+    </th>
+  );
+}
+
 function SlaReport({ deliveries, onOpen }) {
   const [range, setRange] = useState('today'); // today|yesterday|7d|custom
   const [from, setFrom] = useState(todayStr());
@@ -2216,10 +2277,16 @@ function SlaReport({ deliveries, onOpen }) {
                 <th>Customer</th>
                 <th>Store</th>
                 <th>Stage</th>
-                <th>Response</th>
-                <th>Promise</th>
+                <SlaTh
+                  label="Response"
+                  info={`Entry aane se "Talked to Customer" tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
+                />
+                <SlaTh
+                  label="Promise"
+                  info="Jo date aur time customer ko diya gaya tha — Talked stage pe bhara hua confirmed slot."
+                />
                 <th>Delivered</th>
-                <th>Late by</th>
+                <SlaTh label="Late by" info="Promise time se kitna late delivery hui, ya kitna time nikal chuka hai." />
                 <th>Delivery boy</th>
               </tr>
             </thead>
@@ -2367,12 +2434,30 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Store</th>
                   <th>Total</th>
                   <th>Delivered</th>
-                  <th>Avg Response Time</th>
-                  <th>Resp Breach</th>
-                  <th>Avg Response Breach Time</th>
-                  <th>Avg Delivery Time</th>
-                  <th>Del Breach</th>
-                  <th>Overdue</th>
+                  <SlaTh
+                    label="Avg Response Time"
+                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
+                  />
+                  <SlaTh
+                    label="Resp Breach"
+                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar "Talked to Customer" pe move nahi hue. Ye store manager ki zimmedari hai.`}
+                  />
+                  <SlaTh
+                    label="Avg Response Breach Time"
+                    info={`Jo orders ${SLA_RESPONSE_MIN} min ki deadline paar kar gaye, unka average kitna upar nikle. 10% breach par har breach 5 min ka hona, 5% breach par 3 ghante ka hone se behtar hai.`}
+                  />
+                  <SlaTh
+                    label="Avg Delivery Time"
+                    info="Entry aane se Item Delivered tak ka poora average. Sirf delivered orders ka."
+                  />
+                  <SlaTh
+                    label="Del Breach"
+                    info="Jo date aur time customer ko promise kiya tha, us se late delivery hui — ya abhi tak hui hi nahi."
+                  />
+                  <SlaTh
+                    label="Overdue"
+                    info={`Pending orders jinka promise time nikal chuka hai, ya ${SLA_RESPONSE_MIN} min se koi response nahi mila — inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta, purane atke orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai.`}
+                  />
                   <th>Alert</th>
                 </tr>
               </thead>
@@ -2429,14 +2514,29 @@ function SlaReport({ deliveries, onOpen }) {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>Delivery boy</th>
+                  <SlaTh
+                    label="Delivery boy"
+                    info="MBC (self pickup) aur bina-assign wale orders is view mein nahi aate, isliye yahan ke totals Stores view se kam honge."
+                  />
                   <th>Store</th>
                   <th>Total</th>
                   <th>Delivered</th>
-                  <th>Del Time</th>
-                  <th>Avg Delivery Time</th>
-                  <th>Del Breach</th>
-                  <th>Overdue</th>
+                  <SlaTh
+                    label="Del Time"
+                    info="Out for Delivery se Delivered tak ka average — sirf delivery boy ka hissa. MBC orders mein ye nahi banta."
+                  />
+                  <SlaTh
+                    label="Avg Delivery Time"
+                    info="Entry aane se Item Delivered tak ka poora average, jisme manager ka time bhi shaamil hai."
+                  />
+                  <SlaTh
+                    label="Del Breach"
+                    info="Jo date aur time customer ko promise kiya tha, us se late delivery hui — ya abhi tak hui hi nahi."
+                  />
+                  <SlaTh
+                    label="Overdue"
+                    info={`Pending orders jinka promise time nikal chuka hai, ya ${SLA_RESPONSE_MIN} min se koi response nahi mila. Ye column date filter follow nahi karta.`}
+                  />
                 </tr>
               </thead>
               <tbody>
@@ -2469,20 +2569,6 @@ function SlaReport({ deliveries, onOpen }) {
         </div>
       )}
 
-
-      <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
-        <b>Avg Response Time</b> = entry aane se Talked to Customer tak ka average ·{' '}
-        <b>Resp Breach</b> = entry ke {SLA_RESPONSE_MIN} min ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM
-        business hours) mein Talked pe move nahi hua — store manager ki zimmedari ·{' '}
-        <b>Avg Response Breach Time</b> = jo orders wo {SLA_RESPONSE_MIN} min paar kar gaye, unka average
-        kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
-        <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
-        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue</b> = wo saare pending
-        orders jinka promise time nikal chuka hai, ya {SLA_RESPONSE_MIN} min se koi response nahi mila —
-        inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta: purane atke
-        orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai. Delivery boys view mein MBC
-        (self pickup) aur bina-assign wale orders nahi aate, isliye uske totals stores view se kam honge.
-      </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
     </div>
