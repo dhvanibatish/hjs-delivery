@@ -2092,7 +2092,7 @@ function SlaReport({ deliveries, onOpen }) {
     { kind: 'pending', label: 'Pending', n: overall.pending, icon: MessageSquareWarning, color: T.blue, soft: T.blueSoft },
     { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
     { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Overdue (abhi)', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
 
   /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
@@ -2180,6 +2180,92 @@ function SlaReport({ deliveries, onOpen }) {
       {n}
     </td>
   );
+
+  /* Kisi number pe click → poora view badal jaata hai: sirf us subset ki list
+     dikhti hai, cards aur upar wali table chhup jaati hai. Back se wapas. */
+  if (sel) {
+    const selLabel = cards.find((c) => c.kind === sel.kind)?.label || 'All';
+    return (
+      <div>
+        <button className="track-back" onClick={() => setSel(null)}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="dash-head">
+          <div>
+            <div className="dash-sub">
+              {selLabel}
+              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
+              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
+            </div>
+            <h2 style={{ margin: '2px 0 0' }}>
+              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
+            </h2>
+          </div>
+        </div>
+      <div className="dash-block">
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Store</th>
+                <th>Stage</th>
+                <th>Response</th>
+                <th>Promise</th>
+                <th>Delivered</th>
+                <th>Late by</th>
+                <th>Delivery boy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drill.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="dash-empty">
+                    Koi entry nahi
+                  </td>
+                </tr>
+              ) : (
+                drill.map((a) => {
+                  const stg = stageMeta(a.x.stage);
+                  return (
+                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
+                      <td>{a.x.id}</td>
+                      <td>{a.x.customer}</td>
+                      <td>{branchLabel(a.branch)}</td>
+                      <td>
+                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
+                          {stg.short}
+                        </span>
+                      </td>
+                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
+                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
+                      </td>
+                      <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
+                      <td>
+                        {a.delAt && !isNaN(a.delAt) ? (
+                          fmtDateTime(a.delAt.toISOString())
+                        ) : (
+                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
+                            {a.delBreach ? 'nahi hui' : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
+                        {a.delBreach ? slaMins(a.delLateBy) : '—'}
+                      </td>
+                      <td>{personOf(a)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -2281,7 +2367,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Avg Response Breach Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>Overdue (abhi)</th>
+                  <th>Overdue</th>
                   <th>Alert</th>
                 </tr>
               </thead>
@@ -2345,7 +2431,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Del Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>Overdue (abhi)</th>
+                  <th>Overdue</th>
                 </tr>
               </thead>
               <tbody>
@@ -2378,88 +2464,6 @@ function SlaReport({ deliveries, onOpen }) {
         </div>
       )}
 
-      {/* drill: sirf click karne pe khulta hai, dobara click ya Back pe band */}
-      {sel && (
-      <div className="dash-block">
-        <div
-          className="dash-block-h"
-          style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
-        >
-          <button
-            className="track-back"
-            style={{ marginBottom: 0, padding: '6px 11px', fontSize: 12.5 }}
-            onClick={() => setSel(null)}
-          >
-            <ArrowLeft size={15} /> Back
-          </button>
-          <span>
-            {cards.find((c) => c.kind === sel.kind)?.label || 'All'}
-            {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
-            {sel.person ? ` · ${sel.person}` : ''} · {drill.length} entries
-          </span>
-        </div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Store</th>
-                <th>Stage</th>
-                <th>Response</th>
-                <th>Promise</th>
-                <th>Delivered</th>
-                <th>Late by</th>
-                <th>Delivery boy</th>
-              </tr>
-            </thead>
-            <tbody>
-              {drill.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="dash-empty">
-                    Koi entry nahi
-                  </td>
-                </tr>
-              ) : (
-                drill.map((a) => {
-                  const stg = stageMeta(a.x.stage);
-                  return (
-                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
-                      <td>{a.x.id}</td>
-                      <td>{a.x.customer}</td>
-                      <td>{branchLabel(a.branch)}</td>
-                      <td>
-                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
-                          {stg.short}
-                        </span>
-                      </td>
-                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
-                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
-                      </td>
-                      <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
-                      <td>
-                        {a.delAt && !isNaN(a.delAt) ? (
-                          fmtDateTime(a.delAt.toISOString())
-                        ) : (
-                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
-                            {a.delBreach ? 'nahi hui' : '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
-                        {a.delBreach ? slaMins(a.delLateBy) : '—'}
-                      </td>
-                      <td>{personOf(a)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      )}
 
       <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
         <b>Avg Response Time</b> = entry aane se Talked to Customer tak ka average ·{' '}
@@ -2468,7 +2472,7 @@ function SlaReport({ deliveries, onOpen }) {
         <b>Avg Response Breach Time</b> = jo orders wo {SLA_RESPONSE_MIN} min paar kar gaye, unka average
         kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
         <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
-        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue (abhi)</b> = wo saare pending
+        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue</b> = wo saare pending
         orders jinka promise time nikal chuka hai, ya {SLA_RESPONSE_MIN} min se koi response nahi mila —
         inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta: purane atke
         orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai. Delivery boys view mein MBC
