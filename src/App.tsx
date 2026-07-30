@@ -2051,9 +2051,10 @@ function SlaReport({ deliveries, onOpen }) {
     pending: (a) => !a.delivered,
     resp: (a) => a.respBreach,
     del: (a) => a.delBreach,
+    overdue: (a) => a.overdue,
   };
 
-  const statOf = (list, ov) => {
+  const statOf = (list) => {
     const dl = list.filter((a) => a.delivered);
 
     const avg = (k) => {
@@ -2077,14 +2078,23 @@ function SlaReport({ deliveries, onOpen }) {
         const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
         return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
       })(),
-      overdue: ov.length,
+      overdue: list.filter((a) => a.overdue).length,
       avgCycle: avg('totalHrs'),
       avgResp: avgAll('respHrs'),
       avgDel: avg('delHrs'),
     };
   };
 
-  const overall = statOf(rows, overdueAll);
+  const overall = statOf(rows);
+
+  /* Purane atke orders jo is date filter ke bahar hain — cards mein nahi jud
+     sakte (warna Total se zyada dikhte the), par chhupne bhi nahi chahiye.
+     Isliye table ke upar alag banner mein. */
+  const rangeIds = useMemo(() => new Set(rows.map((a) => a.x.invoice_id)), [rows]);
+  const olderOverdue = useMemo(
+    () => overdueAll.filter((a) => !rangeIds.has(a.x.invoice_id)),
+    [overdueAll, rangeIds],
+  );
 
   const cards = [
     { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
@@ -2092,7 +2102,7 @@ function SlaReport({ deliveries, onOpen }) {
     { kind: 'pending', label: 'Pending', n: overall.pending, icon: MessageSquareWarning, color: T.blue, soft: T.blueSoft },
     { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
     { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+    { kind: 'overdue', label: 'SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
 
   /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
@@ -2103,26 +2113,23 @@ function SlaReport({ deliveries, onOpen }) {
   };
 
   const drill = useMemo(() => {
-    let list = sel.kind === 'overdue' ? overdueAll : rows;
+    let list = sel.kind === 'older' ? olderOverdue : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
     if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
-    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
+    const fn = sel.kind === 'older' ? () => true : pick[sel.kind] || (() => true);
     return list
       .filter(fn)
       .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
     // eslint-disable-next-line
-  }, [rows, overdueAll, sel]);
+  }, [rows, olderOverdue, sel]);
 
   /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
     .map((st) => ({
       st,
-      s: statOf(
-        rows.filter((a) => a.branch === st),
-        overdueAll.filter((a) => a.branch === st),
-      ),
+      s: statOf(rows.filter((a) => a.branch === st)),
     }))
-    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
+    .filter((r) => r.s.total > 0);
 
   /* delivery boy wise — person + store ke hisaab se group */
   const boyStats = useMemo(() => {
@@ -2134,7 +2141,6 @@ function SlaReport({ deliveries, onOpen }) {
     };
     const keys = new Set();
     rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
     return [...keys]
       .map((k) => {
         const [person, br] = k.split('|');
@@ -2142,16 +2148,13 @@ function SlaReport({ deliveries, onOpen }) {
           person,
           br,
           st: br,
-          s: statOf(
-            rows.filter((a) => personOf(a) === person && a.branch === br),
-            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
-          ),
+          s: statOf(rows.filter((a) => personOf(a) === person && a.branch === br)),
         };
       })
-      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
+      .filter((r) => r.s.total > 0)
       .sort((a, b) => a.person.localeCompare(b.person));
     // eslint-disable-next-line
-  }, [rows, overdueAll]);
+  }, [rows]);
 
   const rangeLabel =
     range === 'today'
@@ -2252,6 +2255,34 @@ function SlaReport({ deliveries, onOpen }) {
         })}
       </div>
 
+      {olderOverdue.length > 0 && (
+        <button
+          onClick={() => setSel({ kind: 'older', store: null, person: null })}
+          style={{
+            width: '100%',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: T.amberSoft,
+            border: '1px solid #EBD9BC',
+            borderRadius: 14,
+            padding: '13px 16px',
+            marginBottom: 20,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            color: T.ink,
+          }}
+        >
+          <AlertTriangle size={17} color={T.amber} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+            <b style={{ fontWeight: 800 }}>{olderOverdue.length}</b> purane order bhi SLA se bahar hain
+            — ye is date filter ke bahar bane the.{' '}
+            <span style={{ color: T.amber, fontWeight: 800 }}>Dekho →</span>
+          </span>
+        </button>
+      )}
+
       {view === 'stores' ? (
         <div className="dash-block">
           <div className="dash-block-h">
@@ -2269,7 +2300,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Avg Response Breach Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>Overdue Now</th>
+                  <th>SLA se bahar</th>
                   <th>Alert</th>
                 </tr>
               </thead>
@@ -2333,7 +2364,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Del Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>Overdue Now</th>
+                  <th>SLA se bahar</th>
                 </tr>
               </thead>
               <tbody>
@@ -2372,8 +2403,9 @@ function SlaReport({ deliveries, onOpen }) {
           {drill.length} entries
           {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
           {sel.person ? ` · ${sel.person}` : ''} ·{' '}
-          {cards.find((c) => c.kind === sel.kind)?.label ||
-            (sel.kind === 'overdue' ? 'Abhi SLA se bahar' : 'All')}
+          {sel.kind === 'older'
+            ? 'Purane order jo SLA se bahar hain'
+            : cards.find((c) => c.kind === sel.kind)?.label || 'All'}
         </div>
         <div className="dash-table-wrap">
           <table className="dash-table">
@@ -2443,9 +2475,11 @@ function SlaReport({ deliveries, onOpen }) {
         <b>Avg Response Breach Time</b> = jo orders wo {SLA_RESPONSE_MIN} min paar kar gaye, unka average
         kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
         <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
-        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue Now</b> hamesha aaj ki haalat
-        dikhata hai, date range se filter nahi hota. Delivery boys view mein MBC (self pickup) aur
-        bina-assign wale orders nahi aate, isliye uske totals stores view se kam honge.
+        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>SLA se bahar</b> = abhi pending orders
+        jinka promise time nikal chuka hai (ya {SLA_RESPONSE_MIN} min se koi response nahi). Saare
+        numbers isi date filter ke hain — jo purane atke orders is filter ke bahar hain, wo upar wale
+        banner mein dikhte hain. Delivery boys view mein MBC (self pickup) aur bina-assign wale orders
+        nahi aate, isliye uske totals stores view se kam honge.
       </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
