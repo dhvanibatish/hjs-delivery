@@ -1996,7 +1996,8 @@ function SlaReport({ deliveries, onOpen }) {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
-  const [sel, setSel] = useState({ kind: 'all', store: null });
+  const [view, setView] = useState('stores'); // stores | boys
+  const [sel, setSel] = useState({ kind: 'all', store: null, person: null });
   const [alertOn, setAlertOn] = useState(null);
 
   const bounds = useMemo(() => {
@@ -2051,6 +2052,7 @@ function SlaReport({ deliveries, onOpen }) {
     delivered: (a) => a.delivered,
     pending: (a) => !a.delivered,
     breach: (a) => a.delBreach,
+    notdel: (a) => a.delBreach && !a.delivered,
   };
 
   const statOf = (list, ov) => {
@@ -2079,11 +2081,13 @@ function SlaReport({ deliveries, onOpen }) {
       delivered: dl.length,
       pending: list.length - dl.length,
       breach: list.filter((a) => a.delBreach).length,
+      notDel: list.filter((a) => a.delBreach && !a.delivered).length,
       overdue: ov.length,
       slaPct,
       score: slaPct,
       avgCycle: avg('totalHrs'),
       avgResp: avgAll('respHrs'),
+      avgDel: avg('delHrs'),
     };
   };
 
@@ -2094,21 +2098,21 @@ function SlaReport({ deliveries, onOpen }) {
     { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
     { kind: 'pending', label: 'Pending', n: overall.pending, icon: Clock, color: T.blue, soft: T.blueSoft },
     { kind: 'breach', label: 'SLA breach', n: overall.breach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'notdel', label: 'Promise nikla, delivery nahi', n: overall.notDel, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
     { kind: 'overdue', label: 'Abhi SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
-    {
-      kind: 'all',
-      label: 'SLA met',
-      n: overall.slaPct == null ? '—' : overall.slaPct + '%',
-      icon: BarChart3,
-      color: slaTone(overall.slaPct),
-      soft: T.mint,
-      plain: true,
-    },
   ];
+
+  /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
+  const personOf = (a) => {
+    const p = String(a.x.person || '').trim();
+    if (!p || p === 'null') return 'Not assigned';
+    return p;
+  };
 
   const drill = useMemo(() => {
     let list = sel.kind === 'overdue' ? overdueAll : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
+    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
     const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
     return list
       .filter(fn)
@@ -2117,6 +2121,14 @@ function SlaReport({ deliveries, onOpen }) {
   }, [rows, overdueAll, sel]);
 
   /* Best performer sabse upar */
+  const rank = (a, b) => {
+    if (a.s.score == null && b.s.score == null) return b.s.total - a.s.total;
+    if (a.s.score == null) return 1;
+    if (b.s.score == null) return -1;
+    if (b.s.score !== a.s.score) return b.s.score - a.s.score;
+    return b.s.delivered - a.s.delivered; // barabar score pe zyada delivery upar
+  };
+
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
     .map((st) => ({
       st,
@@ -2126,13 +2138,30 @@ function SlaReport({ deliveries, onOpen }) {
       ),
     }))
     .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-    .sort((a, b) => {
-      if (a.s.score == null && b.s.score == null) return b.s.total - a.s.total;
-      if (a.s.score == null) return 1;
-      if (b.s.score == null) return -1;
-      if (b.s.score !== a.s.score) return b.s.score - a.s.score;
-      return b.s.delivered - a.s.delivered; // barabar score pe zyada delivery upar
-    });
+    .sort(rank);
+
+  /* delivery boy wise — person + store ke hisaab se group */
+  const boyStats = useMemo(() => {
+    const keys = new Set();
+    rows.forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    overdueAll.forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    return [...keys]
+      .map((k) => {
+        const [person, br] = k.split('|');
+        return {
+          person,
+          br,
+          st: br,
+          s: statOf(
+            rows.filter((a) => personOf(a) === person && a.branch === br),
+            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
+          ),
+        };
+      })
+      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
+      .sort(rank);
+    // eslint-disable-next-line
+  }, [rows, overdueAll]);
 
   const rangeLabel =
     range === 'today'
@@ -2143,6 +2172,28 @@ function SlaReport({ deliveries, onOpen }) {
           ? 'Pichhle 7 din'
           : `${from} → ${to}`;
 
+  const cellFor = (target) => (kind, n, color) => (
+    <td
+      className={n ? 'dash-td-click' : 'dash-td-zero'}
+      style={n ? { color } : {}}
+      onClick={() => n && setSel({ kind, ...target })}
+    >
+      {n}
+    </td>
+  );
+
+  const scoreChip = (s) => (
+    <span
+      className="dash-chip"
+      style={{
+        background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
+        color: s.score == null ? T.inkSoft : slaTone(s.score),
+      }}
+    >
+      {s.score == null ? '—' : s.score}
+    </span>
+  );
+
   return (
     <div>
       <div className="dash-head">
@@ -2151,6 +2202,26 @@ function SlaReport({ deliveries, onOpen }) {
           <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
         </div>
         <div className="dash-filters">
+          <div className="layout-toggle">
+            <button
+              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('stores');
+                setSel({ kind: 'all', store: null, person: null });
+              }}
+            >
+              <Building2 size={14} /> Stores
+            </button>
+            <button
+              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('boys');
+                setSel({ kind: 'all', store: null, person: null });
+              }}
+            >
+              <User size={14} /> Delivery boys
+            </button>
+          </div>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
             <option value="today">Aaj</option>
             <option value="yesterday">Kal</option>
@@ -2168,7 +2239,7 @@ function SlaReport({ deliveries, onOpen }) {
             value={store}
             onChange={(e) => {
               setStore(e.target.value);
-              setSel({ kind: 'all', store: null });
+              setSel({ kind: 'all', store: null, person: null });
             }}
           >
             <option value="ALL">All stores</option>
@@ -2183,13 +2254,13 @@ function SlaReport({ deliveries, onOpen }) {
 
       <div className="dash-cards">
         {cards.map((c) => {
-          const on = !c.plain && sel.kind === c.kind && !sel.store;
+          const on = sel.kind === c.kind && !sel.store && !sel.person;
           return (
             <button
               key={c.label}
               className={on ? 'dash-card on' : 'dash-card'}
               style={on ? { borderColor: c.color } : {}}
-              onClick={() => setSel({ kind: c.kind, store: null })}
+              onClick={() => setSel({ kind: c.kind, store: null, person: null })}
             >
               <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
                 <c.icon size={16} />
@@ -2203,98 +2274,146 @@ function SlaReport({ deliveries, onOpen }) {
         })}
       </div>
 
-      {/* store-wise — best performer top pe */}
-      <div className="dash-block">
-        <div className="dash-block-h">
-          Store-wise · {rangeLabel}
-          <span style={{ fontWeight: 600, color: T.inkSoft }}>
-            {'  ·  '}best performer sabse upar
-          </span>
-        </div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Store</th>
-                <th>Total</th>
-                <th>Delivered</th>
-                <th>Response Time</th>
-                <th>Avg Time</th>
-                <th>SLA Breach</th>
-                <th>Overdue Now</th>
-                <th>Score</th>
-                <th>Alert</th>
-              </tr>
-            </thead>
-            <tbody>
-              {storeStats.length === 0 ? (
+      {view === 'stores' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">
+            Store-wise · {rangeLabel}
+            <span style={{ fontWeight: 600, color: T.inkSoft }}>
+              {'  ·  '}best performer sabse upar
+            </span>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
                 <tr>
-                  <td colSpan={9} className="dash-empty">
-                    Is duration mein koi entry nahi
-                  </td>
+                  <th>Store</th>
+                  <th>Total</th>
+                  <th>Delivered</th>
+                  <th>Response Time</th>
+                  <th>Avg Time</th>
+                  <th>SLA Breach</th>
+                  <th>Not Delivered</th>
+                  <th>Overdue Now</th>
+                  <th>Score</th>
+                  <th>Alert</th>
                 </tr>
-              ) : (
-                storeStats.map(({ st, s }, i) => {
-                  const cell = (kind, n, color) => (
-                    <td
-                      className={n ? 'dash-td-click' : 'dash-td-zero'}
-                      style={n ? { color } : {}}
-                      onClick={() => n && setSel({ kind, store: st })}
-                    >
-                      {n}
+              </thead>
+              <tbody>
+                {storeStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="dash-empty">
+                      Is duration mein koi entry nahi
                     </td>
-                  );
-                  const top = i === 0 && s.score != null && s.score >= 85;
-                  return (
-                    <tr key={st}>
-                      <td className="dash-store">
-                        {top && <span style={{ marginRight: 6 }}>🏆</span>}
-                        {branchLabel(st)}
-                      </td>
-                      {cell('all', s.total, T.green)}
-                      {cell('delivered', s.delivered, T.green)}
-                      <td>{slaHrs(s.avgResp)}</td>
-                      <td>{slaHrs(s.avgCycle)}</td>
-                      {cell('breach', s.breach, T.red)}
-                      {cell('overdue', s.overdue, T.amber)}
-                      <td>
-                        <span
-                          className="dash-chip"
-                          style={{
-                            background: s.score == null ? T.slateSoft : slaTone(s.score) + '1A',
-                            color: s.score == null ? T.inkSoft : slaTone(s.score),
-                          }}
-                        >
-                          {s.score == null ? '—' : s.score}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          className="mini-edit"
-                          style={
-                            s.overdue || (s.score != null && s.score < 70)
-                              ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
-                              : {}
-                          }
-                          onClick={() => setAlertOn({ st, s })}
-                        >
-                          <Bell size={12} /> Alert
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  </tr>
+                ) : (
+                  storeStats.map(({ st, s }, i) => {
+                    const cell = cellFor({ store: st, person: null });
+                    const top = i === 0 && s.score != null && s.score >= 85;
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">
+                          {top && <span style={{ marginRight: 6 }}>🏆</span>}
+                          {branchLabel(st)}
+                        </td>
+                        {cell('all', s.total, T.green)}
+                        {cell('delivered', s.delivered, T.green)}
+                        <td>{slaHrs(s.avgResp)}</td>
+                        <td>{slaHrs(s.avgCycle)}</td>
+                        {cell('breach', s.breach, T.red)}
+                        {cell('notdel', s.notDel, T.red)}
+                        {cell('overdue', s.overdue, T.amber)}
+                        <td>{scoreChip(s)}</td>
+                        <td>
+                          <button
+                            className="mini-edit"
+                            style={
+                              s.overdue || (s.score != null && s.score < 70)
+                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
+                                : {}
+                            }
+                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
+                          >
+                            <Bell size={12} /> Alert
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="dash-block">
+          <div className="dash-block-h">
+            Delivery boy wise · {rangeLabel}
+            <span style={{ fontWeight: 600, color: T.inkSoft }}>
+              {'  ·  '}best performer sabse upar
+            </span>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>Delivery boy</th>
+                  <th>Store</th>
+                  <th>Total</th>
+                  <th>Delivered</th>
+                  <th>Del Time</th>
+                  <th>Avg Time</th>
+                  <th>SLA Breach</th>
+                  <th>Not Delivered</th>
+                  <th>Overdue Now</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {boyStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  boyStats.map(({ person, br, s }, i) => {
+                    const cell = cellFor({ person, store: null });
+                    const real = person !== 'MBC' && person !== 'Not assigned';
+                    const top = i === 0 && real && s.score != null && s.score >= 85;
+                    return (
+                      <tr key={person + br}>
+                        <td className="dash-store" style={real ? {} : { color: T.inkSoft, fontWeight: 600 }}>
+                          {top && <span style={{ marginRight: 6 }}>🏆</span>}
+                          {person}
+                          {person === 'MBC' && (
+                            <span style={{ fontWeight: 500, fontSize: 11 }}> · self pickup</span>
+                          )}
+                        </td>
+                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
+                        {cell('all', s.total, T.green)}
+                        {cell('delivered', s.delivered, T.green)}
+                        <td>{slaHrs(s.avgDel)}</td>
+                        <td>{slaHrs(s.avgCycle)}</td>
+                        {cell('breach', s.breach, T.red)}
+                        {cell('notdel', s.notDel, T.red)}
+                        {cell('overdue', s.overdue, T.amber)}
+                        <td>{scoreChip(s)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* drill: selected entries */}
       <div className="dash-block">
         <div className="dash-block-h">
           {drill.length} entries
-          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+          {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
+          {sel.person ? ` · ${sel.person}` : ''} ·{' '}
           {cards.find((c) => c.kind === sel.kind)?.label ||
             (sel.kind === 'overdue' ? 'Abhi SLA se bahar' : 'All')}
         </div>
@@ -2310,7 +2429,7 @@ function SlaReport({ deliveries, onOpen }) {
                 <th>Promise</th>
                 <th>Delivered</th>
                 <th>Late by</th>
-                <th>Person</th>
+                <th>Delivery boy</th>
               </tr>
             </thead>
             <tbody>
@@ -2335,11 +2454,19 @@ function SlaReport({ deliveries, onOpen }) {
                       </td>
                       <td>{a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}</td>
                       <td>{a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}</td>
-                      <td>{a.delAt && !isNaN(a.delAt) ? fmtDateTime(a.delAt.toISOString()) : '—'}</td>
+                      <td>
+                        {a.delAt && !isNaN(a.delAt) ? (
+                          fmtDateTime(a.delAt.toISOString())
+                        ) : (
+                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
+                            {a.delBreach ? 'nahi hui' : '—'}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
                         {a.delBreach ? slaMins(a.delLateBy) : '—'}
                       </td>
-                      <td>{a.x.person || '—'}</td>
+                      <td>{personOf(a)}</td>
                     </tr>
                   );
                 })
@@ -2350,26 +2477,30 @@ function SlaReport({ deliveries, onOpen }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.7, padding: '0 4px 10px' }}>
-        <b>SLA Breach</b> = jo date aur time customer ko promise kiya, us se late delivery hui (ya abhi
-        tak nahi hui) · <b>Response Time</b> = entry aane se Talked to Customer tak ka average, business
-        hours ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM) mein · <b>Avg Time</b> = entry se delivery tak ka
-        poora average · <b>Overdue Now</b> = abhi pending orders jinka promise time nikal chuka hai (ya{' '}
-        {SLA_RESPONSE_MIN} min se koi response nahi) — ye hamesha aaj ki haalat dikhata hai, date range
-        se filter nahi hota · <b>Score</b> = SLA met %, isme overdue orders bhi breach ginte hain.
+        <b>SLA Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
+        <b>Not Delivered</b> = usme se wo orders jinka promise time nikal gaya par delivery abhi tak
+        nahi hui · <b>Response Time</b> = entry aane se Talked to Customer tak ka average, business
+        hours ({SLA_BIZ_START}AM–{SLA_BIZ_END - 12}PM) mein · <b>Del Time</b> = Out for Delivery se
+        Delivered tak (MBC mein nahi banta) · <b>Avg Time</b> = entry se delivery tak ka poora average ·{' '}
+        <b>Overdue Now</b> hamesha aaj ki haalat dikhata hai, date range se filter nahi hota ·{' '}
+        <b>Score</b> = SLA met %, isme overdue orders bhi breach ginte hain.
       </div>
 
-      {alertOn && <SlaAlert st={alertOn.st} s={alertOn.s} onClose={() => setAlertOn(null)} />}
+      {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
     </div>
   );
 }
 
 /* ── Alert modal — abhi sirf UI, backend baad mein ── */
-function SlaAlert({ st, s, onClose }) {
+function SlaAlert({ title, s, onClose }) {
   const problems = [];
-  if (s.overdue)
-    problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
-  if (s.breach)
-    problems.push(['SLA breach', `${s.breach} order customer ko diye time se late gaye.`]);
+  if (s.overdue) problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
+  if (s.notDel)
+    problems.push([
+      'Promise nikla, delivery nahi hui',
+      `${s.notDel} order ka diya hua time nikal gaya par abhi tak deliver nahi hue.`,
+    ]);
+  if (s.breach) problems.push(['SLA breach', `${s.breach} order customer ko diye time se late gaye.`]);
 
   return (
     <div className="overlay center" onClick={onClose}>
@@ -2387,7 +2518,7 @@ function SlaAlert({ st, s, onClose }) {
               <span className="col-pip" style={{ background: slaTone(s.score) }} /> Score{' '}
               {s.score == null ? '—' : s.score} · {slaBand(s.score)}
             </span>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>{branchLabel(st)}</div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
             <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
           </div>
           <button className="icon-btn" onClick={onClose}>
@@ -2410,7 +2541,7 @@ function SlaAlert({ st, s, onClose }) {
           {problems.length === 0 ? (
             <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
           ) : (
-            problems.map(([t, d], i) => (
+            problems.slice(0, 2).map(([t, d], i) => (
               <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
                 <b>{t}</b>
                 <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
