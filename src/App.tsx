@@ -4427,46 +4427,7 @@ function SalesTrackPage() {
             ) : shownRows.length === 0 ? (
               <div className="track-msg">Koi delivery nahi mili.</div>
             ) : (
-              <div className="sales-list">
-                {shownRows.map((r) => {
-                  const st = statusToStage(r.status);
-                  const cancelled = st === 'cancelled';
-                  const stg = stageMeta(st);
-                  const equip = equipmentText({
-                    line_items: r.line_items,
-                    item_name: r.item_name,
-                  });
-                  const Icon = equipIcon(equip);
-                  return (
-                    <button
-                      key={r.invoice_number}
-                      className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
-                      onClick={() => setSelected(r)}
-                    >
-                      <div className="eq-ico" style={{ background: stg.soft }}>
-                        <Icon size={17} color={stg.color} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div className="sales-row-top">
-                          <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
-                            {r.customer_name || 'Customer'}
-                          </span>
-                          <span className="sales-chip" style={{ background: stg.soft, color: stg.color }}>
-                            {stg.short}
-                          </span>
-                        </div>
-                        <div className="ellip sales-sub">{equip}</div>
-                        <div className="sales-meta">
-                          <span className="ellip">#{r.invoice_number}</span>
-                          <span>₹{Number(r.total_amount || 0).toLocaleString('en-IN')}</span>
-                          {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
-                        </div>
-                      </div>
-                      <ChevronRight size={18} color={T.inkSoft} />
-                    </button>
-                  );
-                })}
-              </div>
+              <SalesGroupedList rows={shownRows} onPick={setSelected} />
             )}
           </>
         ) : (
@@ -4552,61 +4513,7 @@ function SalesTrackPage() {
                 {sState === 'done' && sRows.length === 0 ? (
                   <div className="track-msg">Kuch nahi mila.</div>
                 ) : (
-                  <div className="sales-list">
-                    {sRows.map((r) => {
-                      const st = statusToStage(r.status);
-                      const cancelled = st === 'cancelled';
-                      const stg = stageMeta(st);
-                      const equip = equipmentText({
-                        line_items: r.line_items,
-                        item_name: r.item_name,
-                      });
-                      const Icon = equipIcon(equip);
-                      return (
-                        <button
-                          key={r.invoice_number}
-                          className={
-                            cancelled ? 'sales-row is-cancelled' : 'sales-row'
-                          }
-                          onClick={() => setSelected(r)}
-                        >
-                          <div className="eq-ico" style={{ background: stg.soft }}>
-                            <Icon size={17} color={stg.color} />
-                          </div>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div className="sales-row-top">
-                              <span
-                                className="ellip"
-                                style={{ fontWeight: 800, fontSize: 14.5 }}
-                              >
-                                {r.customer_name || 'Customer'}
-                              </span>
-                              <span
-                                className="sales-chip"
-                                style={{ background: stg.soft, color: stg.color }}
-                              >
-                                {stg.short}
-                              </span>
-                            </div>
-                            <div className="ellip sales-sub">{equip}</div>
-                            <div className="sales-meta">
-                              <span className="ellip">#{r.invoice_number}</span>
-                              {r.salesperson && (
-                                <span className="ellip">{r.salesperson}</span>
-                              )}
-                              <span>
-                                ₹
-                                {Number(r.total_amount || 0).toLocaleString(
-                                  'en-IN',
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                          <ChevronRight size={18} color={T.inkSoft} />
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <SalesGroupedList rows={sRows} onPick={setSelected} />
                 )}
               </>
             ) : mState === 'loading' ? (
@@ -4891,6 +4798,86 @@ function TrackPage({ invoice }) {
   );
 }
 
+/* Sales list ko group karke dikhao: pehle Pending (stage order mein),
+   phir Delivered, phir Cancelled. Har group ka heading + count. */
+function SalesGroupedList({ rows, onPick }) {
+  const order = ['new', 'talked', 'scheduled', 'dispatched']; // pending stages
+  const rank = (r) => {
+    const st = statusToStage(r.status);
+    const i = order.indexOf(st);
+    return i === -1 ? 99 : i;
+  };
+  const pending = rows
+    .filter((r) => order.includes(statusToStage(r.status)))
+    .sort((a, b) => rank(a) - rank(b));
+  const delivered = rows.filter((r) => statusToStage(r.status) === 'delivered');
+  const cancelled = rows.filter((r) => statusToStage(r.status) === 'cancelled');
+
+  const Row = (r) => {
+    const st = statusToStage(r.status);
+    const cancel = st === 'cancelled';
+    const stg = stageMeta(st);
+    const equip = equipmentText({
+      line_items: r.line_items,
+      item_name: r.item_name,
+    });
+    const Icon = equipIcon(equip);
+    return (
+      <button
+        key={r.invoice_number}
+        className={cancel ? 'sales-row is-cancelled' : 'sales-row'}
+        onClick={() => onPick(r)}
+      >
+        <div className="eq-ico" style={{ background: stg.soft }}>
+          <Icon size={17} color={stg.color} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="sales-row-top">
+            <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
+              {r.customer_name || 'Customer'}
+            </span>
+            <span
+              className="sales-chip"
+              style={{ background: stg.soft, color: stg.color }}
+            >
+              {stg.short}
+            </span>
+          </div>
+          <div className="ellip sales-sub">{equip}</div>
+          <div className="sales-meta">
+            <span className="ellip">#{r.invoice_number}</span>
+            <span>
+              ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+            </span>
+            {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
+          </div>
+        </div>
+        <ChevronRight size={18} color={T.inkSoft} />
+      </button>
+    );
+  };
+
+  const Group = (title, list, color) =>
+    list.length === 0 ? null : (
+      <div className="sgroup">
+        <div className="sgroup-head">
+          <span className="sgroup-dot" style={{ background: color }} />
+          {title}
+          <span className="sgroup-count">{list.length}</span>
+        </div>
+        <div className="sales-list">{list.map(Row)}</div>
+      </div>
+    );
+
+  return (
+    <>
+      {Group('Pending', pending, T.blue)}
+      {Group('Delivered', delivered, T.green)}
+      {Group('Cancelled', cancelled, T.red)}
+    </>
+  );
+}
+
 /* Sales-only detail card — sab zaroori info ek jagah, systematically */
 function SalesOrderCard({ row }) {
   const store = deriveBranch(row);
@@ -4906,7 +4893,7 @@ function SalesOrderCard({ row }) {
     ['Salesperson', val(row.salesperson) || '—'],
     ['Store', branchLabel(store)],
     ['Store manager', manager],
-    ['Talked to customer',
+    ['Delivery slot given',
       val(row.confirmed_date)
         ? `${niceDate(row.confirmed_date)}${val(row.confirmed_time) ? ', ' + niceTime(row.confirmed_time) : ''}`
         : '—'],
@@ -5494,7 +5481,12 @@ function StyleTag() {
       .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
       .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
       .track-back:hover { background: ${T.beige}; }
-      .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+      .sales-list { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+      .sgroup { margin-top: 18px; }
+      .sgroup:first-child { margin-top: 8px; }
+      .sgroup-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: ${T.ink}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
+      .sgroup-dot { width: 9px; height: 9px; border-radius: 50%; }
+      .sgroup-count { margin-left: 4px; font-size: 12px; font-weight: 800; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 999px; padding: 1px 9px; }
       .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
       .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
       .sales-stores { margin-bottom: 16px; }
