@@ -2102,7 +2102,7 @@ function SlaReport({ deliveries, onOpen }) {
     { kind: 'pending', label: 'Pending', n: overall.pending, icon: MessageSquareWarning, color: T.blue, soft: T.blueSoft },
     { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
     { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'SLA se bahar', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
 
   /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
@@ -2259,27 +2259,23 @@ function SlaReport({ deliveries, onOpen }) {
         <button
           onClick={() => setSel({ kind: 'older', store: null, person: null })}
           style={{
-            width: '100%',
-            textAlign: 'left',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             background: T.amberSoft,
             border: '1px solid #EBD9BC',
-            borderRadius: 14,
-            padding: '13px 16px',
+            borderRadius: 999,
+            padding: '8px 15px',
             marginBottom: 20,
             cursor: 'pointer',
             fontFamily: 'inherit',
-            color: T.ink,
+            fontSize: 13,
+            fontWeight: 700,
+            color: T.amber,
           }}
         >
-          <AlertTriangle size={17} color={T.amber} style={{ flexShrink: 0 }} />
-          <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-            <b style={{ fontWeight: 800 }}>{olderOverdue.length}</b> purane order bhi SLA se bahar hain
-            — ye is date filter ke bahar bane the.{' '}
-            <span style={{ color: T.amber, fontWeight: 800 }}>Dekho →</span>
-          </span>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          {olderOverdue.length} purane orders bhi overdue hain →
         </button>
       )}
 
@@ -2300,7 +2296,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Avg Response Breach Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>SLA se bahar</th>
+                  <th>Overdue</th>
                   <th>Alert</th>
                 </tr>
               </thead>
@@ -2364,7 +2360,7 @@ function SlaReport({ deliveries, onOpen }) {
                   <th>Del Time</th>
                   <th>Avg Delivery Time</th>
                   <th>Del Breach</th>
-                  <th>SLA se bahar</th>
+                  <th>Overdue</th>
                 </tr>
               </thead>
               <tbody>
@@ -2404,7 +2400,7 @@ function SlaReport({ deliveries, onOpen }) {
           {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
           {sel.person ? ` · ${sel.person}` : ''} ·{' '}
           {sel.kind === 'older'
-            ? 'Purane order jo SLA se bahar hain'
+            ? 'Purane overdue orders'
             : cards.find((c) => c.kind === sel.kind)?.label || 'All'}
         </div>
         <div className="dash-table-wrap">
@@ -2475,11 +2471,11 @@ function SlaReport({ deliveries, onOpen }) {
         <b>Avg Response Breach Time</b> = jo orders wo {SLA_RESPONSE_MIN} min paar kar gaye, unka average
         kitna <i>upar</i> nikle · <b>Avg Delivery Time</b> = entry se Delivered tak ka poora average ·{' '}
         <b>Del Breach</b> = promise time se late delivery hui, <i>ya</i> abhi tak nahi hui ·{' '}
-        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>SLA se bahar</b> = abhi pending orders
-        jinka promise time nikal chuka hai (ya {SLA_RESPONSE_MIN} min se koi response nahi). Saare
-        numbers isi date filter ke hain — jo purane atke orders is filter ke bahar hain, wo upar wale
-        banner mein dikhte hain. Delivery boys view mein MBC (self pickup) aur bina-assign wale orders
-        nahi aate, isliye uske totals stores view se kam honge.
+        <b>Del Time</b> = Out for Delivery se Delivered tak · <b>Overdue</b> = wo pending orders jinka
+        promise time nikal chuka hai, ya {SLA_RESPONSE_MIN} min se koi response nahi mila — inpe abhi
+        action chahiye. Saare numbers isi date filter ke hain; jo purane overdue orders is filter ke
+        bahar hain wo upar chip mein dikhte hain. Delivery boys view mein MBC (self pickup) aur
+        bina-assign wale orders nahi aate, isliye uske totals stores view se kam honge.
       </div>
 
       {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
@@ -2490,7 +2486,11 @@ function SlaReport({ deliveries, onOpen }) {
 /* ── Alert modal — abhi sirf UI, backend baad mein ── */
 function SlaAlert({ title, s, onClose }) {
   const problems = [];
-  if (s.overdue) problems.push(['Abhi SLA se bahar', `${s.overdue} order pe turant action chahiye.`]);
+  if (s.overdue)
+    problems.push([
+      'Overdue orders',
+      `${s.overdue} order ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
+    ]);
   if (s.respBreach)
     problems.push([
       'Response late',
@@ -2514,7 +2514,7 @@ function SlaAlert({ title, s, onClose }) {
         </div>
         <div className="modal-body">
           <div className="kv-grid">
-            <KV label="Overdue now" value={s.overdue} />
+            <KV label="Overdue" value={s.overdue} />
             <KV label="Avg response time" value={slaHrs(s.avgResp)} />
             <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
             <KV label="Response breach" value={s.respBreach} />
