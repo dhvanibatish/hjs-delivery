@@ -2106,18 +2106,6 @@ function Header({
         <div style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>
           {today}
         </div>
-        <h2
-          style={{
-            fontSize: 25,
-            fontWeight: 800,
-            letterSpacing: -0.5,
-            margin: '3px 0 0',
-            color: T.ink,
-          }}
-        >
-          {session.branch === 'ALL' ? L('allStores') : branchLabel(session.branch)}{' '}
-          {L('complaints')}
-        </h2>
         {mgr && (
           <div
             style={{
