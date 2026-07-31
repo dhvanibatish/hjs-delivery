@@ -42,7 +42,7 @@ import {
    ══════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
   url: 'https://bkiorfluddgdujpkcfjm.supabase.co',
-  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraW9yZmx1ZGRnZHVqcGtjZmptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjE1MzEsImV4cCI6MjEwMDA5NzUzMX0.dqggpSuocXcxPYeCfXmVQqPrxfCbR2LiZ-lVN_mOJas',
+  key: '', // preview = demo mode
   table: 'tickets',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
@@ -230,24 +230,22 @@ function clearAhead(toStage) {
   return patch;
 }
 
-/* ── Bhasha (EN / Hing) — stage naam + action buttons. */
+/* ── Language (EN / Hinglish) — dono clean & professional ── */
 const HINDI = {
-  received: { label: 'Ticket aaya', short: 'Aaya' },
-  talk: { label: 'Customer se baat hui', short: 'Baat hui' },
-  status: { label: 'Kaam shuru hua', short: 'Shuru' },
-  resolution: { label: 'Samasya suljh gayi', short: 'Suljh gayi' },
-  hold: { label: 'Hold pe dala gaya', short: 'Hold' },
-  unhold: { label: 'Unhold — dubara shuru', short: 'Unhold' },
+  received: { label: 'Ticket Mila', short: 'Naya' },
+  talk: { label: 'Customer Se Baat Hui', short: 'Baat Hui' },
+  status: { label: 'Kaam Jaari Hai', short: 'Jaari' },
+  resolution: { label: 'Samasya Hal Hui', short: 'Hal Hui' },
 };
 const HINDI_MOVE = {
-  talk: 'Customer se baat karo',
-  status: 'Yeh kaam shuru karo',
-  resolution: 'Samasya suljha do',
+  talk: 'Customer se baat karein',
+  status: 'Kaam shuru karein',
+  resolution: 'Hal hua mark karein',
 };
 const ENG_MOVE = {
   talk: 'Talk to customer',
   status: 'Start the work',
-  resolution: 'Mark resolved',
+  resolution: 'Mark as resolved',
 };
 let HJS_LANG = 'en';
 try {
@@ -271,15 +269,206 @@ function moveText(id) {
   if (HJS_LANG === 'hi' && HINDI_MOVE[id]) return HINDI_MOVE[id];
   return ENG_MOVE[id] || `Move to ${stageMeta(id).short}`;
 }
+
+/* ── UI text — har string dono language me. L('key') se aata hai. ──── */
+const TXT = {
+  // header / chips
+  complaints: { en: 'complaints', hi: 'ki shikayatein' },
+  storeManager: { en: 'Store manager', hi: 'Store manager' },
+  today: { en: 'Today', hi: 'Aaj' },
+  archived: { en: 'Archived', hi: 'Purani' },
+  stages: { en: 'Stages', hi: 'Stages' },
+  categories: { en: 'Categories', hi: 'Category' },
+  allStores: { en: 'All stores', hi: 'Sabhi stores' },
+  totalTickets: { en: 'Total Tickets', hi: 'Kul Tickets' },
+  totalArchived: { en: 'Total Archived', hi: 'Kul Purani' },
+  pending: { en: 'Pending', hi: 'Baaki' },
+  resolved: { en: 'Resolved', hi: 'Hal Hui' },
+  cancelled: { en: 'Cancelled', hi: 'Cancel' },
+  demoData: { en: 'Demo data', hi: 'Demo data' },
+  // board / cards
+  noTicket: { en: 'No tickets', hi: 'Koi ticket nahi' },
+  completed: { en: 'Completed', hi: 'Poora hua' },
+  backToStages: { en: 'Back to stages', hi: 'Stages par wapas' },
+  noEntry: { en: 'No entries', hi: 'Koi entry nahi' },
+  // search
+  searchPh: {
+    en: 'Search by customer, ticket, phone…',
+    hi: 'Customer, ticket ya phone se dhundein…',
+  },
+  noMatch: { en: 'No match found', hi: 'Kuch nahi mila' },
+  // drawer
+  moveToStage: { en: 'Move to stage', hi: 'Stage badlein' },
+  nextStep: { en: 'Next step', hi: 'Agla step' },
+  allDone: {
+    en: 'All stages complete — issue resolved',
+    hi: 'Saari stages poori — samasya hal ho gayi',
+  },
+  filledColored: {
+    en: 'Completed stages are coloured. Fill the next stage to unlock the one after it.',
+    hi: 'Poori hui stages coloured hain. Agli stage bharne par uske baad wali khulegi.',
+  },
+  prevStages: { en: 'Earlier stages', hi: 'Pichhli stages' },
+  fillNote: { en: 'To fill this stage, tap', hi: 'Ye stage bharne ke liye dabayein' },
+  aboveBtn: { en: 'above.', hi: 'upar wala button.' },
+  timeline: { en: 'Timeline / history', hi: 'Timeline / history' },
+  noHistory: {
+    en: 'No history yet. Every stage change will appear here as a continuous log.',
+    hi: 'Abhi koi history nahi. Har stage change yahan log hoga.',
+  },
+  dangerDelete: { en: 'Delete this entry', hi: 'Is entry ko delete karein' },
+  confirmDelete: { en: 'Are you sure?', hi: 'Pakka delete karein?' },
+  yesDelete: { en: 'Yes, delete', hi: 'Haan, delete' },
+  keepIt: { en: 'Keep it', hi: 'Rehne dein' },
+  deleteNote: {
+    en: 'Only the head can delete. It disappears from view but stays in the database as "Deleted".',
+    hi: 'Sirf head delete kar sakta hai. View se hat jayega par database mein "Deleted" ke saath safe rahega.',
+  },
+  locked: { en: 'locked', hi: 'locked' },
+  nextStepBadge: { en: 'Next step', hi: 'Agla step' },
+  // KV labels
+  kvPhone: { en: 'Phone', hi: 'Phone' },
+  kvEmail: { en: 'Email', hi: 'Email' },
+  kvItem: { en: 'Product', hi: 'Product' },
+  kvIssue: { en: 'Complaint', hi: 'Shikayat' },
+  kvStore: { en: 'Store', hi: 'Store' },
+  kvOpened: { en: 'Ticket opened', hi: 'Ticket khula' },
+  kvManager: { en: 'Store manager', hi: 'Store manager' },
+  // modal fields
+  whatCustomerSaid: {
+    en: 'What did the customer say? *',
+    hi: 'Customer ne kya kaha? *',
+  },
+  whatCustomerSaidPh: {
+    en: 'Note the problem, condition, and any advice given…',
+    hi: 'Dikkat, haalat aur di gayi salah — sab likhein…',
+  },
+  autoTime: {
+    en: 'The current time will be saved automatically:',
+    hi: 'Abhi ka time apne aap save hoga:',
+  },
+  saidRequired: {
+    en: 'Please note what the customer said.',
+    hi: 'Customer ne kya kaha — likhna zaroori hai.',
+  },
+  workDone: { en: 'What work was done? *', hi: 'Kya kaam kiya? *' },
+  workDoneOther: {
+    en: 'Describe the work done *',
+    hi: 'Jo kaam kiya wo likhein *',
+  },
+  workDoneOtherPh: { en: 'Describe the work…', hi: 'Kaam ke baare mein likhein…' },
+  otherRequired: {
+    en: 'You selected "Other" — please describe it.',
+    hi: 'Aapne "Other" chuna — likhna zaroori hai.',
+  },
+  expectedBy: { en: 'Expected resolution date *', hi: 'Kab tak theek hoga? *' },
+  markResolvedChk: { en: 'Issue has been resolved', hi: 'Samasya theek ho gayi' },
+  resolvedRequired: {
+    en: 'Tick the box to close the ticket.',
+    hi: 'Tick karein — tabhi ticket band hoga.',
+  },
+  workWasDone: { en: 'Work done', hi: 'Kya kaam kiya tha' },
+  // short KV row labels (drawer blocks)
+  kvDate: { en: 'Date', hi: 'Date' },
+  kvTime: { en: 'Time', hi: 'Time' },
+  whatSaidShort: { en: 'Customer said', hi: 'Customer ne kya kaha' },
+  workDoneShort: { en: 'Work done', hi: 'Kya kaam kiya' },
+  expectedShort: { en: 'Expected by', hi: 'Kab tak theek hoga' },
+  remarksShort: { en: 'Remarks', hi: 'Remarks' },
+  resolvedShort: { en: 'Resolved', hi: 'Hal hua' },
+  yes: { en: 'Yes', hi: 'Haan' },
+  no: { en: 'No', hi: 'Nahi' },
+  remarks: { en: 'Remarks (optional)', hi: 'Remarks (optional)' },
+  remarksResolve: { en: 'How it was fixed (optional)', hi: 'Kaise theek hua (optional)' },
+  remarksPh: { en: 'Optional notes…', hi: 'Optional notes…' },
+  remarksResolvePh: {
+    en: 'What fixed the issue…',
+    hi: 'Kya karne se theek hua…',
+  },
+  spotFixNote: {
+    en: 'Repaired on the spot. No need to wait — tick below and the ticket will be marked Resolved directly.',
+    hi: 'Wahin theek ho gaya. Wait karne ki zarurat nahi — neeche tick karein, ticket seedha Resolved ho jayega.',
+  },
+  finalResolution: { en: 'Final · resolution', hi: 'Final · resolution' },
+  ticketStatus: { en: 'Ticket status', hi: 'Ticket status' },
+  talkedNormal: { en: 'Talked to customer', hi: 'Customer se baat hui' },
+  invalidOpt: { en: 'Invalid ticket', hi: 'Invalid ticket' },
+  duplicateOpt: { en: 'Duplicate ticket', hi: 'Duplicate ticket' },
+  cancelledOpt: { en: 'Cancelled ticket', hi: 'Cancelled ticket' },
+  select: { en: 'Select…', hi: 'Chunein…' },
+  cancel: { en: 'Cancel', hi: 'Cancel' },
+  update: { en: 'Update', hi: 'Update' },
+  save: { en: 'Save & update', hi: 'Save karein' },
+  saveResolved: { en: 'Save · Mark Resolved', hi: 'Save · Resolved' },
+  saveCompleted: { en: 'Save · Completed', hi: 'Save · Poora' },
+  edit: { en: 'Edit', hi: 'Edit' },
+  // toasts
+  tSaved: { en: 'Saved', hi: 'Save ho gaya' },
+  tUpdated: { en: 'Updated', hi: 'Update ho gaya' },
+  tDeleted: {
+    en: 'Deleted — marked "Deleted" in the database',
+    hi: 'Delete ho gaya — database mein "Deleted" mark hua',
+  },
+  tSaveFail: { en: 'Save failed', hi: 'Save nahi hua' },
+  tDeleteFail: { en: 'Delete failed', hi: 'Delete nahi hua' },
+  tMarked: { en: 'Marked as', hi: 'Mark hua' },
+  tMoved: { en: 'Moved to', hi: 'Move hua' },
+  // dashboard
+  dashSub: { en: 'All stores · MIS', hi: 'Sabhi stores · MIS' },
+  dashTitle: { en: 'Dashboard', hi: 'Dashboard' },
+  rToday: { en: 'Today', hi: 'Aaj' },
+  rYesterday: { en: 'Yesterday', hi: 'Kal' },
+  r7d: { en: 'Last 7 days', hi: 'Pichhle 7 din' },
+  rMonth: { en: 'This month', hi: 'Is mahine' },
+  rAll: { en: 'All time', hi: 'Sabhi' },
+  rCustom: { en: 'Custom', hi: 'Custom' },
+  storeWise: { en: 'Store-wise', hi: 'Store-wise' },
+  entriesWord: { en: 'entries', hi: 'entries' },
+  entryWord: { en: 'entry', hi: 'entry' },
+  colStore: { en: 'Store', hi: 'Store' },
+  colTotal: { en: 'Total', hi: 'Kul' },
+  colPending: { en: 'Pending', hi: 'Baaki' },
+  colOverdue: { en: 'Overdue', hi: 'Late' },
+  colIssues: { en: 'Issues', hi: 'Issues' },
+  colCustomer: { en: 'Customer', hi: 'Customer' },
+  colItem: { en: 'Product', hi: 'Product' },
+  colComplaint: { en: 'Complaint', hi: 'Shikayat' },
+  colStage: { en: 'Stage', hi: 'Stage' },
+  colOpened: { en: 'Opened', hi: 'Khula' },
+  colDue: { en: 'Due', hi: 'Kab tak' },
+  colTicket: { en: 'Ticket', hi: 'Ticket' },
+  cTotal: { en: 'Total', hi: 'Kul' },
+  cResolved: { en: 'Resolved', hi: 'Hal Hui' },
+  cOverdue: { en: 'Overdue', hi: 'Late' },
+  cIssues: { en: 'Cancelled/Dup/Invalid', hi: 'Cancel/Dup/Invalid' },
+  // misc
+  loadingTickets: { en: 'Loading tickets…', hi: 'Tickets load ho rahe hain…' },
+  connectFail: {
+    en: 'Could not connect to Supabase.',
+    hi: 'Supabase se connect nahi hua.',
+  },
+  connectHint: {
+    en: 'Check the anon key and the RLS SELECT policy.',
+    hi: 'anon key aur RLS SELECT policy check karein.',
+  },
+  noneOf: { en: 'No', hi: 'Koi' },
+  entriesLower: { en: 'entries', hi: 'entries' },
+};
+function L(key) {
+  const t = TXT[key];
+  if (!t) return key;
+  return HJS_LANG === 'hi' ? t.hi : t.en;
+}
 function eventLine(ev) {
-  if (HJS_LANG !== 'hi') return `${ev.action} ${ev.label}`;
-  const label = HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
+  const label =
+    HJS_LANG === 'hi' && HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
+  if (HJS_LANG !== 'hi') return `${ev.action} ${label}`;
   const verb =
     ev.action === 'Edited'
-      ? 'edit kiya'
+      ? '— edit hua'
       : ev.action === 'Marked as'
-        ? 'mark kiya'
-        : 'pe pahuncha';
+        ? 'mark hua'
+        : 'par pahuncha';
   return `${label} ${verb}`;
 }
 const stageToStatus = (id) =>
@@ -305,8 +494,11 @@ const CLOSED = {
     short: 'Cancelled',
     color: T.red,
     soft: T.redSoft,
-    title: 'Ye shikayat cancel ho gayi',
-    note: 'Customer ne shikayat wapas le li. Stages edit nahi ho sakti — bas record ke liye dikha rahe hain.',
+    title: { en: 'This ticket was cancelled', hi: 'Ye ticket cancel ho gaya' },
+    note: {
+      en: 'The customer withdrew the complaint. Stages can no longer be edited — kept for the record.',
+      hi: 'Customer ne shikayat wapas le li. Stages ab edit nahi ho sakti — record ke liye rakhi gayi hai.',
+    },
   },
   duplicate: {
     id: 'duplicate',
@@ -314,8 +506,11 @@ const CLOSED = {
     short: 'Duplicate',
     color: T.slate,
     soft: T.slateSoft,
-    title: 'Duplicate shikayat mark hui',
-    note: 'Store manager ne isse duplicate mark kiya hai — active list se hata diya gaya hai.',
+    title: { en: 'Marked as duplicate', hi: 'Duplicate mark hua' },
+    note: {
+      en: 'The store manager marked this as a duplicate — removed from the active list.',
+      hi: 'Store manager ne isse duplicate mark kiya — active list se hata diya gaya.',
+    },
   },
   invalid: {
     id: 'invalid',
@@ -323,8 +518,11 @@ const CLOSED = {
     short: 'Invalid',
     color: T.blue,
     soft: T.blueSoft,
-    title: 'Invalid shikayat mark hui',
-    note: 'Ye shikayat humare kaam ki nahi thi (warranty ke bahar / galat entry) — active list se hata di gayi.',
+    title: { en: 'Marked as invalid', hi: 'Invalid mark hua' },
+    note: {
+      en: 'Not a valid complaint (out of warranty / wrong entry) — removed from the active list.',
+      hi: 'Ye valid shikayat nahi thi (warranty ke bahar / galat entry) — active list se hata di gayi.',
+    },
   },
   deleted: {
     id: 'deleted',
@@ -332,50 +530,48 @@ const CLOSED = {
     short: 'Deleted',
     color: T.slate,
     soft: T.slateSoft,
-    title: 'Ye entry delete hui',
-    note: 'Head ne isse delete kiya hai — Supabase mein record ke liye rakha gaya hai.',
+    title: { en: 'This entry was deleted', hi: 'Ye entry delete hui' },
+    note: {
+      en: 'The head deleted this — kept in the database for the record.',
+      hi: 'Head ne isse delete kiya — database mein record ke liye rakha gaya.',
+    },
   },
 };
+// closed meta ka title/note current language me
+const cTitle = (m) => (typeof m.title === 'string' ? m.title : m.title[HJS_LANG === 'hi' ? 'hi' : 'en']);
+const cNote = (m) => (typeof m.note === 'string' ? m.note : m.note[HJS_LANG === 'hi' ? 'hi' : 'en']);
 const isClosedStage = (s) =>
   s === 'cancelled' || s === 'duplicate' || s === 'invalid' || s === 'deleted';
-
-/* ── HOLD (pause) ─────────────────────────────────────────────────────
-   Hold koi "stage" nahi — ek pause flag hai jo kisi bhi active stage
-   (received / talk / status) ke upar laga sakte hain. Ticket ka asli
-   `stage` waise ka waisa rehta hai, bas is_hold=true ho jaata hai, isliye
-   Unhold karte hi wahi purani stage se same process continue ho jaata hai. */
-const HOLD_META = {
-  hold: {
-    id: 'hold',
-    label: 'On Hold',
-    short: 'Hold',
-    color: T.amber,
-    soft: T.amberSoft,
-  },
-  unhold: {
-    id: 'unhold',
-    label: 'Resumed (Unhold)',
-    short: 'Unhold',
-    color: T.green,
-    soft: T.mint,
-  },
-};
-const isOnHold = (x) => !!(x && x.is_hold) && !isClosedStage(x.stage);
-
 function stageMeta(id) {
   const s = STAGES[stageIndex(id)];
   if (s) return s;
   if (CLOSED[id]) return CLOSED[id];
-  if (HOLD_META[id]) return HOLD_META[id];
   return STAGES[0];
 }
 const stageColorOf = (id) => stageMeta(id).color;
 
 const STAGE_HINT = {
-  received: 'Shikayat register ho gayi',
-  talk: 'Customer se baat karke dikkat samjho',
-  status: 'Kya kaam shuru kiya + kab tak theek hoga bharo',
-  resolution: 'Samasya suljhne pe tick karo — ticket band ho jayega',
+  received: {
+    en: 'Ticket has been registered',
+    hi: 'Ticket register ho gaya',
+  },
+  talk: {
+    en: 'Call the customer and note the issue',
+    hi: 'Customer ko call karke dikkat note karein',
+  },
+  status: {
+    en: 'Enter the work done and expected resolution date',
+    hi: 'Kya kaam kiya aur kab tak theek hoga bharein',
+  },
+  resolution: {
+    en: 'Tick once resolved — the ticket will close',
+    hi: 'Hal hone par tick karein — ticket band ho jayega',
+  },
+};
+const stageHint = (id) => {
+  const h = STAGE_HINT[id];
+  if (!h) return '';
+  return typeof h === 'string' ? h : h[HJS_LANG === 'hi' ? 'hi' : 'en'];
 };
 
 function clean(v) {
@@ -468,20 +664,6 @@ function makeEvent(toStage, fields, mode) {
 }
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
-
-function makeHoldEvent(kind, cur, reason) {
-  const atStage = (cur && cur.stage) || 'received';
-  return {
-    ts: new Date().toISOString(),
-    stage: kind, // 'hold' | 'unhold'
-    label: HOLD_META[kind].label,
-    action: 'Marked as',
-    fields:
-      kind === 'hold'
-        ? { 'Stage pe rukwaya': stageMeta(atStage).label, ...(reason ? { Wajah: reason } : {}) }
-        : { 'Dubara shuru': stageMeta(atStage).label },
-  };
-}
 
 function reachedIdxFromLog(log) {
   if (Array.isArray(log) && log.length) {
@@ -606,9 +788,6 @@ function rowToTicket(r) {
     expected: clean(r.expected_date) || '—',
     stage: statusToStage(r.status),
     rawStatus: r.status,
-    is_hold: !!r.is_hold,
-    hold_reason: clean(r.hold_reason) || '',
-    hold_since: r.hold_since || null,
     _raw: r,
   };
 }
@@ -671,19 +850,7 @@ const DEMO = [
   demo('1988005', '2336', 'Vikram Singh', '+91 90000 11122', 'Ludhiana',
     'BiPAP Machine', 'Display par error code', 'Open', { mins: 240 }),
   demo('1988006', '2337', 'Anjali Rao', '+91 93456 78901', 'Jaipur',
-    'Nebulizer', 'Pipe se hawa kam aa rahi hai', 'Talked To Customer', {
-      mins: 410,
-      talk_date: new Date().toISOString().slice(0, 10),
-      talk_time: '09:15',
-      stage1_remarks: 'Customer ne 2 din baad wapas call karne ko kaha hai.',
-      is_hold: true,
-      hold_reason: 'Customer 2 din ke liye bahar hai, waapas aake baat karega.',
-      hold_since: agoIso(30),
-      app_log: [
-        { ts: agoIso(380), stage: 'talk', label: 'Customer Se Baat', action: 'Moved to', fields: { Date: 'aaj', Time: '09:15' } },
-        { ts: agoIso(30), stage: 'hold', label: 'On Hold', action: 'Marked as', fields: { 'Stage pe rukwaya': 'Talked to Customer', Wajah: 'Customer 2 din ke liye bahar hai, waapas aake baat karega.' } },
-      ],
-    }),
+    'Nebulizer', 'Pipe se hawa kam aa rahi hai', 'Talked To Customer', { mins: 410 }),
   demo('1988007', '2338', 'Karan Gupta', '+91 97777 88899', 'Gurugram',
     'Pulse Oximeter', 'Reading galat aa rahi hai', 'Open', { mins: 70 }),
   demo('1988008', '2339', 'Sneha Iyer', '+91 96543 21098', 'Noida',
@@ -723,7 +890,6 @@ export default function App() {
   const [error, setError] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [modal, setModal] = useState(null); // { ticketId, toStage, mode }
-  const [holdModal, setHoldModal] = useState(null); // ticketId waiting for hold reason
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today | archived
@@ -836,8 +1002,8 @@ export default function App() {
       );
       ping(
         mode === 'edit'
-          ? 'Updated ✓ (demo)'
-          : `Saved ✓  ${STAGES[stageIndex(landed)].label} (demo)`,
+          ? `${L('tUpdated')} ✓`
+          : `${L('tSaved')} ✓ · ${sLabel(landed)}`,
       );
       if (mode === 'move') jumpMobile(landed);
       return;
@@ -846,13 +1012,13 @@ export default function App() {
       await sbPatch(ticketId, patch);
       ping(
         mode === 'edit'
-          ? 'Updated ✓'
-          : `Saved ✓  ${STAGES[stageIndex(landed)].label}`,
+          ? `${L('tUpdated')} ✓`
+          : `${L('tSaved')} ✓ · ${sLabel(landed)}`,
       );
       if (mode === 'move') jumpMobile(landed);
       load();
     } catch (e) {
-      ping('Save failed: ' + e.message);
+      ping(`${L('tSaveFail')}: ` + e.message);
     }
   };
 
@@ -889,75 +1055,17 @@ export default function App() {
             : x,
         ),
       );
-      ping(`Moved to ${STAGES[stageIndex(toStage)].label} (demo)`);
+      ping(`${L('tMoved')} · ${sLabel(toStage)}`);
       jumpMobile(toStage);
       return;
     }
     try {
       await sbPatch(ticketId, patch);
-      ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
+      ping(`${L('tMoved')} · ${sLabel(toStage)}`);
       jumpMobile(toStage);
       load();
     } catch (e) {
-      ping('Save failed: ' + e.message);
-    }
-  };
-
-  const putOnHold = async (ticketId, reason) => {
-    const cur = tickets.find((x) => x.ticket_id === ticketId);
-    const patch = {
-      is_hold: true,
-      hold_reason: reason || null,
-      hold_since: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      app_log: [...existingLog(cur), makeHoldEvent('hold', cur, reason)],
-    };
-    if (!CONFIGURED) {
-      setTickets((prev) =>
-        prev.map((x) =>
-          x.ticket_id === ticketId
-            ? rowToTicket({ ...(x._raw || {}), ...patch })
-            : x,
-        ),
-      );
-      ping('Hold pe daal diya (demo)');
-      return;
-    }
-    try {
-      await sbPatch(ticketId, patch);
-      ping('Hold pe daal diya ✓');
-      load();
-    } catch (e) {
-      ping('Save failed: ' + e.message);
-    }
-  };
-
-  const unholdTicket = async (ticketId) => {
-    const cur = tickets.find((x) => x.ticket_id === ticketId);
-    const patch = {
-      is_hold: false,
-      hold_reason: null,
-      hold_since: null,
-      updated_at: new Date().toISOString(),
-      app_log: [...existingLog(cur), makeHoldEvent('unhold', cur)],
-    };
-    if (!CONFIGURED) {
-      setTickets((prev) =>
-        prev.map((x) =>
-          x.ticket_id === ticketId
-            ? rowToTicket({ ...(x._raw || {}), ...patch })
-            : x,
-        ),
-      );
-      ping('Unhold ✓ — same process continue (demo)');
-      return;
-    }
-    try {
-      await sbPatch(ticketId, patch);
-      ping('Unhold ✓ — same process continue');
-      load();
-    } catch (e) {
-      ping('Save failed: ' + e.message);
+      ping(`${L('tSaveFail')}: ` + e.message);
     }
   };
 
@@ -986,16 +1094,16 @@ export default function App() {
         ),
       );
       setActiveId(null);
-      ping('Deleted (demo)');
+      ping(L('tDeleted'));
       return;
     }
     try {
       await sbPatch(ticketId, patch);
       setActiveId(null);
-      ping('Deleted — Supabase mein "Deleted" mark ho gaya');
+      ping(L('tDeleted'));
       load();
     } catch (e) {
-      ping('Delete failed: ' + e.message);
+      ping(`${L('tDeleteFail')}: ` + e.message);
     }
   };
 
@@ -1068,11 +1176,11 @@ export default function App() {
                   <div className="err">
                     <CloudOff size={18} color={T.red} />
                     <div>
-                      <b>Supabase se connect nahi hua.</b> {error}
+                      <b>{L('connectFail')}</b> {error}
                       <div
                         style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}
                       >
-                        anon key + RLS SELECT policy check karo.
+                        {L('connectHint')}
                       </div>
                     </div>
                   </div>
@@ -1089,8 +1197,6 @@ export default function App() {
                   onCommit={(dd, toStage, fields) =>
                     applyMove(dd.ticket_id, toStage, fields, 'move')
                   }
-                  onHold={(x) => setHoldModal(x.ticket_id)}
-                  onUnhold={(x) => unholdTicket(x.ticket_id)}
                   focus={lastMove}
                 />
               </>
@@ -1112,8 +1218,6 @@ export default function App() {
           onEditStage={(sid) =>
             setModal({ ticketId: active.ticket_id, toStage: sid, mode: 'edit' })
           }
-          onHold={() => setHoldModal(active.ticket_id)}
-          onUnhold={() => unholdTicket(active.ticket_id)}
         />
       )}
       {modal && (
@@ -1123,15 +1227,6 @@ export default function App() {
           mode={modal.mode}
           onClose={() => setModal(null)}
           onSave={commitModal}
-        />
-      )}
-      {holdModal && (
-        <HoldModal
-          onClose={() => setHoldModal(null)}
-          onSave={(reason) => {
-            putOnHold(holdModal, reason);
-            setHoldModal(null);
-          }}
         />
       )}
       {toast && <Toast msg={toast} />}
@@ -1218,11 +1313,11 @@ function Dashboard({ tickets, onOpen }) {
   };
 
   const cards = [
-    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
-    { kind: 'resolved', label: 'Resolved', color: T.green, soft: T.mint },
-    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
-    { kind: 'overdue', label: 'Overdue', color: T.amber, soft: T.amberSoft },
-    { kind: 'issues', label: 'Cancelled/Dup/Invalid', color: T.red, soft: T.redSoft },
+    { kind: 'all', label: L('cTotal'), color: T.slate, soft: T.slateSoft },
+    { kind: 'resolved', label: L('cResolved'), color: T.green, soft: T.mint },
+    { kind: 'pending', label: L('pending'), color: T.blue, soft: T.blueSoft },
+    { kind: 'overdue', label: L('cOverdue'), color: T.amber, soft: T.amberSoft },
+    { kind: 'issues', label: L('cIssues'), color: T.red, soft: T.redSoft },
   ];
 
   const rows = useMemo(() => {
@@ -1238,22 +1333,22 @@ function Dashboard({ tickets, onOpen }) {
   const cnt = (fn, list) => list.filter(fn).length;
   const rangeLabel =
     range === 'today'
-      ? 'Aaj'
+      ? L('rToday')
       : range === 'yesterday'
-        ? 'Kal'
+        ? L('rYesterday')
         : range === '7d'
-          ? 'Pichhle 7 din'
+          ? L('r7d')
           : range === 'month'
-            ? 'Is mahine'
+            ? L('rMonth')
             : range === 'all'
-              ? 'Sabhi'
+              ? L('rAll')
               : `${from} → ${to}`;
 
   return (
     <div>
       <div className="dash-head">
         <div>
-          <div className="dash-sub">All stores · MIS</div>
+          <div className="dash-sub">{L('dashSub')}</div>
           <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
         </div>
         <div className="dash-filters">
@@ -1262,12 +1357,12 @@ function Dashboard({ tickets, onOpen }) {
             value={range}
             onChange={(e) => setRange(e.target.value)}
           >
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="month">Is mahine</option>
-            <option value="all">Sabhi</option>
-            <option value="custom">Custom</option>
+            <option value="today">{L('rToday')}</option>
+            <option value="yesterday">{L('rYesterday')}</option>
+            <option value="7d">{L('r7d')}</option>
+            <option value="month">{L('rMonth')}</option>
+            <option value="all">{L('rAll')}</option>
+            <option value="custom">{L('rCustom')}</option>
           </select>
           {range === 'custom' && (
             <>
@@ -1328,20 +1423,20 @@ function Dashboard({ tickets, onOpen }) {
       </div>
 
       <div className="dash-block">
-        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+        <div className="dash-block-h">{L('storeWise')} · {rangeLabel}</div>
         <div className="dash-table-wrap">
           <table className="dash-table">
             <thead>
               <tr>
-                <th>Store</th>
-                <th>Total</th>
-                <th>Aaya</th>
-                <th>Baat</th>
-                <th>Jankari</th>
-                <th>Suljhi</th>
-                <th>Pending</th>
-                <th>Overdue</th>
-                <th>Issues</th>
+                <th>{L('colStore')}</th>
+                <th>{L('colTotal')}</th>
+                <th>{sShort('received')}</th>
+                <th>{sShort('talk')}</th>
+                <th>{sShort('status')}</th>
+                <th>{sShort('resolution')}</th>
+                <th>{L('colPending')}</th>
+                <th>{L('colOverdue')}</th>
+                <th>{L('colIssues')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1389,7 +1484,7 @@ function Dashboard({ tickets, onOpen }) {
 
       <div className="dash-block">
         <div className="dash-block-h">
-          {rows.length} entries
+          {rows.length} {L('entriesWord')}
           {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
           {cards.find((c) => c.kind === sel.kind)?.label ||
             sShort(sel.kind) ||
@@ -1399,21 +1494,21 @@ function Dashboard({ tickets, onOpen }) {
           <table className="dash-table">
             <thead>
               <tr>
-                <th>Ticket</th>
-                <th>Customer</th>
-                <th>Store</th>
-                <th>Saman</th>
-                <th>Shikayat</th>
-                <th>Stage</th>
-                <th>Aayi</th>
-                <th>Kab tak</th>
+                <th>{L('colTicket')}</th>
+                <th>{L('colCustomer')}</th>
+                <th>{L('colStore')}</th>
+                <th>{L('colItem')}</th>
+                <th>{L('colComplaint')}</th>
+                <th>{L('colStage')}</th>
+                <th>{L('colOpened')}</th>
+                <th>{L('colDue')}</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="dash-empty">
-                    Koi entry nahi
+                    {L('noEntry')}
                   </td>
                 </tr>
               ) : (
@@ -1465,8 +1560,6 @@ function EntriesView({
   onOpen,
   onMove,
   onCommit,
-  onHold,
-  onUnhold,
   focus,
 }) {
   const isMobile = useIsMobile();
@@ -1541,8 +1634,6 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
-          onHold={onHold}
-          onUnhold={onUnhold}
           focus={focus}
         />
       ) : (
@@ -1552,8 +1643,6 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
-          onHold={onHold}
-          onUnhold={onUnhold}
         />
       )}
       {viewMode !== 'archived' && <FooterTotal items={items} />}
@@ -1596,7 +1685,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
   return (
     <div>
       <button className="track-back" onClick={onBack}>
-        <ArrowLeft size={16} /> Back to stages
+        <ArrowLeft size={16} /> {L('backToStages')}
       </button>
       <div className="drill-head">
         <span
@@ -1612,7 +1701,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
         </span>
       </div>
       {rows.length === 0 ? (
-        <div className="empty">Koi entry nahi</div>
+        <div className="empty">{L('noEntry')}</div>
       ) : (
         <div className="cat-grid">
           {rows.map((x) => (
@@ -1671,7 +1760,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
         </span>
       </div>
       {rows.length === 0 ? (
-        <div className="empty">Koi {meta.label.toLowerCase()} entry nahi</div>
+        <div className="empty">{L('noneOf')} {meta.label.toLowerCase()} {L('entriesLower')}</div>
       ) : (
         <div className="cat-grid">
           {rows.map((x) => (
@@ -1693,7 +1782,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
 function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
   const [open, setOpen] = useState('pending');
   if (loading && items.length === 0)
-    return <div className="loading">Tickets load ho rahe hain…</div>;
+    return <div className="loading">{L('loadingTickets')}</div>;
   return (
     <div className="cat-list">
       {CATS.map((c) => {
@@ -1715,7 +1804,7 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
               <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 15 }}>{c.label}</div>
                 <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 1 }}>
-                  {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
+                  {rows.length} {rows.length === 1 ? L('entryWord') : L('entriesWord')}
                 </div>
               </div>
               <span
@@ -1736,7 +1825,7 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
             {isOpen && (
               <div className="cat-body">
                 {rows.length === 0 ? (
-                  <div className="empty">Koi entry nahi</div>
+                  <div className="empty">{L('noEntry')}</div>
                 ) : (
                   <div className="cat-grid">
                     {rows.map((x) => (
@@ -1768,17 +1857,17 @@ function Login({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const go = async () => {
     if (!branch) {
-      setErr('Pehle store choose karo.');
+      setErr('Please choose a store first.');
       return;
     }
     if (!pw) {
-      setErr('PIN daalo.');
+      setErr('Enter your PIN.');
       return;
     }
     setBusy(true);
     setErr('');
     if (LOCAL_PW[branch] !== pw) {
-      setErr('Galat PIN.');
+      setErr('Incorrect PIN.');
       setBusy(false);
       return;
     }
@@ -1801,18 +1890,18 @@ function Login({ onLogin }) {
                 Healthy Jeena Sikho
               </div>
               <div style={{ fontSize: 12.5, opacity: 0.75 }}>
-                Complaint Control
+                Complaint Desk
               </div>
             </div>
           </div>
           <h1 className="hero-h1">
-            Har shikayat,
+            Every complaint,
             <br />
-            ek hi jagah.
+            in one place.
           </h1>
           <p className="hero-p">
-            Sheet se aane wali har shikayat — customer se baat se lekar samasya
-            suljhne tak, store-wise, live from Supabase.
+            Every complaint from your sheet — from the first customer call to
+            final resolution, store by store, live from Supabase.
           </p>
           <div className="hero-chips">
             {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map(
@@ -1845,7 +1934,7 @@ function Login({ onLogin }) {
               Store login
             </div>
             <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>
-              Apna store choose karke PIN daalo.
+              Choose your store and enter the PIN.
             </div>
           </div>
           <Field label="Store">
@@ -1906,8 +1995,10 @@ function Login({ onLogin }) {
             }}
           >
             {CONFIGURED
-              ? 'Live · Supabase connected'
-              : 'Demo mode · CONFIG.key khaali hai'}
+              ? 'Live · Connected to Supabase'
+              : 'Demo mode · add your Supabase key'}
+            <br />
+            Store PIN: starts at <b>1001</b> · All stores: <b>2222</b>
           </div>
         </div>
       </div>
@@ -2011,14 +2102,14 @@ function Topbar({
         />
         <input
           className="topbar-search"
-          placeholder="Search by customer, ticket, phone…"
+          placeholder={L('searchPh')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         {search.trim() && (
           <div className="search-dd">
             {!results || results.length === 0 ? (
-              <div className="search-empty">Koi match nahi mila</div>
+              <div className="search-empty">{L('noMatch')}</div>
             ) : (
               results.map((x) => {
                 const closed = isClosedStage(x.stage);
@@ -2137,8 +2228,8 @@ function Header({
             color: T.ink,
           }}
         >
-          {session.branch === 'ALL' ? 'All stores' : branchLabel(session.branch)}{' '}
-          complaints
+          {session.branch === 'ALL' ? L('allStores') : branchLabel(session.branch)}{' '}
+          {L('complaints')}
         </h2>
         {mgr && (
           <div
@@ -2151,7 +2242,7 @@ function Header({
               gap: 5,
             }}
           >
-            <UserCog size={13} /> Store manager:{' '}
+            <UserCog size={13} /> {L('storeManager')}:{' '}
             <b style={{ color: T.ink, fontWeight: 700 }}>{mgr}</b>
           </div>
         )}
@@ -2175,8 +2266,8 @@ function Header({
             value={viewMode}
             onChange={(e) => onViewMode(e.target.value)}
           >
-            <option value="today">Today</option>
-            <option value="archived">Archived</option>
+            <option value="today">{L('today')}</option>
+            <option value="archived">{L('archived')}</option>
           </select>
         </div>
         <div className="layout-toggle">
@@ -2184,13 +2275,13 @@ function Header({
             className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
             onClick={() => onLayoutMode('board')}
           >
-            <LayoutDashboard size={14} /> Stages
+            <LayoutDashboard size={14} /> {L('stages')}
           </button>
           <button
             className={layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'}
             onClick={() => onLayoutMode('categories')}
           >
-            <Package size={14} /> Categories
+            <Package size={14} /> {L('categories')}
           </button>
         </div>
         {session.isHead && (
@@ -2226,8 +2317,8 @@ function Header({
             style={{ background: live ? T.greenBright : T.amber }}
           />
           {live
-            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Tickets · ${count}`
-            : 'Demo data'}
+            ? `${viewMode === 'archived' ? L('archived') : L('today')} · ${L('totalTickets')} · ${count}`
+            : L('demoData')}
         </span>
       </div>
     </div>
@@ -2342,14 +2433,13 @@ function Stats({ items, viewMode, onDrill }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ BOARD */
-function Board({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold }) {
+function Board({ items, loading, onOpen, onMove, onCommit }) {
   if (loading && items.length === 0)
-    return <div className="loading">Supabase se tickets load ho rahe hain…</div>;
-  const held = items.filter((x) => isOnHold(x));
+    return <div className="loading">{L('loadingTickets')}</div>;
   return (
     <div className="board">
       {STAGES.map((stage) => {
-        const cards = items.filter((x) => x.stage === stage.id && !isOnHold(x));
+        const cards = items.filter((x) => x.stage === stage.id);
         return (
           <section key={stage.id} className="column">
             <div className="col-head">
@@ -2365,7 +2455,7 @@ function Board({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold }) {
               </span>
             </div>
             <div className="col-body">
-              {cards.length === 0 && <div className="empty">Koi ticket nahi</div>}
+              {cards.length === 0 && <div className="empty">{L('noTicket')}</div>}
               {cards.map((x) => (
                 <Card
                   key={x.ticket_id}
@@ -2374,59 +2464,20 @@ function Board({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold }) {
                   onOpen={() => onOpen(x)}
                   onMove={onMove}
                   onCommit={onCommit}
-                  onHold={onHold}
-                  onUnhold={onUnhold}
                 />
               ))}
             </div>
           </section>
         );
       })}
-      <section key="hold" className="column column-hold">
-        <div className="col-head">
-          <span className="col-pip" style={{ background: HOLD_META.hold.color }} />
-          <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-            {sLabel('hold')}
-          </span>
-          <span
-            className="col-count"
-            style={{ background: HOLD_META.hold.soft, color: HOLD_META.hold.color }}
-          >
-            {held.length}
-          </span>
-        </div>
-        <div className="col-body">
-          {held.length === 0 && (
-            <div className="empty">Koi ticket hold pe nahi</div>
-          )}
-          {held.map((x) => (
-            <Card
-              key={x.ticket_id}
-              d={x}
-              stage={HOLD_META.hold}
-              onOpen={() => onOpen(x)}
-              onMove={onMove}
-              onCommit={onCommit}
-              onHold={onHold}
-              onUnhold={onUnhold}
-            />
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
 
 /* Mobile: stage tabs (accordion). */
-function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhold, focus }) {
-  const active = STAGES.filter((s) =>
-    items.some((x) => x.stage === s.id && !isOnHold(x)),
-  );
-  const held = items.filter((x) => isOnHold(x));
-  const sections = held.length
-    ? [...active, { id: 'hold', color: HOLD_META.hold.color, __hold: true }]
-    : active;
-  const activeIds = sections.map((s) => s.id);
+function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
+  const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
+  const activeIds = active.map((s) => s.id);
   const sig = activeIds.join(',');
   const [open, setOpen] = useState(activeIds[0] || null);
   const consumed = React.useRef(0);
@@ -2449,20 +2500,18 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhol
   }, [sig, focus && focus.n]);
 
   if (loading && items.length === 0)
-    return <div className="loading">Tickets load ho rahe hain…</div>;
-  if (sections.length === 0)
+    return <div className="loading">{L('loadingTickets')}</div>;
+  if (active.length === 0)
     return (
       <div className="empty" style={{ padding: '44px 0' }}>
-        Koi ticket nahi
+        {L('noTicket')}
       </div>
     );
 
   return (
     <div className="m-board">
-      {sections.map((stage) => {
-        const cards = stage.__hold
-          ? held
-          : items.filter((x) => x.stage === stage.id && !isOnHold(x));
+      {active.map((stage) => {
+        const cards = items.filter((x) => x.stage === stage.id);
         const isOpen = open === stage.id;
         return (
           <section
@@ -2481,7 +2530,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhol
               <span
                 className="col-count"
                 style={{
-                  background: stage.__hold ? HOLD_META.hold.soft : stage.soft,
+                  background: stage.soft,
                   color: stage.color,
                   marginLeft: 'auto',
                 }}
@@ -2503,12 +2552,10 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhol
                   <Card
                     key={x.ticket_id}
                     d={x}
-                    stage={stage.__hold ? HOLD_META.hold : stage}
+                    stage={stage}
                     onOpen={() => onOpen(x)}
                     onMove={onMove}
                     onCommit={onCommit}
-                    onHold={onHold}
-                    onUnhold={onUnhold}
                   />
                 ))}
               </div>
@@ -2520,21 +2567,15 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, onHold, onUnhol
   );
 }
 
-function Card({ d, stage, onOpen, onMove, onCommit, onHold, onUnhold }) {
+function Card({ d, stage, onOpen, onMove, onCommit }) {
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
-  const held = isOnHold(d);
-  const next = closed || held ? null : STAGES[stageIndex(d.stage) + 1];
+  const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
   return (
-    <div
-      className={
-        cancelled ? 'card is-cancelled' : held ? 'card is-hold' : 'card'
-      }
-      onClick={onOpen}
-    >
+    <div className={cancelled ? 'card is-cancelled' : 'card'} onClick={onOpen}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -2570,25 +2611,7 @@ function Card({ d, stage, onOpen, onMove, onCommit, onHold, onUnhold }) {
           </span>
         </div>
       )}
-      {held && (
-        <div className="card-hold-note">
-          <span>
-            Rukka hai: <b>{sShort(d.stage)}</b> pe
-          </span>
-          {d.hold_reason && <span className="ellip">{d.hold_reason}</span>}
-        </div>
-      )}
-      {held ? (
-        <button
-          className="card-next is-hold-resume"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUnhold && onUnhold(d);
-          }}
-        >
-          <RefreshCw size={14} /> Unhold — {sShort(d.stage)} se continue
-        </button>
-      ) : closed ? (
+      {closed ? (
         <div
           className="card-done"
           style={{ color: stage.color, background: stage.soft }}
@@ -2637,19 +2660,8 @@ function Card({ d, stage, onOpen, onMove, onCommit, onHold, onUnhold }) {
         </>
       ) : (
         <div className="card-done">
-          <Check size={13} /> Completed
+          <Check size={13} /> {L('completed')}
         </div>
-      )}
-      {!held && !closed && d.stage === 'received' && onHold && (
-        <button
-          className="card-hold-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            onHold(d);
-          }}
-        >
-          <Clock size={12} /> Hold pe daalo
-        </button>
       )}
     </div>
   );
@@ -2663,9 +2675,7 @@ function FooterTotal({ items }) {
   const can = items.filter((x) => x.stage === 'cancelled').length;
   const dup = items.filter((x) => x.stage === 'duplicate').length;
   const inv = items.filter((x) => x.stage === 'invalid').length;
-  const hold = items.filter((x) => isOnHold(x)).length;
   const extra = [
-    hold && `Hold ${hold}`,
     can && `Cancelled ${can}`,
     inv && `Invalid ${inv}`,
     dup && `Duplicate ${dup}`,
@@ -2681,22 +2691,11 @@ function FooterTotal({ items }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({
-  d,
-  onClose,
-  onAdvance,
-  onSetStage,
-  onEditStage,
-  canDelete,
-  onDelete,
-  onHold,
-  onUnhold,
-}) {
+function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
   const cancelled = !!closedMeta;
-  const held = isOnHold(d);
   const idx = stageIndex(d.stage);
   const stage = cancelled
     ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
@@ -2712,9 +2711,9 @@ function Drawer({
       id: 'talk',
       i: 1,
       rows: [
-        ['Date', show(niceDate(r.talk_date))],
-        ['Time', show(niceTime(r.talk_time))],
-        ['Customer ne kya kaha', show(r.stage1_remarks)],
+        [L('kvDate'), show(niceDate(r.talk_date))],
+        [L('kvTime'), show(niceTime(r.talk_time))],
+        [L('whatSaidShort'), show(r.stage1_remarks)],
       ],
     },
     {
@@ -2722,23 +2721,23 @@ function Drawer({
       i: 2,
       rows: [
         [
-          'Kya kaam kiya',
+          L('workDoneShort'),
           show(r.action_taken === 'Other' ? r.action_other : r.action_taken),
         ],
-        ['Kab tak theek hoga', show(niceDate(r.expected_date))],
-        ['Remarks', show(r.stage2_remarks)],
+        [L('expectedShort'), show(niceDate(r.expected_date))],
+        [L('remarksShort'), show(r.stage2_remarks)],
       ],
     },
     {
       id: 'resolution',
       i: 3,
       rows: [
-        ['Resolved', r.is_resolved ? 'Yes' : 'No'],
+        [L('resolvedShort'), r.is_resolved ? L('yes') : L('no')],
         [
-          'Kya kaam kiya tha',
+          L('workDoneShort'),
           show(r.action_taken === 'Other' ? r.action_other : r.action_taken),
         ],
-        ['Remarks', show(r.stage3_remarks)],
+        [L('remarksShort'), show(r.stage3_remarks)],
       ],
     },
   ];
@@ -2771,47 +2770,13 @@ function Drawer({
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <span
-            className="stage-badge"
-            style={{ background: stage.soft, color: stage.color }}
-          >
-            <span className="col-pip" style={{ background: stage.color }} />{' '}
-            {cancelled ? stage.label : sLabel(d.stage)}
-          </span>
-          {held && (
-            <span
-              className="stage-badge"
-              style={{ background: HOLD_META.hold.soft, color: HOLD_META.hold.color }}
-            >
-              <Clock size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
-              On Hold
-            </span>
-          )}
-        </div>
-
-        {!cancelled && held && (
-          <div className="hold-banner">
-            <div className="hold-banner-head">
-              <Clock size={17} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div>
-                <div style={{ fontWeight: 800 }}>
-                  Ye ticket hold pe hai — {sLabel(d.stage)} pe rukka hai
-                </div>
-                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                  {d.hold_reason
-                    ? `Wajah: ${d.hold_reason}`
-                    : 'Customer side se waiting ki wajah se hold kiya gaya.'}
-                  {d.hold_since ? ` · ${fmtDateTime(d.hold_since)} se` : ''}
-                </div>
-              </div>
-            </div>
-            <button className="btn-primary" onClick={onUnhold}>
-              <RefreshCw size={15} /> Unhold — {sShort(d.stage)} se dubara
-              shuru karo
-            </button>
-          </div>
-        )}
+        <span
+          className="stage-badge"
+          style={{ background: stage.soft, color: stage.color }}
+        >
+          <span className="col-pip" style={{ background: stage.color }} />{' '}
+          {cancelled ? stage.label : sLabel(d.stage)}
+        </span>
 
         {cancelled ? (
           <>
@@ -2829,14 +2794,14 @@ function Drawer({
                 <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
               )}
               <div>
-                <div style={{ fontWeight: 800 }}>{closedMeta.title}</div>
+                <div style={{ fontWeight: 800 }}>{cTitle(closedMeta)}</div>
                 <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                  {closedMeta.note}
+                  {cNote(closedMeta)}
                 </div>
               </div>
             </div>
             <div className="sec-title" style={{ marginTop: 16 }}>
-              Is se pehle ki stages
+              {L('prevStages')}
             </div>
             <div className="stage-picker">
               {STAGES.map((s, i) => {
@@ -2863,38 +2828,21 @@ function Drawer({
               })}
             </div>
           </>
-        ) : held ? (
-          <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
-            Ticket hold pe hai, isliye stage aage nahi badhayi ja sakti.
-            Unhold karo — turant <b>{sLabel(d.stage)}</b> se same process
-            continue ho jayega.
-          </div>
         ) : (
           <>
-            <div
-              className="sec-title"
-              style={{
-                marginTop: 16,
-                justifyContent: 'space-between',
-              }}
-            >
-              <span>Move to stage</span>
-              {onHold && d.stage === 'received' && (
-                <button className="mini-edit" onClick={onHold}>
-                  <Clock size={13} /> Hold pe daalo
-                </button>
-              )}
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              {L('moveToStage')}
             </div>
             {next ? (
               <div className="next-hint">
                 <span className="col-pip" style={{ background: next.color }} />
                 <span>
-                  Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
+                  {L('nextStep')}: <b>{stageHint(next.id) || next.label}</b>
                 </span>
               </div>
             ) : (
               <div className="next-hint done">
-                <Check size={14} /> Saari stages complete — samasya suljh gayi
+                <Check size={14} /> {L('allDone')}
               </div>
             )}
             <div className="stage-picker">
@@ -2928,20 +2876,19 @@ function Drawer({
               })}
             </div>
             <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-              Bhari hui stages colored hain · agli stage bharne pe wo colored
-              hogi aur uske baad wali khulegi.
+              {L('filledColored')}
             </div>
           </>
         )}
 
         <div className="kv-grid" style={{ marginTop: 18 }}>
-          <KV label="Phone" value={d.phone} />
-          <KV label="Email" value={d.email} />
-          <KV label="Saman" value={d.equipment} full />
-          <KV label="Shikayat" value={d.subject} full />
-          <KV label="Store" value={branchLabel(d.branch)} />
-          <KV label="Ticket aayi" value={niceDateTime(d.opened) || '—'} />
-          <KV label="Store manager" value={d.manager} full />
+          <KV label={L('kvPhone')} value={d.phone} />
+          <KV label={L('kvEmail')} value={d.email} />
+          <KV label={L('kvItem')} value={d.equipment} full />
+          <KV label={L('kvIssue')} value={d.subject} full />
+          <KV label={L('kvStore')} value={branchLabel(d.branch)} />
+          <KV label={L('kvOpened')} value={niceDateTime(d.opened) || '—'} />
+          <KV label={L('kvManager')} value={d.manager} full />
         </div>
 
         {blocks.map((b) => {
@@ -2969,14 +2916,14 @@ function Drawer({
                     className="next-badge"
                     style={{ color: T.inkSoft, background: T.slateSoft }}
                   >
-                    locked
+                    {L('locked')}
                   </span>
                 ) : (
                   <span
                     className="next-badge"
                     style={{ color: st.color, background: st.soft }}
                   >
-                    Agla step
+                    {L('nextStepBadge')}
                   </span>
                 )}
               </div>
@@ -2987,13 +2934,13 @@ function Drawer({
                       key={k}
                       label={k}
                       value={v}
-                      full={k === 'Remarks' || k === 'Customer ne kya kaha'}
+                      full={k === L('remarksShort') || k === L('whatSaidShort')}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="block-next-note">
-                  Ye stage bharne ke liye upar <b>{sShort(st.id)}</b> button dabao.
+                  {L('fillNote')} <b>{sShort(st.id)}</b> {L('aboveBtn')}
                 </div>
               )}
             </div>
@@ -3001,7 +2948,7 @@ function Drawer({
         })}
 
         <div className="sec-title" style={{ marginTop: 22 }}>
-          <History size={14} /> Timeline / history
+          <History size={14} /> {L('timeline')}
         </div>
         {cancelled && !hasClosedLog && (
           <div className="timeline">
@@ -3018,7 +2965,7 @@ function Drawer({
                 >
                   {closedMeta.label}
                 </div>
-                <div className="tl-note">{closedMeta.title}</div>
+                <div className="tl-note">{cTitle(closedMeta)}</div>
               </div>
             </div>
           </div>
@@ -3053,8 +3000,7 @@ function Drawer({
           </div>
         ) : (
           <div style={{ fontSize: 12, color: T.inkSoft }}>
-            Abhi koi history nahi. Jaise hi koi stage move/edit hoga, yahan
-            continuous log banega.
+            {L('noHistory')}
           </div>
         )}
 
@@ -3063,23 +3009,22 @@ function Drawer({
             {confirmDel ? (
               <div className="danger-confirm">
                 <span style={{ fontSize: 13, fontWeight: 700, color: T.red }}>
-                  Pakka delete karna hai?
+                  {L('confirmDelete')}
                 </span>
                 <button className="btn-danger" onClick={onDelete}>
-                  <Trash2 size={15} /> Haan, delete
+                  <Trash2 size={15} /> {L('yesDelete')}
                 </button>
                 <button className="btn-ghost" onClick={() => setConfirmDel(false)}>
-                  Rehne do
+                  {L('keepIt')}
                 </button>
               </div>
             ) : (
               <button className="btn-danger" onClick={() => setConfirmDel(true)}>
-                <Trash2 size={15} /> Delete this entry
+                <Trash2 size={15} /> {L('dangerDelete')}
               </button>
             )}
             <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-              Sirf head delete kar sakta hai · view se hat jayega par Supabase
-              mein <b>status = "Deleted"</b> ke saath record safe rahega.
+              {L('deleteNote')}
             </div>
           </div>
         )}
@@ -3093,59 +3038,6 @@ function KV({ label, value, full }) {
     <div className="kv" style={full ? { gridColumn: '1 / -1' } : null}>
       <div className="kv-label">{label}</div>
       <div className="kv-val">{value}</div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════ HOLD MODAL */
-function HoldModal({ onClose, onSave }) {
-  const [reason, setReason] = useState('');
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>
-              <Clock size={16} style={{ verticalAlign: -3, marginRight: 6 }} />
-              Ticket ko Hold pe daalein
-            </div>
-            <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
-              Jahan hai wahin ruk jayega — Unhold karte hi wahin se same
-              process dobara continue ho jayega.
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="field">
-            <div className="field-label">
-              Wajah (optional) — jaise "customer abhi available nahi",
-              "part ka wait", "waqt maanga hai"
-            </div>
-            <textarea
-              className="inp"
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Kyun hold pe daal rahe ho…"
-            />
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn-primary"
-            style={{ background: T.amber, boxShadow: 'none' }}
-            onClick={() => onSave(reason.trim())}
-          >
-            <Clock size={15} /> Hold pe daalo
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -3217,16 +3109,16 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   // neeche wala textarea — stage ke hisaab se label
   const remarkLabel =
     toStage === 'talk'
-      ? 'Customer ne kya kaha *'
+      ? L('whatCustomerSaid')
       : toStage === 'resolution'
-        ? 'Kaise theek hua (optional)'
-        : 'Remarks (optional)';
+        ? L('remarksResolve')
+        : L('remarks');
   const remarkPh =
     toStage === 'talk'
-      ? 'Customer ne kya bola? Dikkat, haalat, jo salah di — sab likho…'
+      ? L('whatCustomerSaidPh')
       : toStage === 'resolution'
-        ? 'Kya kiya jisse theek hua…'
-        : 'Optional notes…';
+        ? L('remarksResolvePh')
+        : L('remarksPh');
 
   const inner = (
     <>
@@ -3258,7 +3150,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
           <div className="auto-time">
             <Clock size={15} />
             <span>
-              Abhi ka time apne aap save hoga:{' '}
+              {L('autoTime')}{' '}
               <b>
                 {_now.toLocaleString('en-IN', {
                   day: 'numeric',
@@ -3275,13 +3167,13 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
 
         {toStage === 'status' && (
           <>
-            <Field label="Kya kaam kiya *">
+            <Field label={L('workDone')}>
               <select
                 className="inp"
                 value={f.action}
                 onChange={(e) => set('action', e.target.value)}
               >
-                <option value="">Select…</option>
+                <option value="">{L('select')}</option>
                 {ACTIONS.map((a) => (
                   <option key={a} value={a}>
                     {a}
@@ -3290,29 +3182,27 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
               </select>
             </Field>
             {otherAction && (
-              <Field label="Kya kaam kiya — likho *">
+              <Field label={L('workDoneOther')}>
                 <input
                   className="inp"
-                  placeholder="Jo kaam kiya wo likho…"
+                  placeholder={L('workDoneOtherPh')}
                   value={f.actionOther}
                   onChange={(e) => set('actionOther', e.target.value)}
                 />
               </Field>
             )}
             {otherAction && !f.actionOther.trim() && (
-              <div className="req-note">Other chuna hai — likhna zaroori hai.</div>
+              <div className="req-note">{L('otherRequired')}</div>
             )}
             {spot ? (
               <div
                 className="flag-note"
                 style={{ background: T.mint, color: T.green }}
               >
-                <b>Repair ho gaya.</b> Wahin theek ho gaya to wait karne ki
-                zarurat nahi — neeche tick karo, ticket seedha <b>Resolved</b>{' '}
-                ho jayega.
+                {L('spotFixNote')}
               </div>
             ) : (
-              <Field label="Kab tak theek hoga *">
+              <Field label={L('expectedBy')}>
                 <input
                   className="inp"
                   type="date"
@@ -3334,11 +3224,11 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
 
             {spot && (
               <>
-                <div className="mbc-divider">Final · resolution</div>
+                <div className="mbc-divider">{L('finalResolution')}</div>
                 <Check1
                   checked={f.resolved}
                   onChange={() => set('resolved', !f.resolved)}
-                  label="Samasya theek ho gayi"
+                  label={L('markResolvedChk')}
                 />
               </>
             )}
@@ -3351,7 +3241,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
               <div className="prev-line">
                 <Wrench size={14} />
                 <span>
-                  Kya kaam kiya tha:{' '}
+                  {L('workWasDone')}:{' '}
                   <b>
                     {r.action_taken === 'Other'
                       ? r.action_other
@@ -3363,11 +3253,11 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
             <Check1
               checked={f.resolved}
               onChange={() => set('resolved', !f.resolved)}
-              label="Samasya theek ho gayi"
+              label={L('markResolvedChk')}
             />
             {!f.resolved && (
               <div className="req-note">
-                Tick karo — tabhi ticket completed hoga.
+                {L('resolvedRequired')}
               </div>
             )}
           </>
@@ -3383,14 +3273,12 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
           />
         </Field>
         {toStage === 'talk' && !f.remarks.trim() && (
-          <div className="req-note">
-            Customer ne kya kaha — likhna zaroori hai.
-          </div>
+          <div className="req-note">{L('saidRequired')}</div>
         )}
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>
-          Cancel
+          {L('cancel')}
         </button>
         <button
           className="btn-primary"
@@ -3409,12 +3297,12 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
         >
           <ShieldCheck size={16} />{' '}
           {mode === 'edit'
-            ? 'Update'
+            ? L('update')
             : spot
-              ? 'Save · Mark Resolved'
+              ? L('saveResolved')
               : toStage === 'resolution'
-                ? 'Save · Completed'
-                : 'Save & update'}
+                ? L('saveCompleted')
+                : L('save')}
         </button>
       </div>
     </>
@@ -3558,7 +3446,7 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
       .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
@@ -3587,18 +3475,6 @@ function StyleTag() {
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
-      .card.is-hold { background: ${T.amberSoft}; border-color: #EAD5AE; }
-      .card.is-hold:hover { border-color: #DDBD84; }
-      .card-hold-note { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; font-size: 11.5px; color: ${T.amber}; font-weight: 600; }
-      .card-next.is-hold-resume { color: ${T.amber}; border-color: #EAD5AE; background: #fff; }
-      .card-next.is-hold-resume:hover { background: ${T.amberSoft}; }
-      .card-hold-btn { width: 100%; margin-top: 8px; border: none; background: transparent; color: ${T.inkSoft}; font-size: 11.5px; font-weight: 700; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 4px; }
-      .card-hold-btn:hover { color: ${T.amber}; }
-      .column-hold .col-head { border-bottom: 2px solid ${T.amberSoft}; }
-      .hold-banner { margin-top: 14px; background: ${T.amberSoft}; border: 1px solid #EAD5AE; border-radius: 13px; padding: 13px 14px; display: flex; flex-direction: column; gap: 12px; color: ${T.ink}; }
-      .hold-banner-head { display: flex; gap: 10px; align-items: flex-start; color: ${T.amber}; font-size: 13px; }
-      .hold-banner .btn-primary { background: ${T.amber}; box-shadow: none; align-self: flex-start; }
-      .hold-banner .btn-primary:hover { background: #b26f22; }
       .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
 
       .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
