@@ -42,7 +42,7 @@ import {
    ══════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
   url: 'https://bkiorfluddgdujpkcfjm.supabase.co',
-  key: '', // preview = demo mode
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraW9yZmx1ZGRnZHVqcGtjZmptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjE1MzEsImV4cCI6MjEwMDA5NzUzMX0.dqggpSuocXcxPYeCfXmVQqPrxfCbR2LiZ-lVN_mOJas',
   table: 'tickets',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
@@ -792,74 +792,6 @@ function rowToTicket(r) {
   };
 }
 
-/* Demo data (jab key khaali ho) */
-const agoIso = (m) => new Date(Date.now() - m * 60000).toISOString();
-function demo(tid, num, name, phone, city, product, subject, status, extra) {
-  return rowToTicket({
-    ticket_id: tid,
-    ticket_number: num,
-    full_name: name,
-    mobile: phone,
-    email_id: `${name.split(' ')[0].toLowerCase()}@mail.com`,
-    city,
-    product,
-    subject,
-    status,
-    opening_time: agoIso(extra && extra.mins ? extra.mins : 120),
-    created_at: agoIso(extra && extra.mins ? extra.mins : 120),
-    ...(extra || {}),
-  });
-}
-const DEMO = [
-  demo('1988001', '2332', 'Rahul Mehra', '+91 98765 43210', 'Mohali',
-    'Oxygen Concentrator 5L', 'Awaaz zyada aa rahi hai', 'Open', { mins: 95 }),
-  demo('1988002', '2333', 'Priya Sharma', '+91 91234 56780', 'Mohali',
-    'Hospital Bed (Manual)', 'Side railing jam ho gayi', 'Talked To Customer', {
-      mins: 190,
-      talk_date: new Date().toISOString().slice(0, 10),
-      talk_time: '11:30',
-      stage1_remarks: 'Railing ka lock tight ho gaya hai. Zor na lagane ko kaha.',
-      app_log: [{ ts: agoIso(160), stage: 'talk', label: 'Customer Se Baat', action: 'Moved to', fields: { Date: 'aaj', Time: '11:30' } }],
-    }),
-  demo('1988003', '2334', 'Amit Verma', '+91 99887 76655', 'Mohali',
-    'CPAP Machine', 'Mask se hawa leak ho rahi hai', 'In Progress', {
-      mins: 320,
-      talk_date: new Date().toISOString().slice(0, 10),
-      talk_time: '10:00',
-      stage1_remarks: 'Mask ka size chhota lag raha hai.',
-      action_taken: 'Part mangwaya',
-      expected_date: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
-      stage2_remarks: 'Naya cushion warehouse se mangwaya.',
-      app_log: [
-        { ts: agoIso(300), stage: 'talk', label: 'Customer Se Baat', action: 'Moved to', fields: {} },
-        { ts: agoIso(120), stage: 'status', label: 'Aage Ki Jankari', action: 'Moved to', fields: { Action: 'Part mangwaya' } },
-      ],
-    }),
-  demo('1988004', '2335', 'Neha Kapoor', '+91 98111 22334', 'Mohali',
-    'Wheelchair (Manual)', 'Aage ka wheel ghoom nahi raha', 'Resolved', {
-      mins: 1400,
-      action_taken: 'Store pe repair kiya',
-      is_resolved: true,
-      stage3_remarks: 'Bearing badal diya, wheel theek chal raha.',
-      app_log: [
-        { ts: agoIso(1350), stage: 'talk', label: 'Customer Se Baat', action: 'Moved to', fields: {} },
-        { ts: agoIso(900), stage: 'status', label: 'Aage Ki Jankari', action: 'Moved to', fields: {} },
-        { ts: agoIso(200), stage: 'resolution', label: 'Samasya Suljhi', action: 'Moved to', fields: { Resolved: 'Yes' } },
-      ],
-    }),
-  demo('1988005', '2336', 'Vikram Singh', '+91 90000 11122', 'Ludhiana',
-    'BiPAP Machine', 'Display par error code', 'Open', { mins: 240 }),
-  demo('1988006', '2337', 'Anjali Rao', '+91 93456 78901', 'Jaipur',
-    'Nebulizer', 'Pipe se hawa kam aa rahi hai', 'Talked To Customer', { mins: 410 }),
-  demo('1988007', '2338', 'Karan Gupta', '+91 97777 88899', 'Gurugram',
-    'Pulse Oximeter', 'Reading galat aa rahi hai', 'Open', { mins: 70 }),
-  demo('1988008', '2339', 'Sneha Iyer', '+91 96543 21098', 'Noida',
-    'Oxygen Cylinder', 'Regulator leak kar raha hai', 'Resolved', { mins: 520 }),
-  demo('1988009', '2340', 'Manish Patel', '+91 95555 42310', 'Ludhiana',
-    'Walker (Foldable)', 'Folding lock tight ho gaya', 'In Progress', { mins: 150 }),
-  demo('1988010', '2341', 'Rohit Bansal', '+91 98999 12345', 'Mohali',
-    'Oxygen Concentrator 5L', 'Same shikayat dobara aayi', 'Duplicate Ticket', { mins: 600 }),
-];
 
 /* mobile detection */
 function useIsMobile(bp = 760) {
@@ -910,10 +842,6 @@ export default function App() {
   };
 
   const load = async () => {
-    if (!CONFIGURED) {
-      setTickets(DEMO);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
@@ -991,23 +919,6 @@ export default function App() {
       ...(spot ? [makeEvent('resolution', fields, 'move')] : []),
     ];
     const landed = spot ? 'resolution' : toStage;
-    if (!CONFIGURED) {
-      setTickets((prev) =>
-        prev.map((x) => {
-          if (x.ticket_id !== ticketId) return x;
-          const raw = { ...(x._raw || {}), ...patch };
-          if (mode === 'edit') raw.status = x.rawStatus;
-          return rowToTicket(raw);
-        }),
-      );
-      ping(
-        mode === 'edit'
-          ? `${L('tUpdated')} ✓`
-          : `${L('tSaved')} ✓ · ${sLabel(landed)}`,
-      );
-      if (mode === 'move') jumpMobile(landed);
-      return;
-    }
     try {
       await sbPatch(ticketId, patch);
       ping(
@@ -1047,18 +958,6 @@ export default function App() {
       app_log: [...existingLog(cur), makeEvent(toStage, {}, 'move')],
     };
     if (goingBack) Object.assign(patch, clearAhead(toStage));
-    if (!CONFIGURED) {
-      setTickets((prev) =>
-        prev.map((x) =>
-          x.ticket_id === ticketId
-            ? rowToTicket({ ...(x._raw || {}), ...patch })
-            : x,
-        ),
-      );
-      ping(`${L('tMoved')} · ${sLabel(toStage)}`);
-      jumpMobile(toStage);
-      return;
-    }
     try {
       await sbPatch(ticketId, patch);
       ping(`${L('tMoved')} · ${sLabel(toStage)}`);
@@ -1085,18 +984,6 @@ export default function App() {
         },
       ],
     };
-    if (!CONFIGURED) {
-      setTickets((prev) =>
-        prev.map((x) =>
-          x.ticket_id === ticketId
-            ? { ...x, stage: 'deleted', rawStatus: 'Deleted' }
-            : x,
-        ),
-      );
-      setActiveId(null);
-      ping(L('tDeleted'));
-      return;
-    }
     try {
       await sbPatch(ticketId, patch);
       setActiveId(null);
@@ -1996,7 +1883,7 @@ function Login({ onLogin }) {
           >
             {CONFIGURED
               ? 'Live · Connected to Supabase'
-              : 'Demo mode · add your Supabase key'}
+              : 'Not connected · check Supabase key'}
             <br />
             Store PIN: starts at <b>1001</b> · All stores: <b>2222</b>
           </div>
