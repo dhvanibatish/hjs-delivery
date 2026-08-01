@@ -612,7 +612,11 @@ function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
   if (toStage === 'new') return {};
   if (toStage === 'talked')
-    return { Date: f.date || '—', Time: f.time || '—', ...rmk };
+    return {
+      Date: f.date ? niceDate(f.date) || f.date : '—',
+      Time: f.time ? niceTime(f.time) || f.time : '—',
+      ...rmk,
+    };
   if (toStage === 'scheduled')
     return { Person: f.person || '—', Transport: f.vehicle || '—', ...rmk };
   if (toStage === 'dispatched')
@@ -620,7 +624,7 @@ function stageFields(toStage, f) {
   if (toStage === 'delivered')
     return {
       Inspected: f.inspected ? 'Yes' : 'No',
-      Date: f.pickDate || '—',
+      Date: f.pickDate ? niceDate(f.pickDate) || f.pickDate : '—',
       Charges: `₹${f.charges || 0}`,
       Done: f.done ? 'Yes' : 'No',
       ...rmk,
@@ -760,7 +764,14 @@ function rowToDelivery(r) {
     phone: clean(r.phone) || '—',
     area: clean(r.address) || '—',
     equipment: equipmentText(r),
-    amount: Number(r.pickup_charges_collected) || 0,
+    // charges tab tak blank rehte hain jab tak pickup pe khud na bhare jayein —
+    // 0 dikhana galat impression deta hai
+    amount:
+      r.pickup_charges_collected != null &&
+      r.pickup_charges_collected !== '' &&
+      r.pickup_charges_collected !== 'null'
+        ? Number(r.pickup_charges_collected)
+        : null,
     expected:
       r.confirmed_date && r.confirmed_date !== 'null'
         ? r.confirmed_date
@@ -1779,7 +1790,10 @@ function Topbar({
                       <span className={tagClass}>{tagText}</span>
                     </div>
                     <div className="ellip search-sub">
-                      ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
+                      {x.amount != null
+                        ? `₹${x.amount.toLocaleString('en-IN')} · `
+                        : ''}
+                      {x.equipment}
                     </div>
                   </button>
                 );
@@ -2248,9 +2262,11 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
       </div>
       <div className="card-equip">{d.equipment}</div>
       <div className="card-meta">
-        <span style={{ color: T.green, fontWeight: 800 }}>
-          <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
-        </span>
+        {d.amount != null && (
+          <span style={{ color: T.green, fontWeight: 800 }}>
+            <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
+          </span>
+        )}
         <span className="ellip" style={{ maxWidth: 130 }}>
           <MapPin size={12} /> {d.area}
         </span>
@@ -2369,8 +2385,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'talked',
       i: 1,
       rows: [
-        ['Pickup date', show(r.confirmed_date)],
-        ['Time', show(r.confirmed_time)],
+        ['Pickup date', niceDate(r.confirmed_date) || '—'],
+        ['Time', niceTime(r.confirmed_time) || '—'],
         ['Remarks', show(r.stage1_remarks)],
       ],
     },
@@ -2397,7 +2413,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       rows: [
         ['Inspected', r.item_inspected ? 'Yes' : 'No'],
         ['Picked up', r.pickup_done ? 'Yes' : 'No'],
-        ['Actual date', show(r.actual_pickup_date)],
+        ['Actual date', niceDate(r.actual_pickup_date) || '—'],
         [
           'Charges',
           r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
@@ -2565,7 +2581,10 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           <KV label="Phone" value={d.phone} />
           <KV label="Area" value={d.area} />
           <KV label="Equipment" value={d.equipment} full />
-          <KV label="Amount" value={`₹${d.amount.toLocaleString('en-IN')}`} />
+          <KV
+            label="Pickup charges"
+            value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
+          />
           <KV label="Due date" value={d.expected} />
           <KV label="Store manager" value={d.manager} full />
         </div>
@@ -2864,7 +2883,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const canSave =
     toStage === 'talked' ? !!(f.date && f.time)
     : toStage === 'scheduled' ? !!(f.person && f.vehicle)
-    : toStage === 'dispatched' ? !!f.eta
+    : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
     : toStage === 'delivered' ? !!(f.inspected && f.photoPicked && f.done)
     : true;
 
@@ -2892,8 +2911,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('date', v); }} />
             </Field>
             <Field label="Confirmed Time *">
-              <input className="inp" type="time" value={f.time} onClick={openPicker} onChange={(e) => set('time', e.target.value)} />
-              {f.time && <span className="tp-preview">🕐 {niceTime(f.time)}</span>}
+              <TimePick12 value={f.time} onChange={(v) => set('time', v)} />
             </Field>
             {!(f.date && f.time) && <div className="req-note">Date aur Time dono bharo.</div>}
           </>
@@ -2917,12 +2935,35 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
         )}
         {toStage === 'dispatched' && (
           <>
-            <Field label="Estimated arrival (date & time) *">
-              <input className="inp" type="datetime-local" value={f.eta} min="2024-01-01T00:00" max="2099-12-31T23:59" onClick={openPicker}
-                onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('eta', v); }} />
-              {f.eta && <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>}
+            <Field label="Estimated arrival date *">
+              <input
+                className="inp"
+                type="date"
+                value={(f.eta || '').slice(0, 10)}
+                min="2024-01-01"
+                max="2099-12-31"
+                onClick={openPicker}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v && Number(v.slice(0, 4)) > 2099) return;
+                  set('eta', v ? `${v}T${(f.eta || '').slice(11, 16) || '00:00'}` : '');
+                }}
+              />
             </Field>
-            {!f.eta && <div className="req-note">ETA bharna zaroori hai.</div>}
+            <Field label="Estimated arrival time *">
+              <TimePick12
+                value={(f.eta || '').slice(11, 16)}
+                onChange={(t) => set('eta', `${(f.eta || '').slice(0, 10) || nowDate}T${t}`)}
+              />
+              {f.eta && (f.eta || '').slice(11, 16) && (
+                <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
+              )}
+            </Field>
+            {!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16)) && (
+              <div className="req-note">
+                Customer ko yahi date &amp; time jaayega — dono bharna zaroori hai.
+              </div>
+            )}
           </>
         )}
         {toStage === 'delivered' && (
@@ -2971,6 +3012,67 @@ function Field({ label, children }) {
     </div>
   );
 }
+/* 12-ghante ka time picker — hour (1-12) + minute + AM/PM.
+   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta)
+   aur Zoho iframe mein showPicker() block ho jaata hai, isliye apna control:
+   value andar "HH:MM" (24h) hi rehti hai. */
+function TimePick12({ value, onChange }) {
+  const [hh, mm] = String(value || '')
+    .split(':')
+    .map((x) => parseInt(x, 10));
+  const h24 = isNaN(hh) ? null : hh;
+  const ap = h24 == null ? 'AM' : h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 == null ? '' : h24 % 12 || 12;
+  const min = isNaN(mm) ? '' : String(mm).padStart(2, '0');
+
+  const push = (nh12, nmin, nap) => {
+    if (!nh12 || nmin === '' || !nap) return;
+    let h = Number(nh12) % 12;
+    if (nap === 'PM') h += 12;
+    onChange(`${String(h).padStart(2, '0')}:${nmin}`);
+  };
+
+  return (
+    <div className="tp12">
+      <select
+        className="inp"
+        value={h12}
+        onChange={(e) => push(e.target.value, min || '00', ap)}
+      >
+        <option value="">Hr</option>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+      <span className="tp12-sep">:</span>
+      <select
+        className="inp"
+        value={min}
+        onChange={(e) => push(h12 || 12, e.target.value, ap)}
+      >
+        <option value="">Min</option>
+        {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(
+          (m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ),
+        )}
+      </select>
+      <select
+        className="inp"
+        value={ap}
+        onChange={(e) => push(h12 || 12, min || '00', e.target.value)}
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+}
+
 function Check1({ checked, onChange, label }) {
   return (
     <button
@@ -3888,6 +3990,10 @@ function StyleTag() {
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .tp12 { display: flex; align-items: center; gap: 7px; }
+      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
+      .tp12 .inp:last-child { flex: 0 0 84px; }
+      .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
       .photo-btns { display: flex; gap: 9px; }
