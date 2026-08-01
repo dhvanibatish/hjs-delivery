@@ -764,9 +764,16 @@ function rowToDelivery(r) {
     phone: clean(r.phone) || '—',
     area: clean(r.address) || '—',
     equipment: equipmentText(r),
-    // charges tab tak blank rehte hain jab tak pickup pe khud na bhare jayein —
-    // 0 dikhana galat impression deta hai
+    // Card / Drawer ka "Amount" = invoice ka total (Supabase se aata hai).
+    // Pickup charges alag cheez hai — wo Picked Up stage pe khud bhare jaate
+    // hain aur usi block mein dikhte hain. Khaali ho to blank, 0 nahi.
     amount:
+      r.total_amount != null &&
+      r.total_amount !== '' &&
+      r.total_amount !== 'null'
+        ? Number(r.total_amount)
+        : null,
+    charges:
       r.pickup_charges_collected != null &&
       r.pickup_charges_collected !== '' &&
       r.pickup_charges_collected !== 'null'
@@ -2582,7 +2589,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           <KV label="Area" value={d.area} />
           <KV label="Equipment" value={d.equipment} full />
           <KV
-            label="Pickup charges"
+            label="Invoice amount"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
           <KV label="Due date" value={d.expected} />
