@@ -742,6 +742,40 @@ function stageFields(toStage, f) {
     };
   return {};
 }
+/* ── Kaun kar raha hai ─────────────────────────────────────────────────
+   Har app_log event ke saath login ka store + us store ka manager stamp
+   hota hai, taaki Activity log mein "kisne kiya" dikh sake. Koi naya
+   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai.
+   NOTE: login store-level hai, isliye actor = store (+ manager ka naam).
+   Person-level chahiye to app_staff mein per-user logins banane padenge. */
+let ACTOR = { by: null, byName: null };
+function setActor(session) {
+  if (!session) {
+    ACTOR = { by: null, byName: null };
+    return;
+  }
+  const code = session.authStore || session.branch;
+  ACTOR = {
+    by: code,
+    byName:
+      code === 'ALL'
+        ? 'Head office'
+        : STORE_MANAGERS[code] || branchLabel(code),
+  };
+}
+function actorStamp() {
+  return { by: ACTOR.by || null, by_name: ACTOR.byName || null };
+}
+/* purani entries mein by/by_name nahi hoga — wahan honest "record nahi" */
+function actorText(ev) {
+  if (!ev) return 'Record nahi';
+  const name = ev.by_name || ev.byName || '';
+  const code = ev.by || '';
+  if (!name && !code) return 'Record nahi (purana update)';
+  if (code === 'ALL') return name || 'Head office';
+  return name ? `${name} · ${branchLabel(code)}` : branchLabel(code);
+}
+
 function makeEvent(toStage, fields, mode) {
   return {
     ts: new Date().toISOString(),
@@ -749,6 +783,7 @@ function makeEvent(toStage, fields, mode) {
     label: (STAGES[stageIndex(toStage)] || {}).label || toStage,
     action: mode === 'edit' ? 'Edited' : 'Moved to',
     fields: stageFields(toStage, fields || {}),
+    ...actorStamp(),
   };
 }
 /* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
@@ -759,6 +794,7 @@ function makeClosedEvent(flag, remarks) {
     label: (CLOSED[flag] || {}).label || flag,
     action: 'Marked as',
     fields: remarks ? { Remarks: remarks } : {},
+    ...actorStamp(),
   };
 }
 const existingLog = (d) =>
@@ -1039,8 +1075,11 @@ export default function App() {
     } catch (_) {}
     return null;
   });
+  // kaun logged-in hai — har app_log event isi se stamp hota hai
+  setActor(session);
   // session badle to localStorage mein rakho / hatao (logout pe)
   useEffect(() => {
+    setActor(session);
     try {
       if (typeof localStorage === 'undefined') return;
       if (session) localStorage.setItem('hjsSession', JSON.stringify(session));
@@ -1060,6 +1099,7 @@ export default function App() {
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const [page, setPage] = useState('deliveries'); // deliveries | dashboard
+  const [showLog, setShowLog] = useState(false); // overall activity log panel
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1099,6 +1139,14 @@ export default function App() {
     const base = deliveries.filter((x) => x.stage !== 'deleted');
     if (session.branch === 'ALL') return base;
     return base.filter((x) => x.branch === session.branch);
+  }, [deliveries, session]);
+
+  // Activity log ke liye alag scope — deleted entries bhi chahiye (kisne
+  // delete ki, wo dikhana hai), isliye ye 'scoped' se alag hai.
+  const scopedAll = useMemo(() => {
+    if (!session) return [];
+    if (session.branch === 'ALL') return deliveries;
+    return deliveries.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
@@ -1287,6 +1335,7 @@ export default function App() {
           label: 'Deleted',
           action: 'Marked as',
           fields: {},
+          ...actorStamp(),
         },
       ],
     };
@@ -1350,6 +1399,7 @@ export default function App() {
             onReload={load}
             loading={loading}
             onLogout={() => setSession(null)}
+            onActivity={() => setShowLog(true)}
             lang={lang}
             onLang={switchLang}
           />
@@ -1432,6 +1482,17 @@ export default function App() {
               mode: 'edit',
             })
           }
+        />
+      )}
+      {showLog && (
+        <ActivityLog
+          deliveries={scopedAll}
+          session={session}
+          onClose={() => setShowLog(false)}
+          onOpen={(x) => {
+            setShowLog(false);
+            setActiveId(x.invoice_id);
+          }}
         />
       )}
       {modal && (
@@ -3321,6 +3382,7 @@ function Topbar({
   results,
   onPick,
   onReload,
+  onActivity,
   loading,
   onLogout,
   lang,
@@ -3404,6 +3466,13 @@ function Topbar({
             Hing
           </button>
         </div>
+        <button
+          className="icon-btn"
+          onClick={onActivity}
+          title="Activity log — kisne kya update kiya"
+        >
+          <History size={17} color={T.ink} />
+        </button>
         <button className="icon-btn" onClick={onReload} title="Reload">
           <RefreshCw
             size={17}
@@ -6153,6 +6222,288 @@ function TrackResult({ row }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ STYLES */
+/* ═════════════════════════════════════════════════ ACTIVITY LOG (overall)
+   Saari entries ke app_log events ek jagah, latest pehle — Books / Bigin ke
+   audit trail jaisa. Data wahi hai jo har entry ke andar timeline mein
+   dikhta hai; yahan sab merge karke "kisne kya kab kiya" ek screen pe.
+   Delete hui entries bhi yahan aati hain (view se hatti hain, log se nahi). */
+const ACT_KINDS = [
+  { id: 'all', label: 'Sab updates' },
+  { id: 'move', label: 'Stage move' },
+  { id: 'edit', label: 'Edit' },
+  { id: 'closed', label: 'Cancel / Dup / Renewal' },
+  { id: 'delete', label: 'Delete' },
+];
+function actKind(ev) {
+  if (!ev) return 'move';
+  if (ev.stage === 'deleted') return 'delete';
+  if (CLOSED[ev.stage]) return 'closed';
+  if (ev.action === 'Edited') return 'edit';
+  return 'move';
+}
+function actIconOf(k) {
+  return k === 'delete'
+    ? Trash2
+    : k === 'edit'
+      ? Pencil
+      : k === 'closed'
+        ? AlertTriangle
+        : ArrowRight;
+}
+function actTitle(ev) {
+  const k = actKind(ev);
+  const lbl =
+    (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
+    ev.label ||
+    ev.stage;
+  if (k === 'delete') return 'Entry delete ki';
+  if (k === 'closed') return `${lbl} mark kiya`;
+  if (k === 'edit') return `${lbl} edit kiya`;
+  return `${lbl} pe move kiya`;
+}
+function actDayLabel(ds) {
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  if (ds === todayStr()) return 'Aaj';
+  if (ds === dayStr(y)) return 'Kal';
+  const d = new Date(ds + 'T00:00');
+  return isNaN(d)
+    ? ds
+    : d.toLocaleDateString('en-IN', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+}
+function actTime(ts) {
+  const d = new Date(ts);
+  if (isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function ActivityLog({ deliveries, session, onOpen, onClose }) {
+  const [q, setQ] = useState('');
+  const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
+  const [store, setStore] = useState('ALL');
+  const [kind, setKind] = useState('all');
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    if (range === 'today') return [dayStr(t), dayStr(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [dayStr(y), dayStr(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [dayStr(s), dayStr(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [dayStr(s), dayStr(t)];
+    }
+    return ['0000-01-01', '9999-12-31'];
+  }, [range]);
+
+  // saari entries ke app_log ko ek flat list mein merge karo (latest pehle)
+  const all = useMemo(() => {
+    const out = [];
+    deliveries.forEach((d) => {
+      const log = d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
+      log.forEach((ev, i) => {
+        if (ev && ev.ts) out.push({ ev, d, key: `${d.invoice_id}#${i}` });
+      });
+    });
+    out.sort((a, b) => String(b.ev.ts).localeCompare(String(a.ev.ts)));
+    return out;
+  }, [deliveries]);
+
+  const rows = useMemo(() => {
+    const [s, e] = bounds;
+    const term = q.trim().toLowerCase();
+    return all.filter(({ ev, d }) => {
+      const ds = dayStr(ev.ts);
+      if (ds < s || ds > e) return false;
+      if (store !== 'ALL' && d.branch !== store) return false;
+      if (kind !== 'all' && actKind(ev) !== kind) return false;
+      if (!term) return true;
+      const hay =
+        `${d.customer} ${d.id} ${branchLabel(d.branch)} ${actorText(ev)} ${actTitle(ev)}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [all, bounds, store, kind, q]);
+
+  // din ke hisaab se group — heading ke neeche us din ke updates
+  const days = [];
+  const byDay = {};
+  rows.forEach((r) => {
+    const ds = dayStr(r.ev.ts);
+    if (!byDay[ds]) {
+      byDay[ds] = [];
+      days.push(ds);
+    }
+    byDay[ds].push(r);
+  });
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="act-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="act-head">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>Activity log</div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+              Kisne kya update kiya · {rows.length}{' '}
+              {rows.length === 1 ? 'update' : 'updates'}
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+
+        <div className="act-filters">
+          <div className="act-search">
+            <Search size={15} color={T.inkSoft} />
+            <input
+              placeholder="Customer, invoice, store, naam…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="act-selects">
+            <select
+              className="dash-inp"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+            >
+              <option value="today">Aaj</option>
+              <option value="yesterday">Kal</option>
+              <option value="7d">Pichhle 7 din</option>
+              <option value="month">Is mahine</option>
+              <option value="all">Sabhi</option>
+            </select>
+            <select
+              className="dash-inp"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
+              {ACT_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            {session && session.isHead && (
+              <select
+                className="dash-inp"
+                value={store}
+                onChange={(e) => setStore(e.target.value)}
+              >
+                <option value="ALL">All stores</option>
+                {STORE_ORDER.map((s) => (
+                  <option key={s} value={s}>
+                    {branchLabel(s)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        <div className="act-body">
+          {rows.length === 0 ? (
+            <div className="empty" style={{ padding: '44px 0' }}>
+              Is filter mein koi update nahi
+            </div>
+          ) : (
+            days.map((ds) => (
+              <div key={ds}>
+                <div className="act-day">{actDayLabel(ds)}</div>
+                {byDay[ds].map(({ ev, d, key }) => {
+                  const k = actKind(ev);
+                  const Ico = actIconOf(k);
+                  const c = k === 'delete' ? T.red : stageColorOf(ev.stage);
+                  const soft =
+                    k === 'delete' ? T.redSoft : stageMeta(ev.stage).soft;
+                  const fields =
+                    ev.fields && typeof ev.fields === 'object'
+                      ? Object.entries(ev.fields).filter(
+                          ([, v]) => v !== '' && v !== null && v !== undefined,
+                        )
+                      : [];
+                  return (
+                    <button
+                      key={key}
+                      className="act-row"
+                      onClick={() => onOpen(d)}
+                    >
+                      <div
+                        className="act-ico"
+                        style={{ background: soft, color: c }}
+                      >
+                        <Ico size={15} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="act-line">
+                          <span className="act-what" style={{ color: c }}>
+                            {actTitle(ev)}
+                          </span>
+                          <span className="act-time">{actTime(ev.ts)}</span>
+                        </div>
+                        <div className="act-who">
+                          <UserCog size={12} />{' '}
+                          <span className="ellip">{actorText(ev)}</span>
+                        </div>
+                        <div className="act-sub">
+                          <span className="act-cust">{d.customer}</span>
+                          <span className="act-dot">·</span>
+                          <span className="ellip">{d.id}</span>
+                          {session && session.isHead && (
+                            <>
+                              <span className="act-dot">·</span>
+                              <span>{branchLabel(d.branch)}</span>
+                            </>
+                          )}
+                        </div>
+                        {fields.length > 0 && (
+                          <div className="act-fields">
+                            {fields.map(([fk, fv]) => (
+                              <span key={fk} className="act-chip">
+                                <b>{fk}:</b> {String(fv)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <ChevronRight
+                        size={16}
+                        color={T.inkSoft}
+                        style={{ flexShrink: 0, alignSelf: 'center' }}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          )}
+          <div className="act-foot">
+            Purane updates mein naam nahi dikhega — "kisne kiya" ab se save
+            hona shuru hua hai.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StyleTag() {
   return (
     <style>{`
@@ -6536,6 +6887,32 @@ function StyleTag() {
       .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
       .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
       .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
+
+      /* ── activity log (overall history panel) ── */
+      .act-panel { margin-left: auto; width: 560px; max-width: 96vw; height: 100%; background: ${T.cream}; display: flex; flex-direction: column; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
+      .act-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 20px 20px 14px; border-bottom: 1px solid ${T.line}; background: #fff; }
+      .act-filters { padding: 12px 20px; border-bottom: 1px solid ${T.line}; background: #fff; display: flex; flex-direction: column; gap: 9px; }
+      .act-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; }
+      .act-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .act-selects { display: flex; gap: 8px; flex-wrap: wrap; }
+      .act-selects .dash-inp { flex: 1 1 auto; min-width: 120px; }
+      .act-body { flex: 1; overflow-y: auto; padding: 8px 16px 30px; }
+      .act-day { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .5px; padding: 16px 4px 8px; position: sticky; top: 0; background: ${T.cream}; z-index: 1; }
+      .act-row { display: flex; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 13px 14px; margin-bottom: 9px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .act-row:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(20,57,43,.08); border-color: #d8d1c0; }
+      .act-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+      .act-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+      .act-what { font-size: 13.5px; font-weight: 800; letter-spacing: -0.2px; }
+      .act-time { flex-shrink: 0; font-size: 11.5px; font-weight: 700; color: ${T.inkSoft}; }
+      .act-who { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: ${T.forestSoft}; margin-top: 3px; min-width: 0; }
+      .act-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 3px; }
+      .act-cust { font-weight: 700; color: ${T.ink}; }
+      .act-dot { color: #C9C7BE; }
+      .act-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .act-chip { font-size: 11px; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 8px; padding: 3px 8px; line-height: 1.4; }
+      .act-chip b { font-weight: 700; color: ${T.ink}; }
+      .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
+      @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
 
       @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
