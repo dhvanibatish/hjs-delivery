@@ -3536,13 +3536,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
             {/* optional — bakaya amount agar wahin collect ho jaye to yahan */}
-            <Field
-              label={
-                delivery.pending != null && delivery.pending > 0
-                  ? `Pending amount collected (₹) · bakaya ₹${delivery.pending.toLocaleString('en-IN')}`
-                  : 'Pending amount collected (₹)'
-              }
-            >
+            <Field label="Pending amount collected (₹)">
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
                 onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
