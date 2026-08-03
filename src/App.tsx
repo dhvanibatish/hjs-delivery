@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import PickupsModule from './Pickups.tsx';
 import {
   Truck,
   Package,
@@ -1406,7 +1407,11 @@ export default function App() {
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'dashboard' ? (
+            {session.branch === 'ALL' && page === 'pickups' ? (
+              <PickupsModule session={session} view="board" />
+            ) : session.branch === 'ALL' && page === 'pickups-dash' ? (
+              <PickupsModule session={session} view="dashboard" />
+            ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
                 deliveries={scoped}
                 onOpen={(x) => setActiveId(x.invoice_id)}
@@ -3319,7 +3324,12 @@ function Sidebar({ session, page, onNav }) {
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
         ]
       : []),
-    { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
+    ...(isAll
+      ? [
+          { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+          { id: 'pickups-dash', icon: BarChart3, label: 'Pickups Dashboard' },
+        ]
+      : []),
     { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
   ];
   const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
@@ -3464,6 +3474,8 @@ function Topbar({
           <option value="deliveries">Deliveries</option>
           <option value="dashboard">Dashboard</option>
           <option value="sla">Process &amp; SLA</option>
+          <option value="pickups">Pickups</option>
+          <option value="pickups-dash">Pickups Dashboard</option>
         </select>
       )}
       <div className="tb-actions">
