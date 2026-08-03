@@ -4829,6 +4829,10 @@ function StyleTag() {
       .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
       .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
       .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
+      /* dashboard ke date inputs pe bhi wahi green calendar icon (warna
+         icon default light-grey hota hai aur beige background mein chhup jaata) */
+      .dash-inp[type="date"] { cursor: pointer; }
+      .dash-inp[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 18px; height: 18px; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
       .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
       .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
       .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
