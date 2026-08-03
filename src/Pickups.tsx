@@ -1254,6 +1254,8 @@ export default function App() {
         >
           <Topbar
             session={session}
+            page={session.branch === 'ALL' ? page : 'pickups'}
+            onNav={setPage}
             search={search}
             setSearch={setSearch}
             results={searchResults}
@@ -2107,6 +2109,8 @@ function Sidebar({ session, page, onNav }) {
 /* ══════════════════════════════════════════════════════════════ TOPBAR */
 function Topbar({
   session,
+  page,
+  onNav,
   search,
   setSearch,
   results,
@@ -2184,6 +2188,16 @@ function Topbar({
           </div>
         )}
       </div>
+      {session.isHead && (
+        <select
+          className="page-switch"
+          value={page}
+          onChange={(e) => onNav && onNav(e.target.value)}
+        >
+          <option value="pickups">Pickups</option>
+          <option value="dashboard">Dashboard</option>
+        </select>
+      )}
       <div className="tb-actions">
         <div className="lang-toggle">
           <button
@@ -4713,6 +4727,11 @@ function StyleTag() {
       .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
       .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .lang-btn.active { background: ${T.forest}; color: #fff; }
+      /* phone pe sidebar chhup jaata hai — head login ke liye page switcher
+         yahan topbar mein aa jaata hai (laptop pe sidebar hi kaafi hai) */
+      .page-switch { display: none; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 10px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; outline: none; max-width: 150px; }
+      .page-switch:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      @media (max-width: 860px) { .page-switch { display: block; } }
       .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
       .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
       .search-row:hover { background: ${T.cream}; }
@@ -4846,6 +4865,10 @@ function StyleTag() {
       .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
       .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
       .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
+      /* table scroll karte waqt pehla column (Store / Invoice) jama rehta hai */
+      .dash-table th:first-child, .dash-table td:first-child { position: sticky; left: 0; z-index: 2; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
+      .dash-table thead th:first-child { z-index: 3; }
+      .dash-row:hover td:first-child { background: ${T.cream}; }
       .dash-store { font-weight: 700; color: ${T.ink}; }
       .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
       .dash-td-click:hover { background: ${T.mint}; }
@@ -4890,11 +4913,14 @@ function StyleTag() {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
         .tb-brand span { font-size: 14px; }
-        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; gap: 8px; }
+        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; align-items: center; gap: 6px; }
         .tb-user-text { display: none; }
-        .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
-        .lang-toggle { order: 3; }
-        .icon-btn { width: 34px; height: 34px; }
+        /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
+        .tb-user { display: none; }
+        .page-switch { order: 2; flex: 1 1 100%; max-width: none; }
+        .tb-search { order: 3; flex: 1 1 100%; max-width: none; }
+        .icon-btn { width: 34px; height: 34px; flex-shrink: 0; }
+        .lang-btn { padding: 6px 8px; }
         main { padding: 10px 14px 60px !important; }
         main > div:first-child { margin-bottom: 14px !important; }
         h2 { font-size: 22px !important; }
