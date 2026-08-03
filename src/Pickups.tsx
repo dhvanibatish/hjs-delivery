@@ -3445,7 +3445,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           : !!(f.date && f.time)
     : toStage === 'scheduled' ? !!(f.person && f.vehicle)
     : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
-    : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate)
+    : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate && String(f.charges).trim() !== '')
     : true;
 
   const inner = (
@@ -3544,10 +3544,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             <Field label="Actual pickup date *">
               <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
             </Field>
-            <Field label="Pickup charges collected (₹)">
+            <Field label="Pickup charges collected (₹) *">
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
                 onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
+            {String(f.charges).trim() === '' && (
+              <div className="req-note">
+                Pickup charges bharna zaroori hai — kuch nahi liya to 0 daal do.
+              </div>
+            )}
             {/* optional — bakaya amount agar wahin collect ho jaye to yahan */}
             <Field label="Pending amount collected (₹)">
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
