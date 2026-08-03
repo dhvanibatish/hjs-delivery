@@ -1,5 +1,5 @@
+// @ts-nocheck
 import React, { useState, useMemo, useEffect } from 'react';
-import PickupsModule from './Pickups.tsx';
 import {
   Truck,
   Package,
@@ -48,7 +48,7 @@ import {
 const CONFIG = {
   url: 'https://idcmfebqizovivuvsuns.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY21mZWJxaXpvdml2dXZzdW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDgxODgsImV4cCI6MjA5OTMyNDE4OH0.miXziOcl5sEo8S6K1WsrHRhCbtEYRgnnUA4gAISUkmM',
-  table: 'deliveries',
+  table: 'pickups',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
 const HDRS = () => ({
@@ -66,68 +66,32 @@ async function sbRpc(fn, body) {
   return res.json();
 }
 // staff login — DB verifies password, returns [] if wrong
+// Pickups ke RPCs abhi dev-password lete hain. Login screen hata di gayi hai —
+// access delivery app ke head login (All stores) se control hota hai. Jab
+// pickup_list/pickup_update store-scoped ho jayein, ye constant hat jayega.
+const PICKUP_DEV_KEY = 'hjs_22';
 async function sbLogin(store, pw) {
-  return sbRpc('staff_login', { p_store: store, p_password: pw });
+  return sbRpc('pickup_list', { p_dev: pw });
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
 async function sbList(store, pw) {
-  return sbRpc('staff_list', { p_store: store, p_password: pw });
+  return sbRpc('pickup_list', { p_dev: pw });
 }
 // staff update — stage move/edit. Password + store-scope checked in DB.
 async function sbUpdate(store, pw, invoiceId, patch) {
-  return sbRpc('staff_update', {
-    p_store: store,
-    p_password: pw,
-    p_invoice: invoiceId,
-    p_patch: patch,
-  });
+  return sbRpc('pickup_update', { p_dev: pw, p_invoice: invoiceId, p_patch: patch });
 }
 // public customer tracking — link se invoice + customer ka registered phone
 // NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
 async function sbTrack(invoice, phone) {
-  return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
+  return sbRpc('pickup_track', { p_invoice: invoice, p_phone: phone });
 }
 // sales team — sirf phone se us customer ki saari deliveries (latest→old).
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
 async function sbTrackSearch(phone, pin) {
-  return sbRpc('track_search', { p_phone: phone, p_pin: pin });
+  return sbRpc('pickup_track_search', { p_phone: phone, p_pin: pin });
 }
-// Sales console: store code se us store ki saari active deliveries (PIN-free)
-async function sbSalesByStore(store) {
-  return sbRpc('sales_by_store', { p_store: store });
-}
-// Sales matrix: salesperson × store counts (date range + status)
-async function sbSalesMatrix(from, to, status) {
-  return sbRpc('sales_matrix', {
-    p_from: from,
-    p_to: to,
-    p_status: status || 'all',
-  });
-}
-// Global search: customer / invoice / salesperson
-async function sbSalesSearch(qq) {
-  return sbRpc('sales_search', { p_q: qq });
-}
-// Flexible list: store / salesperson / cell / all (date range + status)
-async function sbSalesList(sales, store, from, to, status) {
-  return sbRpc('sales_list', {
-    p_sales: sales || '',
-    p_store: store || '',
-    p_from: from,
-    p_to: to,
-    p_status: status || 'all',
-  });
-}
-// Ek cell ki deliveries (salesperson + store, date range)
-async function sbSalesCell(sales, store, from, to) {
-  return sbRpc('sales_cell', {
-    p_sales: sales,
-    p_store: store,
-    p_from: from,
-    p_to: to,
-  });
-}
-// photo upload → Supabase Storage bucket 'delivery-photos'.
+// photo upload → Supabase Storage bucket 'pickup-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
 async function sbUploadPhoto(invoiceNumber, kind, file) {
@@ -135,7 +99,7 @@ async function sbUploadPhoto(invoiceNumber, kind, file) {
   const ext = (file.name && file.name.split('.').pop()) || 'jpg';
   const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
   const res = await fetch(
-    `${CONFIG.url}/storage/v1/object/delivery-photos/${path}`,
+    `${CONFIG.url}/storage/v1/object/pickup-photos/${path}`,
     {
       method: 'POST',
       headers: {
@@ -147,7 +111,7 @@ async function sbUploadPhoto(invoiceNumber, kind, file) {
     },
   );
   if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
-  return `${CONFIG.url}/storage/v1/object/public/delivery-photos/${path}`;
+  return `${CONFIG.url}/storage/v1/object/public/pickup-photos/${path}`;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -295,8 +259,8 @@ const PAY_OPTIONS = [
 ];
 
 /* ══════════════════════════════════════════════════════════════════════
-   LOGIN  ── store dropdown se choose karke store-wise password daalo.
-   Head login se saare stores dikhte hain.
+   LOGIN  ── store dropdown se choose karo. Password store-wise 1001 se shuru
+   hota hai aur aakhri store tak badhta hai. All stores (head) = 2222.
    ══════════════════════════════════════════════════════════════════════ */
 const STORE_ORDER = [
   'MOH',
@@ -326,67 +290,25 @@ function sessionFor(branch) {
 
 /* ── STAGES ────────────────────────────────────────────────────────────── */
 const STAGES = [
-  {
-    id: 'new',
-    label: 'New Delivery',
-    short: 'New Job',
-    status: 'New Delivery',
-    color: T.slate,
-    soft: T.slateSoft,
-  },
-  {
-    id: 'talked',
-    label: 'Talked to Customer',
-    short: 'Contacted',
-    status: 'Talked To Customer',
-    color: T.blue,
-    soft: T.blueSoft,
-  },
-  {
-    id: 'scheduled',
-    label: 'Delivery Scheduled',
-    short: 'Scheduled',
-    status: 'Delivery Scheduled',
-    color: T.amber,
-    soft: T.amberSoft,
-  },
-  {
-    id: 'dispatched',
-    label: 'Out for Delivery',
-    short: 'Dispatched',
-    status: 'Out For Delivery',
-    color: T.violet,
-    soft: T.violetSoft,
-  },
-  {
-    id: 'delivered',
-    label: 'Item Delivered',
-    short: 'Delivered',
-    status: 'Item Delivered',
-    color: T.green,
-    soft: T.mint,
-  },
+  { id: 'new', label: 'New Pickup', short: 'New', status: 'New Pickup', color: T.slate, soft: T.slateSoft },
+  { id: 'talked', label: 'Contacted', short: 'Contacted', status: 'Contacted', color: T.blue, soft: T.blueSoft },
+  { id: 'scheduled', label: 'Pickup Scheduled', short: 'Scheduled', status: 'Pickup Scheduled', color: T.amber, soft: T.amberSoft },
+  { id: 'dispatched', label: 'Out for Pickup', short: 'Out for Pickup', status: 'Out for Pickup', color: T.violet, soft: T.violetSoft },
+  { id: 'delivered', label: 'Picked Up', short: 'Picked Up', status: 'Picked Up', color: T.green, soft: T.mint },
 ];
 const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 
 // peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
 const STAGE_COLS = {
   talked: { confirmed_date: null, confirmed_time: null, stage1_remarks: null },
-  scheduled: {
-    app_delivery_person: null,
-    app_vehicle: null,
-    item_inspected: false,
-    photo_inspected: null,
-    stage3_remarks: null,
-  },
-  dispatched: { app_eta: null },
+  scheduled: { app_pickup_person: null, app_vehicle: null, stage2_remarks: null },
+  dispatched: { app_eta: null, stage3_remarks: null },
   delivered: {
-    item_delivered: false,
-    photo_delivered: null,
-    amount_collected: 0,
-    amount_type: null,
-    security_collected: 0,
-    security_type: null,
+    item_inspected: false,
+    pickup_image: null,
+    actual_pickup_date: null,
+    pickup_charges_collected: null,
+    pickup_done: false,
     stage4_remarks: null,
   },
 };
@@ -402,17 +324,17 @@ function clearAhead(toStage) {
 /* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
    Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
 const HINDI = {
-  new: { label: 'Nayi Delivery', short: 'Nayi Delivery' },
+  new: { label: 'Nayi Pickup', short: 'Nayi' },
   talked: { label: 'Customer se baat hui', short: 'Baat hui' },
-  scheduled: { label: 'Ladka aur gaadi arrange hui', short: 'Arrange hui' },
-  dispatched: { label: 'Order raaste mein hai', short: 'Raaste mein' },
-  delivered: { label: 'Hisaab-kitaab ho gaya', short: 'Ho gaya' },
+  scheduled: { label: 'Pickup schedule hui', short: 'Scheduled' },
+  dispatched: { label: 'Pickup ke liye nikle', short: 'Nikle' },
+  delivered: { label: 'Item utha liya', short: 'Utha liya' },
 };
 const HINDI_MOVE = {
   talked: 'Customer se baat karo',
-  scheduled: 'Ladka aur gaadi arrange karo',
-  dispatched: 'Order ko bhejo',
-  delivered: 'Order ka hisaab lo',
+  scheduled: 'Pickup schedule karo',
+  dispatched: 'Pickup ke liye niklo',
+  delivered: 'Item utha lo',
 };
 let HJS_LANG = 'en';
 try {
@@ -453,21 +375,20 @@ function eventLine(ev) {
   return `${label} ${verb}`;
 }
 const stageToStatus = (id) =>
-  (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
+  (STAGES.find((s) => s.id === id) || {}).status || 'New Pickup';
 function statusToStage(s) {
   const t = String(s || '').toLowerCase();
-  if (t.includes('delet')) return 'deleted'; // "Deleted" — 'deliver' se alag
-  if (t.includes('duplicate')) return 'duplicate';
-  if (t.includes('renew')) return 'renewal';
+  if (t.includes('delet')) return 'deleted';
   if (t.includes('cancel')) return 'cancelled';
-  if (t.includes('new')) return 'new'; // "New Delivery" — 'deliver' se pehle check zaroori
-  // NOTE: "Out For Delivery" mein bhi 'deliver' aata hai — isliye ye pehle
-  if (t.includes('out for') || t.includes('dispatch')) return 'dispatched';
+  // Rescheduled = abhi bhi pehli stage. NOTE: 'schedul' se PEHLE check zaroori,
+  // warna "Rescheduled" galti se Pickup Scheduled ban jaata.
+  if (t.includes('reschedul')) return 'new';
+  if (t.includes('new')) return 'new';
   if (t.includes('schedul')) return 'scheduled';
-  if (t.includes('inspect')) return 'scheduled'; // inspection ab Scheduled ka part hai
-  if (t.includes('deliver')) return 'delivered';
-  if (t.includes('talk')) return 'talked';
-  return 'new'; // naya / unknown record → New Delivery
+  if (t.includes('out for')) return 'dispatched';
+  if (t.includes('contact')) return 'talked';
+  if (t.includes('picked')) return 'delivered';
+  return 'new';
 }
 
 /* ── CLOSED STATES ──────────────────────────────────────────────────────
@@ -519,12 +440,34 @@ const CLOSED = {
   },
 };
 const CLOSED_STATUS = {
-  cancelled: 'Cancelled Invoice',
-  duplicate: 'Duplicate Invoice',
-  renewal: 'Renewal Invoice',
+  cancelled: 'Cancelled',
 };
-const isClosedStage = (s) =>
-  s === 'cancelled' || s === 'duplicate' || s === 'renewal' || s === 'deleted';
+const isClosedStage = (s) => s === 'cancelled' || s === 'deleted';
+/* Rescheduled — customer ne abhi date nahi di, baad mein baat hogi. Entry
+   pehli stage mein hi pending rehti hai, bas tile pe alag dikhti hai. */
+const RESCHED_STATUS = 'Rescheduled';
+const isResched = (x) =>
+  /reschedul/i.test(String((x && x.rawStatus) || ''));
+
+/* ── Dashboard / Activity ke chhote helpers ──────────────────────────── */
+const DASH_STORES = [
+  'MOH','CHD','GGN','NCR','NOD','LDH','JAL','JPR','LKO','NWD','JKP',
+];
+function dayStr(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayStr() {
+  return dayStr(Date.now());
+}
+/* jis din ki pickup tay hui hai (confirmed_date) — future dated pakadne ko */
+function plannedDate(x) {
+  const r = (x && x._raw) || {};
+  const v = r.confirmed_date || r.mentioned_pickup_date;
+  return v && v !== 'null' ? String(v).slice(0, 10) : '';
+}
 /* stage id → meta (STAGES ya CLOSED dono cover). Card/list ke colors ke liye. */
 function stageMeta(id) {
   const s = STAGES[stageIndex(id)];
@@ -536,11 +479,11 @@ const stageColorOf = (id) => stageMeta(id).color;
 
 /* Drawer mein agli stage ke liye simple prompt (next stage id → message) */
 const STAGE_HINT = {
-  new: 'Delivery shuru karo',
-  talked: 'Customer se baat karke Contacted bharo',
-  scheduled: 'Delivery schedule karke details bharo',
-  dispatched: 'Item nikal gaya — estimated time bharo',
-  delivered: 'Item deliver karke amount bharo',
+  new: 'Pickup shuru karo',
+  talked: 'Customer se baat karke date tay karo',
+  scheduled: 'Banda aur gaadi arrange karo',
+  dispatched: 'Pickup ke liye nikle — ETA bharo',
+  delivered: 'Item inspect karke utha lo',
 };
 
 function deriveBranch(r) {
@@ -691,21 +634,6 @@ function niceDateTime(v) {
   if (!d && !tm) return String(v);
   return [d, tm].filter(Boolean).join(', ');
 }
-/* poori date + 12-ghante ka time — "23 Jul 2026, 5:43 PM" */
-function fmtFullDateTime(ts) {
-  if (!ts) return null;
-  const d = new Date(ts);
-  if (isNaN(d)) return String(ts);
-  return d.toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
 /* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
 function toLocalInput(v) {
   if (!v || v === 'null') return '';
@@ -723,22 +651,21 @@ function stageFields(toStage, f) {
       ...rmk,
     };
   if (toStage === 'scheduled')
-    return {
-      'Delivery person': f.person || '—',
-      Vehicle: f.vehicle || '—',
-      Inspected: f.inspected ? 'Yes' : 'No',
-      ...rmk,
-    };
+    return { Person: f.person || '—', Transport: f.vehicle || '—', ...rmk };
   if (toStage === 'dispatched')
     return {
-      'Estimated arrival': f.eta ? niceDateTime(f.eta) || f.eta : '—',
+      'Estimated arrival': f.eta
+        ? niceTime(String(f.eta).slice(11, 16)) || f.eta
+        : '—',
       ...rmk,
     };
   if (toStage === 'delivered')
     return {
-      Delivered: f.delivered ? 'Yes' : 'No',
-      Amount: `₹${f.amount || 0} · ${f.amountType || '—'}`,
-      Security: `₹${f.security || 0} · ${f.securityType || '—'}`,
+      Inspected: f.inspected ? 'Yes' : 'No',
+      Date: f.pickDate ? niceDate(f.pickDate) || f.pickDate : '—',
+      Charges: `₹${f.charges || 0}`,
+      'Pending collected': `₹${f.pendingCollected || 0}`,
+      Done: f.done ? 'Yes' : 'No',
       ...rmk,
     };
   return {};
@@ -746,9 +673,7 @@ function stageFields(toStage, f) {
 /* ── Kaun kar raha hai ─────────────────────────────────────────────────
    Har app_log event ke saath login ka store + us store ka manager stamp
    hota hai, taaki Activity log mein "kisne kiya" dikh sake. Koi naya
-   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai.
-   NOTE: login store-level hai, isliye actor = store (+ manager ka naam).
-   Person-level chahiye to app_staff mein per-user logins banane padenge. */
+   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai. */
 let ACTOR = { by: null, byName: null };
 function setActor(session) {
   if (!session) {
@@ -787,7 +712,6 @@ function makeEvent(toStage, fields, mode) {
     ...actorStamp(),
   };
 }
-/* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
 function makeClosedEvent(flag, remarks) {
   return {
     ts: new Date().toISOString(),
@@ -871,7 +795,7 @@ function inView(x, viewMode) {
 }
 
 /* stat categories jinpe collapsible entries khulti hain.
-   NOTE: "Total Deliveries" ab yahan se hata diya — wo count Header ke
+   NOTE: "Total Pickups" ab yahan se hata diya — wo count Header ke
    "Today/Archived · Total deliveries · N" chip mein dikhta hai. Pending +
    Delivered + Cancelled se poori picture mil jaati hai.                 */
 const CATS = [
@@ -881,15 +805,24 @@ const CATS = [
     icon: Package,
     color: T.blue,
     soft: T.blueSoft,
-    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
+    test: (x) =>
+      !isClosedStage(x.stage) && x.stage !== 'delivered' && !isResched(x),
   },
   {
     id: 'delivered',
-    label: 'Delivered',
+    label: 'Picked Up',
     icon: CheckCircle2,
     color: T.forestSoft,
     soft: T.mint,
     test: (x) => x.stage === 'delivered',
+  },
+  {
+    id: 'resched',
+    label: 'Rescheduled',
+    icon: RotateCcw,
+    color: T.amber,
+    soft: T.amberSoft,
+    test: (x) => isResched(x),
   },
   {
     id: 'cancelled',
@@ -899,22 +832,6 @@ const CATS = [
     soft: T.redSoft,
     test: (x) => x.stage === 'cancelled',
   },
-  {
-    id: 'renewal',
-    label: 'Renewal Invoices',
-    icon: RefreshCw,
-    color: T.blue,
-    soft: T.blueSoft,
-    test: (x) => x.stage === 'renewal',
-  },
-  {
-    id: 'duplicate',
-    label: 'Duplicate Invoices',
-    icon: Copy,
-    color: T.slate,
-    soft: T.slateSoft,
-    test: (x) => x.stage === 'duplicate',
-  },
 ];
 
 function rowToDelivery(r) {
@@ -923,15 +840,46 @@ function rowToDelivery(r) {
     invoice_id: r.invoice_id,
     id: r.invoice_number || r.invoice_id,
     branch,
-    manager: STORE_MANAGERS[branch] || '—',
+    manager: clean(r.store_manager) || STORE_MANAGERS[branch] || '—',
     customer: r.customer_name || '—',
-    phone: clean(r.customer_phone) || '—',
-    area: clean(r.city) || clean(r.billing_address) || '—',
+    phone: clean(r.phone) || '—',
+    area: clean(r.address) || '—',
     equipment: equipmentText(r),
-    amount: Number(r.total_amount) || 0,
-    expected: r.due_date && r.due_date !== 'null' ? r.due_date : '—',
-    person: clean(r.app_delivery_person) || clean(r.delivery_person) || null,
-    vehicle: clean(r.app_vehicle) || clean(r.assigned_vehicle) || null,
+    // Card / Drawer ka "Amount" = invoice ka total (Supabase se aata hai).
+    // Pickup charges alag cheez hai — wo Picked Up stage pe khud bhare jaate
+    // hain aur usi block mein dikhte hain. Khaali ho to blank, 0 nahi.
+    amount:
+      r.total_amount != null &&
+      r.total_amount !== '' &&
+      r.total_amount !== 'null'
+        ? Number(r.total_amount)
+        : null,
+    // pending = invoice ka bacha hua balance (Books se aata hai). Card pe
+    // yahi dikhta hai — wahi to uthana hai customer se.
+    pending:
+      r.pending_amount != null &&
+      r.pending_amount !== '' &&
+      r.pending_amount !== 'null'
+        ? Number(r.pending_amount)
+        : null,
+    // Books se: security kis mode se li gayi thi (refund usi mode mein karna
+    // hota hai) aur delivery pe amount kis mode se aaya tha. Sirf type.
+    securityType: clean(r.security_type),
+    amountType: clean(r.amount_type),
+    charges:
+      r.pickup_charges_collected != null &&
+      r.pickup_charges_collected !== '' &&
+      r.pickup_charges_collected !== 'null'
+        ? Number(r.pickup_charges_collected)
+        : null,
+    expected:
+      r.confirmed_date && r.confirmed_date !== 'null'
+        ? r.confirmed_date
+        : r.mentioned_pickup_date && r.mentioned_pickup_date !== 'null'
+          ? r.mentioned_pickup_date
+          : '—',
+    person: clean(r.app_pickup_person) || null,
+    vehicle: clean(r.app_vehicle) || null,
     stage: statusToStage(r.status),
     rawStatus: r.status,
     synced_at: r.synced_at || r.updated_at,
@@ -1043,8 +991,11 @@ function useEmbedFlag() {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
-export default function App() {
+export default function App({ session: extSession = null, view = 'board' }) {
   useEmbedFlag();
+  // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
+  // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
+  const hosted = !!extSession;
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -1060,33 +1011,15 @@ export default function App() {
   // nahi chahiye — customer apna registered phone daale, uska latest order
   // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
   // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
-  if (inv) return <TrackPage invoice={inv} />; // customer — single order
-  if (params.has('order') || params.has('my'))
-    return <TrackPage invoice="" />; // customer — phone se latest order
-  if (params.has('track') || params.has('sales') || isTrackPath)
-    return <SalesTrackPage />; // sales — phone → list → timeline
+  if (!hosted && inv) return <TrackPage invoice={inv} />;
+  if (!hosted && (params.has('order') || params.has('my')))
+    return <TrackPage invoice="" />;
+  if (!hosted && (params.has('track') || params.has('sales') || isTrackPath))
+    return <SalesTrackPage />;
 
-  const [session, setSession] = useState(() => {
-    // app switch / reload pe wapas login na maange — session yaad rakho
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const raw = localStorage.getItem('hjsSession');
-        if (raw) return JSON.parse(raw);
-      }
-    } catch (_) {}
-    return null;
-  });
-  // kaun logged-in hai — har app_log event isi se stamp hota hai
-  setActor(session);
-  // session badle to localStorage mein rakho / hatao (logout pe)
-  useEffect(() => {
-    setActor(session);
-    try {
-      if (typeof localStorage === 'undefined') return;
-      if (session) localStorage.setItem('hjsSession', JSON.stringify(session));
-      else localStorage.removeItem('hjsSession');
-    } catch (_) {}
-  }, [session]);
+  const [ownSession, setOwnSession] = useState(null);
+  const session = hosted ? extSession : ownSession;
+  const setSession = hosted ? () => {} : setOwnSession;
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1098,10 +1031,14 @@ export default function App() {
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
+  const [ownPage, setOwnPage] = useState('pickups'); // pickups | dashboard
+  // hosted mode mein page delivery app ka sidebar decide karta hai
+  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
+  const setPage = hosted ? () => {} : setOwnPage;
+  const [showLog, setShowLog] = useState(false); // activity log panel
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
-  const [page, setPage] = useState('deliveries'); // deliveries | dashboard
-  const [showLog, setShowLog] = useState(false); // overall activity log panel
-  const [dashKind, setDashKind] = useState('delivery'); // dashboard: delivery | pickups
+  // kaun logged-in hai — har app_log event isi se stamp hota hai
+  setActor(session);
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1123,7 +1060,7 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+        (await sbList(session.authStore, PICKUP_DEV_KEY)).map(rowToDelivery),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1143,8 +1080,7 @@ export default function App() {
     return base.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
-  // Activity log ke liye alag scope — deleted entries bhi chahiye (kisne
-  // delete ki, wo dikhana hai), isliye ye 'scoped' se alag hai.
+  // Activity log ke liye alag scope — deleted entries bhi chahiye
   const scopedAll = useMemo(() => {
     if (!session) return [];
     if (session.branch === 'ALL') return deliveries;
@@ -1182,33 +1118,23 @@ export default function App() {
       patch.confirmed_time = f.time || null;
       patch.stage1_remarks = f.remarks || null;
     } else if (toStage === 'scheduled') {
-      patch.app_delivery_person = f.person || null;
+      patch.app_pickup_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
-      patch.item_inspected = !!f.inspected;
-      patch.photo_inspected = f.photoInspected || null;
-      patch.stage3_remarks = f.remarks || null;
-      // MBC (Managed By Client) — customer khud le jaata hai. Gaadi/dispatch
-      // ki zarurat nahi: usi form mein final details bhar ke seedha Delivered.
-      if (f.mbcDirect) {
-        if (mode === 'move') patch.status = stageToStatus('delivered');
-        patch.app_vehicle = null; // MBC — koi gaadi nahi lagti
-        patch.item_delivered = !!f.delivered;
-        patch.photo_delivered = f.photoDelivered || null;
-        patch.amount_collected = Number(f.amount) || 0;
-        patch.amount_type = f.amountType || null;
-        patch.security_collected = Number(f.security) || 0;
-        patch.security_type = f.securityType || null;
-        patch.stage4_remarks = f.remarks || null;
-      }
+      patch.stage2_remarks = f.remarks || null;
     } else if (toStage === 'dispatched') {
       patch.app_eta = f.eta || null;
+      patch.stage3_remarks = f.remarks || null;
     } else if (toStage === 'delivered') {
-      patch.item_delivered = !!f.delivered;
-      patch.photo_delivered = f.photoDelivered || null;
-      patch.amount_collected = Number(f.amount) || 0;
-      patch.amount_type = f.amountType || null;
-      patch.security_collected = Number(f.security) || 0;
-      patch.security_type = f.securityType || null;
+      patch.item_inspected = !!f.inspected;
+      patch.pickup_image = f.photoPicked || null;
+      patch.actual_pickup_date = f.pickDate || null;
+      patch.pickup_charges_collected =
+        f.charges === '' || f.charges == null ? null : Number(f.charges);
+      patch.pending_collected =
+        f.pendingCollected === '' || f.pendingCollected == null
+          ? null
+          : Number(f.pendingCollected);
+      patch.pickup_done = !!f.done;
       patch.stage4_remarks = f.remarks || null;
     }
     return patch;
@@ -1234,7 +1160,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Marked as ${CLOSED[flag].label}`);
       load();
     } catch (e) {
@@ -1243,32 +1169,65 @@ export default function App() {
   };
 
   // core move/edit apply — modal aur inline card dono use karte hain
-  const applyMove = async (invoiceId, toStage, fields, mode) => {
-    if (toStage === 'talked' && fields.invoiceFlag) {
-      return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
-    }
-    const patch = buildPatch(toStage, fields, mode);
+  // Reschedule — entry pehli stage mein hi rehti hai, bas status "Rescheduled"
+  // ho jaata hai aur pehle se bhari confirmed date/time hat jaati hai.
+  const rescheduleEntry = async (invoiceId, remarks) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    // MBC → ek hi save mein Scheduled + Delivered dono log ho
-    const mbc = toStage === 'scheduled' && fields.mbcDirect && mode === 'move';
-    patch.app_log = [
-      ...existingLog(cur),
-      makeEvent(toStage, fields, mode),
-      ...(mbc ? [makeEvent('delivered', fields, 'move')] : []),
-    ];
-    const landed = mbc ? 'delivered' : toStage;
+    const patch = {
+      status: RESCHED_STATUS,
+      confirmed_date: null,
+      confirmed_time: null,
+      stage1_remarks: remarks || null,
+      updated_at: new Date().toISOString(),
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: new Date().toISOString(),
+          stage: 'new',
+          label: 'Rescheduled',
+          action: 'Marked as',
+          fields: remarks ? { Remarks: remarks } : {},
+          ...actorStamp(),
+        },
+      ],
+    };
     if (!CONFIGURED) {
       ping('Demo mode — save nahi hua');
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      ping('Rescheduled ✓ — entry pending mein hi hai');
+      jumpMobile('new');
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
+  const applyMove = async (invoiceId, toStage, fields, mode) => {
+    // pehli stage ka dropdown: reschedule / cancel alag raaste
+    if (toStage === 'talked' && mode === 'move') {
+      if (fields.flow === 'cancelled')
+        return closeEntry(invoiceId, 'cancelled', fields.remarks);
+      if (fields.flow === 'resched')
+        return rescheduleEntry(invoiceId, fields.remarks);
+    }
+    const patch = buildPatch(toStage, fields, mode);
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
+    if (!CONFIGURED) {
+      ping('Demo mode — save nahi hua');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(
         mode === 'edit'
           ? 'Updated ✓'
-          : `Saved ✓  ${STAGES[stageIndex(landed)].label}`,
+          : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
       );
-      if (mode === 'move') jumpMobile(landed);
+      if (mode === 'move') jumpMobile(toStage);
       load();
     } catch (e) {
       ping('Save failed: ' + e.message);
@@ -1313,7 +1272,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
       jumpMobile(toStage);
       load();
@@ -1354,7 +1313,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       setActiveId(null);
       ping('Deleted — Supabase mein "Deleted" mark ho gaya');
       load();
@@ -1364,6 +1323,85 @@ export default function App() {
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // ── HOSTED: delivery app ke <main> ke andar — sirf content, koi chrome nahi
+  if (hosted) {
+    return (
+      <>
+        <StyleTag />
+        {page === 'dashboard' ? (
+          <Dashboard
+            deliveries={scoped}
+            onOpen={(x) => setActiveId(x.invoice_id)}
+          />
+        ) : (
+          <>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={() => {}}
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>Supabase se connect nahi hua.</b> {error}
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={layoutMode}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
+          </>
+        )}
+        {active && (
+          <Drawer
+            d={active}
+            canDelete={session.isHead}
+            onDelete={() => removeEntry(active.invoice_id)}
+            onClose={() => setActiveId(null)}
+            onAdvance={(toStage) =>
+              setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
+            }
+            onSetStage={(toStage) => setStage(active.invoice_id, toStage)}
+            onEditStage={(sid) =>
+              setModal({
+                invoiceId: active.invoice_id,
+                toStage: sid,
+                mode: 'edit',
+              })
+            }
+          />
+        )}
+        {modal && (
+          <StageModal
+            delivery={deliveries.find((x) => x.invoice_id === modal.invoiceId)}
+            toStage={modal.toStage}
+            mode={modal.mode}
+            onClose={() => setModal(null)}
+            onSave={commitModal}
+          />
+        )}
+        {toast && <Toast msg={toast} />}
+      </>
+    );
+  }
 
   return (
     <div
@@ -1378,7 +1416,7 @@ export default function App() {
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
           session={session}
-          page={session.branch === 'ALL' ? page : 'deliveries'}
+          page={session.branch === 'ALL' ? page : 'pickups'}
           onNav={setPage}
         />
         <div
@@ -1391,7 +1429,7 @@ export default function App() {
         >
           <Topbar
             session={session}
-            page={session.branch === 'ALL' ? page : 'deliveries'}
+            page={session.branch === 'ALL' ? page : 'pickups'}
             onNav={setPage}
             search={search}
             setSearch={setSearch}
@@ -1408,90 +1446,54 @@ export default function App() {
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'pickups' ? (
-              <PickupsModule session={session} view="board" />
-            ) : session.branch === 'ALL' && page === 'dashboard' ? (
-              <>
-                {/* ek hi Dashboard page — upar se delivery/pickups switch */}
-                <div className="dash-switch">
-                  <div className="layout-toggle">
-                    <button
-                      className={
-                        dashKind === 'delivery' ? 'lt-btn active' : 'lt-btn'
-                      }
-                      onClick={() => setDashKind('delivery')}
-                    >
-                      <Truck size={14} /> Deliveries
-                    </button>
-                    <button
-                      className={
-                        dashKind === 'pickups' ? 'lt-btn active' : 'lt-btn'
-                      }
-                      onClick={() => setDashKind('pickups')}
-                    >
-                      <RotateCcw size={14} /> Pickups
-                    </button>
-                  </div>
-                </div>
-                {dashKind === 'pickups' ? (
-                  <PickupsModule session={session} view="dashboard" />
-                ) : (
-                  <Dashboard
-                    deliveries={scoped}
-                    onOpen={(x) => setActiveId(x.invoice_id)}
-                  />
-                )}
-              </>
-            ) : session.branch === 'ALL' && page === 'sla' ? (
-              <SlaReport
+            {session.branch === 'ALL' && page === 'dashboard' ? (
+              <Dashboard
                 deliveries={scoped}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             ) : (
               <>
-                <Header
-                  session={session}
-                  live={CONFIGURED}
-                  count={viewItems.length}
-                  viewMode={viewMode}
-                  onViewMode={setViewMode}
-                  layoutMode={layoutMode}
-                  onLayoutMode={setLayoutMode}
-                  onSwitchStore={(b) =>
-                    setSession((s) => ({
-                      ...s,
-                      branch: b,
-                      storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
-                    }))
-                  }
-                />
-                {error && (
-                  <div className="err">
-                    <CloudOff size={18} color={T.red} />
-                    <div>
-                      <b>Supabase se connect nahi hua.</b> {error}
-                      <div
-                        style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}
-                      >
-                        anon key + RLS SELECT policy check karo.
-                      </div>
-                    </div>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={(b) =>
+                setSession((s) => ({
+                  ...s,
+                  branch: b,
+                  storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
+                }))
+              }
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>Supabase se connect nahi hua.</b> {error}
+                  <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+                    anon key + RLS SELECT policy check karo.
                   </div>
-                )}
-                <EntriesView
-                  items={viewItems}
-                  viewMode={viewMode}
-                  layoutMode={effLayout}
-                  loading={loading}
-                  onOpen={(x) => setActiveId(x.invoice_id)}
-                  onMove={(x, toStage) =>
-                    setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                  }
-                  onCommit={(dd, toStage, fields) =>
-                    applyMove(dd.invoice_id, toStage, fields, 'move')
-                  }
-                  focus={lastMove}
-                />
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={effLayout}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
               </>
             )}
           </main>
@@ -1546,1319 +1548,6 @@ export default function App() {
    FIX: ye component missing tha isliye login ke baad screen crash ho rahi
    thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
    FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
-/* ═══════════════════════════════════════════════════════ DASHBOARD (all stores)
-   Store-wise daily MIS. Cards + table sab clickable → entries neeche table mein. */
-const DASH_STORES = [
-  'MOH',
-  'CHD',
-  'GGN',
-  'NCR',
-  'NOD',
-  'LDH',
-  'JAL',
-  'JPR',
-  'LKO',
-  'NWD',
-  'JKP',
-];
-
-function dayStr(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (isNaN(d)) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function todayStr() {
-  return dayStr(Date.now());
-}
-// item ki "scheduled/planned" date (confirmed_date) — future dated detect karne ko
-function plannedDate(x) {
-  const r = (x && x._raw) || {};
-  const v = r.confirmed_date;
-  return v && v !== 'null' ? String(v).slice(0, 10) : '';
-}
-
-function Dashboard({ deliveries, onOpen }) {
-  const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
-  const [store, setStore] = useState('ALL');
-  const [sel, setSel] = useState({ kind: 'all', store: null }); // clicked filter
-
-  // date range → [start,end] (created date ke hisaab se base)
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'month') {
-      const s = new Date(t.getFullYear(), t.getMonth(), 1);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'custom') return [from, to];
-    return ['0000-01-01', '9999-12-31']; // all
-  }, [range, from, to]);
-
-  // base = date-range + store filter (created date pe)
-  const base = useMemo(() => {
-    const [s, e] = bounds;
-    return deliveries.filter((x) => {
-      const cd = dayStr(createdTs(x));
-      if (cd < s || cd > e) return false;
-      if (store !== 'ALL' && x.branch !== store) return false;
-      return true;
-    });
-  }, [deliveries, bounds, store]);
-
-  // ek item kis-kis metric mein aata hai
-  const today = todayStr();
-  const isClosed = (x) => isClosedStage(x.stage);
-  const metric = {
-    all: () => true,
-    delivered: (x) => x.stage === 'delivered',
-    pending: (x) => x.stage !== 'delivered' && !isClosed(x),
-    future: (x) =>
-      x.stage !== 'delivered' &&
-      !isClosed(x) &&
-      plannedDate(x) &&
-      plannedDate(x) > today,
-    issues: (x) => isClosed(x),
-    nophoto: (x) =>
-      x.stage === 'delivered' &&
-      !(x._raw && x._raw.photo_delivered && x._raw.photo_delivered !== 'null'),
-  };
-  const stageMetric = {
-    new: (x) => x.stage === 'new',
-    talked: (x) => x.stage === 'talked',
-    scheduled: (x) => x.stage === 'scheduled',
-    dispatched: (x) => x.stage === 'dispatched',
-    delivered: (x) => x.stage === 'delivered',
-  };
-
-  const cards = [
-    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
-    { kind: 'delivered', label: 'Delivered', color: T.green, soft: T.mint },
-    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
-    { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
-    { kind: 'issues', label: 'Cancelled/Dup/Renewal', color: T.red, soft: T.redSoft },
-    { kind: 'nophoto', label: 'Delivered · photo missing', color: T.violet, soft: T.violetSoft },
-  ];
-
-  // clicked subset for the entries table
-  const rows = useMemo(() => {
-    let list = base;
-    if (sel.store) list = list.filter((x) => x.branch === sel.store);
-    const fn =
-      metric[sel.kind] || stageMetric[sel.kind] || (() => true);
-    return list.filter(fn).sort((a, b) => (createdTs(b) || 0) - (createdTs(a) || 0));
-    // eslint-disable-next-line
-  }, [base, sel]);
-
-  const cnt = (fn, list) => list.filter(fn).length;
-  const rangeLabel =
-    range === 'today'
-      ? 'Aaj'
-      : range === 'yesterday'
-        ? 'Kal'
-        : range === '7d'
-          ? 'Pichhle 7 din'
-          : range === 'month'
-            ? 'Is mahine'
-            : range === 'all'
-              ? 'Sabhi'
-              : `${from} → ${to}`;
-
-  return (
-    <div>
-      <div className="dash-head">
-        <div>
-          <div className="dash-sub">All stores · MIS</div>
-          <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
-        </div>
-        <div className="dash-filters">
-          <select
-            className="dash-inp"
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-          >
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="month">Is mahine</option>
-            <option value="all">Sabhi</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <>
-              <input
-                className="dash-inp"
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-              <input
-                className="dash-inp"
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </>
-          )}
-          <select
-            className="dash-inp"
-            value={store}
-            onChange={(e) => {
-              setStore(e.target.value);
-              setSel({ kind: 'all', store: null });
-            }}
-          >
-            <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* summary cards */}
-      <div className="dash-cards">
-        {cards.map((c) => {
-          const n = cnt(metric[c.kind], base);
-          const on = sel.kind === c.kind && !sel.store;
-          return (
-            <button
-              key={c.kind}
-              className={on ? 'dash-card on' : 'dash-card'}
-              style={on ? { borderColor: c.color } : {}}
-              onClick={() => setSel({ kind: c.kind, store: null })}
-            >
-              <div
-                className="dash-card-ico"
-                style={{ background: c.soft, color: c.color }}
-              >
-                <BarChart3 size={16} />
-              </div>
-              <div className="dash-card-n">{n}</div>
-              <div className="dash-card-l">{c.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* store-wise MIS table */}
-      <div className="dash-block">
-        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Store</th>
-                <th>Total</th>
-                <th>New</th>
-                <th>Contacted</th>
-                <th>Scheduled</th>
-                <th>Out for Del</th>
-                <th>Delivered</th>
-                <th>Pending</th>
-                <th>Future</th>
-                <th>Issues</th>
-              </tr>
-            </thead>
-            <tbody>
-              {DASH_STORES.filter(
-                (st) => store === 'ALL' || store === st,
-              ).map((st) => {
-                const list = base.filter((x) => x.branch === st);
-                if (list.length === 0) return null;
-                const cell = (kind, fn) => (
-                  <td
-                    className={fn(list) ? 'dash-td-click' : 'dash-td-zero'}
-                    onClick={() =>
-                      fn(list) && setSel({ kind, store: st })
-                    }
-                  >
-                    {cnt(
-                      metric[kind] || stageMetric[kind],
-                      list,
-                    )}
-                  </td>
-                );
-                const has = (kind) =>
-                  cnt(metric[kind] || stageMetric[kind], list) > 0;
-                return (
-                  <tr key={st}>
-                    <td className="dash-store">{branchLabel(st)}</td>
-                    <td
-                      className="dash-td-click"
-                      onClick={() => setSel({ kind: 'all', store: st })}
-                    >
-                      {list.length}
-                    </td>
-                    {['new', 'talked', 'scheduled', 'dispatched', 'delivered'].map(
-                      (k) => (
-                        <td
-                          key={k}
-                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
-                          onClick={() => has(k) && setSel({ kind: k, store: st })}
-                        >
-                          {cnt(stageMetric[k], list)}
-                        </td>
-                      ),
-                    )}
-                    {['pending', 'future', 'issues'].map((k) => (
-                      <td
-                        key={k}
-                        className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
-                        onClick={() => has(k) && setSel({ kind: k, store: st })}
-                      >
-                        {cnt(metric[k], list)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* drill: selected entries */}
-      <div className="dash-block">
-        <div className="dash-block-h">
-          {rows.length} entries
-          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
-          {cards.find((c) => c.kind === sel.kind)?.label ||
-            sShort(sel.kind) ||
-            'All'}
-        </div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Store</th>
-                <th>Equipment</th>
-                <th>Stage</th>
-                <th>Amount</th>
-                <th>Created</th>
-                <th>Planned</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="dash-empty">
-                    Koi entry nahi
-                  </td>
-                </tr>
-              ) : (
-                rows.map((x) => {
-                  const st = stageMeta(x.stage);
-                  return (
-                    <tr
-                      key={x.invoice_id}
-                      className="dash-row"
-                      onClick={() => onOpen(x)}
-                    >
-                      <td>{x.id}</td>
-                      <td>{x.customer}</td>
-                      <td>{branchLabel(x.branch)}</td>
-                      <td className="ellip" style={{ maxWidth: 200 }}>
-                        {x.equipment}
-                      </td>
-                      <td>
-                        <span
-                          className="dash-chip"
-                          style={{ background: st.soft, color: st.color }}
-                        >
-                          {st.short}
-                        </span>
-                      </td>
-                      <td>₹{x.amount.toLocaleString('en-IN')}</td>
-                      <td>{dayStr(createdTs(x)) || '—'}</td>
-                      <td>{plannedDate(x) || '—'}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════ PROCESS & SLA (all stores)
-   Do SLA:
-   1. RESPONSE  — order aane ke 30 min (business hours 10AM–8PM) mein
-                  "Talked to Customer" pe move hona chahiye
-   2. DELIVERY  — jo confirmed date+time customer ko diya, us tak
-                  "Item Delivered" ho jaana chahiye (exact wall clock)
-   Dashboard ke hi dash-* classes use karta hai — koi naya CSS nahi.        */
-
-const SLA_BIZ_START = 10; // 10 AM
-const SLA_BIZ_END = 20; // 8 PM
-const SLA_RESPONSE_MIN = 30; // business minutes
-
-/* 30-min SLA duration hai isliye business-hours clock pe chalta hai.
-   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
-   normal wall clock. */
-function slaBizAdd(from, mins) {
-  const shift = (x) => {
-    const y = new Date(x);
-    const h = y.getHours() + y.getMinutes() / 60;
-    if (h < SLA_BIZ_START) y.setHours(SLA_BIZ_START, 0, 0, 0);
-    else if (h >= SLA_BIZ_END) {
-      y.setDate(y.getDate() + 1);
-      y.setHours(SLA_BIZ_START, 0, 0, 0);
-    }
-    return y;
-  };
-  let d = shift(new Date(from));
-  let left = mins;
-  for (let g = 0; g < 400 && left > 0; g++) {
-    const end = new Date(d);
-    end.setHours(SLA_BIZ_END, 0, 0, 0);
-    const avail = (end - d) / 60000;
-    if (left <= avail) return new Date(d.getTime() + left * 60000);
-    left -= avail;
-    d = shift(new Date(end.getTime() + 60000));
-  }
-  return d;
-}
-
-/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi).
-   Mgr/Del/Avg time isse nikalte hain, warna raat ke ghante jud kar store
-   bekaar mein kharab dikhta hai. */
-function slaBizMins(a, b) {
-  if (!a || !b || b <= a) return 0;
-  let total = 0;
-  let cur = new Date(a);
-  for (let g = 0; g < 400 && cur < b; g++) {
-    const s0 = new Date(cur);
-    s0.setHours(SLA_BIZ_START, 0, 0, 0);
-    const e0 = new Date(cur);
-    e0.setHours(SLA_BIZ_END, 0, 0, 0);
-    const s = cur < s0 ? s0 : cur;
-    const e = b < e0 ? b : e0;
-    if (e > s) total += (e - s) / 60000;
-    const nx = new Date(cur);
-    nx.setDate(nx.getDate() + 1);
-    nx.setHours(0, 0, 0, 0);
-    cur = nx;
-  }
-  return total;
-}
-
-const slaLog = (x) => {
-  const r = (x && x._raw) || {};
-  return Array.isArray(r.app_log) ? r.app_log : [];
-};
-
-/* Current cycle = aakhri baar "New Delivery" pe wapas jaane ke baad ka hissa.
-   Iske bina re-opened orders galti se "stage skipped" dikhte hain.
-   "Edited" stage move nahi hai, isliye chhod dete hain. */
-function slaCycle(x) {
-  const mv = slaLog(x)
-    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
-    .slice()
-    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-  let start = 0;
-  for (let i = mv.length - 1; i >= 0; i--)
-    if (mv[i].stage === 'new') {
-      start = i;
-      break;
-    }
-  return mv.slice(start);
-}
-function slaFirst(cycle, stage) {
-  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
-  return null;
-}
-/* MBC = customer khud le jaata hai — Scheduled se seedha Delivered.
-   Ispe "Out for Delivery skip hua" count nahi hona chahiye. */
-function slaIsMbc(x, cycle) {
-  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
-  return cycle.some((e) =>
-    String((e.fields && e.fields['Delivery person']) || '').toUpperCase().includes('MBC'),
-  );
-}
-/* Promise = confirmed_date + confirmed_time (buildPatch inhe hamesha likhta hai) */
-function slaPromise(x) {
-  const r = (x && x._raw) || {};
-  const d = r.confirmed_date;
-  if (!d || d === 'null') return null;
-  let t = r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time) : '20:00:00';
-  if (t.length === 5) t += ':00';
-  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
-  return isNaN(dt) ? null : dt;
-}
-
-/* ETA = app_eta column ("YYYY-MM-DDTHH:MM" ya "YYYY-MM-DD HH:MM"),
-   Out for Delivery stage pe bhara jaata hai */
-function slaEta(x) {
-  const r = (x && x._raw) || {};
-  const v = r.app_eta;
-  if (!v || v === 'null') return null;
-  const dt = new Date(String(v).replace(' ', 'T'));
-  return isNaN(dt) ? null : dt;
-}
-
-const slaHrs = (h) =>
-  h == null ? '—' : h < 1 ? Math.round(h * 60) + 'm' : h < 48 ? Math.round(h) + 'h' : (h / 24).toFixed(1) + 'd';
-const slaMins = (m) => {
-  if (m == null) return '—';
-  const a = Math.abs(m);
-  if (a < 60) return Math.round(a) + 'm';
-  if (a < 2880) return Math.round(a / 60) + 'h';
-  return (a / 1440).toFixed(1) + 'd';
-};
-
-/* ── ek order ka poora SLA picture ── */
-function slaAnalyze(x) {
-  const cycle = slaCycle(x);
-  const mbc = slaIsMbc(x, cycle);
-  const now = new Date();
-  const created = new Date(createdTs(x));
-  const okStart = !isNaN(created);
-  // saare duration business hours mein — deadline logic ke saath consistent
-  const span = (a, b) => (a && b && b >= a ? slaBizMins(a, b) / 60 : null);
-
-  const delivered = x.stage === 'delivered';
-  const delAt = delivered ? new Date(deliveredTs(x)) : null;
-
-  /* SLA 1 — Response */
-  const talkedAt = slaFirst(cycle, 'talked');
-  const respDeadline = okStart ? slaBizAdd(created, SLA_RESPONSE_MIN) : null;
-  const respEnd = talkedAt || now;
-  const respBreach = !!(respDeadline && respEnd > respDeadline);
-  const respOpen = !talkedAt;
-  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
-
-  const promise = slaPromise(x);
-  const dispAt = slaFirst(cycle, 'dispatched');
-  const eta = slaEta(x);
-
-  /* SLA 2 — ETA fill: jo delivery time customer ko diya tha, us tak order
-     "Out for Delivery" hokar estimated arrival bhar jani chahiye. */
-  const etaApplies = !!promise;
-  const etaEnd = dispAt || now;
-  const etaBreach = !!(etaApplies && etaEnd > promise);
-  const etaOpen = !dispAt;
-  const etaLateBy = etaBreach ? (etaEnd - promise) / 60000 : 0;
-
-  /* SLA 3 — Delivery: jo estimated arrival bhara, us tak delivery ho jani chahiye */
-  const delDeadline = eta;
-  const delEnd = delAt || now;
-  const delBreach = !!(delDeadline && delEnd > delDeadline);
-  const delLateBy = delBreach ? (delEnd - delDeadline) / 60000 : 0;
-
-  /* stage skip */
-  const need = ['talked', 'scheduled', 'dispatched'];
-  const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
-
-  /* Manager response — entry aane se agli stage (Talked to Customer) tak.
-     Jo order abhi Talked pe pahuncha hi nahi, uska respHrs null (average
-     mein count nahi hoga — wo Response Breach column mein pakda jaata hai). */
-  const respHrs = okStart && talkedAt ? span(created, talkedAt) : null;
-
-  /* Delivery person ka hissa — Out for Delivery se Delivered tak */
-  let delHrs = null;
-  if (delAt && !isNaN(delAt) && dispAt) delHrs = span(dispAt, delAt);
-
-  const graded = (respDeadline ? 1 : 0) + (etaApplies ? 1 : 0) + (delDeadline ? 1 : 0);
-  const breaches = (respBreach ? 1 : 0) + (etaBreach ? 1 : 0) + (delBreach ? 1 : 0);
-
-  return {
-    x,
-    branch: x.branch,
-    delivered,
-    mbc,
-    respBreach,
-    respOpen,
-    respLateBy,
-    respDeadline,
-    talkedAt,
-    promise,
-    eta,
-    dispAt,
-    etaApplies,
-    etaBreach,
-    etaOpen,
-    etaLateBy,
-    delDeadline,
-    delBreach,
-    delLateBy,
-    delAt,
-    skipped: delivered && missing.length > 0,
-    missing,
-    graded,
-    breaches,
-    /* abhi action chahiye: pending order jiski koi bhi SLA nikal chuki hai */
-    overdue: !delivered && ((respOpen && respBreach) || (etaOpen && etaBreach) || delBreach),
-    totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
-    openHrs: okStart && !delivered ? span(created, now) : null,
-    respHrs,
-    delHrs,
-  };
-}
-
-/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka chhota box.
-   position:fixed use karte hain kyunki dash-block mein overflow:hidden hai —
-   warna kam rows hone pe tooltip cut ho jaata. */
-function SlaTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
-  const [pos, setPos] = useState(null);
-  const ref = React.useRef(null);
-  /* nowrap hata dete hain taaki lambi heading 2 line mein aa jaye aur
-     table horizontally scroll na karni pade */
-  const thStyle = {
-    whiteSpace: 'normal',
-    verticalAlign: 'bottom',
-    width: w || 'auto',
-    textAlign: center || group ? 'center' : 'left',
-    ...(group
-      ? { color: T.forestSoft, borderBottom: '1px solid ' + T.line, paddingBottom: 6 }
-      : {}),
-    /* group ke shuru mein vertical line — kaunsa column kis group ka hai saaf rahe */
-    ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-  };
-  const span = { colSpan, rowSpan };
-  if (!info) return <th style={thStyle} {...span}>{label}</th>;
-
-  const show = () => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const w = 250;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 12)),
-      top: r.bottom + 6,
-      w,
-    });
-  };
-
-  return (
-    <th style={thStyle} {...span}>
-      <span
-        ref={ref}
-        style={{ cursor: 'help' }}
-        onMouseEnter={show}
-        onMouseLeave={() => setPos(null)}
-        onClick={() => (pos ? setPos(null) : show())}
-      >
-        {label}{' '}
-        <Info size={12} color="#B3AFA4" style={{ verticalAlign: '-1px' }} />
-      </span>
-      {pos && (
-        <div
-          style={{
-            position: 'fixed',
-            left: pos.left,
-            top: pos.top,
-            width: pos.w,
-            zIndex: 90,
-            background: T.forest,
-            color: '#fff',
-            borderRadius: 10,
-            padding: '10px 12px',
-            fontSize: 11.5,
-            fontWeight: 500,
-            lineHeight: 1.55,
-            letterSpacing: 0,
-            textTransform: 'none',
-            whiteSpace: 'normal',
-            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
-            pointerEvents: 'none',
-          }}
-        >
-          {info}
-        </div>
-      )}
-    </th>
-  );
-}
-
-function SlaReport({ deliveries, onOpen }) {
-  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
-  const [store, setStore] = useState('ALL');
-  const [view, setView] = useState('stores'); // stores | boys
-  const [sel, setSel] = useState(null); // null = drill band
-  const [alertOn, setAlertOn] = useState(null);
-
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    return [from, to];
-  }, [range, from, to]);
-
-  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati */
-  const live = useMemo(
-    () => deliveries.filter((d) => !isClosedStage(d.stage)),
-    [deliveries],
-  );
-
-  const inRange = useMemo(() => {
-    const [s, e] = bounds;
-    return live.filter((d) => {
-      const cd = dayStr(createdTs(d));
-      if (cd < s || cd > e) return false;
-      if (store !== 'ALL' && d.branch !== store) return false;
-      return true;
-    });
-  }, [live, bounds, store]);
-
-  /* MBC = customer khud le jaata hai — store ki SLA uspe lagti hi nahi,
-     isliye poori report se bahar (Total mein bhi nahi). */
-  const rows = useMemo(() => inRange.map(slaAnalyze).filter((a) => !a.mbc), [inRange]);
-
-  /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
-     order "Aaj" filter mein chhup jaata to report jhooth bolti. */
-  const overdueAll = useMemo(
-    () =>
-      live
-        .filter((d) => d.stage !== 'delivered')
-        .map(slaAnalyze)
-        .filter((a) => a.overdue && !a.mbc && (store === 'ALL' || a.branch === store)),
-    [live, store],
-  );
-
-  const pick = {
-    all: () => true,
-    delivered: (a) => a.delivered,
-    pending: (a) => !a.delivered,
-    resp: (a) => a.respBreach,
-    eta: (a) => a.etaBreach,
-    del: (a) => a.delBreach,
-  };
-
-  const statOf = (list, ov) => {
-    const dl = list.filter((a) => a.delivered);
-
-    const avg = (k) => {
-      const v = dl.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-    /* response time delivered hone ka intezaar nahi karta — pending bhi count */
-    const avgAll = (k) => {
-      const v = list.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-
-    return {
-      total: list.length,
-      delivered: dl.length,
-      pending: list.length - dl.length,
-      respBreach: list.filter((a) => a.respBreach).length,
-      etaBreach: list.filter((a) => a.etaBreach).length,
-      delBreach: list.filter((a) => a.delBreach).length,
-      /* sirf breach hue orders ka average — deadline se kitna upar nikle */
-      avgRespLate: (() => {
-        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
-        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-      })(),
-      overdue: ov.length,
-      avgCycle: avg('totalHrs'),
-      avgResp: avgAll('respHrs'),
-      avgDel: avg('delHrs'),
-    };
-  };
-
-  const overall = statOf(rows, overdueAll);
-
-  const cards = [
-    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
-    { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
-    { kind: 'eta', label: 'ETA breach', n: overall.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
-    { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
-  ];
-
-  /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
-  const personOf = (a) => {
-    const p = String(a.x.person || '').trim();
-    if (!p || p === 'null') return 'Not assigned';
-    return p;
-  };
-
-  const drill = useMemo(() => {
-    if (!sel) return [];
-    let list = sel.kind === 'overdue' ? overdueAll : rows;
-    if (sel.store) list = list.filter((a) => a.branch === sel.store);
-    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
-    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
-    return list
-      .filter(fn)
-      .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
-    // eslint-disable-next-line
-  }, [rows, overdueAll, sel]);
-
-  /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
-  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
-    .map((st) => ({
-      st,
-      s: statOf(
-        rows.filter((a) => a.branch === st),
-        overdueAll.filter((a) => a.branch === st),
-      ),
-    }))
-    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
-
-  /* delivery boy wise — person + store ke hisaab se group */
-  const boyStats = useMemo(() => {
-    // bina-assign wale orders kisi bande ki performance nahi hain
-    const skip = (a) => personOf(a) === 'Not assigned';
-    const keys = new Set();
-    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    return [...keys]
-      .map((k) => {
-        const [person, br] = k.split('|');
-        return {
-          person,
-          br,
-          st: br,
-          s: statOf(
-            rows.filter((a) => personOf(a) === person && a.branch === br),
-            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
-          ),
-        };
-      })
-      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-      .sort((a, b) => a.person.localeCompare(b.person));
-    // eslint-disable-next-line
-  }, [rows, overdueAll]);
-
-  const rangeLabel =
-    range === 'today'
-      ? 'Aaj'
-      : range === 'yesterday'
-        ? 'Kal'
-        : range === '7d'
-          ? 'Pichhle 7 din'
-          : `${from} → ${to}`;
-
-  /* dobara wahi click = band (dropdown jaisa) */
-  const toggleSel = (next) =>
-    setSel((cur) =>
-      cur && cur.kind === next.kind && cur.store === next.store && cur.person === next.person
-        ? null
-        : next,
-    );
-
-  const cellFor = (target) => (kind, n, color, div) => (
-    <td
-      className={n ? 'dash-td-click' : 'dash-td-zero'}
-      style={{
-        textAlign: 'center',
-        ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-        ...(n ? { color } : {}),
-      }}
-      onClick={() => n && toggleSel({ kind, store: null, person: null, ...target })}
-    >
-      {n}
-    </td>
-  );
-
-  /* Kisi number pe click → poora view badal jaata hai: sirf us subset ki list
-     dikhti hai, cards aur upar wali table chhup jaati hai. Back se wapas. */
-  if (sel) {
-    const selLabel = cards.find((c) => c.kind === sel.kind)?.label || 'All';
-    return (
-      <div>
-        <button className="track-back" onClick={() => setSel(null)}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="dash-head">
-          <div>
-            <div className="dash-sub">
-              {selLabel}
-              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
-              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
-            </div>
-            <h2 style={{ margin: '2px 0 0' }}>
-              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
-            </h2>
-          </div>
-        </div>
-      <div className="dash-block">
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <SlaTh label="Invoice" />
-                <SlaTh label="Customer" />
-                <SlaTh label="Store" />
-                <SlaTh label="Stage" />
-                <SlaTh
-                  label="Response"
-                  info={`Entry aane se "Talked to Customer" tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
-                />
-                <SlaTh
-                  label="Promise"
-                  info="Jo date aur time customer ko diya gaya tha — Talked stage pe bhara hua confirmed slot. Is time tak ETA bhar jani chahiye."
-                />
-                <SlaTh
-                  label="ETA"
-                  info="Out for Delivery stage pe bhara hua Estimated arrival. Is time tak delivery ho jani chahiye."
-                />
-                <SlaTh label="Delivered" />
-                <SlaTh label="Late by" info="Jo SLA breach hui hai, us deadline se kitna time nikal gaya." />
-                <SlaTh label="Delivery boy" />
-              </tr>
-            </thead>
-            <tbody>
-              {drill.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="dash-empty">
-                    Koi entry nahi
-                  </td>
-                </tr>
-              ) : (
-                drill.map((a) => {
-                  const stg = stageMeta(a.x.stage);
-                  return (
-                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
-                      <td>{a.x.id}</td>
-                      <td>{a.x.customer}</td>
-                      <td>{branchLabel(a.branch)}</td>
-                      <td>
-                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
-                          {stg.short}
-                        </span>
-                      </td>
-                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
-                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
-                      </td>
-                      <td style={{ color: a.etaBreach ? T.red : T.ink, fontWeight: a.etaBreach ? 700 : 500 }}>
-                        {a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}
-                      </td>
-                      <td>
-                        {a.eta ? (
-                          fmtDateTime(a.eta.toISOString())
-                        ) : (
-                          <span style={{ color: a.etaBreach ? T.red : T.inkSoft, fontWeight: a.etaBreach ? 700 : 500 }}>
-                            {a.etaBreach ? 'bhari nahi' : '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {a.delAt && !isNaN(a.delAt) ? (
-                          fmtDateTime(a.delAt.toISOString())
-                        ) : (
-                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
-                            {a.delBreach ? 'nahi hui' : '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          color: a.delBreach || a.etaBreach ? T.red : T.inkSoft,
-                          fontWeight: a.delBreach || a.etaBreach ? 700 : 500,
-                        }}
-                      >
-                        {a.delBreach
-                          ? slaMins(a.delLateBy)
-                          : a.etaBreach
-                            ? slaMins(a.etaLateBy)
-                            : '—'}
-                      </td>
-                      <td>{personOf(a)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="dash-head">
-        <div>
-          <div className="dash-sub">All stores · Process &amp; SLA</div>
-          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
-        </div>
-        <div className="dash-filters">
-          <div className="layout-toggle">
-            <button
-              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('stores');
-                setSel(null);
-              }}
-            >
-              <Building2 size={14} /> Stores
-            </button>
-            <button
-              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('boys');
-                setSel(null);
-              }}
-            >
-              <User size={14} /> Delivery boys
-            </button>
-          </div>
-          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <>
-              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
-            </>
-          )}
-          <select
-            className="dash-inp"
-            value={store}
-            onChange={(e) => {
-              setStore(e.target.value);
-              setSel(null);
-            }}
-          >
-            <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="dash-cards">
-        {cards.map((c) => {
-          const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
-          return (
-            <button
-              key={c.label}
-              className={on ? 'dash-card on' : 'dash-card'}
-              style={{
-                ...(on ? { borderColor: c.color } : {}),
-                ...(c.n ? {} : { cursor: 'default' }),
-              }}
-              onClick={() => c.n && toggleSel({ kind: c.kind, store: null, person: null })}
-            >
-              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
-                <c.icon size={16} />
-              </div>
-              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
-                {c.n}
-              </div>
-              <div className="dash-card-l">{c.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {view === 'stores' ? (
-        <div className="dash-block">
-          <div className="dash-block-h">
-            Store-wise · {rangeLabel}
-          </div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <SlaTh label="Store" rowSpan={2} />
-                  <SlaTh label="Orders" colSpan={2} group div />
-                  <SlaTh label="Response" colSpan={3} group div />
-                  <SlaTh label="Delivery" colSpan={3} group div />
-                  <SlaTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info={`Pending orders jinki koi bhi SLA nikal chuki hai — ${SLA_RESPONSE_MIN} min ka response, ETA fill, ya ETA tak delivery. Inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta, purane atke orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai.`}
-                  />
-                  <SlaTh label="Alert" rowSpan={2} center w={70} div />
-                </tr>
-                <tr>
-                  <SlaTh
-                    label="Total"
-                    center
-                    div
-                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin — un pe store ki SLA lagti hi nahi."
-                  />
-                  <SlaTh label="Delivered" center />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    div
-                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
-                  />
-                  <SlaTh
-                    label="Breach"
-                    center
-                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar "Talked to Customer" pe move nahi hue. Ye store manager ki zimmedari hai.`}
-                  />
-                  <SlaTh
-                    label="Avg Breach Time"
-                    center
-                    info={`Jo orders ${SLA_RESPONSE_MIN} min ki deadline paar kar gaye, unka average kitna upar nikle.`}
-                  />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    div
-                    info="Entry aane se Item Delivered tak ka poora average. Sirf delivered orders ka."
-                  />
-                  <SlaTh
-                    label="ETA Breach"
-                    center
-                    info="Jo delivery time customer ko diya tha, us tak order Out for Delivery hokar Estimated arrival bhar jani chahiye thi — nahi hui."
-                  />
-                  <SlaTh
-                    label="Del Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak delivery nahi hui (ya abhi tak hui hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {storeStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  storeStats.map(({ st, s }) => {
-                    const cell = cellFor({ store: st, person: null });
-                    return (
-                      <tr key={st}>
-                        <td className="dash-store">{branchLabel(st)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('delivered', s.delivered, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgResp)}
-                        </td>
-                        {cell('resp', s.respBreach, T.red)}
-                        <td
-                          style={{
-                            textAlign: 'center',
-                            color: s.avgRespLate == null ? '#C9C7BE' : T.red,
-                          }}
-                        >
-                          {s.avgRespLate == null ? '—' : '+' + slaMins(s.avgRespLate)}
-                        </td>
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgCycle)}
-                        </td>
-                        {cell('eta', s.etaBreach, T.red)}
-                        {cell('del', s.delBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          <button
-                            className="mini-edit"
-                            style={
-                              s.overdue || s.respBreach || s.delBreach
-                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
-                                : {}
-                            }
-                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
-                          >
-                            <Bell size={12} /> Alert
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="dash-block">
-          <div className="dash-block-h">
-            Delivery boy wise · {rangeLabel}
-          </div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <SlaTh
-                    label="Delivery boy"
-                    rowSpan={2}
-                    info="Bina-assign wale orders is view mein nahi aate, isliye yahan ke totals Stores view se thode kam ho sakte hain."
-                  />
-                  <SlaTh label="Store" rowSpan={2} />
-                  <SlaTh label="Orders" colSpan={2} group div />
-                  <SlaTh label="Delivery" colSpan={3} group div />
-                  <SlaTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info="Pending orders jinki koi bhi SLA nikal chuki hai. Ye column date filter follow nahi karta."
-                  />
-                </tr>
-                <tr>
-                  <SlaTh label="Total" center div />
-                  <SlaTh label="Delivered" center />
-                  <SlaTh
-                    label="Del Time"
-                    center
-                    div
-                    info="Out for Delivery se Delivered tak ka average — sirf delivery boy ka hissa."
-                  />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    info="Entry aane se Item Delivered tak ka poora average, jisme manager ka time bhi shaamil hai."
-                  />
-                  <SlaTh
-                    label="Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak delivery nahi hui (ya abhi tak hui hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {boyStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  boyStats.map(({ person, br, s }) => {
-                    const cell = cellFor({ person, store: null });
-                    return (
-                      <tr key={person + br}>
-                        <td className="dash-store">{person}</td>
-                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('delivered', s.delivered, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgDel)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>{slaHrs(s.avgCycle)}</td>
-                        {cell('del', s.delBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-
-      {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
-    </div>
-  );
-}
-
-/* ── Alert modal — abhi sirf UI, backend baad mein ── */
-function SlaAlert({ title, s, onClose }) {
-  const problems = [];
-  if (s.overdue)
-    problems.push([
-      'Overdue orders',
-      `${s.overdue} order ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
-    ]);
-  if (s.respBreach)
-    problems.push([
-      'Response late',
-      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
-        (s.avgRespLate ? ` — average ${slaMins(s.avgRespLate)} deadline se upar.` : '.'),
-    ]);
-  if (s.etaBreach)
-    problems.push([
-      'ETA bhari nahi gayi',
-      `${s.etaBreach} order diye hue delivery time tak Out for Delivery nahi hue — estimated arrival hi nahi bhari.`,
-    ]);
-  if (s.delBreach)
-    problems.push(['Delivery breach', `${s.delBreach} order apni estimated arrival se late gaye.`]);
-
-  return (
-    <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="kv-grid">
-            <KV label="Overdue" value={s.overdue} />
-            <KV label="Avg response time" value={slaHrs(s.avgResp)} />
-            <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
-            <KV label="Response breach" value={s.respBreach} />
-            <KV label="ETA breach" value={s.etaBreach} />
-          </div>
-
-          <div className="sec-title" style={{ margin: '4px 0 0' }}>
-            Main problems
-          </div>
-          {problems.length === 0 ? (
-            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
-          ) : (
-            problems.slice(0, 2).map(([t, d], i) => (
-              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-                <b>{t}</b>
-                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Close
-          </button>
-          <button className="btn-primary" disabled>
-            <Bell size={15} /> Send alert
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function EntriesView({
   items,
   viewMode,
@@ -2966,7 +1655,7 @@ function EntriesView({
 /* stat card → kaunsi entries dikhani hain */
 const STAT_CATS = {
   total: {
-    label: 'Total Deliveries',
+    label: 'Total Pickups',
     color: T.green,
     soft: T.mint,
     test: (x) => !isClosedStage(x.stage),
@@ -2978,7 +1667,7 @@ const STAT_CATS = {
     test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
   },
   delivered: {
-    label: 'Delivered',
+    label: 'Picked Up',
     color: T.forestSoft,
     soft: T.mint,
     test: (x) => x.stage === 'delivered',
@@ -3049,7 +1738,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
           test: (x) => x.stage === 'cancelled',
         }
       : {
-          label: 'Delivered',
+          label: 'Picked Up',
           color: T.green,
           soft: T.mint,
           test: (x) => x.stage === 'delivered',
@@ -3067,7 +1756,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
           value={mode}
           onChange={(e) => setMode(e.target.value)}
         >
-          <option value="delivered">Delivered</option>
+          <option value="delivered">Picked Up</option>
           <option value="cancelled">Cancelled</option>
         </select>
         <span
@@ -3104,7 +1793,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
 function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
   const [open, setOpen] = useState('pending'); // default: Pending khula
   if (loading && items.length === 0)
-    return <div className="loading">Deliveries load ho rahi hain…</div>;
+    return <div className="loading">Pickups load ho rahe hain…</div>;
   return (
     <div className="cat-list">
       {CATS.map((c) => {
@@ -3175,36 +1864,294 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
+/* ═══════════════════════════════════════════ DASHBOARD (all stores · MIS)
+   Store-wise daily picture. Cards + table sab clickable → entries neeche
+   table mein khulti hain. Sirf head login mein dikhta hai.              */
+function Dashboard({ deliveries, onOpen }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [sel, setSel] = useState({ kind: 'all', store: null });
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'custom') return [from, to];
+    return ['0000-01-01', '9999-12-31'];
+  }, [range, from, to]);
+
+  // base = date range + store filter (entry kab aayi, uspe)
+  const base = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries.filter((x) => {
+      const cd = dayStr(createdTs(x));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && x.branch !== store) return false;
+      return true;
+    });
+  }, [deliveries, bounds, store]);
+
+  const today = todayStr();
+  const metric = {
+    all: () => true,
+    picked: (x) => x.stage === 'delivered',
+    pending: (x) => x.stage !== 'delivered' && !isClosedStage(x.stage),
+    future: (x) =>
+      x.stage !== 'delivered' &&
+      !isClosedStage(x.stage) &&
+      plannedDate(x) &&
+      plannedDate(x) > today,
+    overdue: (x) =>
+      x.stage !== 'delivered' &&
+      !isClosedStage(x.stage) &&
+      plannedDate(x) &&
+      plannedDate(x) < today,
+    resched: (x) => isResched(x),
+    nophoto: (x) =>
+      x.stage === 'delivered' &&
+      !(x._raw && x._raw.pickup_image && x._raw.pickup_image !== 'null'),
+  };
+  const stageMetric = {
+    new: (x) => x.stage === 'new',
+    talked: (x) => x.stage === 'talked',
+    scheduled: (x) => x.stage === 'scheduled',
+    dispatched: (x) => x.stage === 'dispatched',
+    delivered: (x) => x.stage === 'delivered',
+  };
+
+  const cards = [
+    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
+    { kind: 'picked', label: 'Picked up', color: T.green, soft: T.mint },
+    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
+    { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
+    { kind: 'resched', label: 'Rescheduled', color: T.amber, soft: T.amberSoft },
+    { kind: 'overdue', label: 'Date nikal gayi', color: T.red, soft: T.redSoft },
+    { kind: 'nophoto', label: 'Picked up · photo missing', color: T.violet, soft: T.violetSoft },
+  ];
+
+  const rows = useMemo(() => {
+    let list = base;
+    if (sel.store) list = list.filter((x) => x.branch === sel.store);
+    const fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) => String(createdTs(b) || '').localeCompare(String(createdTs(a) || '')));
+    // eslint-disable-next-line
+  }, [base, sel]);
+
+  const cnt = (fn, list) => list.filter(fn).length;
+  const rangeLabel =
+    range === 'today' ? 'Aaj'
+    : range === 'yesterday' ? 'Kal'
+    : range === '7d' ? 'Pichhle 7 din'
+    : range === 'month' ? 'Is mahine'
+    : range === 'all' ? 'Sabhi'
+    : `${from} → ${to}`;
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Pickups MIS</div>
+          <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
+        </div>
+        <div className="dash-filters">
+          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="month">Is mahine</option>
+            <option value="all">Sabhi</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel({ kind: 'all', store: null });
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>{branchLabel(s)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const n = cnt(metric[c.kind], base);
+          const on = sel.kind === c.kind && !sel.store;
+          return (
+            <button
+              key={c.kind}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={on ? { borderColor: c.color } : {}}
+              onClick={() => setSel({ kind: c.kind, store: null })}
+            >
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
+                <BarChart3 size={16} />
+              </div>
+              <div className="dash-card-n" style={{ color: n ? c.color : T.ink }}>{n}</div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dash-block">
+        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Total</th>
+                <th>New</th>
+                <th>Contacted</th>
+                <th>Scheduled</th>
+                <th>Out for Pickup</th>
+                <th>Picked Up</th>
+                <th>Pending</th>
+                <th>Future</th>
+                <th>Overdue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {base.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="dash-empty">Is duration mein koi entry nahi</td>
+                </tr>
+              ) : (
+                DASH_STORES.filter((st) => store === 'ALL' || store === st).map((st) => {
+                  const list = base.filter((x) => x.branch === st);
+                  if (list.length === 0) return null;
+                  const has = (kind) => cnt(metric[kind] || stageMetric[kind], list) > 0;
+                  return (
+                    <tr key={st}>
+                      <td className="dash-store">{branchLabel(st)}</td>
+                      <td className="dash-td-click" onClick={() => setSel({ kind: 'all', store: st })}>
+                        {list.length}
+                      </td>
+                      {['new', 'talked', 'scheduled', 'dispatched', 'delivered'].map((k) => (
+                        <td
+                          key={k}
+                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                          onClick={() => has(k) && setSel({ kind: k, store: st })}
+                        >
+                          {cnt(stageMetric[k], list)}
+                        </td>
+                      ))}
+                      {['pending', 'future', 'overdue'].map((k) => (
+                        <td
+                          key={k}
+                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                          style={k === 'overdue' && has(k) ? { color: T.red } : {}}
+                          onClick={() => has(k) && setSel({ kind: k, store: st })}
+                        >
+                          {cnt(metric[k], list)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="dash-block">
+        <div className="dash-block-h">
+          {rows.length} entries
+          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+          {cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
+        </div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Store</th>
+                <th>Equipment</th>
+                <th>Stage</th>
+                <th>Amount</th>
+                <th>Aayi</th>
+                <th>Pickup date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="dash-empty">Koi entry nahi</td>
+                </tr>
+              ) : (
+                rows.map((x) => {
+                  const st = stageMeta(x.stage);
+                  return (
+                    <tr key={x.invoice_id} className="dash-row" onClick={() => onOpen(x)}>
+                      <td>{x.id}</td>
+                      <td>{x.customer}</td>
+                      <td>{branchLabel(x.branch)}</td>
+                      <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
+                      <td>
+                        <span className="dash-chip" style={{ background: st.soft, color: st.color }}>
+                          {st.short}
+                        </span>
+                      </td>
+                      <td>{x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'}</td>
+                      <td>{niceDate(createdTs(x)) || '—'}</td>
+                      <td>{niceDate(plannedDate(x)) || '—'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login({ onLogin }) {
-  const [branch, setBranch] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
-    if (!branch) {
-      setErr('Pehle store choose karo.');
-      return;
-    }
-    if (!pw) {
-      setErr('Password daalo.');
-      return;
-    }
-    if (!CONFIGURED) {
-      onLogin({ ...sessionFor(branch), pw });
-      return;
-    }
-    setBusy(true);
-    setErr('');
+    if (!pw.trim()) { setErr('Dev password daalo.'); return; }
+    setBusy(true); setErr('');
     try {
-      const rows = await sbLogin(branch, pw);
-      if (!rows || rows.length === 0) {
-        setErr('Galat password.');
-        setBusy(false);
-        return;
-      }
-      onLogin({ ...sessionFor(branch), pw });
+      await sbLogin('ALL', pw.trim());
+      onLogin({ ...sessionFor('ALL'), pw: pw.trim() });
     } catch (e) {
-      setErr('Login error: ' + (e.message || 'unknown'));
+      setErr(/unauthorized/i.test(e.message || '') ? 'Galat password.' : 'Login error: ' + (e.message || 'unknown'));
       setBusy(false);
     }
   };
@@ -3215,48 +2162,22 @@ function Login({ onLogin }) {
         <div className="hero-glow" />
         <div style={{ position: 'relative', zIndex: 2 }}>
           <div className="brand">
-            <div className="brand-badge">
-              <Truck size={22} color="#fff" />
-            </div>
+            <div className="brand-badge"><RotateCcw size={22} color="#fff" /></div>
             <div>
-              <div
-                style={{ fontWeight: 800, fontSize: 19, letterSpacing: -0.3 }}
-              >
-                Healthy Jeena Sikho
-              </div>
-              <div style={{ fontSize: 12.5, opacity: 0.75 }}>
-                Delivery Control
-              </div>
+              <div style={{ fontWeight: 800, fontSize: 19, letterSpacing: -0.3 }}>Healthy Jeena Sikho</div>
+              <div style={{ fontSize: 12.5, opacity: 0.75 }}>Pickup Control</div>
             </div>
           </div>
-          <h1 className="hero-h1">
-            Har delivery,
-            <br />
-            ek hi jagah.
-          </h1>
-          <p className="hero-p">
-            Zoho Books se aane wali har delivery — customer se baat se lekar
-            item handover tak, store-wise, live from Supabase.
-          </p>
+          <h1 className="hero-h1">Har pickup,<br />ek hi jagah.</h1>
+          <p className="hero-p">Zoho Books se aane wali har return — customer se baat se lekar item collect hone tak, store-wise, live from Supabase.</p>
           <div className="hero-chips">
-            {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map(
-              (c) => (
-                <span key={c} className="hero-chip">
-                  {c}
-                </span>
-              ),
-            )}
+            {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map((c) => <span key={c} className="hero-chip">{c}</span>)}
           </div>
           <div className="hero-flow">
             {STAGES.map((s, i) => (
               <React.Fragment key={s.id}>
-                <div className="flow-dot">
-                  <span style={{ background: s.color }} className="flow-pip" />
-                  {s.short}
-                </div>
-                {i < STAGES.length - 1 && (
-                  <ChevronRight size={15} opacity={0.5} />
-                )}
+                <div className="flow-dot"><span style={{ background: s.color }} className="flow-pip" />{s.short}</div>
+                {i < STAGES.length - 1 && <ChevronRight size={15} opacity={0.5} />}
               </React.Fragment>
             ))}
           </div>
@@ -3265,73 +2186,22 @@ function Login({ onLogin }) {
       <div className="login-form">
         <div className="glass-card">
           <div style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
-              Store login
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ShieldCheck size={20} color={T.green} /> Dev access
             </div>
-            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>
-              Apna store choose karke password daalo.
-            </div>
+            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>Internal WIP — dev password daalo.</div>
           </div>
-          <Field label="Store">
-            <select
-              className="inp"
-              value={branch}
-              onChange={(e) => {
-                setBranch(e.target.value);
-                setErr('');
-              }}
-            >
-              <option value="">Select store…</option>
-              <option value="ALL">All stores</option>
-              {STORE_ORDER.map((c) => (
-                <option key={c} value={c}>
-                  {branchLabel(c)}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field label="Password">
-            <input
-              className="inp"
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="••••"
-              value={pw}
-              onChange={(e) => {
-                setPw(e.target.value.replace(/\D/g, '').slice(0, 4));
-                setErr('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && go()}
-            />
+            <input className="inp" type="password" placeholder="••••••" value={pw} autoFocus
+              onChange={(e) => { setPw(e.target.value); setErr(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && go()} />
           </Field>
           {err && <div className="login-err">{err}</div>}
-          <button
-            className="btn-primary"
-            style={{ width: '100%', marginTop: 4 }}
-            disabled={!branch || !pw || busy}
-            onClick={go}
-          >
-            {busy ? (
-              'Checking…'
-            ) : (
-              <>
-                Sign in <ArrowRight size={17} />
-              </>
-            )}
+          <button className="btn-primary" style={{ width: '100%', marginTop: 4 }} disabled={!pw.trim() || busy} onClick={go}>
+            {busy ? 'Checking…' : <>Enter <ArrowRight size={17} /></>}
           </button>
-          <div
-            style={{
-              textAlign: 'center',
-              fontSize: 11.5,
-              color: T.inkSoft,
-              marginTop: 12,
-              lineHeight: 1.6,
-            }}
-          >
-            {CONFIGURED
-              ? 'Live · Supabase connected'
-              : 'Demo mode · CONFIG.key khaali hai'}
+          <div style={{ textAlign: 'center', fontSize: 11.5, color: T.inkSoft, marginTop: 12, lineHeight: 1.6 }}>
+            Live · Supabase connected<br />Sirf internal team ke liye
           </div>
         </div>
       </div>
@@ -3339,23 +2209,21 @@ function Login({ onLogin }) {
   );
 }
 
-/* ═════════════════════════════════════════════════════════════ SIDEBAR */
+/* SIDEBAR */
 function Sidebar({ session, page, onNav }) {
   const isAll = session.branch === 'ALL';
   const nav = [
-    { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
-    ...(isAll
-      ? [
-          { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
-          { id: 'sla', icon: Clock, label: 'Process & SLA' },
-        ]
-      : []),
-    ...(isAll
-      ? [
-          { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-        ]
-      : []),
-    { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
+    {
+      icon: LayoutDashboard,
+      label: 'Deliveries',
+      onClick: () => {
+        window.location.href = window.location.origin + window.location.pathname;
+      },
+    },
+    { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+    ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
+    { icon: MessageSquareWarning, label: 'Complaints', soon: true },
+    { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
   const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
   return (
@@ -3366,10 +2234,10 @@ function Sidebar({ session, page, onNav }) {
         </div>
         <div>
           <div style={{ fontWeight: 800, fontSize: 15.5, color: '#fff' }}>
-            HJS Delivery
+            HJS Pickups
           </div>
           <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.6)' }}>
-            Control Panel
+            Control Panel · DEV
           </div>
         </div>
       </div>
@@ -3378,10 +2246,14 @@ function Sidebar({ session, page, onNav }) {
           <div
             key={n.label}
             className="nav-item"
-            onClick={() => !n.soon && onNav && onNav(n.id)}
+            onClick={() => {
+              if (n.soon) return;
+              if (n.onClick) return n.onClick();
+              if (n.id && onNav) onNav(n.id);
+            }}
             style={{
-              background: page === n.id ? 'rgba(255,255,255,.12)' : 'transparent',
-              color: page === n.id ? '#fff' : 'rgba(255,255,255,.62)',
+              background: n.id && page === n.id ? 'rgba(255,255,255,.12)' : 'transparent',
+              color: n.id && page === n.id ? '#fff' : 'rgba(255,255,255,.62)',
               cursor: n.soon ? 'default' : 'pointer',
             }}
           >
@@ -3481,7 +2353,10 @@ function Topbar({
                       <span className={tagClass}>{tagText}</span>
                     </div>
                     <div className="ellip search-sub">
-                      ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
+                      {x.amount != null
+                        ? `₹${x.amount.toLocaleString('en-IN')} · `
+                        : ''}
+                      {x.equipment}
                     </div>
                   </button>
                 );
@@ -3496,10 +2371,8 @@ function Topbar({
           value={page}
           onChange={(e) => onNav && onNav(e.target.value)}
         >
-          <option value="deliveries">Deliveries</option>
-          <option value="dashboard">Dashboard</option>
-          <option value="sla">Process &amp; SLA</option>
           <option value="pickups">Pickups</option>
+          <option value="dashboard">Dashboard</option>
         </select>
       )}
       <div className="tb-actions">
@@ -3597,7 +2470,7 @@ function Header({
           {session.branch === 'ALL'
             ? 'All stores'
             : branchLabel(session.branch)}{' '}
-          deliveries
+          pickups
         </h2>
         {mgr && (
           <div
@@ -3687,7 +2560,7 @@ function Header({
             style={{ background: live ? T.greenBright : T.amber }}
           />
           {live
-            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Deliveries · ${count}`
+            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Pickups · ${count}`
             : 'Demo data'}
         </span>
       </div>
@@ -3714,7 +2587,7 @@ function Stats({ items, viewMode, onDrill }) {
         },
         {
           id: 'delivered',
-          label: 'Delivered',
+          label: 'Picked Up',
           value: done,
           icon: CheckCircle2,
           color: T.forestSoft,
@@ -3732,7 +2605,7 @@ function Stats({ items, viewMode, onDrill }) {
     : [
         {
           id: 'total',
-          label: 'Total Deliveries',
+          label: 'Total Pickups',
           value: board.length,
           icon: Truck,
           color: T.green,
@@ -3748,7 +2621,7 @@ function Stats({ items, viewMode, onDrill }) {
         },
         {
           id: 'delivered',
-          label: 'Delivered',
+          label: 'Picked Up',
           value: done,
           icon: CheckCircle2,
           color: T.forestSoft,
@@ -3806,7 +2679,7 @@ function Stats({ items, viewMode, onDrill }) {
 function Board({ items, loading, onOpen, onMove, onCommit }) {
   if (loading && items.length === 0)
     return (
-      <div className="loading">Supabase se deliveries load ho rahi hain…</div>
+      <div className="loading">Supabase se pickups load ho rahe hain…</div>
     );
   return (
     <div className="board">
@@ -3828,7 +2701,7 @@ function Board({ items, loading, onOpen, onMove, onCommit }) {
             </div>
             <div className="col-body">
               {cards.length === 0 && (
-                <div className="empty">Koi delivery nahi</div>
+                <div className="empty">Koi pickup nahi</div>
               )}
               {cards.map((x) => (
                 <Card
@@ -3879,11 +2752,11 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
   }, [sig, focus && focus.n]);
 
   if (loading && items.length === 0)
-    return <div className="loading">Deliveries load ho rahi hain…</div>;
+    return <div className="loading">Pickups load ho rahe hain…</div>;
   if (active.length === 0)
     return (
       <div className="empty" style={{ padding: '44px 0' }}>
-        Koi delivery nahi
+        Koi pickup nahi
       </div>
     );
 
@@ -3947,6 +2820,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
 }
 
 function Card({ d, stage, onOpen, onMove, onCommit }) {
+  const resched = isResched(d);
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
@@ -3955,7 +2829,9 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
   return (
     <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
+      className={
+        cancelled ? 'card is-cancelled' : resched ? 'card is-resched' : 'card'
+      }
       onClick={onOpen}
     >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -3968,17 +2844,38 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         </div>
       </div>
       <div className="card-equip">{d.equipment}</div>
+      {d.securityType && (
+        <div className="card-meta">
+          <span className="ellip" style={{ maxWidth: '100%' }}>
+            <ShieldCheck size={12} /> Security: <b>{d.securityType}</b>
+          </span>
+        </div>
+      )}
+      {resched && (
+        <div className="resched-chip">
+          <RotateCcw size={12} /> Rescheduled
+          {d._raw && d._raw.stage1_remarks && d._raw.stage1_remarks !== 'null' ? (
+            <span className="resched-note">· {d._raw.stage1_remarks}</span>
+          ) : null}
+        </div>
+      )}
       <div className="card-meta">
-        <span style={{ color: T.green, fontWeight: 800 }}>
-          <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
-        </span>
+        {d.pending != null && (
+          <span
+            style={{ color: d.pending > 0 ? T.red : T.green, fontWeight: 800 }}
+            title="Pending amount"
+          >
+            <IndianRupee size={12} /> {d.pending.toLocaleString('en-IN')}
+            {d.pending > 0 ? ' pending' : ' clear'}
+          </span>
+        )}
         <span className="ellip" style={{ maxWidth: 130 }}>
           <MapPin size={12} /> {d.area}
         </span>
       </div>
       <div className="card-meta">
         <span>
-          <Clock size={12} /> {d.expected}
+          <Clock size={12} /> {niceDate(d.expected) || d.expected}
         </span>
       </div>
       {(d.person || d.manager) && (
@@ -4006,7 +2903,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
               else onMove(d, next.id);
             }}
           >
-            {moveText(next.id)}{' '}
+            {resched ? 'Edit · dobara bharo' : moveText(next.id)}{' '}
             {canInline ? (
               <ChevronRight
                 size={14}
@@ -4061,8 +2958,8 @@ function FooterTotal({ items }) {
     .join(' · ');
   return (
     <div className="foot-total">
-      Total {board.length} deliveries &nbsp;•&nbsp; {per}
-      {extra ? ` \u2022 ${extra}` : ''}
+      Total {board.length} pickups &nbsp;•&nbsp; {per}
+      {extra ? ` • ${extra}` : ''}
     </div>
   );
 }
@@ -4090,7 +2987,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'talked',
       i: 1,
       rows: [
-        ['Date', niceDate(r.confirmed_date) || '—'],
+        ['Pickup date', niceDate(r.confirmed_date) || '—'],
         ['Time', niceTime(r.confirmed_time) || '—'],
         ['Remarks', show(r.stage1_remarks)],
       ],
@@ -4099,38 +2996,43 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'scheduled',
       i: 2,
       rows: [
-        ['Delivery person', d.person || '—'],
-        ['Vehicle', d.vehicle || '—'],
-        ['Inspected', r.item_inspected ? 'Yes' : 'No'],
-        ['Remarks', show(r.stage3_remarks)],
+        ['Pickup person', d.person || '—'],
+        ['Transport', d.vehicle || '—'],
+        ['Remarks', show(r.stage2_remarks)],
       ],
-      photo: r.photo_inspected,
     },
     {
       id: 'dispatched',
       i: 3,
-      rows: [['Estimated arrival', niceDateTime(r.app_eta) || '—']],
+      rows: [
+        ['Estimated arrival', niceTime(String(r.app_eta || '').slice(11, 16)) || '—'],
+        ['Remarks', show(r.stage3_remarks)],
+      ],
     },
     {
       id: 'delivered',
       i: 4,
       rows: [
-        ['Delivered', r.item_delivered ? 'Yes' : 'No'],
+        ['Inspected', r.item_inspected ? 'Yes' : 'No'],
+        ['Picked up', r.pickup_done ? 'Yes' : 'No'],
+        ['Actual date', niceDate(r.actual_pickup_date) || '—'],
         [
-          'Amount',
-          r.amount_collected
-            ? `₹${Number(r.amount_collected).toLocaleString('en-IN')} · ${show(r.amount_type)}`
+          'Charges',
+          r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
+            ? `₹${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
             : '—',
         ],
         [
-          'Security',
-          r.security_collected
-            ? `₹${Number(r.security_collected).toLocaleString('en-IN')} · ${show(r.security_type)}`
+          'Pending collected',
+          r.pending_collected != null &&
+          r.pending_collected !== '' &&
+          r.pending_collected !== 'null'
+            ? `₹${Number(r.pending_collected).toLocaleString('en-IN')}`
             : '—',
         ],
         ['Remarks', show(r.stage4_remarks)],
       ],
-      photo: r.photo_delivered,
+      photo: r.pickup_image,
     },
   ];
 
@@ -4178,6 +3080,27 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           {cancelled ? stage.label : sLabel(d.stage)}
         </span>
 
+        {!cancelled && isResched(d) && (
+          <div
+            className="cancel-note"
+            style={{ background: T.amberSoft, color: T.amber, borderColor: T.amberSoft }}
+          >
+            <RotateCcw size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontWeight: 800 }}>Pickup reschedule hui hai</div>
+              <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                Customer ne abhi date nahi di. Baat hone pe upar{' '}
+                <b>Contacted</b> dabao aur dropdown se "Customer se baat hui"
+                chun ke date bhar do.
+              </div>
+              {d._raw && d._raw.stage1_remarks && d._raw.stage1_remarks !== 'null' && (
+                <div style={{ fontSize: 12.5, marginTop: 6, fontWeight: 700 }}>
+                  “{d._raw.stage1_remarks}”
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {cancelled ? (
           <>
             <div
@@ -4243,7 +3166,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
               </div>
             ) : (
               <div className="next-hint done">
-                <Check size={14} /> Saari stages complete — delivery done
+                <Check size={14} /> Saari stages complete — pickup done
               </div>
             )}
             <div className="stage-picker">
@@ -4289,8 +3212,17 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           <KV label="Phone" value={d.phone} />
           <KV label="Area" value={d.area} />
           <KV label="Equipment" value={d.equipment} full />
-          <KV label="Amount" value={`₹${d.amount.toLocaleString('en-IN')}`} />
-          <KV label="Due date" value={d.expected} />
+          <KV
+            label="Pending amount"
+            value={d.pending != null ? `₹${d.pending.toLocaleString('en-IN')}` : '—'}
+          />
+          <KV
+            label="Invoice total"
+            value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
+          />
+          <KV label="Security li thi" value={d.securityType || '—'} />
+          <KV label="Amount liya tha" value={d.amountType || '—'} />
+          <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
           <KV label="Store manager" value={d.manager} full />
         </div>
 
@@ -4339,22 +3271,16 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                   ))}
-                  {b.photo &&
-                    b.photo !== 'null' &&
-                    String(b.photo)
-                      .split('|')
-                      .filter(Boolean)
-                      .map((ph, i) => (
-                        <a
-                          key={ph + i}
-                          className="kv-photo"
-                          href={ph}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <img src={ph} alt={`photo ${i + 1}`} />
-                        </a>
-                      ))}
+                  {b.photo && b.photo !== 'null' && (
+                    <a
+                      className="kv-photo"
+                      href={b.photo}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img src={b.photo} alt="photo" />
+                    </a>
+                  )}
                 </div>
               ) : (
                 <div className="block-next-note">
@@ -4499,11 +3425,6 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
           </div>
         )}
-
-        {/* sabse neeche — ye entry app mein kab aayi (sirf yahin dikhta hai) */}
-        <div className="created-note">
-          Entry app mein aayi: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
-        </div>
       </div>
     </div>
   );
@@ -4572,487 +3493,203 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const stage = STAGES[stageIndex(toStage)];
   const r = (delivery && delivery._raw) || {};
   const persons = personsFor(delivery.branch, delivery.person || '');
-  // abhi ka date / time / datetime — default value ke liye
   const _now = new Date();
   const _pad = (n) => String(n).padStart(2, '0');
   const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
   const nowDT = `${nowDate}T${nowTime}`;
+  // ETA ki date ab poochhi nahi jaati — jo pickup date tay hui hai wahi le
+  // lete hain (na ho to aaj). Staff sirf time bharta hai.
+  const etaDay =
+    (r.confirmed_date && r.confirmed_date !== 'null'
+      ? String(r.confirmed_date).slice(0, 10)
+      : '') || nowDate;
   const [f, setF] = useState({
-    invoiceFlag: '',
-    // EDIT → jo bhara hai wahi. MOVE → abhi ka date/time/ETA pehle se bhara.
-    date:
-      mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null'
-        ? r.confirmed_date
-        : nowDate,
-    time:
-      mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null'
-        ? String(r.confirmed_time).slice(0, 5)
-        : nowTime,
+    // pehli stage pe: talked | resched | cancelled
+    flow: 'talked',
+    date: mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null' ? r.confirmed_date : nowDate,
+    time: mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time).slice(0, 5) : nowTime,
     remarks:
-      (toStage === 'delivered'
-        ? r.stage4_remarks
-        : toStage === 'scheduled'
-          ? r.stage3_remarks
-          : r.stage1_remarks) || '',
+      (toStage === 'delivered' ? r.stage4_remarks
+        : toStage === 'dispatched' ? r.stage3_remarks
+        : toStage === 'scheduled' ? r.stage2_remarks
+        : r.stage1_remarks) || '',
     person: delivery.person || '',
-    vehicle: delivery.vehicle || 'Auto-Rikshaw',
-    eta:
-      mode === 'edit' && r.app_eta && r.app_eta !== 'null'
-        ? toLocalInput(r.app_eta)
-        : nowDT,
+    vehicle: delivery.vehicle || 'Bike',
+    eta: mode === 'edit' && r.app_eta && r.app_eta !== 'null' ? toLocalInput(r.app_eta) : nowDT,
     inspected: !!r.item_inspected,
-    photoInspected:
-      r.photo_inspected && r.photo_inspected !== 'null'
-        ? r.photo_inspected
+    photoPicked: r.pickup_image && r.pickup_image !== 'null' ? r.pickup_image : '',
+    pickDate: mode === 'edit' && r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : nowDate,
+    charges: r.pickup_charges_collected != null && r.pickup_charges_collected !== '' ? r.pickup_charges_collected : '',
+    pendingCollected:
+      r.pending_collected != null && r.pending_collected !== '' && r.pending_collected !== 'null'
+        ? r.pending_collected
         : '',
-    photoDelivered:
-      r.photo_delivered && r.photo_delivered !== 'null'
-        ? r.photo_delivered
-        : '',
-    delivered: !!r.item_delivered,
-    amount:
-      r.amount_collected != null && r.amount_collected !== 0
-        ? r.amount_collected
-        : delivery.amount,
-    amountType:
-      r.amount_type && r.amount_type !== 'null' ? r.amount_type : 'Cash',
-    security:
-      r.security_collected != null && r.security_collected !== 0
-        ? r.security_collected
-        : '',
-    securityType:
-      r.security_type && r.security_type !== 'null' ? r.security_type : 'Cash',
+    done: !!r.pickup_done,
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  // Chrome mein date/time input pe click se picker khud nahi khulta —
-  // showPicker() chahiye. Cross-origin iframe (Zoho) mein ye throw karta hai,
-  // wahan user calendar icon se khol lega — isliye try/catch.
-  const openPicker = (e) => {
-    try {
-      e.currentTarget.showPicker();
-    } catch (_) {}
-  };
-  // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
-  // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
-  const flagSel = toStage === 'talked' && !!f.invoiceFlag;
-  // MBC = Managed By Client — customer khud le jaata hai. Scheduled form mein
-  // hi final details bhar ke entry seedha Item Delivered ho jaati hai.
-  const mbc = toStage === 'scheduled' && f.person === 'MBC';
-  const canSave = flagSel
-    ? true
-    : toStage === 'talked'
-      ? !!(f.date && f.time) // baat hui → date + time
-      : toStage === 'scheduled'
-        ? mbc
-          ? !!(
-              f.person &&
-              f.inspected &&
-              f.delivered &&
-              f.photoDelivered &&
-              String(f.amount).trim() !== '' &&
-              f.amountType &&
-              String(f.security).trim() !== '' &&
-              f.securityType
-            )
-          : !!(f.person && f.vehicle && f.inspected && f.photoInspected)
-        : toStage === 'dispatched'
-          ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
-          : toStage === 'delivered'
-            ? !!(
-                f.delivered &&
-                f.photoDelivered &&
-                String(f.amount).trim() !== '' &&
-                f.amountType &&
-                String(f.security).trim() !== '' &&
-                f.securityType
-              )
-            : true;
+  const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
+  const canSave =
+    toStage === 'talked'
+      ? f.flow === 'cancelled'
+        ? true
+        : f.flow === 'resched'
+          ? !!String(f.remarks || '').trim()
+          : !!(f.date && f.time)
+    : toStage === 'scheduled' ? !!(f.person && f.vehicle)
+    : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
+    : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate && String(f.charges).trim() !== '')
+    : true;
 
   const inner = (
     <>
       {!embedded && (
         <div className="modal-head">
           <div>
-            <span
-              className="stage-badge"
-              style={{
-                background: flagSel ? CLOSED[f.invoiceFlag].soft : stage.soft,
-                color: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
-                marginBottom: 8,
-              }}
-            >
-              <span
-                className="col-pip"
-                style={{
-                  background: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
-                }}
-              />{' '}
-              {flagSel
-                ? CLOSED[f.invoiceFlag].label
-                : mode === 'edit'
-                  ? `Edit · ${sLabel(toStage)}`
-                  : sLabel(toStage)}
+            <span className="stage-badge" style={{ background: stage.soft, color: stage.color, marginBottom: 8 }}>
+              <span className="col-pip" style={{ background: stage.color }} />{' '}
+              {mode === 'edit' ? `Edit · ${sLabel(toStage)}` : sLabel(toStage)}
             </span>
             <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
               {delivery.customer} · {delivery.id}
             </div>
           </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
+          <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
         </div>
       )}
       <div className="modal-body">
-          {toStage === 'talked' && (
-            <>
-              <Field label="Invoice status">
-                <select
-                  className="inp"
-                  value={f.invoiceFlag}
-                  onChange={(e) => set('invoiceFlag', e.target.value)}
-                >
-                  <option value="">Customer se baat hui</option>
-                  <option value="renewal">Renewal invoice</option>
-                  <option value="duplicate">Duplicate invoice</option>
-                  <option value="cancelled">Cancelled invoice</option>
-                </select>
-              </Field>
-              {flagSel ? (
-                <div
-                  className="flag-note"
-                  style={{
-                    background: CLOSED[f.invoiceFlag].soft,
-                    color: CLOSED[f.invoiceFlag].color,
-                  }}
-                >
-                  Ye entry <b>{CLOSED[f.invoiceFlag].label}</b> mark hokar active
-                  list se hat jayegi — date/time bharne ki zarurat nahi. Neeche
-                  save dabao.
-                </div>
-              ) : (
-                <>
-                  <Field label="Confirmed Date *">
-                    <input
-                      className="inp"
-                      type="date"
-                      value={f.date}
-                      min="2024-01-01"
-                      max="2099-12-31"
-                      onClick={openPicker}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        // Chrome year 275760 tak deta hai — 4 digit tak hi rakho
-                        if (v && Number(v.slice(0, 4)) > 2099) return;
-                        set('date', v);
-                      }}
-                    />
-                  </Field>
-                  <Field label="Confirmed Time *">
-                    <TimePick12
-                      value={f.time}
-                      onChange={(v) => set('time', v)}
-                    />
-                  </Field>
-                  {!(f.date && f.time) && (
-                    <div className="req-note">
-                      Date aur Time dono bharna zaroori hai.
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {toStage === 'scheduled' && (
-            <>
-              <Field label="Delivery person *">
-                <select
-                  className="inp"
-                  value={f.person}
-                  onChange={(e) => set('person', e.target.value)}
-                >
-                  <option value="">Select…</option>
-                  {persons.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {mbc ? (
-                <div className="flag-note" style={{ background: T.mint, color: T.green }}>
-                  <b>MBC — Managed By Client.</b> Customer khud le ja raha hai, to
-                  gaadi/dispatch ki zarurat nahi. Neeche final details bhar do —
-                  entry seedha <b>Item Delivered</b> ho jayegi.
-                </div>
-              ) : (
-                <Field label="Vehicle *">
-                  <select
-                    className="inp"
-                    value={f.vehicle}
-                    onChange={(e) => set('vehicle', e.target.value)}
-                  >
-                    <option value="">Select…</option>
-                    {VEHICLES.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                    {f.vehicle && !VEHICLES.includes(f.vehicle) && (
-                      <option value={f.vehicle}>{f.vehicle}</option>
-                    )}
-                  </select>
-                </Field>
-              )}
-              <Check1
-                checked={f.inspected}
-                onChange={() => set('inspected', !f.inspected)}
-                label="Item inspected & ready"
-              />
-              {!mbc && f.inspected && (
-                <PhotoUpload
-                  label="Inspection photo *"
-                  invoiceNumber={delivery.id}
-                  kind="inspected"
-                  value={f.photoInspected}
-                  onChange={(url) => set('photoInspected', url)}
-                />
-              )}
-              {!mbc && f.inspected && !f.photoInspected && (
-                <div className="req-note">Inspection photo lagana zaroori hai.</div>
-              )}
-
-              {/* MBC → yahin final details (photo + amount + security) */}
-              {mbc && (
-                <>
-                  <div className="mbc-divider">Final details · handover</div>
-                  <Check1
-                    checked={f.delivered}
-                    onChange={() => set('delivered', !f.delivered)}
-                    label="Item customer ko de diya"
-                  />
-                  {f.delivered && (
-                    <PhotoUpload
-                      label="Handover photo *"
-                      invoiceNumber={delivery.id}
-                      kind="delivered"
-                      value={f.photoDelivered}
-                      onChange={(url) => set('photoDelivered', url)}
-                    />
-                  )}
-                  {f.delivered && !f.photoDelivered && (
-                    <div className="req-note">Handover photo lagana zaroori hai.</div>
-                  )}
-                  <div className="two-col">
-                    <Field label="Amount collected *">
-                      <input
-                        className="inp"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={f.amount}
-                        onChange={(e) =>
-                          set('amount', e.target.value.replace(/[^0-9]/g, ''))
-                        }
-                      />
-                    </Field>
-                    <Field label="Amount type *">
-                      <select
-                        className="inp"
-                        value={f.amountType}
-                        onChange={(e) => set('amountType', e.target.value)}
-                      >
-                        {PAY_OPTIONS.map((p) => (
-                          <option key={p}>{p}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                  <div className="two-col">
-                    <Field label="Security collected *">
-                      <input
-                        className="inp"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={f.security}
-                        onChange={(e) =>
-                          set('security', e.target.value.replace(/[^0-9]/g, ''))
-                        }
-                      />
-                    </Field>
-                    <Field label="Security type *">
-                      <select
-                        className="inp"
-                        value={f.securityType}
-                        onChange={(e) => set('securityType', e.target.value)}
-                      >
-                        {PAY_OPTIONS.map((p) => (
-                          <option key={p}>{p}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {toStage === 'dispatched' && (
-            <>
-              <Field label="Estimated arrival date *">
-                <input
-                  className="inp"
-                  type="date"
-                  value={(f.eta || '').slice(0, 10)}
-                  min="2024-01-01"
-                  max="2099-12-31"
-                  onClick={openPicker}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v && Number(v.slice(0, 4)) > 2099) return;
-                    set('eta', v ? `${v}T${(f.eta || '').slice(11, 16) || '00:00'}` : '');
-                  }}
-                />
-              </Field>
-              <Field label="Estimated arrival time *">
-                <TimePick12
-                  value={(f.eta || '').slice(11, 16)}
-                  onChange={(t) =>
-                    set(
-                      'eta',
-                      `${(f.eta || '').slice(0, 10) || nowDate}T${t}`,
-                    )
-                  }
-                />
-                {f.eta && (f.eta || '').slice(11, 16) && (
-                  <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
-                )}
-              </Field>
-              {!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16)) && (
-                <div className="req-note">
-                  Customer ko yahi date &amp; time message mein jaayega — dono
-                  bharna zaroori hai.
-                </div>
-              )}
-            </>
-          )}
-
-          {toStage === 'delivered' && (
-            <>
-              <Check1
-                checked={f.delivered}
-                onChange={() => set('delivered', !f.delivered)}
-                label="Item delivered to customer"
-              />
-              {f.delivered && (
-                <PhotoUpload
-                  label="Delivery photo *"
-                  invoiceNumber={delivery.id}
-                  kind="delivered"
-                  value={f.photoDelivered}
-                  onChange={(url) => set('photoDelivered', url)}
-                />
-              )}
-              {f.delivered && !f.photoDelivered && (
-                <div className="req-note">Delivery photo lagana zaroori hai.</div>
-              )}
-              <div className="two-col">
-                <Field label="Amount collected *">
-                  <input
-                    className="inp"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={f.amount}
-                    onChange={(e) =>
-                      set('amount', e.target.value.replace(/[^0-9]/g, ''))
-                    }
-                  />
-                </Field>
-                <Field label="Amount type *">
-                  <select
-                    className="inp"
-                    value={f.amountType}
-                    onChange={(e) => set('amountType', e.target.value)}
-                  >
-                    {PAY_OPTIONS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                </Field>
+        {toStage === 'talked' && (
+          <>
+            <Field label="Customer se kya baat hui?">
+              <select
+                className="inp"
+                value={f.flow}
+                onChange={(e) => set('flow', e.target.value)}
+              >
+                <option value="talked">Customer se baat hui</option>
+                <option value="resched">Reschedule pickup</option>
+                <option value="cancelled">Cancel pickup</option>
+              </select>
+            </Field>
+            {f.flow === 'resched' && (
+              <div className="flag-note" style={{ background: T.amberSoft, color: T.amber }}>
+                <b>Reschedule</b> — entry pehli stage mein hi pending rahegi, tile
+                pe "Rescheduled" likha aayega. Neeche remarks mein likh do customer
+                ne kya kaha (jaise "1-2 din mein confirm karenge").
               </div>
-              <div className="two-col">
-                <Field label="Security collected *">
-                  <input
-                    className="inp"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={f.security}
-                    onChange={(e) =>
-                      set('security', e.target.value.replace(/[^0-9]/g, ''))
-                    }
-                  />
-                </Field>
-                <Field label="Security type *">
-                  <select
-                    className="inp"
-                    value={f.securityType}
-                    onChange={(e) => set('securityType', e.target.value)}
-                  >
-                    {PAY_OPTIONS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                </Field>
+            )}
+            {f.flow === 'cancelled' && (
+              <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
+                Ye pickup <b>Cancelled</b> mark hokar active list se hat jayegi —
+                date/time bharne ki zarurat nahi.
               </div>
-            </>
-          )}
-
-          <Field label="Remarks">
-            <textarea
-              className="inp"
-              rows={2}
-              placeholder="Optional notes…"
-              value={f.remarks}
-              onChange={(e) => set('remarks', e.target.value)}
-            />
-          </Field>
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn-primary"
-            disabled={!canSave}
-            onClick={() => onSave(mbc ? { ...f, mbcDirect: true } : f)}
-          >
-            <ShieldCheck size={16} />{' '}
-            {flagSel
-              ? `Mark as ${CLOSED[f.invoiceFlag].short}`
+            )}
+          </>
+        )}
+        {toStage === 'talked' && f.flow === 'talked' && (
+          <>
+            <Field label="Confirmed Pickup Date *">
+              <input className="inp" type="date" value={f.date} min="2024-01-01" max="2099-12-31" onClick={openPicker}
+                onChange={(e) => { const v = e.target.value; if (v && Number(v.slice(0, 4)) > 2099) return; set('date', v); }} />
+            </Field>
+            <Field label="Confirmed Time *">
+              <TimePick12 value={f.time} onChange={(v) => set('time', v)} />
+            </Field>
+            {!(f.date && f.time) && <div className="req-note">Date aur Time dono bharo.</div>}
+          </>
+        )}
+        {toStage === 'scheduled' && (
+          <>
+            <Field label="Pickup person *">
+              <select className="inp" value={f.person} onChange={(e) => set('person', e.target.value)}>
+                <option value="">Select…</option>
+                {persons.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </Field>
+            <Field label="Transport / vehicle *">
+              <select className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)}>
+                <option value="">Select…</option>
+                {VEHICLES.map((v) => <option key={v} value={v}>{v}</option>)}
+                {f.vehicle && !VEHICLES.includes(f.vehicle) && <option value={f.vehicle}>{f.vehicle}</option>}
+              </select>
+            </Field>
+          </>
+        )}
+        {toStage === 'dispatched' && (
+          <>
+            <Field label="Estimated arrival time *">
+              <TimePick12
+                value={(f.eta || '').slice(11, 16)}
+                onChange={(t) => set('eta', `${etaDay}T${t}`)}
+              />
+              {(f.eta || '').slice(11, 16) && (
+                <span className="tp-preview">🕐 {niceTime((f.eta || '').slice(11, 16))}</span>
+              )}
+            </Field>
+            {!(f.eta && f.eta.slice(11, 16)) && (
+              <div className="req-note">Estimated time bharna zaroori hai.</div>
+            )}
+          </>
+        )}
+        {toStage === 'delivered' && (
+          <>
+            <Check1 checked={f.inspected} onChange={() => set('inspected', !f.inspected)} label="Item inspected" />
+            <Field label="Actual pickup date *">
+              <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
+            </Field>
+            <Field label="Pickup charges collected (₹) *">
+              <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
+                onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
+            </Field>
+            {String(f.charges).trim() === '' && (
+              <div className="req-note">
+                Pickup charges bharna zaroori hai — kuch nahi liya to 0 daal do.
+              </div>
+            )}
+            {/* optional — bakaya amount agar wahin collect ho jaye to yahan */}
+            <Field label="Pending amount collected (₹)">
+              <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
+                onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
+            </Field>
+            <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Pickup done" />
+            {/* photo tabhi maanga jaata hai jab "Pickup done" tick ho —
+                delivery app jaisa hi flow */}
+            {f.done && (
+              <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
+            )}
+            {f.done && !f.photoPicked && (
+              <div className="req-note">Pickup photo lagana zaroori hai.</div>
+            )}
+          </>
+        )}
+        <Field label="Remarks">
+          <textarea className="inp" rows={2} placeholder="Optional notes…" value={f.remarks} onChange={(e) => set('remarks', e.target.value)} />
+        </Field>
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" disabled={!canSave} onClick={() => onSave(f)}>
+          <ShieldCheck size={16} />{' '}
+          {toStage === 'talked' && f.flow === 'resched'
+            ? 'Save · Rescheduled'
+            : toStage === 'talked' && f.flow === 'cancelled'
+              ? 'Mark as Cancelled'
               : mode === 'edit'
                 ? 'Update'
-                : mbc
-                  ? 'Save · Mark Delivered'
-                  : 'Save & update'}
-          </button>
-        </div>
+                : 'Save & update'}
+        </button>
+      </div>
     </>
   );
   if (embedded) return <div className="inline-move">{inner}</div>;
   return (
     <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {inner}
-      </div>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>{inner}</div>
     </div>
   );
 }
 
-/* ═════════════════════════════════════════════════════════════ SMALL UI */
+/* SMALL UI */
 function Field({ label, children }) {
   // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
   // jisse picker khulke turant band ho jaata tha (laptop pe).
@@ -5064,8 +3701,9 @@ function Field({ label, children }) {
   );
 }
 /* 12-ghante ka time picker — hour (1-12) + minute + AM/PM.
-   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta),
-   isliye apna control: value andar "HH:MM" (24h) hi rehti hai. */
+   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta)
+   aur Zoho iframe mein showPicker() block ho jaata hai, isliye apna control:
+   value andar "HH:MM" (24h) hi rehti hai. */
 function TimePick12({ value, onChange }) {
   const [hh, mm] = String(value || '')
     .split(':')
@@ -5153,77 +3791,56 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
   const [err, setErr] = useState('');
   const camRef = React.useRef(null);
   const fileRef = React.useRef(null);
-  // value = pipe-joined URLs (multiple photos)
-  const urls = value ? String(value).split('|').filter(Boolean) : [];
 
   const handle = async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (!files.length) return;
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // same file dobara chun sakein
+    if (!file) return;
     setErr('');
     setBusy(true);
-    const added = [];
-    for (const file of files) {
-      try {
-        const url = await sbUploadPhoto(invoiceNumber, kind, file);
-        added.push(url);
-      } catch (er) {
-        setErr('Kuch photos upload nahi hue, dobara try karo');
-      }
+    try {
+      const url = await sbUploadPhoto(invoiceNumber, kind, file);
+      onChange(url);
+    } catch (er) {
+      setErr('Upload fail hua, dobara try karo');
     }
-    if (added.length) onChange([...urls, ...added].join('|'));
     setBusy(false);
-  };
-
-  const removeAt = (i) => {
-    const next = urls.filter((_, idx) => idx !== i);
-    onChange(next.join('|'));
   };
 
   return (
     <div className="photo-up">
-      <div className="photo-up-label">
-        {label}
-        {urls.length > 0 && (
-          <span className="photo-count"> · {urls.length}</span>
-        )}
-      </div>
-      {urls.length > 0 && (
-        <div className="photo-grid">
-          {urls.map((u, i) => (
-            <div className="photo-thumb" key={u + i}>
-              <img src={u} alt={`${label} ${i + 1}`} />
-              <button
-                className="photo-x"
-                onClick={() => removeAt(i)}
-                type="button"
-                title="Hatao"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
+      <div className="photo-up-label">{label}</div>
+      {value ? (
+        <div className="photo-preview">
+          <img src={value} alt={label} />
+          <button
+            className="photo-remove"
+            onClick={() => onChange('')}
+            type="button"
+          >
+            <X size={13} /> Hatao
+          </button>
+        </div>
+      ) : (
+        <div className="photo-btns">
+          <button
+            type="button"
+            className="photo-btn"
+            onClick={() => camRef.current && camRef.current.click()}
+            disabled={busy}
+          >
+            <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
+          </button>
+          <button
+            type="button"
+            className="photo-btn alt"
+            onClick={() => fileRef.current && fileRef.current.click()}
+            disabled={busy}
+          >
+            <Upload size={15} /> Device se
+          </button>
         </div>
       )}
-      <div className="photo-btns">
-        <button
-          type="button"
-          className="photo-btn"
-          onClick={() => camRef.current && camRef.current.click()}
-          disabled={busy}
-        >
-          <Camera size={15} />{' '}
-          {busy ? 'Upload ho raha…' : urls.length ? 'Aur photo' : 'Camera'}
-        </button>
-        <button
-          type="button"
-          className="photo-btn alt"
-          onClick={() => fileRef.current && fileRef.current.click()}
-          disabled={busy}
-        >
-          <Upload size={15} /> Device se
-        </button>
-      </div>
       <input
         ref={camRef}
         type="file"
@@ -5236,7 +3853,6 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
         ref={fileRef}
         type="file"
         accept="image/*"
-        multiple
         style={{ display: 'none' }}
         onChange={handle}
       />
@@ -5256,32 +3872,32 @@ function Toast({ msg }) {
 const TRACK_STEPS = [
   {
     id: 'new',
-    label: 'Order Registered',
-    desc: 'Your order has been registered. Our team will call you shortly to confirm the delivery date and time.',
+    label: 'Pickup Registered',
+    desc: 'Your pickup request has been registered. Our team will call you shortly to confirm the pickup date and time.',
     icon: Package,
   },
   {
     id: 'talked',
     label: 'Confirmed With You',
-    desc: 'Our team has contacted you and your delivery date and time has been confirmed.',
+    desc: 'Our team has contacted you and your pickup date and time has been confirmed.',
     icon: Phone,
   },
   {
     id: 'scheduled',
-    label: 'Delivery Scheduled',
-    desc: 'Your item has passed the quality check and the delivery has been scheduled.',
+    label: 'Pickup Scheduled',
+    desc: 'Your pickup has been scheduled. Our team will arrive to collect your item.',
     icon: ClipboardCheck,
   },
   {
     id: 'dispatched',
-    label: 'Out for Delivery',
-    desc: 'Your order has been dispatched and is on its way to your location.',
+    label: 'Out for Pickup',
+    desc: 'Our team is on the way to your location to collect your item.',
     icon: Truck,
   },
   {
     id: 'delivered',
-    label: 'Delivered',
-    desc: 'Your order has been delivered successfully. Thank you for choosing Healthy Jeena Sikho.',
+    label: 'Picked Up',
+    desc: 'Your item has been picked up successfully. Thank you for choosing Healthy Jeena Sikho.',
     icon: CheckCircle2,
   },
 ];
@@ -5298,166 +3914,69 @@ function stepTime(log, stageId) {
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
 function SalesTrackPage() {
-  // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
-  const [range, setRange] = useState('today');
-  const [from, setFrom] = useState(dayStr(Date.now()));
-  const [to, setTo] = useState(dayStr(Date.now()));
-  const [storeFilter, setStoreFilter] = useState(''); // '' = all stores
-  const [statusFilter, setStatusFilter] = useState('all'); // all|pending|delivered
-  const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
-  const [mState, setMState] = useState('loading'); // loading|done|error
-  const [mErr, setMErr] = useState('');
-  const [cell, setCell] = useState(null); // {sales, store}
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateErr, setGateErr] = useState('');
+  const [phone, setPhone] = useState('');
+  const [state, setState] = useState('idle'); // idle|loading|done|notfound|error
   const [rows, setRows] = useState([]);
-  const [cState, setCState] = useState('idle');
-  const [q, setQ] = useState(''); // global search (customer/invoice/salesperson)
-  const [sRows, setSRows] = useState([]);
-  const [sState, setSState] = useState('idle'); // idle|loading|done
-  const [lq, setLq] = useState(''); // list search (cell view)
   const [selected, setSelected] = useState(null);
+  const [err, setErr] = useState('');
 
-  // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      setSState('idle');
-      setSRows([]);
+  // PIN verify: empty phone se call — sahi PIN pe [] aata hai, galat pe error
+  const unlock = async () => {
+    if (!pin) {
+      setGateErr('Enter the sales PIN.');
       return;
     }
-    let alive = true;
-    setSState('loading');
-    const t = setTimeout(async () => {
-      try {
-        const res = await sbSalesSearch(term);
-        if (alive) {
-          setSRows(res || []);
-          setSState('done');
-        }
-      } catch (_) {
-        if (alive) setSState('done');
+    setGateBusy(true);
+    setGateErr('');
+    try {
+      await sbTrackSearch('', pin);
+      setUnlocked(true);
+    } catch (e) {
+      const msg = String(e.message || '');
+      // RPC sirf galat PIN pe hi 'pin' waala error deta hai. Baaki errors
+      // (function missing / permission / naya project setup) alag dikhao.
+      if (/pin|invalid|unauthor/i.test(msg)) {
+        setGateErr('Wrong PIN. Try again.');
+      } else {
+        setGateErr('Access error: ' + msg);
       }
-    }, 300);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [q]);
-
-  const bounds = () => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
     }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'month') {
-      const s = new Date(t.getFullYear(), t.getMonth(), 1);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'custom') return [from, to];
-    return ['2000-01-01', '2999-12-31'];
+    setGateBusy(false);
   };
 
-  const loadMatrix = async () => {
-    setMState('loading');
-    setCell(null);
+  const search = async () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) {
+      setErr('Please enter a full 10-digit mobile number.');
+      return;
+    }
+    setErr('');
+    setState('loading');
     setSelected(null);
-    const [f, t] = bounds();
     try {
-      const res = await sbSalesMatrix(f, t, statusFilter);
-      setMatrix(res || []);
-      setMState('done');
+      const res = await sbTrackSearch(`+91${digits}`, pin);
+      if (!res || res.length === 0) {
+        setRows([]);
+        setState('notfound');
+        return;
+      }
+      setRows(res);
+      setState('done');
     } catch (e) {
-      setMErr(e.message || 'error');
-      setMState('error');
+      // PIN galat ho gaya (e.g. changed) → wapas gate pe
+      if (String(e.message || '').toLowerCase().includes('pin')) {
+        setUnlocked(false);
+        setGateErr('Session expired — enter PIN again.');
+        return;
+      }
+      setErr(e.message || 'Something went wrong');
+      setState('error');
     }
   };
-
-  useEffect(() => {
-    loadMatrix();
-    // eslint-disable-next-line
-  }, [range, from, to, statusFilter]);
-
-  const openCell = async (sales, store) => {
-    setCell({
-      sales,
-      store,
-      title:
-        sales && store
-          ? `${sales} · ${branchLabel(store)}`
-          : sales
-            ? sales
-            : store
-              ? branchLabel(store)
-              : 'All',
-    });
-    setSelected(null);
-    setLq('');
-    setCState('loading');
-    const [f, t] = bounds();
-    try {
-      const res = await sbSalesList(sales, store, f, t, statusFilter);
-      setRows(res || []);
-      setCState('done');
-    } catch (e) {
-      setCState('error');
-    }
-  };
-
-  // matrix ko pivot karo: salespeople (rows) × stores (cols jinme data hai)
-  const stores = [];
-  const people = [];
-  const map = {}; // sales|store -> cnt
-  const rowTotal = {};
-  const colTotal = {};
-  matrix.forEach((m) => {
-    if (!stores.includes(m.store)) stores.push(m.store);
-    if (!people.includes(m.salesperson)) people.push(m.salesperson);
-    map[`${m.salesperson}|${m.store}`] = Number(m.cnt);
-    rowTotal[m.salesperson] = (rowTotal[m.salesperson] || 0) + Number(m.cnt);
-    colTotal[m.store] = (colTotal[m.store] || 0) + Number(m.cnt);
-  });
-  // store order fixed rakho jaha possible
-  const STORE_ORDER = [
-    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
-  ];
-  stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
-  const shownStores = stores;
-  // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
-  const hasNum = (p) => /\d{6,}/.test(String(p || ''));
-  people.sort((a, b) => {
-    const na = hasNum(a) ? 1 : 0;
-    const nb = hasNum(b) ? 1 : 0;
-    if (na !== nb) return nb - na; // number waale pehle
-    return (rowTotal[b] || 0) - (rowTotal[a] || 0);
-  });
-  const shownPeople = people.filter(
-    (p) => !q.trim() || p.toLowerCase().includes(q.trim().toLowerCase()),
-  );
-
-  const shownRows = rows.filter((r) => {
-    if (!lq.trim()) return true;
-    const hay = `${r.customer_name || ''} ${r.invoice_number || ''} ${equipmentText(
-      { line_items: r.line_items, item_name: r.item_name },
-    )}`.toLowerCase();
-    return hay.includes(lq.trim().toLowerCase());
-  });
-
-  const rangeLabel =
-    range === 'today' ? 'Aaj'
-    : range === 'yesterday' ? 'Kal'
-    : range === '7d' ? 'Pichhle 7 din'
-    : range === 'month' ? 'Is mahine'
-    : range === 'all' ? 'Sabhi'
-    : `${from} → ${to}`;
 
   return (
     <div className="track-wrap" style={{ fontFamily: FONT }}>
@@ -5472,236 +3991,170 @@ function SalesTrackPage() {
               Healthy Jeena Sikho
             </div>
             <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Delivery tracker · Sales
+              Pickup tracker · Sales
             </div>
           </div>
         </div>
       </div>
 
-      <div className={cell || selected ? 'track-body' : 'track-body track-wide'}>
-        {/* DETAIL VIEW */}
-        {selected ? (
+      <div className="track-body">
+        {!unlocked ? (
+          <div className="track-card">
+            <h1 className="track-h1">Sales access</h1>
+            <p className="track-sub">
+              Enter the sales PIN to look up customer deliveries.
+            </p>
+            <Field label="Sales PIN">
+              <input
+                className="inp"
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="••••"
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                  setGateErr('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && unlock()}
+              />
+            </Field>
+            {gateErr && <div className="login-err">{gateErr}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={!pin || gateBusy}
+              onClick={unlock}
+            >
+              {gateBusy ? (
+                'Checking…'
+              ) : (
+                <>
+                  Unlock <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            <div className="track-foot" style={{ marginTop: 6 }}>
+              Healthy Jeena Sikho · Internal use only
+            </div>
+          </div>
+        ) : selected ? (
           <>
             <button className="track-back" onClick={() => setSelected(null)}>
               <ArrowLeft size={16} /> Back to list
             </button>
-            <SalesOrderCard row={selected} />
             <TrackResult row={selected} />
           </>
-        ) : cell ? (
-          /* CELL LIST VIEW */
-          <>
-            <button
-              className="track-back"
-              onClick={() => {
-                setCell(null);
-                setStoreFilter('');
-              }}
-            >
-              <ArrowLeft size={16} /> Back to overview
-            </button>
-            <div className="sales-listbar">
-              <div className="sales-list-head">
-                {cell.title} · {shownRows.length}
-              </div>
-              <div className="sales-search">
-                <Search size={15} color={T.inkSoft} />
-                <input
-                  placeholder="Search name, invoice, product…"
-                  value={lq}
-                  onChange={(e) => setLq(e.target.value)}
-                />
-              </div>
-            </div>
-            {cState === 'loading' ? (
-              <div className="track-msg">Loading…</div>
-            ) : shownRows.length === 0 ? (
-              <div className="track-msg">Koi delivery nahi mili.</div>
-            ) : (
-              <SalesGroupedList rows={shownRows} onPick={setSelected} />
-            )}
-          </>
         ) : (
-          /* MATRIX OVERVIEW */
-          <>
-            <div className="mx-toolbar">
-              <div className="mx-search">
-                <Search size={16} color={T.inkSoft} />
+          <div className="track-card">
+            <h1 className="track-h1">Track a customer's pickups</h1>
+            <p className="track-sub">
+              Enter the customer's registered mobile number to see all their
+              orders, latest first.
+            </p>
+            <Field label="Customer mobile number">
+              <div className="phone-row">
+                <span className="code-fixed">+91</span>
                 <input
-                  placeholder="Search customer, invoice, salesperson…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  className="inp phone-input"
+                  inputMode="numeric"
+                  placeholder="Enter mobile number"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value.replace(/\D/g, ''));
+                    setErr('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && search()}
                 />
               </div>
-              <div className="mx-daterow">
-                <select
-                  className="mx-select"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="delivered">Delivered</option>
-                </select>
-                <select
-                  className="mx-select"
-                  value={storeFilter}
-                  onChange={(e) => {
-                    const s = e.target.value;
-                    setStoreFilter(s);
-                    if (s) openCell('', s);
-                    else setCell(null);
-                  }}
-                >
-                  <option value="">All stores</option>
-                  {[
-                    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL',
-                    'LDH', 'CHD', 'NCR',
-                  ].map((s) => (
-                    <option key={s} value={s}>
-                      {branchLabel(s)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="mx-select"
-                  value={range}
-                  onChange={(e) => setRange(e.target.value)}
-                >
-                  <option value="today">Today</option>
-                  <option value="yesterday">Yesterday</option>
-                  <option value="7d">Last 7 days</option>
-                  <option value="month">This month</option>
-                  <option value="all">All time</option>
-                  <option value="custom">Custom range</option>
-                </select>
-                {range === 'custom' && (
-                  <div className="mx-range">
-                    <input
-                      className="mx-date"
-                      type="date"
-                      value={from}
-                      max={to}
-                      onChange={(e) => setFrom(e.target.value)}
-                    />
-                    <span className="mx-arrow">–</span>
-                    <input
-                      className="mx-date"
-                      type="date"
-                      value={to}
-                      min={from}
-                      onChange={(e) => setTo(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="mx-caption">
-              {sState === 'idle' &&
-                `Deliveries by salesperson & store · ${rangeLabel}${statusFilter !== 'all' ? ' · ' + statusFilter[0].toUpperCase() + statusFilter.slice(1) : ''}`}
-            </div>
-
-            {sState !== 'idle' ? (
-              /* GLOBAL SEARCH RESULTS — matrix ki jagah */
-              <>
-                <div className="mx-caption">
-                  {sState === 'loading'
-                    ? 'Searching…'
-                    : `${sRows.length} result${sRows.length === 1 ? '' : 's'} for "${q.trim()}"`}
-                </div>
-                {sState === 'done' && sRows.length === 0 ? (
-                  <div className="track-msg">Kuch nahi mila.</div>
-                ) : (
-                  <SalesGroupedList rows={sRows} onPick={setSelected} />
-                )}
-              </>
-            ) : mState === 'loading' ? (
-              <div className="track-msg">Loading…</div>
-            ) : mState === 'error' ? (
-              <div className="track-msg">Unable to load. {mErr}</div>
-            ) : shownPeople.length === 0 ? (
-              <div className="track-msg">Is duration mein koi delivery nahi.</div>
-            ) : (
-              <div className="matrix-wrap">
-                <table className="matrix">
-                  <thead>
-                    <tr>
-                      <th className="mx-sticky">Salesperson</th>
-                      {shownStores.map((s) => (
-                        <th
-                          key={s}
-                          className="mx-store mx-hclick"
-                          title={`${branchLabel(s)} — click for all`}
-                          onClick={() => colTotal[s] && openCell('', s)}
-                        >
-                          {s}
-                        </th>
-                      ))}
-                      <th className="mx-total">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownPeople.map((person) => {
-                      const rt = rowTotal[person] || 0;
-                      return (
-                        <tr key={person}>
-                          <td
-                            className="mx-sticky mx-name mx-nclick"
-                            onClick={() => openCell(person, '')}
-                            title="Click for all deliveries"
-                          >
-                            {person}
-                          </td>
-                          {shownStores.map((s) => {
-                            const n = map[`${person}|${s}`] || 0;
-                            return (
-                              <td
-                                key={s}
-                                className={
-                                  n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
-                                }
-                                onClick={() => n && openCell(person, s)}
-                              >
-                                {n || '·'}
-                              </td>
-                            );
-                          })}
-                          <td
-                            className={rt ? 'mx-total mx-tclick' : 'mx-total'}
-                            onClick={() => rt && openCell(person, '')}
-                          >
-                            {rt}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    <tr className="mx-footer">
-                      <td className="mx-sticky">Total</td>
-                      {shownStores.map((s) => (
-                        <td
-                          key={s}
-                          className={
-                            colTotal[s] ? 'mx-total mx-tclick' : 'mx-total'
-                          }
-                          onClick={() => colTotal[s] && openCell('', s)}
-                        >
-                          {colTotal[s] || 0}
-                        </td>
-                      ))}
-                      <td className="mx-total">
-                        {matrix.reduce((a, m) => a + Number(m.cnt), 0)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+            </Field>
+            {err && <div className="login-err">{err}</div>}
+            <button
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 4 }}
+              disabled={state === 'loading'}
+              onClick={search}
+            >
+              {state === 'loading' ? (
+                'Searching…'
+              ) : (
+                <>
+                  Search <ArrowRight size={17} />
+                </>
+              )}
+            </button>
+            {state === 'notfound' && (
+              <div className="track-msg">
+                No deliveries found for this number.
               </div>
             )}
-          </>
+            {state === 'error' && (
+              <div className="track-msg">
+                Unable to search right now. Please try again.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!selected && state === 'done' && rows.length > 0 && (
+          <div className="sales-list">
+            <div className="sales-list-head">
+              {rows.length} {rows.length === 1 ? 'delivery' : 'deliveries'} ·
+              latest first
+            </div>
+            {rows.map((r) => {
+              const st = statusToStage(r.status);
+              const cancelled = st === 'cancelled';
+              const stg = stageMeta(st);
+              const equip = equipmentText({
+                line_items: r.line_items,
+                item_name: r.item_name,
+              });
+              const Icon = equipIcon(equip);
+              return (
+                <button
+                  key={r.invoice_number}
+                  className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
+                  onClick={() => setSelected(r)}
+                >
+                  <div className="eq-ico" style={{ background: stg.soft }}>
+                    <Icon size={17} color={stg.color} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="sales-row-top">
+                      <span
+                        className="ellip"
+                        style={{ fontWeight: 800, fontSize: 14.5 }}
+                      >
+                        {r.customer_name || 'Customer'}
+                      </span>
+                      <span
+                        className="sales-chip"
+                        style={{ background: stg.soft, color: stg.color }}
+                      >
+                        {stg.short}
+                      </span>
+                    </div>
+                    <div className="ellip sales-sub">{equip}</div>
+                    <div className="sales-meta">
+                      <span className="ellip">#{r.invoice_number}</span>
+                      <span>
+                        ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+                      </span>
+                      {niceDate(r.created_at) && (
+                        <span>{niceDate(r.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={T.inkSoft} />
+                </button>
+              );
+            })}
+          </div>
         )}
 
         <div className="track-foot">
-          Healthy Jeena Sikho · Internal delivery tracker
+          Healthy Jeena Sikho · Internal pickup tracker
         </div>
       </div>
     </div>
@@ -5761,7 +4214,7 @@ function TrackPage({ invoice }) {
               Healthy Jeena Sikho
             </div>
             <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Track your delivery
+              Track your pickup
             </div>
           </div>
         </div>
@@ -5769,7 +4222,7 @@ function TrackPage({ invoice }) {
 
       <div className="track-body">
         <div className="track-card">
-          <h1 className="track-h1">Track your delivery</h1>
+          <h1 className="track-h1">Track your pickup</h1>
           <p className="track-sub">
             Welcome! Please enter your registered mobile number to see your
             order status.
@@ -5898,139 +4351,6 @@ function TrackPage({ invoice }) {
   );
 }
 
-/* Sales list ko group karke dikhao: pehle Pending (stage order mein),
-   phir Delivered, phir Cancelled. Har group ka heading + count. */
-function SalesGroupedList({ rows, onPick }) {
-  const order = ['new', 'talked', 'scheduled', 'dispatched']; // pending stages
-  const rank = (r) => {
-    const st = statusToStage(r.status);
-    const i = order.indexOf(st);
-    return i === -1 ? 99 : i;
-  };
-  const pending = rows
-    .filter((r) => order.includes(statusToStage(r.status)))
-    .sort((a, b) => rank(a) - rank(b));
-  const delivered = rows.filter((r) => statusToStage(r.status) === 'delivered');
-  const cancelled = rows.filter((r) => statusToStage(r.status) === 'cancelled');
-
-  const Row = (r) => {
-    const st = statusToStage(r.status);
-    const cancel = st === 'cancelled';
-    const stg = stageMeta(st);
-    const equip = equipmentText({
-      line_items: r.line_items,
-      item_name: r.item_name,
-    });
-    const Icon = equipIcon(equip);
-    return (
-      <button
-        key={r.invoice_number}
-        className={cancel ? 'sales-row is-cancelled' : 'sales-row'}
-        onClick={() => onPick(r)}
-      >
-        <div className="eq-ico" style={{ background: stg.soft }}>
-          <Icon size={17} color={stg.color} />
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="sales-row-top">
-            <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
-              {r.customer_name || 'Customer'}
-            </span>
-            <span
-              className="sales-chip"
-              style={{ background: stg.soft, color: stg.color }}
-            >
-              {stg.short}
-            </span>
-          </div>
-          <div className="ellip sales-sub">{equip}</div>
-          <div className="sales-meta">
-            <span className="ellip">#{r.invoice_number}</span>
-            <span>
-              ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
-            </span>
-            {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
-          </div>
-        </div>
-        <ChevronRight size={18} color={T.inkSoft} />
-      </button>
-    );
-  };
-
-  const Group = (title, list, color) =>
-    list.length === 0 ? null : (
-      <div className="sgroup">
-        <div className="sgroup-head">
-          <span className="sgroup-dot" style={{ background: color }} />
-          {title}
-          <span className="sgroup-count">{list.length}</span>
-        </div>
-        <div className="sales-list">{list.map(Row)}</div>
-      </div>
-    );
-
-  return (
-    <>
-      {Group('Pending', pending, T.blue)}
-      {Group('Delivered', delivered, T.green)}
-      {Group('Cancelled', cancelled, T.red)}
-    </>
-  );
-}
-
-/* Sales-only detail card — sab zaroori info ek jagah, systematically */
-function SalesOrderCard({ row }) {
-  const store = deriveBranch(row);
-  const manager = STORE_MANAGERS[store] || '—';
-  const stage = statusToStage(row.status);
-  const stg = stageMeta(stage);
-  const val = (x) => (x && x !== 'null' ? x : null);
-  const money = (n) =>
-    n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : null;
-
-  const rows = [
-    ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
-    ['Salesperson', val(row.salesperson) || '—'],
-    ['Store', branchLabel(store)],
-    ['Store manager', manager],
-    ['Delivery slot given',
-      val(row.confirmed_date)
-        ? `${niceDate(row.confirmed_date)}${val(row.confirmed_time) ? ', ' + niceTime(row.confirmed_time) : ''}`
-        : '—'],
-    ['Delivery person', val(row.app_delivery_person) || '—'],
-    ['Mode of transport', val(row.app_vehicle) || '—'],
-    ['Estimated arrival', niceDateTime(row.app_eta) || '—'],
-    ['Amount collected',
-      money(row.amount_collected)
-        ? `${money(row.amount_collected)}${val(row.amount_type) ? ' · ' + row.amount_type : ''}`
-        : '—'],
-    ['Security collected',
-      money(row.security_collected)
-        ? `${money(row.security_collected)}${val(row.security_type) ? ' · ' + row.security_type : ''}`
-        : '—'],
-    ['Invoice total', money(row.total_amount) || '—'],
-  ];
-
-  return (
-    <div className="soc">
-      <div className="soc-head">
-        <div>
-          <div className="soc-cust">{row.customer_name || 'Customer'}</div>
-          <div className="soc-inv">#{row.invoice_number}</div>
-        </div>
-      </div>
-      <div className="soc-grid">
-        {rows.map(([k, v]) => (
-          <div className="soc-item" key={k}>
-            <div className="soc-k">{k}</div>
-            <div className="soc-v">{v}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function TrackResult({ row }) {
   // row = safe fields from track_order RPC (poora delivery row NAHI)
   const equipment = equipmentText({
@@ -6052,54 +4372,23 @@ function TrackResult({ row }) {
   const Icon = equipIcon(equipment);
   const person = row.delivery_partner || null;
   const orderId = row.invoice_number;
-  // MBC = Managed By Client — customer khud collect karta hai. Us case mein
-  // "Out for Delivery" step dikhana galat hai; wording bhi pickup waali honi
-  // chahiye. Isliye steps filter + override karte hain.
-  const mbc = String(person || '').trim().toUpperCase() === 'MBC';
-  const steps = mbc
-    ? TRACK_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
-        st.id === 'scheduled'
-          ? {
-              ...st,
-              label: 'Ready for Collection',
-              desc: 'Your item has passed the quality check and is ready. You will collect it as arranged with the store.',
-            }
-          : st.id === 'delivered'
-            ? {
-                ...st,
-                label: 'Handed Over',
-                desc: 'Your order has been handed over to you. Thank you for choosing Healthy Jeena Sikho.',
-              }
-            : st,
-      )
-    : TRACK_STEPS;
 
   const banner = cancelled
     ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
-      ? {
-          text: mbc ? 'Handed over successfully 🎉' : 'Delivered successfully 🎉',
-          bg: T.mint,
-          fg: T.green,
-        }
+      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
       : stage === 'dispatched'
         ? {
-            text: 'Your order is out for delivery',
+            text: 'Our team is on the way to pick up your item',
             bg: T.violetSoft,
             fg: T.violet,
           }
         : stage === 'scheduled'
-          ? {
-              text: mbc
-                ? 'Your item is ready for collection'
-                : 'Your delivery is scheduled',
-              bg: T.amberSoft,
-              fg: T.amber,
-            }
+          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
           : stage === 'talked'
-            ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
+            ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
             : {
-                text: 'Your order has been received',
+                text: 'Your pickup request has been received',
                 bg: T.slateSoft,
                 fg: T.slate,
               };
@@ -6135,12 +4424,9 @@ function TrackResult({ row }) {
 
       {/* the timeline */}
       <div className="track-tl">
-        {steps.map((step) => {
-          // array-index nahi, asli stage-index dekho (MBC mein ek step hata
-          // diya jaata hai, isliye index shift ho jaata)
-          const si = stageIndex(step.id);
-          if (si > flowIdx) return null; // sirf reached stages dikhao
-          const current = !cancelled && si === idx;
+        {TRACK_STEPS.map((step, i) => {
+          if (i > flowIdx) return null; // sirf reached stages dikhao
+          const current = !cancelled && i === idx;
           // "reached this stage" time — har stage pe green chhota timestamp
           const reachedTs =
             stepTime(log, step.id) ||
@@ -6153,7 +4439,7 @@ function TrackResult({ row }) {
               : null);
           const StepIcon = step.icon;
           // closed hua to aakhri reached stage bhi neeche closed-entry se jude
-          const showLine = si < flowIdx || cancelled;
+          const showLine = i < flowIdx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
               <div className="ttl-left">
@@ -6197,31 +4483,25 @@ function TrackResult({ row }) {
                   <div className="ttl-extra">
                     {(schedDate || schedTime) && (
                       <div>
-                        <b>{mbc ? 'Collection slot:' : 'Delivery slot:'}</b>{' '}
-                        {schedDate || ''}
+                        <b>Pickup slot:</b> {schedDate || ''}
                         {schedDate && schedTime ? ', ' : ''}
                         {schedTime || ''}
                       </div>
                     )}
-                    {mbc ? (
+                    {person && (
                       <div>
-                        <b>Collection:</b> Self pickup — arranged by you
+                        <b>Pickup person:</b> {person}
                       </div>
-                    ) : (
-                      person && (
-                        <div>
-                          <b>Delivery partner:</b> {person}
-                        </div>
-                      )
                     )}
                   </div>
                 )}
 
                 {/* Stage 4 — out for delivery: estimated arrival */}
-                {step.id === 'dispatched' && niceDateTime(row.app_eta) && (
+                {step.id === 'dispatched' && row.app_eta && (
                   <div className="ttl-extra">
                     <div>
-                      <b>Estimated arrival:</b> {niceDateTime(row.app_eta)}
+                      <b>Estimated arrival:</b>{' '}
+                      {niceTime(String(row.app_eta || '').slice(11, 16))}
                     </div>
                   </div>
                 )}
@@ -6282,7 +4562,7 @@ const ACT_KINDS = [
   { id: 'all', label: 'Sab updates' },
   { id: 'move', label: 'Stage move' },
   { id: 'edit', label: 'Edit' },
-  { id: 'closed', label: 'Cancel / Dup / Renewal' },
+  { id: 'closed', label: 'Cancelled' },
   { id: 'delete', label: 'Delete' },
 ];
 function actKind(ev) {
@@ -6307,6 +4587,7 @@ function actTitle(ev) {
     (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
     ev.label ||
     ev.stage;
+  if (ev.label === 'Rescheduled') return 'Reschedule kiya';
   if (k === 'delete') return 'Entry delete ki';
   if (k === 'closed') return `${lbl} mark kiya`;
   if (k === 'edit') return `${lbl} edit kiya`;
@@ -6580,43 +4861,6 @@ function StyleTag() {
       .brand-badge { width: 40px; height: 40px; border-radius: 12px; background: ${T.green}; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(46,125,50,.35); }
       .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
       .nav-item:hover { background: rgba(255,255,255,.07); }
-      /* ── DASHBOARD ── */
-      .dash-switch { display: flex; margin-bottom: 16px; }
-      .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
-      .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
-      .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
-      .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
-      /* dashboard ke date inputs pe bhi wahi green calendar icon (warna
-         icon default light-grey hota hai aur beige background mein chhup jaata) */
-      .dash-inp[type="date"] { cursor: pointer; }
-      .dash-inp[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 18px; height: 18px; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
-      .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
-      .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
-      .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
-      .dash-card.on { box-shadow: 0 4px 16px rgba(20,57,43,.12); }
-      .dash-card-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
-      .dash-card-n { font-size: 26px; font-weight: 800; color: ${T.ink}; line-height: 1; }
-      .dash-card-l { font-size: 11.5px; font-weight: 600; color: ${T.inkSoft}; margin-top: 5px; }
-      .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
-      .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
-      .dash-table-wrap { overflow-x: auto; }
-      .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-      .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
-      .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
-      /* table scroll karte waqt pehla column (Store / Invoice) jama rehta hai */
-      .dash-table th:first-child, .dash-table td:first-child { position: sticky; left: 0; z-index: 2; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
-      .dash-table thead th:first-child { z-index: 3; }
-      .dash-row:hover td:first-child { background: ${T.cream}; }
-      .dash-store { font-weight: 700; color: ${T.ink}; }
-      .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
-      .dash-td-click:hover { background: ${T.mint}; }
-      .dash-td-zero { color: ${T.line2 || '#C9C7BE'}; }
-      .dash-row { cursor: pointer; }
-      .dash-row:hover { background: ${T.cream}; }
-      .dash-chip { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-      .dash-empty { text-align: center; color: ${T.inkSoft}; padding: 26px !important; }
-      @media (max-width: 1100px) { .dash-cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-      @media (max-width: 760px) { .dash-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       .soon { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; color: rgba(255,255,255,.7); }
       .store-tag { margin: 12px; padding: 12px 14px; border-radius: 13px; background: rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
 
@@ -6688,6 +4932,11 @@ function StyleTag() {
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
+      /* Rescheduled — pending hi hai, bas alag rang aur badge */
+      .card.is-resched { background: #FDF6EA; border-color: #EEDFC2; }
+      .card.is-resched:hover { border-color: #E2CB9F; }
+      .resched-chip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; background: ${T.amberSoft}; color: ${T.amber}; border-radius: 9px; padding: 6px 10px; font-size: 11.5px; font-weight: 800; }
+      .resched-note { font-weight: 600; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
       .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
 
       .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
@@ -6722,20 +4971,15 @@ function StyleTag() {
       .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
       .tp12 .inp:last-child { flex: 0 0 84px; }
       .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
-      .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
-      .created-note b { color: ${T.ink}; font-weight: 700; }
-      .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
       .photo-btns { display: flex; gap: 9px; }
       .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .photo-btn.alt { background: #fff; color: ${T.green}; }
       .photo-btn:disabled { opacity: .6; cursor: default; }
-      .photo-count { color: ${T.green}; font-weight: 800; }
-      .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-      .photo-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; aspect-ratio: 1 / 1; }
-      .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .photo-x { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: rgba(20,32,26,.85); color: #fff; border: none; border-radius: 7px; cursor: pointer; }
+      .photo-preview { position: relative; }
+      .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
+      .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
       .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 
@@ -6843,10 +5087,6 @@ function StyleTag() {
       .track-wrap { min-height: 100vh; background: ${T.beige}; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
-      .track-body.track-wide { max-width: 1100px; }
-      /* sales date inputs — calendar icon clearly dikhe (green) */
-      .mx-select, .mx-date { position: relative; }
-      .mx-date::-webkit-calendar-picker-indicator { opacity: 1; width: 18px; height: 18px; cursor: pointer; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
@@ -6877,73 +5117,9 @@ function StyleTag() {
       .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
       .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
       .track-back:hover { background: ${T.beige}; }
-      .sales-list { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
-      .sgroup { margin-top: 18px; }
-      .sgroup:first-child { margin-top: 8px; }
-      .sgroup-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: ${T.ink}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
-      .sgroup-dot { width: 9px; height: 9px; border-radius: 50%; }
-      .sgroup-count { margin-left: 4px; font-size: 12px; font-weight: 800; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 999px; padding: 1px 9px; }
+      .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
       .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
       .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
-      .sales-stores { margin-bottom: 16px; }
-      .sales-stores-label { font-size: 12px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 9px; }
-      .sales-stores-row { display: flex; flex-wrap: wrap; gap: 8px; }
-      .store-pill { border: 1.5px solid ${T.line}; background: #fff; color: ${T.ink}; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; transition: all .12s; }
-      .store-pill:hover { border-color: ${T.green}; }
-      .store-pill.is-active { background: ${T.forest}; border-color: ${T.forest}; color: #fff; }
-      .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-      .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
-      .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
-      /* Sales matrix — toolbar + polished light table */
-      .mx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-      .mx-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 10px 14px; flex: 1; min-width: 220px; }
-      .mx-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 14px; color: ${T.ink}; width: 100%; }
-      .mx-daterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-      .mx-select { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .mx-range { display: inline-flex; align-items: center; gap: 6px; }
-      .mx-date { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 9px 12px; font-size: 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
-      .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
-      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
-      .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
-      .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
-      .mx-hclick { cursor: pointer; }
-      .mx-hclick:hover { background: ${T.green}; color: #fff; }
-      .matrix tbody td { border-bottom: 1px solid #F1EFE8; }
-      .matrix tbody tr:last-child td { border-bottom: none; }
-      .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
-      .matrix tbody tr:hover td { background: ${T.mint}; }
-      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: inherit; }
-      .matrix thead .mx-sticky { background: ${T.mint}; }
-      .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
-      .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
-      .matrix tbody tr:hover .mx-sticky { background: ${T.mint}; }
-      .mx-store { min-width: 64px; }
-      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 210px; font-size: 14px; }
-      .mx-nclick { cursor: pointer; }
-      .mx-nclick:hover { color: ${T.green}; text-decoration: underline; }
-      .mx-cell { font-weight: 800; font-size: 15.5px; }
-      .mx-click { color: ${T.green}; cursor: pointer; }
-      .mx-click:hover { text-decoration: underline; }
-      .mx-zero { color: #D0CEC4; font-weight: 500; }
-      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; font-size: 15px; }
-      .mx-tclick { cursor: pointer; }
-      .mx-tclick:hover { color: ${T.green}; text-decoration: underline; }
-      .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
-      .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
-      .mx-footer .mx-sticky { background: #F4F2EB !important; }
-      /* Sales-only order details card */
-      .soc { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 18px 18px 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .soc-head { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #F1EFE8; margin-bottom: 4px; }
-      .soc-cust { font-size: 17px; font-weight: 800; color: ${T.ink}; }
-      .soc-inv { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; margin-top: 2px; }
-      .soc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-      .soc-item { padding: 11px 4px; border-bottom: 1px solid #F5F3EC; }
-      .soc-item:nth-child(odd) { padding-right: 16px; }
-      .soc-k { font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
-      .soc-v { font-size: 14px; font-weight: 600; color: ${T.ink}; }
-      @media (max-width: 560px) { .soc-grid { grid-template-columns: 1fr; } }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
@@ -6952,6 +5128,43 @@ function StyleTag() {
       .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
       .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
       .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
+
+      /* ── DASHBOARD ── */
+      .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+      .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
+      .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+      .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
+      /* dashboard ke date inputs pe bhi wahi green calendar icon (warna
+         icon default light-grey hota hai aur beige background mein chhup jaata) */
+      .dash-inp[type="date"] { cursor: pointer; }
+      .dash-inp[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 18px; height: 18px; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
+      .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+      .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
+      .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
+      .dash-card.on { box-shadow: 0 4px 16px rgba(20,57,43,.12); }
+      .dash-card-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+      .dash-card-n { font-size: 26px; font-weight: 800; color: ${T.ink}; line-height: 1; }
+      .dash-card-l { font-size: 11.5px; font-weight: 600; color: ${T.inkSoft}; margin-top: 5px; }
+      .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
+      .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
+      .dash-table-wrap { overflow-x: auto; }
+      .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
+      .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
+      /* table scroll karte waqt pehla column (Store / Invoice) jama rehta hai */
+      .dash-table th:first-child, .dash-table td:first-child { position: sticky; left: 0; z-index: 2; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
+      .dash-table thead th:first-child { z-index: 3; }
+      .dash-row:hover td:first-child { background: ${T.cream}; }
+      .dash-store { font-weight: 700; color: ${T.ink}; }
+      .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
+      .dash-td-click:hover { background: ${T.mint}; }
+      .dash-td-zero { color: ${T.line2 || '#C9C7BE'}; }
+      .dash-row { cursor: pointer; }
+      .dash-row:hover { background: ${T.cream}; }
+      .dash-chip { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+      .dash-empty { text-align: center; color: ${T.inkSoft}; padding: 26px !important; }
+      @media (max-width: 1100px) { .dash-cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+      @media (max-width: 760px) { .dash-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 
       /* ── activity log (overall history panel) ── */
       .act-panel { margin-left: auto; width: 560px; max-width: 96vw; height: 100%; background: ${T.cream}; display: flex; flex-direction: column; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
