@@ -649,12 +649,18 @@ function stageFields(toStage, f) {
   if (toStage === 'scheduled')
     return { Person: f.person || '—', Transport: f.vehicle || '—', ...rmk };
   if (toStage === 'dispatched')
-    return { 'Estimated arrival': f.eta ? niceDateTime(f.eta) || f.eta : '—', ...rmk };
+    return {
+      'Estimated arrival': f.eta
+        ? niceTime(String(f.eta).slice(11, 16)) || f.eta
+        : '—',
+      ...rmk,
+    };
   if (toStage === 'delivered')
     return {
       Inspected: f.inspected ? 'Yes' : 'No',
       Date: f.pickDate ? niceDate(f.pickDate) || f.pickDate : '—',
       Charges: `₹${f.charges || 0}`,
+      'Pending collected': `₹${f.pendingCollected || 0}`,
       Done: f.done ? 'Yes' : 'No',
       ...rmk,
     };
@@ -843,6 +849,14 @@ function rowToDelivery(r) {
       r.total_amount !== '' &&
       r.total_amount !== 'null'
         ? Number(r.total_amount)
+        : null,
+    // pending = invoice ka bacha hua balance (Books se aata hai). Card pe
+    // yahi dikhta hai — wahi to uthana hai customer se.
+    pending:
+      r.pending_amount != null &&
+      r.pending_amount !== '' &&
+      r.pending_amount !== 'null'
+        ? Number(r.pending_amount)
         : null,
     charges:
       r.pickup_charges_collected != null &&
@@ -1098,6 +1112,10 @@ export default function App() {
       patch.actual_pickup_date = f.pickDate || null;
       patch.pickup_charges_collected =
         f.charges === '' || f.charges == null ? null : Number(f.charges);
+      patch.pending_collected =
+        f.pendingCollected === '' || f.pendingCollected == null
+          ? null
+          : Number(f.pendingCollected);
       patch.pickup_done = !!f.done;
       patch.stage4_remarks = f.remarks || null;
     }
@@ -2738,9 +2756,13 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         </div>
       )}
       <div className="card-meta">
-        {d.amount != null && (
-          <span style={{ color: T.green, fontWeight: 800 }}>
-            <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
+        {d.pending != null && (
+          <span
+            style={{ color: d.pending > 0 ? T.red : T.green, fontWeight: 800 }}
+            title="Pending amount"
+          >
+            <IndianRupee size={12} /> {d.pending.toLocaleString('en-IN')}
+            {d.pending > 0 ? ' pending' : ' clear'}
           </span>
         )}
         <span className="ellip" style={{ maxWidth: 130 }}>
@@ -2879,7 +2901,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       id: 'dispatched',
       i: 3,
       rows: [
-        ['Estimated arrival', niceDateTime(r.app_eta) || '—'],
+        ['Estimated arrival', niceTime(String(r.app_eta || '').slice(11, 16)) || '—'],
         ['Remarks', show(r.stage3_remarks)],
       ],
     },
@@ -2894,6 +2916,14 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           'Charges',
           r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
             ? `₹${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
+            : '—',
+        ],
+        [
+          'Pending collected',
+          r.pending_collected != null &&
+          r.pending_collected !== '' &&
+          r.pending_collected !== 'null'
+            ? `₹${Number(r.pending_collected).toLocaleString('en-IN')}`
             : '—',
         ],
         ['Remarks', show(r.stage4_remarks)],
@@ -3079,7 +3109,11 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           <KV label="Area" value={d.area} />
           <KV label="Equipment" value={d.equipment} full />
           <KV
-            label="Invoice amount"
+            label="Pending amount"
+            value={d.pending != null ? `₹${d.pending.toLocaleString('en-IN')}` : '—'}
+          />
+          <KV
+            label="Invoice total"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
           <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
@@ -3358,6 +3392,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
   const nowDT = `${nowDate}T${nowTime}`;
+  // ETA ki date ab poochhi nahi jaati — jo pickup date tay hui hai wahi le
+  // lete hain (na ho to aaj). Staff sirf time bharta hai.
+  const etaDay =
+    (r.confirmed_date && r.confirmed_date !== 'null'
+      ? String(r.confirmed_date).slice(0, 10)
+      : '') || nowDate;
   const [f, setF] = useState({
     // pehli stage pe: talked | resched | cancelled
     flow: 'talked',
@@ -3375,6 +3415,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
     photoPicked: r.pickup_image && r.pickup_image !== 'null' ? r.pickup_image : '',
     pickDate: mode === 'edit' && r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : nowDate,
     charges: r.pickup_charges_collected != null && r.pickup_charges_collected !== '' ? r.pickup_charges_collected : '',
+    pendingCollected:
+      r.pending_collected != null && r.pending_collected !== '' && r.pending_collected !== 'null'
+        ? r.pending_collected
+        : '',
     done: !!r.pickup_done,
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -3467,34 +3511,17 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
         )}
         {toStage === 'dispatched' && (
           <>
-            <Field label="Estimated arrival date *">
-              <input
-                className="inp"
-                type="date"
-                value={(f.eta || '').slice(0, 10)}
-                min="2024-01-01"
-                max="2099-12-31"
-                onClick={openPicker}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v && Number(v.slice(0, 4)) > 2099) return;
-                  set('eta', v ? `${v}T${(f.eta || '').slice(11, 16) || '00:00'}` : '');
-                }}
-              />
-            </Field>
             <Field label="Estimated arrival time *">
               <TimePick12
                 value={(f.eta || '').slice(11, 16)}
-                onChange={(t) => set('eta', `${(f.eta || '').slice(0, 10) || nowDate}T${t}`)}
+                onChange={(t) => set('eta', `${etaDay}T${t}`)}
               />
-              {f.eta && (f.eta || '').slice(11, 16) && (
-                <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
+              {(f.eta || '').slice(11, 16) && (
+                <span className="tp-preview">🕐 {niceTime((f.eta || '').slice(11, 16))}</span>
               )}
             </Field>
-            {!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16)) && (
-              <div className="req-note">
-                Customer ko yahi date &amp; time jaayega — dono bharna zaroori hai.
-              </div>
+            {!(f.eta && f.eta.slice(11, 16)) && (
+              <div className="req-note">Estimated time bharna zaroori hai.</div>
             )}
           </>
         )}
@@ -4354,10 +4381,11 @@ function TrackResult({ row }) {
                 )}
 
                 {/* Stage 4 — out for delivery: estimated arrival */}
-                {step.id === 'dispatched' && niceDateTime(row.app_eta) && (
+                {step.id === 'dispatched' && row.app_eta && (
                   <div className="ttl-extra">
                     <div>
-                      <b>Estimated arrival:</b> {niceDateTime(row.app_eta)}
+                      <b>Estimated arrival:</b>{' '}
+                      {niceTime(String(row.app_eta || '').slice(11, 16))}
                     </div>
                   </div>
                 )}
