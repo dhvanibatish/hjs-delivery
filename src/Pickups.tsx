@@ -1918,11 +1918,6 @@ function Dashboard({ deliveries, onOpen }) {
       !isClosedStage(x.stage) &&
       plannedDate(x) &&
       plannedDate(x) > today,
-    overdue: (x) =>
-      x.stage !== 'delivered' &&
-      !isClosedStage(x.stage) &&
-      plannedDate(x) &&
-      plannedDate(x) < today,
     resched: (x) => isResched(x),
     nophoto: (x) =>
       x.stage === 'delivered' &&
@@ -1942,7 +1937,6 @@ function Dashboard({ deliveries, onOpen }) {
     { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
     { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
     { kind: 'resched', label: 'Rescheduled', color: T.amber, soft: T.amberSoft },
-    { kind: 'overdue', label: 'Date nikal gayi', color: T.red, soft: T.redSoft },
     { kind: 'nophoto', label: 'Picked up · photo missing', color: T.violet, soft: T.violetSoft },
   ];
 
@@ -2039,13 +2033,12 @@ function Dashboard({ deliveries, onOpen }) {
                 <th>Picked Up</th>
                 <th>Pending</th>
                 <th>Future</th>
-                <th>Overdue</th>
               </tr>
             </thead>
             <tbody>
               {base.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="dash-empty">Is duration mein koi entry nahi</td>
+                  <td colSpan={9} className="dash-empty">Is duration mein koi entry nahi</td>
                 </tr>
               ) : (
                 DASH_STORES.filter((st) => store === 'ALL' || store === st).map((st) => {
@@ -2067,11 +2060,10 @@ function Dashboard({ deliveries, onOpen }) {
                           {cnt(stageMetric[k], list)}
                         </td>
                       ))}
-                      {['pending', 'future', 'overdue'].map((k) => (
+                      {['pending', 'future'].map((k) => (
                         <td
                           key={k}
                           className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
-                          style={k === 'overdue' && has(k) ? { color: T.red } : {}}
                           onClick={() => has(k) && setSel({ kind: k, store: st })}
                         >
                           {cnt(metric[k], list)}
