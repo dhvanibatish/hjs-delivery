@@ -815,8 +815,13 @@ function useIsMobile(bp = 760) {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
-export default function App() {
-  const [session, setSession] = useState(null);
+export default function App({ session: extSession = null, view = 'board' }) {
+  // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
+  // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
+  const hosted = !!extSession;
+  const [ownSession, setOwnSession] = useState(null);
+  const session = hosted ? extSession : ownSession;
+  const setSession = hosted ? () => {} : setOwnSession;
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -829,7 +834,10 @@ export default function App() {
   const [lang, setLang] = useState(HJS_LANG);
   const [lastMove, setLastMove] = useState(null);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
-  const [page, setPage] = useState('tickets'); // tickets | dashboard
+  const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
+  // hosted mode mein page delivery app ka sidebar decide karta hai
+  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'tickets') : ownPage;
+  const setPage = hosted ? () => {} : setOwnPage;
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -995,6 +1003,78 @@ export default function App() {
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // ── HOSTED: delivery app ke <main> ke andar — sirf content, koi chrome nahi
+  if (hosted) {
+    return (
+      <>
+        <StyleTag />
+        {page === 'dashboard' ? (
+          <Dashboard tickets={scoped} onOpen={(x) => setActiveId(x.ticket_id)} />
+        ) : (
+          <>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={() => {}}
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>{L('connectFail')}</b> {error}
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={effLayout}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.ticket_id)}
+              onMove={(x, toStage) =>
+                setModal({ ticketId: x.ticket_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.ticket_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
+          </>
+        )}
+        {active && (
+          <Drawer
+            d={active}
+            canDelete={session.isHead}
+            onDelete={() => removeEntry(active.ticket_id)}
+            onClose={() => setActiveId(null)}
+            onAdvance={(toStage) =>
+              setModal({ ticketId: active.ticket_id, toStage, mode: 'move' })
+            }
+            onSetStage={(toStage) => setStage(active.ticket_id, toStage)}
+            onEditStage={(sid) =>
+              setModal({ ticketId: active.ticket_id, toStage: sid, mode: 'edit' })
+            }
+          />
+        )}
+        {modal && (
+          <StageModal
+            ticket={tickets.find((x) => x.ticket_id === modal.ticketId)}
+            toStage={modal.toStage}
+            mode={modal.mode}
+            onClose={() => setModal(null)}
+            onSave={commitModal}
+          />
+        )}
+        {toast && <Toast msg={toast} />}
+      </>
+    );
+  }
 
   return (
     <div
