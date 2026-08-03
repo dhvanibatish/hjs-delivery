@@ -376,6 +376,9 @@ function statusToStage(s) {
   const t = String(s || '').toLowerCase();
   if (t.includes('delet')) return 'deleted';
   if (t.includes('cancel')) return 'cancelled';
+  // Rescheduled = abhi bhi pehli stage. NOTE: 'schedul' se PEHLE check zaroori,
+  // warna "Rescheduled" galti se Pickup Scheduled ban jaata.
+  if (t.includes('reschedul')) return 'new';
   if (t.includes('new')) return 'new';
   if (t.includes('schedul')) return 'scheduled';
   if (t.includes('out for')) return 'dispatched';
@@ -436,6 +439,11 @@ const CLOSED_STATUS = {
   cancelled: 'Cancelled',
 };
 const isClosedStage = (s) => s === 'cancelled' || s === 'deleted';
+/* Rescheduled — customer ne abhi date nahi di, baad mein baat hogi. Entry
+   pehli stage mein hi pending rehti hai, bas tile pe alag dikhti hai. */
+const RESCHED_STATUS = 'Rescheduled';
+const isResched = (x) =>
+  /reschedul/i.test(String((x && x.rawStatus) || ''));
 
 /* ── Dashboard / Activity ke chhote helpers ──────────────────────────── */
 const DASH_STORES = [
@@ -787,7 +795,8 @@ const CATS = [
     icon: Package,
     color: T.blue,
     soft: T.blueSoft,
-    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
+    test: (x) =>
+      !isClosedStage(x.stage) && x.stage !== 'delivered' && !isResched(x),
   },
   {
     id: 'delivered',
@@ -796,6 +805,14 @@ const CATS = [
     color: T.forestSoft,
     soft: T.mint,
     test: (x) => x.stage === 'delivered',
+  },
+  {
+    id: 'resched',
+    label: 'Rescheduled',
+    icon: RotateCcw,
+    color: T.amber,
+    soft: T.amberSoft,
+    test: (x) => isResched(x),
   },
   {
     id: 'cancelled',
@@ -1116,7 +1133,50 @@ export default function App() {
   };
 
   // core move/edit apply — modal aur inline card dono use karte hain
+  // Reschedule — entry pehli stage mein hi rehti hai, bas status "Rescheduled"
+  // ho jaata hai aur pehle se bhari confirmed date/time hat jaati hai.
+  const rescheduleEntry = async (invoiceId, remarks) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    const patch = {
+      status: RESCHED_STATUS,
+      confirmed_date: null,
+      confirmed_time: null,
+      stage1_remarks: remarks || null,
+      updated_at: new Date().toISOString(),
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: new Date().toISOString(),
+          stage: 'new',
+          label: 'Rescheduled',
+          action: 'Marked as',
+          fields: remarks ? { Remarks: remarks } : {},
+          ...actorStamp(),
+        },
+      ],
+    };
+    if (!CONFIGURED) {
+      ping('Demo mode — save nahi hua');
+      return;
+    }
+    try {
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      ping('Rescheduled ✓ — entry pending mein hi hai');
+      jumpMobile('new');
+      load();
+    } catch (e) {
+      ping('Save failed: ' + e.message);
+    }
+  };
+
   const applyMove = async (invoiceId, toStage, fields, mode) => {
+    // pehli stage ka dropdown: reschedule / cancel alag raaste
+    if (toStage === 'talked' && mode === 'move') {
+      if (fields.flow === 'cancelled')
+        return closeEntry(invoiceId, 'cancelled', fields.remarks);
+      if (fields.flow === 'resched')
+        return rescheduleEntry(invoiceId, fields.remarks);
+    }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
@@ -1748,6 +1808,7 @@ function Dashboard({ deliveries, onOpen }) {
       !isClosedStage(x.stage) &&
       plannedDate(x) &&
       plannedDate(x) < today,
+    resched: (x) => isResched(x),
     nophoto: (x) =>
       x.stage === 'delivered' &&
       !(x._raw && x._raw.pickup_image && x._raw.pickup_image !== 'null'),
@@ -1765,6 +1826,7 @@ function Dashboard({ deliveries, onOpen }) {
     { kind: 'picked', label: 'Picked up', color: T.green, soft: T.mint },
     { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
     { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
+    { kind: 'resched', label: 'Rescheduled', color: T.amber, soft: T.amberSoft },
     { kind: 'overdue', label: 'Date nikal gayi', color: T.red, soft: T.redSoft },
     { kind: 'nophoto', label: 'Picked up · photo missing', color: T.violet, soft: T.violetSoft },
   ];
@@ -2643,6 +2705,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
 }
 
 function Card({ d, stage, onOpen, onMove, onCommit }) {
+  const resched = isResched(d);
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
@@ -2651,7 +2714,9 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
   return (
     <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
+      className={
+        cancelled ? 'card is-cancelled' : resched ? 'card is-resched' : 'card'
+      }
       onClick={onOpen}
     >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -2664,6 +2729,14 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         </div>
       </div>
       <div className="card-equip">{d.equipment}</div>
+      {resched && (
+        <div className="resched-chip">
+          <RotateCcw size={12} /> Rescheduled
+          {d._raw && d._raw.stage1_remarks && d._raw.stage1_remarks !== 'null' ? (
+            <span className="resched-note">· {d._raw.stage1_remarks}</span>
+          ) : null}
+        </div>
+      )}
       <div className="card-meta">
         {d.amount != null && (
           <span style={{ color: T.green, fontWeight: 800 }}>
@@ -2704,7 +2777,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
               else onMove(d, next.id);
             }}
           >
-            {moveText(next.id)}{' '}
+            {resched ? 'Edit · dobara bharo' : moveText(next.id)}{' '}
             {canInline ? (
               <ChevronRight
                 size={14}
@@ -2873,6 +2946,27 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           {cancelled ? stage.label : sLabel(d.stage)}
         </span>
 
+        {!cancelled && isResched(d) && (
+          <div
+            className="cancel-note"
+            style={{ background: T.amberSoft, color: T.amber, borderColor: T.amberSoft }}
+          >
+            <RotateCcw size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontWeight: 800 }}>Pickup reschedule hui hai</div>
+              <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                Customer ne abhi date nahi di. Baat hone pe upar{' '}
+                <b>Contacted</b> dabao aur dropdown se "Customer se baat hui"
+                chun ke date bhar do.
+              </div>
+              {d._raw && d._raw.stage1_remarks && d._raw.stage1_remarks !== 'null' && (
+                <div style={{ fontSize: 12.5, marginTop: 6, fontWeight: 700 }}>
+                  “{d._raw.stage1_remarks}”
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {cancelled ? (
           <>
             <div
@@ -3265,6 +3359,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
   const nowDT = `${nowDate}T${nowTime}`;
   const [f, setF] = useState({
+    // pehli stage pe: talked | resched | cancelled
+    flow: 'talked',
     date: mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null' ? r.confirmed_date : nowDate,
     time: mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time).slice(0, 5) : nowTime,
     remarks:
@@ -3284,7 +3380,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
   const canSave =
-    toStage === 'talked' ? !!(f.date && f.time)
+    toStage === 'talked'
+      ? f.flow === 'cancelled'
+        ? true
+        : f.flow === 'resched'
+          ? !!String(f.remarks || '').trim()
+          : !!(f.date && f.time)
     : toStage === 'scheduled' ? !!(f.person && f.vehicle)
     : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
     : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate)
@@ -3308,6 +3409,34 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
       )}
       <div className="modal-body">
         {toStage === 'talked' && (
+          <>
+            <Field label="Customer se kya baat hui?">
+              <select
+                className="inp"
+                value={f.flow}
+                onChange={(e) => set('flow', e.target.value)}
+              >
+                <option value="talked">Customer se baat hui</option>
+                <option value="resched">Reschedule pickup</option>
+                <option value="cancelled">Cancel pickup</option>
+              </select>
+            </Field>
+            {f.flow === 'resched' && (
+              <div className="flag-note" style={{ background: T.amberSoft, color: T.amber }}>
+                <b>Reschedule</b> — entry pehli stage mein hi pending rahegi, tile
+                pe "Rescheduled" likha aayega. Neeche remarks mein likh do customer
+                ne kya kaha (jaise "1-2 din mein confirm karenge").
+              </div>
+            )}
+            {f.flow === 'cancelled' && (
+              <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
+                Ye pickup <b>Cancelled</b> mark hokar active list se hat jayegi —
+                date/time bharne ki zarurat nahi.
+              </div>
+            )}
+          </>
+        )}
+        {toStage === 'talked' && f.flow === 'talked' && (
           <>
             <Field label="Confirmed Pickup Date *">
               <input className="inp" type="date" value={f.date} min="2024-01-01" max="2099-12-31" onClick={openPicker}
@@ -3397,7 +3526,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn-primary" disabled={!canSave} onClick={() => onSave(f)}>
-          <ShieldCheck size={16} /> {mode === 'edit' ? 'Update' : 'Save & update'}
+          <ShieldCheck size={16} />{' '}
+          {toStage === 'talked' && f.flow === 'resched'
+            ? 'Save · Rescheduled'
+            : toStage === 'talked' && f.flow === 'cancelled'
+              ? 'Mark as Cancelled'
+              : mode === 'edit'
+                ? 'Update'
+                : 'Save & update'}
         </button>
       </div>
     </>
@@ -4307,6 +4443,7 @@ function actTitle(ev) {
     (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
     ev.label ||
     ev.stage;
+  if (ev.label === 'Rescheduled') return 'Reschedule kiya';
   if (k === 'delete') return 'Entry delete ki';
   if (k === 'closed') return `${lbl} mark kiya`;
   if (k === 'edit') return `${lbl} edit kiya`;
@@ -4651,6 +4788,11 @@ function StyleTag() {
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
+      /* Rescheduled — pending hi hai, bas alag rang aur badge */
+      .card.is-resched { background: #FDF6EA; border-color: #EEDFC2; }
+      .card.is-resched:hover { border-color: #E2CB9F; }
+      .resched-chip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; background: ${T.amberSoft}; color: ${T.amber}; border-radius: 9px; padding: 6px 10px; font-size: 11.5px; font-weight: 800; }
+      .resched-note { font-weight: 600; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
       .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
 
       .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
