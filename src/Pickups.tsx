@@ -11,6 +11,7 @@ import {
   Search,
   Bell,
   LayoutDashboard,
+  BarChart3,
   RotateCcw,
   AlertTriangle,
   ChevronRight,
@@ -435,6 +436,26 @@ const CLOSED_STATUS = {
   cancelled: 'Cancelled',
 };
 const isClosedStage = (s) => s === 'cancelled' || s === 'deleted';
+
+/* ── Dashboard / Activity ke chhote helpers ──────────────────────────── */
+const DASH_STORES = [
+  'MOH','CHD','GGN','NCR','NOD','LDH','JAL','JPR','LKO','NWD','JKP',
+];
+function dayStr(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayStr() {
+  return dayStr(Date.now());
+}
+/* jis din ki pickup tay hui hai (confirmed_date) — future dated pakadne ko */
+function plannedDate(x) {
+  const r = (x && x._raw) || {};
+  const v = r.confirmed_date || r.mentioned_pickup_date;
+  return v && v !== 'null' ? String(v).slice(0, 10) : '';
+}
 /* stage id → meta (STAGES ya CLOSED dono cover). Card/list ke colors ke liye. */
 function stageMeta(id) {
   const s = STAGES[stageIndex(id)];
@@ -631,6 +652,38 @@ function stageFields(toStage, f) {
     };
   return {};
 }
+/* ── Kaun kar raha hai ─────────────────────────────────────────────────
+   Har app_log event ke saath login ka store + us store ka manager stamp
+   hota hai, taaki Activity log mein "kisne kiya" dikh sake. Koi naya
+   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai. */
+let ACTOR = { by: null, byName: null };
+function setActor(session) {
+  if (!session) {
+    ACTOR = { by: null, byName: null };
+    return;
+  }
+  const code = session.authStore || session.branch;
+  ACTOR = {
+    by: code,
+    byName:
+      code === 'ALL'
+        ? 'Head office'
+        : STORE_MANAGERS[code] || branchLabel(code),
+  };
+}
+function actorStamp() {
+  return { by: ACTOR.by || null, by_name: ACTOR.byName || null };
+}
+/* purani entries mein by/by_name nahi hoga — wahan honest "record nahi" */
+function actorText(ev) {
+  if (!ev) return 'Record nahi';
+  const name = ev.by_name || ev.byName || '';
+  const code = ev.by || '';
+  if (!name && !code) return 'Record nahi (purana update)';
+  if (code === 'ALL') return name || 'Head office';
+  return name ? `${name} · ${branchLabel(code)}` : branchLabel(code);
+}
+
 function makeEvent(toStage, fields, mode) {
   return {
     ts: new Date().toISOString(),
@@ -638,9 +691,9 @@ function makeEvent(toStage, fields, mode) {
     label: (STAGES[stageIndex(toStage)] || {}).label || toStage,
     action: mode === 'edit' ? 'Edited' : 'Moved to',
     fields: stageFields(toStage, fields || {}),
+    ...actorStamp(),
   };
 }
-/* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
 function makeClosedEvent(flag, remarks) {
   return {
     ts: new Date().toISOString(),
@@ -648,6 +701,7 @@ function makeClosedEvent(flag, remarks) {
     label: (CLOSED[flag] || {}).label || flag,
     action: 'Marked as',
     fields: remarks ? { Remarks: remarks } : {},
+    ...actorStamp(),
   };
 }
 const existingLog = (d) =>
@@ -931,7 +985,11 @@ export default function App() {
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
+  const [page, setPage] = useState('pickups'); // pickups | dashboard (head only)
+  const [showLog, setShowLog] = useState(false); // activity log panel
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
+  // kaun logged-in hai — har app_log event isi se stamp hota hai
+  setActor(session);
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -971,6 +1029,13 @@ export default function App() {
     const base = deliveries.filter((x) => x.stage !== 'deleted');
     if (session.branch === 'ALL') return base;
     return base.filter((x) => x.branch === session.branch);
+  }, [deliveries, session]);
+
+  // Activity log ke liye alag scope — deleted entries bhi chahiye
+  const scopedAll = useMemo(() => {
+    if (!session) return [];
+    if (session.branch === 'ALL') return deliveries;
+    return deliveries.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
@@ -1052,9 +1117,6 @@ export default function App() {
 
   // core move/edit apply — modal aur inline card dono use karte hain
   const applyMove = async (invoiceId, toStage, fields, mode) => {
-    if (toStage === 'talked' && fields.invoiceFlag) {
-      return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
-    }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
@@ -1138,6 +1200,7 @@ export default function App() {
           label: 'Deleted',
           action: 'Marked as',
           fields: {},
+          ...actorStamp(),
         },
       ],
     };
@@ -1176,7 +1239,11 @@ export default function App() {
     >
       <StyleTag />
       <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar session={session} />
+        <Sidebar
+          session={session}
+          page={session.branch === 'ALL' ? page : 'pickups'}
+          onNav={setPage}
+        />
         <div
           style={{
             flex: 1,
@@ -1197,10 +1264,18 @@ export default function App() {
             onReload={load}
             loading={loading}
             onLogout={() => setSession(null)}
+            onActivity={() => setShowLog(true)}
             lang={lang}
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
+            {session.branch === 'ALL' && page === 'dashboard' ? (
+              <Dashboard
+                deliveries={scoped}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            ) : (
+              <>
             <Header
               session={session}
               live={CONFIGURED}
@@ -1242,6 +1317,8 @@ export default function App() {
               }
               focus={lastMove}
             />
+              </>
+            )}
           </main>
         </div>
       </div>
@@ -1263,6 +1340,17 @@ export default function App() {
               mode: 'edit',
             })
           }
+        />
+      )}
+      {showLog && (
+        <ActivityLog
+          deliveries={scopedAll}
+          session={session}
+          onClose={() => setShowLog(false)}
+          onOpen={(x) => {
+            setShowLog(false);
+            setActiveId(x.invoice_id);
+          }}
         />
       )}
       {modal && (
@@ -1599,6 +1687,280 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
+/* ═══════════════════════════════════════════ DASHBOARD (all stores · MIS)
+   Store-wise daily picture. Cards + table sab clickable → entries neeche
+   table mein khulti hain. Sirf head login mein dikhta hai.              */
+function Dashboard({ deliveries, onOpen }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [sel, setSel] = useState({ kind: 'all', store: null });
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'custom') return [from, to];
+    return ['0000-01-01', '9999-12-31'];
+  }, [range, from, to]);
+
+  // base = date range + store filter (entry kab aayi, uspe)
+  const base = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries.filter((x) => {
+      const cd = dayStr(createdTs(x));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && x.branch !== store) return false;
+      return true;
+    });
+  }, [deliveries, bounds, store]);
+
+  const today = todayStr();
+  const metric = {
+    all: () => true,
+    picked: (x) => x.stage === 'delivered',
+    pending: (x) => x.stage !== 'delivered' && !isClosedStage(x.stage),
+    future: (x) =>
+      x.stage !== 'delivered' &&
+      !isClosedStage(x.stage) &&
+      plannedDate(x) &&
+      plannedDate(x) > today,
+    overdue: (x) =>
+      x.stage !== 'delivered' &&
+      !isClosedStage(x.stage) &&
+      plannedDate(x) &&
+      plannedDate(x) < today,
+    nophoto: (x) =>
+      x.stage === 'delivered' &&
+      !(x._raw && x._raw.pickup_image && x._raw.pickup_image !== 'null'),
+  };
+  const stageMetric = {
+    new: (x) => x.stage === 'new',
+    talked: (x) => x.stage === 'talked',
+    scheduled: (x) => x.stage === 'scheduled',
+    dispatched: (x) => x.stage === 'dispatched',
+    delivered: (x) => x.stage === 'delivered',
+  };
+
+  const cards = [
+    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
+    { kind: 'picked', label: 'Picked up', color: T.green, soft: T.mint },
+    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
+    { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
+    { kind: 'overdue', label: 'Date nikal gayi', color: T.red, soft: T.redSoft },
+    { kind: 'nophoto', label: 'Picked up · photo missing', color: T.violet, soft: T.violetSoft },
+  ];
+
+  const rows = useMemo(() => {
+    let list = base;
+    if (sel.store) list = list.filter((x) => x.branch === sel.store);
+    const fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) => String(createdTs(b) || '').localeCompare(String(createdTs(a) || '')));
+    // eslint-disable-next-line
+  }, [base, sel]);
+
+  const cnt = (fn, list) => list.filter(fn).length;
+  const rangeLabel =
+    range === 'today' ? 'Aaj'
+    : range === 'yesterday' ? 'Kal'
+    : range === '7d' ? 'Pichhle 7 din'
+    : range === 'month' ? 'Is mahine'
+    : range === 'all' ? 'Sabhi'
+    : `${from} → ${to}`;
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Pickups MIS</div>
+          <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
+        </div>
+        <div className="dash-filters">
+          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="month">Is mahine</option>
+            <option value="all">Sabhi</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel({ kind: 'all', store: null });
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>{branchLabel(s)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const n = cnt(metric[c.kind], base);
+          const on = sel.kind === c.kind && !sel.store;
+          return (
+            <button
+              key={c.kind}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={on ? { borderColor: c.color } : {}}
+              onClick={() => setSel({ kind: c.kind, store: null })}
+            >
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
+                <BarChart3 size={16} />
+              </div>
+              <div className="dash-card-n" style={{ color: n ? c.color : T.ink }}>{n}</div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dash-block">
+        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Total</th>
+                <th>New</th>
+                <th>Contacted</th>
+                <th>Scheduled</th>
+                <th>Out for Pickup</th>
+                <th>Picked Up</th>
+                <th>Pending</th>
+                <th>Future</th>
+                <th>Overdue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {base.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="dash-empty">Is duration mein koi entry nahi</td>
+                </tr>
+              ) : (
+                DASH_STORES.filter((st) => store === 'ALL' || store === st).map((st) => {
+                  const list = base.filter((x) => x.branch === st);
+                  if (list.length === 0) return null;
+                  const has = (kind) => cnt(metric[kind] || stageMetric[kind], list) > 0;
+                  return (
+                    <tr key={st}>
+                      <td className="dash-store">{branchLabel(st)}</td>
+                      <td className="dash-td-click" onClick={() => setSel({ kind: 'all', store: st })}>
+                        {list.length}
+                      </td>
+                      {['new', 'talked', 'scheduled', 'dispatched', 'delivered'].map((k) => (
+                        <td
+                          key={k}
+                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                          onClick={() => has(k) && setSel({ kind: k, store: st })}
+                        >
+                          {cnt(stageMetric[k], list)}
+                        </td>
+                      ))}
+                      {['pending', 'future', 'overdue'].map((k) => (
+                        <td
+                          key={k}
+                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
+                          style={k === 'overdue' && has(k) ? { color: T.red } : {}}
+                          onClick={() => has(k) && setSel({ kind: k, store: st })}
+                        >
+                          {cnt(metric[k], list)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="dash-block">
+        <div className="dash-block-h">
+          {rows.length} entries
+          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+          {cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
+        </div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Store</th>
+                <th>Equipment</th>
+                <th>Stage</th>
+                <th>Amount</th>
+                <th>Aayi</th>
+                <th>Pickup date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="dash-empty">Koi entry nahi</td>
+                </tr>
+              ) : (
+                rows.map((x) => {
+                  const st = stageMeta(x.stage);
+                  return (
+                    <tr key={x.invoice_id} className="dash-row" onClick={() => onOpen(x)}>
+                      <td>{x.id}</td>
+                      <td>{x.customer}</td>
+                      <td>{branchLabel(x.branch)}</td>
+                      <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
+                      <td>
+                        <span className="dash-chip" style={{ background: st.soft, color: st.color }}>
+                          {st.short}
+                        </span>
+                      </td>
+                      <td>{x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'}</td>
+                      <td>{niceDate(createdTs(x)) || '—'}</td>
+                      <td>{niceDate(plannedDate(x)) || '—'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login({ onLogin }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
@@ -1669,10 +2031,18 @@ function Login({ onLogin }) {
 }
 
 /* SIDEBAR */
-function Sidebar({ session }) {
+function Sidebar({ session, page, onNav }) {
+  const isAll = session.branch === 'ALL';
   const nav = [
-    { icon: LayoutDashboard, label: 'Deliveries', onClick: () => { window.location.href = window.location.origin + window.location.pathname; } },
-    { icon: RotateCcw, label: 'Pickups', active: true },
+    {
+      icon: LayoutDashboard,
+      label: 'Deliveries',
+      onClick: () => {
+        window.location.href = window.location.origin + window.location.pathname;
+      },
+    },
+    { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+    ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
     { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
@@ -1697,10 +2067,14 @@ function Sidebar({ session }) {
           <div
             key={n.label}
             className="nav-item"
-            onClick={n.onClick}
+            onClick={() => {
+              if (n.soon) return;
+              if (n.onClick) return n.onClick();
+              if (n.id && onNav) onNav(n.id);
+            }}
             style={{
-              background: n.active ? 'rgba(255,255,255,.12)' : 'transparent',
-              color: n.active ? '#fff' : 'rgba(255,255,255,.62)',
+              background: n.id && page === n.id ? 'rgba(255,255,255,.12)' : 'transparent',
+              color: n.id && page === n.id ? '#fff' : 'rgba(255,255,255,.62)',
               cursor: n.soon ? 'default' : 'pointer',
             }}
           >
@@ -1738,6 +2112,7 @@ function Topbar({
   results,
   onPick,
   onReload,
+  onActivity,
   loading,
   onLogout,
   lang,
@@ -1824,6 +2199,13 @@ function Topbar({
             Hing
           </button>
         </div>
+        <button
+          className="icon-btn"
+          onClick={onActivity}
+          title="Activity log — kisne kya update kiya"
+        >
+          <History size={17} color={T.ink} />
+        </button>
         <button className="icon-btn" onClick={onReload} title="Reload">
           <RefreshCw
             size={17}
@@ -2280,7 +2662,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
       </div>
       <div className="card-meta">
         <span>
-          <Clock size={12} /> {d.expected}
+          <Clock size={12} /> {niceDate(d.expected) || d.expected}
         </span>
       </div>
       {(d.person || d.manager) && (
@@ -2592,7 +2974,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             label="Invoice amount"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
-          <KV label="Due date" value={d.expected} />
+          <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
           <KV label="Store manager" value={d.manager} full />
         </div>
 
@@ -3871,6 +4253,288 @@ function TrackResult({ row }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ STYLES */
+/* ═════════════════════════════════════════════════ ACTIVITY LOG (overall)
+   Saari entries ke app_log events ek jagah, latest pehle — Books / Bigin ke
+   audit trail jaisa. Data wahi hai jo har entry ke andar timeline mein
+   dikhta hai; yahan sab merge karke "kisne kya kab kiya" ek screen pe.
+   Delete hui entries bhi yahan aati hain (view se hatti hain, log se nahi). */
+const ACT_KINDS = [
+  { id: 'all', label: 'Sab updates' },
+  { id: 'move', label: 'Stage move' },
+  { id: 'edit', label: 'Edit' },
+  { id: 'closed', label: 'Cancelled' },
+  { id: 'delete', label: 'Delete' },
+];
+function actKind(ev) {
+  if (!ev) return 'move';
+  if (ev.stage === 'deleted') return 'delete';
+  if (CLOSED[ev.stage]) return 'closed';
+  if (ev.action === 'Edited') return 'edit';
+  return 'move';
+}
+function actIconOf(k) {
+  return k === 'delete'
+    ? Trash2
+    : k === 'edit'
+      ? Pencil
+      : k === 'closed'
+        ? AlertTriangle
+        : ArrowRight;
+}
+function actTitle(ev) {
+  const k = actKind(ev);
+  const lbl =
+    (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
+    ev.label ||
+    ev.stage;
+  if (k === 'delete') return 'Entry delete ki';
+  if (k === 'closed') return `${lbl} mark kiya`;
+  if (k === 'edit') return `${lbl} edit kiya`;
+  return `${lbl} pe move kiya`;
+}
+function actDayLabel(ds) {
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  if (ds === todayStr()) return 'Aaj';
+  if (ds === dayStr(y)) return 'Kal';
+  const d = new Date(ds + 'T00:00');
+  return isNaN(d)
+    ? ds
+    : d.toLocaleDateString('en-IN', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+}
+function actTime(ts) {
+  const d = new Date(ts);
+  if (isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function ActivityLog({ deliveries, session, onOpen, onClose }) {
+  const [q, setQ] = useState('');
+  const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
+  const [store, setStore] = useState('ALL');
+  const [kind, setKind] = useState('all');
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    if (range === 'today') return [dayStr(t), dayStr(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [dayStr(y), dayStr(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [dayStr(s), dayStr(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [dayStr(s), dayStr(t)];
+    }
+    return ['0000-01-01', '9999-12-31'];
+  }, [range]);
+
+  // saari entries ke app_log ko ek flat list mein merge karo (latest pehle)
+  const all = useMemo(() => {
+    const out = [];
+    deliveries.forEach((d) => {
+      const log = d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
+      log.forEach((ev, i) => {
+        if (ev && ev.ts) out.push({ ev, d, key: `${d.invoice_id}#${i}` });
+      });
+    });
+    out.sort((a, b) => String(b.ev.ts).localeCompare(String(a.ev.ts)));
+    return out;
+  }, [deliveries]);
+
+  const rows = useMemo(() => {
+    const [s, e] = bounds;
+    const term = q.trim().toLowerCase();
+    return all.filter(({ ev, d }) => {
+      const ds = dayStr(ev.ts);
+      if (ds < s || ds > e) return false;
+      if (store !== 'ALL' && d.branch !== store) return false;
+      if (kind !== 'all' && actKind(ev) !== kind) return false;
+      if (!term) return true;
+      const hay =
+        `${d.customer} ${d.id} ${branchLabel(d.branch)} ${actorText(ev)} ${actTitle(ev)}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [all, bounds, store, kind, q]);
+
+  // din ke hisaab se group — heading ke neeche us din ke updates
+  const days = [];
+  const byDay = {};
+  rows.forEach((r) => {
+    const ds = dayStr(r.ev.ts);
+    if (!byDay[ds]) {
+      byDay[ds] = [];
+      days.push(ds);
+    }
+    byDay[ds].push(r);
+  });
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="act-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="act-head">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>Activity log</div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+              Kisne kya update kiya · {rows.length}{' '}
+              {rows.length === 1 ? 'update' : 'updates'}
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+
+        <div className="act-filters">
+          <div className="act-search">
+            <Search size={15} color={T.inkSoft} />
+            <input
+              placeholder="Customer, invoice, store, naam…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="act-selects">
+            <select
+              className="dash-inp"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+            >
+              <option value="today">Aaj</option>
+              <option value="yesterday">Kal</option>
+              <option value="7d">Pichhle 7 din</option>
+              <option value="month">Is mahine</option>
+              <option value="all">Sabhi</option>
+            </select>
+            <select
+              className="dash-inp"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
+              {ACT_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            {session && session.isHead && (
+              <select
+                className="dash-inp"
+                value={store}
+                onChange={(e) => setStore(e.target.value)}
+              >
+                <option value="ALL">All stores</option>
+                {STORE_ORDER.map((s) => (
+                  <option key={s} value={s}>
+                    {branchLabel(s)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        <div className="act-body">
+          {rows.length === 0 ? (
+            <div className="empty" style={{ padding: '44px 0' }}>
+              Is filter mein koi update nahi
+            </div>
+          ) : (
+            days.map((ds) => (
+              <div key={ds}>
+                <div className="act-day">{actDayLabel(ds)}</div>
+                {byDay[ds].map(({ ev, d, key }) => {
+                  const k = actKind(ev);
+                  const Ico = actIconOf(k);
+                  const c = k === 'delete' ? T.red : stageColorOf(ev.stage);
+                  const soft =
+                    k === 'delete' ? T.redSoft : stageMeta(ev.stage).soft;
+                  const fields =
+                    ev.fields && typeof ev.fields === 'object'
+                      ? Object.entries(ev.fields).filter(
+                          ([, v]) => v !== '' && v !== null && v !== undefined,
+                        )
+                      : [];
+                  return (
+                    <button
+                      key={key}
+                      className="act-row"
+                      onClick={() => onOpen(d)}
+                    >
+                      <div
+                        className="act-ico"
+                        style={{ background: soft, color: c }}
+                      >
+                        <Ico size={15} />
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="act-line">
+                          <span className="act-what" style={{ color: c }}>
+                            {actTitle(ev)}
+                          </span>
+                          <span className="act-time">{actTime(ev.ts)}</span>
+                        </div>
+                        <div className="act-who">
+                          <UserCog size={12} />{' '}
+                          <span className="ellip">{actorText(ev)}</span>
+                        </div>
+                        <div className="act-sub">
+                          <span className="act-cust">{d.customer}</span>
+                          <span className="act-dot">·</span>
+                          <span className="ellip">{d.id}</span>
+                          {session && session.isHead && (
+                            <>
+                              <span className="act-dot">·</span>
+                              <span>{branchLabel(d.branch)}</span>
+                            </>
+                          )}
+                        </div>
+                        {fields.length > 0 && (
+                          <div className="act-fields">
+                            {fields.map(([fk, fv]) => (
+                              <span key={fk} className="act-chip">
+                                <b>{fk}:</b> {String(fv)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <ChevronRight
+                        size={16}
+                        color={T.inkSoft}
+                        style={{ flexShrink: 0, alignSelf: 'center' }}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          )}
+          <div className="act-foot">
+            Purane updates mein naam nahi dikhega — "kisne kiya" ab se save
+            hona shuru hua hai.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StyleTag() {
   return (
     <style>{`
@@ -4153,6 +4817,61 @@ function StyleTag() {
       .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
       .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
       .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
+
+      /* ── DASHBOARD ── */
+      .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+      .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
+      .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+      .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
+      .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+      .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
+      .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
+      .dash-card.on { box-shadow: 0 4px 16px rgba(20,57,43,.12); }
+      .dash-card-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+      .dash-card-n { font-size: 26px; font-weight: 800; color: ${T.ink}; line-height: 1; }
+      .dash-card-l { font-size: 11.5px; font-weight: 600; color: ${T.inkSoft}; margin-top: 5px; }
+      .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
+      .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
+      .dash-table-wrap { overflow-x: auto; }
+      .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
+      .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
+      .dash-store { font-weight: 700; color: ${T.ink}; }
+      .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
+      .dash-td-click:hover { background: ${T.mint}; }
+      .dash-td-zero { color: ${T.line2 || '#C9C7BE'}; }
+      .dash-row { cursor: pointer; }
+      .dash-row:hover { background: ${T.cream}; }
+      .dash-chip { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+      .dash-empty { text-align: center; color: ${T.inkSoft}; padding: 26px !important; }
+      @media (max-width: 1100px) { .dash-cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+      @media (max-width: 760px) { .dash-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+      /* ── activity log (overall history panel) ── */
+      .act-panel { margin-left: auto; width: 560px; max-width: 96vw; height: 100%; background: ${T.cream}; display: flex; flex-direction: column; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
+      .act-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 20px 20px 14px; border-bottom: 1px solid ${T.line}; background: #fff; }
+      .act-filters { padding: 12px 20px; border-bottom: 1px solid ${T.line}; background: #fff; display: flex; flex-direction: column; gap: 9px; }
+      .act-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; }
+      .act-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .act-selects { display: flex; gap: 8px; flex-wrap: wrap; }
+      .act-selects .dash-inp { flex: 1 1 auto; min-width: 120px; }
+      .act-body { flex: 1; overflow-y: auto; padding: 8px 16px 30px; }
+      .act-day { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .5px; padding: 16px 4px 8px; position: sticky; top: 0; background: ${T.cream}; z-index: 1; }
+      .act-row { display: flex; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 13px 14px; margin-bottom: 9px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      .act-row:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(20,57,43,.08); border-color: #d8d1c0; }
+      .act-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+      .act-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+      .act-what { font-size: 13.5px; font-weight: 800; letter-spacing: -0.2px; }
+      .act-time { flex-shrink: 0; font-size: 11.5px; font-weight: 700; color: ${T.inkSoft}; }
+      .act-who { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: ${T.forestSoft}; margin-top: 3px; min-width: 0; }
+      .act-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 3px; }
+      .act-cust { font-weight: 700; color: ${T.ink}; }
+      .act-dot { color: #C9C7BE; }
+      .act-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .act-chip { font-size: 11px; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 8px; padding: 3px 8px; line-height: 1.4; }
+      .act-chip b { font-weight: 700; color: ${T.ink}; }
+      .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
+      @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
 
       @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
