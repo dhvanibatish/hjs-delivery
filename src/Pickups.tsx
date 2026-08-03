@@ -66,6 +66,10 @@ async function sbRpc(fn, body) {
   return res.json();
 }
 // staff login — DB verifies password, returns [] if wrong
+// Pickups ke RPCs abhi dev-password lete hain. Login screen hata di gayi hai —
+// access delivery app ke head login (All stores) se control hota hai. Jab
+// pickup_list/pickup_update store-scoped ho jayein, ye constant hat jayega.
+const PICKUP_DEV_KEY = 'hjs_22';
 async function sbLogin(store, pw) {
   return sbRpc('pickup_list', { p_dev: pw });
 }
@@ -987,8 +991,11 @@ function useEmbedFlag() {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
-export default function App() {
+export default function App({ session: extSession = null, view = 'board' }) {
   useEmbedFlag();
+  // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
+  // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
+  const hosted = !!extSession;
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -1004,11 +1011,15 @@ export default function App() {
   // nahi chahiye — customer apna registered phone daale, uska latest order
   // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
   // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
-  if (inv) return <TrackPage invoice={inv} />;
-  if (params.has('order') || params.has('my')) return <TrackPage invoice="" />;
-  if (params.has('track') || params.has('sales') || isTrackPath) return <SalesTrackPage />;
+  if (!hosted && inv) return <TrackPage invoice={inv} />;
+  if (!hosted && (params.has('order') || params.has('my')))
+    return <TrackPage invoice="" />;
+  if (!hosted && (params.has('track') || params.has('sales') || isTrackPath))
+    return <SalesTrackPage />;
 
-  const [session, setSession] = useState(null);
+  const [ownSession, setOwnSession] = useState(null);
+  const session = hosted ? extSession : ownSession;
+  const setSession = hosted ? () => {} : setOwnSession;
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1020,7 +1031,10 @@ export default function App() {
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
-  const [page, setPage] = useState('pickups'); // pickups | dashboard (head only)
+  const [ownPage, setOwnPage] = useState('pickups'); // pickups | dashboard
+  // hosted mode mein page delivery app ka sidebar decide karta hai
+  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
+  const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   // kaun logged-in hai — har app_log event isi se stamp hota hai
@@ -1046,7 +1060,7 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+        (await sbList(session.authStore, PICKUP_DEV_KEY)).map(rowToDelivery),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1146,7 +1160,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Marked as ${CLOSED[flag].label}`);
       load();
     } catch (e) {
@@ -1182,7 +1196,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping('Rescheduled ✓ — entry pending mein hi hai');
       jumpMobile('new');
       load();
@@ -1207,7 +1221,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(
         mode === 'edit'
           ? 'Updated ✓'
@@ -1258,7 +1272,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
       jumpMobile(toStage);
       load();
@@ -1299,7 +1313,7 @@ export default function App() {
       return;
     }
     try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
+      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       setActiveId(null);
       ping('Deleted — Supabase mein "Deleted" mark ho gaya');
       load();
@@ -1309,6 +1323,85 @@ export default function App() {
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // ── HOSTED: delivery app ke <main> ke andar — sirf content, koi chrome nahi
+  if (hosted) {
+    return (
+      <>
+        <StyleTag />
+        {page === 'dashboard' ? (
+          <Dashboard
+            deliveries={scoped}
+            onOpen={(x) => setActiveId(x.invoice_id)}
+          />
+        ) : (
+          <>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={() => {}}
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>Supabase se connect nahi hua.</b> {error}
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={layoutMode}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
+          </>
+        )}
+        {active && (
+          <Drawer
+            d={active}
+            canDelete={session.isHead}
+            onDelete={() => removeEntry(active.invoice_id)}
+            onClose={() => setActiveId(null)}
+            onAdvance={(toStage) =>
+              setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
+            }
+            onSetStage={(toStage) => setStage(active.invoice_id, toStage)}
+            onEditStage={(sid) =>
+              setModal({
+                invoiceId: active.invoice_id,
+                toStage: sid,
+                mode: 'edit',
+              })
+            }
+          />
+        )}
+        {modal && (
+          <StageModal
+            delivery={deliveries.find((x) => x.invoice_id === modal.invoiceId)}
+            toStage={modal.toStage}
+            mode={modal.mode}
+            onClose={() => setModal(null)}
+            onSave={commitModal}
+          />
+        )}
+        {toast && <Toast msg={toast} />}
+      </>
+    );
+  }
 
   return (
     <div
