@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import PickupsModule from './Pickups.tsx';
+import ComplaintsModule from './ComplaintApp.tsx';
 import {
   Truck,
   Package,
@@ -1410,6 +1411,8 @@ export default function App() {
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'pickups' ? (
               <PickupsModule session={session} view="board" />
+            ) : session.branch === 'ALL' && page === 'complaints' ? (
+              <ComplaintsModule session={session} view="board" />
             ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <>
                 {/* ek hi Dashboard page — upar se delivery/pickups switch */}
@@ -1431,10 +1434,20 @@ export default function App() {
                     >
                       <RotateCcw size={14} /> Pickups
                     </button>
+                    <button
+                      className={
+                        dashKind === 'complaints' ? 'lt-btn active' : 'lt-btn'
+                      }
+                      onClick={() => setDashKind('complaints')}
+                    >
+                      <MessageSquareWarning size={14} /> Complaints
+                    </button>
                   </div>
                 </div>
                 {dashKind === 'pickups' ? (
                   <PickupsModule session={session} view="dashboard" />
+                ) : dashKind === 'complaints' ? (
+                  <ComplaintsModule session={session} view="dashboard" />
                 ) : (
                   <Dashboard
                     deliveries={scoped}
@@ -3355,7 +3368,9 @@ function Sidebar({ session, page, onNav }) {
           { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
         ]
       : []),
-    { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
+    ...(isAll
+      ? [{ id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' }]
+      : []),
   ];
   const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
   return (
@@ -3500,6 +3515,7 @@ function Topbar({
           <option value="dashboard">Dashboard</option>
           <option value="sla">Process &amp; SLA</option>
           <option value="pickups">Pickups</option>
+          <option value="complaints">Complaints</option>
         </select>
       )}
       <div className="tb-actions">
