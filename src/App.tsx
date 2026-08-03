@@ -1716,6 +1716,7 @@ function Dashboard({ deliveries, onOpen }) {
 
   // clicked subset for the entries table
   const rows = useMemo(() => {
+    if (!sel) return [];
     let list = base;
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
     const fn =
