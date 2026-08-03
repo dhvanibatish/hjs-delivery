@@ -3273,7 +3273,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
     toStage === 'talked' ? !!(f.date && f.time)
     : toStage === 'scheduled' ? !!(f.person && f.vehicle)
     : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
-    : toStage === 'delivered' ? !!(f.inspected && f.photoPicked && f.done)
+    : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate)
     : true;
 
   const inner = (
@@ -3365,9 +3365,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
                 onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
-            <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
-            {!f.photoPicked && <div className="req-note">Pickup photo lagana zaroori hai.</div>}
             <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Pickup done" />
+            {/* photo tabhi maanga jaata hai jab "Pickup done" tick ho —
+                delivery app jaisa hi flow */}
+            {f.done && (
+              <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
+            )}
+            {f.done && !f.photoPicked && (
+              <div className="req-note">Pickup photo lagana zaroori hai.</div>
+            )}
           </>
         )}
         <Field label="Remarks">
