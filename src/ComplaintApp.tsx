@@ -277,6 +277,10 @@ const TXT = {
   storeManager: { en: 'Store manager', hi: 'Store manager' },
   today: { en: 'Today', hi: 'Aaj' },
   archived: { en: 'Archived', hi: 'Purani' },
+  vYesterday: { en: 'Yesterday', hi: 'Kal' },
+  vMonth: { en: 'This month', hi: 'Is mahine' },
+  vCustom: { en: 'Custom range', hi: 'Custom' },
+  vAllTime: { en: 'all time', hi: 'sab' },
   stages: { en: 'Stages', hi: 'Stages' },
   categories: { en: 'Categories', hi: 'Category' },
   allStores: { en: 'All stores', hi: 'Sabhi stores' },
@@ -718,14 +722,49 @@ function hoursSince(ts) {
       24–48 ghante  → "Archived" me.
       48+ ghante    → kahin nahi (view se gayab; Supabase me safe rehti hai).
 */
-function inView(x, viewMode) {
+function inView(x, viewMode, vFrom, vTo) {
   const st = x.stage;
-  const pending = st !== 'resolution' && !isClosedStage(st);
-  if (pending) return viewMode === 'today';
-  const h = hoursSince(closedTs(x));
-  if (h < 24) return viewMode === 'today'; // abhi band hui
-  if (h < 48) return viewMode === 'archived'; // 24h baad archived
-  return false; // 48h baad view se gayab
+  // pending = abhi kaam baaki
+  const pending = st !== 'delivered' && !isClosedStage(st);
+  if (viewMode === 'archived') {
+    // Archived (all time) = ho-chuki entries: Delivered + Cancelled waghera
+    return !pending;
+  }
+  if (viewMode === 'today') {
+    // Today (kaam waala view):
+    //   - saari pending (chahe purani ho)
+    //   - jo aaj create hui
+    //   - jo AAJ complete hui (purani entry bhi)
+    return (
+      pending ||
+      isToday(createdTs(x)) ||
+      (st === 'delivered' && isToday(deliveredTs(x)))
+    );
+  }
+  // yesterday / month / custom — date range ke hisaab se: jo us duration mein
+  // aayi ya us duration mein complete hui. Pending purani entries yahan nahi
+  // aatin (wo Today mein dikhti hain).
+  const [s, e] = viewBounds(viewMode, vFrom, vTo);
+  const cd = dayStr(createdTs(x));
+  const dd = st === 'delivered' ? dayStr(deliveredTs(x)) : '';
+  return (cd && cd >= s && cd <= e) || (dd && dd >= s && dd <= e);
+}
+/* view dropdown ke liye [start, end] — dayStr/todayStr neeche define hain
+   par hoisted functions hain, isliye yahan use kar sakte hain. */
+function viewBounds(mode, vFrom, vTo) {
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  if (mode === 'yesterday') {
+    const y = new Date(t);
+    y.setDate(y.getDate() - 1);
+    return [dayStr(y), dayStr(y)];
+  }
+  if (mode === 'month') {
+    const s = new Date(t.getFullYear(), t.getMonth(), 1);
+    return [dayStr(s), dayStr(t)];
+  }
+  if (mode === 'custom') return [vFrom || dayStr(t), vTo || dayStr(t)];
+  return [dayStr(t), dayStr(t)];
 }
 
 const CATS = [
@@ -829,7 +868,9 @@ export default function App({ session: extSession = null, view = 'board' }) {
   const [modal, setModal] = useState(null); // { ticketId, toStage, mode }
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
-  const [viewMode, setViewMode] = useState('today'); // today | archived
+  const [viewMode, setViewMode] = useState('today'); // today|yesterday|month|custom|archived
+  const [vFrom, setVFrom] = useState(() => todayStr());
+  const [vTo, setVTo] = useState(() => todayStr());
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG);
   const [lastMove, setLastMove] = useState(null);
@@ -871,8 +912,8 @@ export default function App({ session: extSession = null, view = 'board' }) {
   }, [tickets, session]);
 
   const viewItems = useMemo(
-    () => scoped.filter((x) => inView(x, viewMode)),
-    [scoped, viewMode],
+    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
+    [scoped, viewMode, vFrom, vTo],
   );
 
   const searchResults = useMemo(() => {
@@ -1019,6 +1060,14 @@ export default function App({ session: extSession = null, view = 'board' }) {
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
+              vFrom={vFrom}
+              vTo={vTo}
+              onVFrom={setVFrom}
+              onVTo={setVTo}
               layoutMode={layoutMode}
               onLayoutMode={setLayoutMode}
               onSwitchStore={() => {}}
@@ -1129,6 +1178,18 @@ export default function App({ session: extSession = null, view = 'board' }) {
                   count={viewItems.length}
                   viewMode={viewMode}
                   onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
+                  vFrom={vFrom}
+                  vTo={vTo}
+                  onVFrom={setVFrom}
+                  onVTo={setVTo}
+              vFrom={vFrom}
+              vTo={vTo}
+              onVFrom={setVFrom}
+              onVTo={setVTo}
                   layoutMode={layoutMode}
                   onLayoutMode={setLayoutMode}
                   onSwitchStore={(b) =>
@@ -1224,7 +1285,7 @@ function Dashboard({ tickets, onOpen }) {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
-  const [sel, setSel] = useState({ kind: 'all', store: null });
+  const [sel, setSel] = useState(null);
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -1288,6 +1349,7 @@ function Dashboard({ tickets, onOpen }) {
   ];
 
   const rows = useMemo(() => {
+    if (!sel) return [];
     let list = base;
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
     const fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
@@ -1310,6 +1372,83 @@ function Dashboard({ tickets, onOpen }) {
             : range === 'all'
               ? L('rAll')
               : `${from} → ${to}`;
+
+  // ── Kisi number pe click → poora view badal jaata hai: sirf us subset ki
+  // list, upar Back button. Dobara dashboard pe aane ke liye Back dabao.
+  if (sel) {
+    return (
+      <div>
+        <button className="track-back" onClick={() => setSel(null)}>
+          <ArrowLeft size={16} /> Back to dashboard
+        </button>
+        <div className="dash-block">
+          <div className="dash-block-h">
+            {rows.length} {L('entriesWord')}
+            {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+            {cards.find((c) => c.kind === sel.kind)?.label ||
+              sShort(sel.kind) ||
+              'All'}
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>{L('colTicket')}</th>
+                  <th>{L('colCustomer')}</th>
+                  <th>{L('colStore')}</th>
+                  <th>{L('colItem')}</th>
+                  <th>{L('colComplaint')}</th>
+                  <th>{L('colStage')}</th>
+                  <th>{L('colOpened')}</th>
+                  <th>{L('colDue')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">
+                      {L('noEntry')}
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((x) => {
+                    const st = stageMeta(x.stage);
+                    return (
+                      <tr
+                        key={x.ticket_id}
+                        className="dash-row"
+                        onClick={() => onOpen(x)}
+                      >
+                        <td>#{x.id}</td>
+                        <td>{x.customer}</td>
+                        <td>{branchLabel(x.branch)}</td>
+                        <td className="ellip" style={{ maxWidth: 160 }}>
+                          {x.equipment}
+                        </td>
+                        <td className="ellip" style={{ maxWidth: 200 }}>
+                          {x.subject}
+                        </td>
+                        <td>
+                          <span
+                            className="dash-chip"
+                            style={{ background: st.soft, color: st.color }}
+                          >
+                            {st.short}
+                          </span>
+                        </td>
+                        <td>{dayStr(createdTs(x)) || '—'}</td>
+                        <td>{plannedDate(x) || '—'}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1368,7 +1507,7 @@ function Dashboard({ tickets, onOpen }) {
       <div className="dash-cards">
         {cards.map((c) => {
           const n = cnt(metric[c.kind], base);
-          const on = sel.kind === c.kind && !sel.store;
+          const on = !!sel && sel.kind === c.kind && !sel.store;
           return (
             <button
               key={c.kind}
@@ -1443,72 +1582,6 @@ function Dashboard({ tickets, onOpen }) {
                     </tr>
                   );
                 },
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="dash-block">
-        <div className="dash-block-h">
-          {rows.length} {L('entriesWord')}
-          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
-          {cards.find((c) => c.kind === sel.kind)?.label ||
-            sShort(sel.kind) ||
-            'All'}
-        </div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>{L('colTicket')}</th>
-                <th>{L('colCustomer')}</th>
-                <th>{L('colStore')}</th>
-                <th>{L('colItem')}</th>
-                <th>{L('colComplaint')}</th>
-                <th>{L('colStage')}</th>
-                <th>{L('colOpened')}</th>
-                <th>{L('colDue')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="dash-empty">
-                    {L('noEntry')}
-                  </td>
-                </tr>
-              ) : (
-                rows.map((x) => {
-                  const st = stageMeta(x.stage);
-                  return (
-                    <tr
-                      key={x.ticket_id}
-                      className="dash-row"
-                      onClick={() => onOpen(x)}
-                    >
-                      <td>#{x.id}</td>
-                      <td>{x.customer}</td>
-                      <td>{branchLabel(x.branch)}</td>
-                      <td className="ellip" style={{ maxWidth: 160 }}>
-                        {x.equipment}
-                      </td>
-                      <td className="ellip" style={{ maxWidth: 200 }}>
-                        {x.subject}
-                      </td>
-                      <td>
-                        <span
-                          className="dash-chip"
-                          style={{ background: st.soft, color: st.color }}
-                        >
-                          {st.short}
-                        </span>
-                      </td>
-                      <td>{dayStr(createdTs(x)) || '—'}</td>
-                      <td>{plannedDate(x) || '—'}</td>
-                    </tr>
-                  );
-                })
               )}
             </tbody>
           </table>
@@ -2161,6 +2234,10 @@ function Header({
   count,
   viewMode,
   onViewMode,
+  vFrom,
+  vTo,
+  onVFrom,
+  onVTo,
   layoutMode,
   onLayoutMode,
   onSwitchStore,
@@ -2222,9 +2299,31 @@ function Header({
             onChange={(e) => onViewMode(e.target.value)}
           >
             <option value="today">{L('today')}</option>
-            <option value="archived">{L('archived')}</option>
+            <option value="yesterday">{L('vYesterday')}</option>
+            <option value="month">{L('vMonth')}</option>
+            <option value="custom">{L('vCustom')}</option>
+            <option value="archived">{L('archived')} ({L('vAllTime')})</option>
           </select>
         </div>
+        {viewMode === 'custom' && (
+          <div className="view-range">
+            <input
+              className="dash-inp"
+              type="date"
+              value={vFrom}
+              max={vTo}
+              onChange={(e) => onVFrom && onVFrom(e.target.value)}
+            />
+            <span className="mx-arrow">–</span>
+            <input
+              className="dash-inp"
+              type="date"
+              value={vTo}
+              min={vFrom}
+              onChange={(e) => onVTo && onVTo(e.target.value)}
+            />
+          </div>
+        )}
         <div className="layout-toggle">
           <button
             className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
@@ -2272,7 +2371,7 @@ function Header({
             style={{ background: live ? T.greenBright : T.amber }}
           />
           {live
-            ? `${viewMode === 'archived' ? L('archived') : L('today')} · ${L('totalTickets')} · ${count}`
+            ? `${viewMode === 'archived' ? L('archived') : viewMode === 'yesterday' ? L('vYesterday') : viewMode === 'month' ? L('vMonth') : viewMode === 'custom' ? L('vCustom') : L('today')} · ${L('totalTickets')} · ${count}`
             : L('demoData')}
         </span>
       </div>
@@ -3389,6 +3488,8 @@ function StyleTag() {
       .arch-select { font-size: 17px; font-weight: 800; font-family: inherit; color: ${T.ink}; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; outline: none; }
       .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
 
+      .view-range { display: inline-flex; align-items: center; gap: 6px; }
+      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
       .lt-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .lt-btn.active { background: ${T.forest}; color: #fff; }
