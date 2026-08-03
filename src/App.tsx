@@ -1101,6 +1101,7 @@ export default function App() {
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const [page, setPage] = useState('deliveries'); // deliveries | dashboard
   const [showLog, setShowLog] = useState(false); // overall activity log panel
+  const [dashKind, setDashKind] = useState('delivery'); // dashboard: delivery | pickups
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1409,13 +1410,38 @@ export default function App() {
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'pickups' ? (
               <PickupsModule session={session} view="board" />
-            ) : session.branch === 'ALL' && page === 'pickups-dash' ? (
-              <PickupsModule session={session} view="dashboard" />
             ) : session.branch === 'ALL' && page === 'dashboard' ? (
-              <Dashboard
-                deliveries={scoped}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-              />
+              <>
+                {/* ek hi Dashboard page — upar se delivery/pickups switch */}
+                <div className="dash-switch">
+                  <div className="layout-toggle">
+                    <button
+                      className={
+                        dashKind === 'delivery' ? 'lt-btn active' : 'lt-btn'
+                      }
+                      onClick={() => setDashKind('delivery')}
+                    >
+                      <Truck size={14} /> Deliveries
+                    </button>
+                    <button
+                      className={
+                        dashKind === 'pickups' ? 'lt-btn active' : 'lt-btn'
+                      }
+                      onClick={() => setDashKind('pickups')}
+                    >
+                      <RotateCcw size={14} /> Pickups
+                    </button>
+                  </div>
+                </div>
+                {dashKind === 'pickups' ? (
+                  <PickupsModule session={session} view="dashboard" />
+                ) : (
+                  <Dashboard
+                    deliveries={scoped}
+                    onOpen={(x) => setActiveId(x.invoice_id)}
+                  />
+                )}
+              </>
             ) : session.branch === 'ALL' && page === 'sla' ? (
               <SlaReport
                 deliveries={scoped}
@@ -3327,7 +3353,6 @@ function Sidebar({ session, page, onNav }) {
     ...(isAll
       ? [
           { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-          { id: 'pickups-dash', icon: BarChart3, label: 'Pickups Dashboard' },
         ]
       : []),
     { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints', soon: true },
@@ -3475,7 +3500,6 @@ function Topbar({
           <option value="dashboard">Dashboard</option>
           <option value="sla">Process &amp; SLA</option>
           <option value="pickups">Pickups</option>
-          <option value="pickups-dash">Pickups Dashboard</option>
         </select>
       )}
       <div className="tb-actions">
@@ -6557,6 +6581,7 @@ function StyleTag() {
       .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
       .nav-item:hover { background: rgba(255,255,255,.07); }
       /* ── DASHBOARD ── */
+      .dash-switch { display: flex; margin-bottom: 16px; }
       .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
       .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
       .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
