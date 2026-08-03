@@ -3535,6 +3535,17 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
                 onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
+            {/* optional — bakaya amount agar wahin collect ho jaye to yahan */}
+            <Field
+              label={
+                delivery.pending != null && delivery.pending > 0
+                  ? `Pending amount collected (₹) · bakaya ₹${delivery.pending.toLocaleString('en-IN')}`
+                  : 'Pending amount collected (₹)'
+              }
+            >
+              <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
+                onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
+            </Field>
             <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Pickup done" />
             {/* photo tabhi maanga jaata hai jab "Pickup done" tick ho —
                 delivery app jaisa hi flow */}
