@@ -858,6 +858,10 @@ function rowToDelivery(r) {
       r.pending_amount !== 'null'
         ? Number(r.pending_amount)
         : null,
+    // Books se: security kis mode se li gayi thi (refund usi mode mein karna
+    // hota hai) aur delivery pe amount kis mode se aaya tha. Sirf type.
+    securityType: clean(r.security_type),
+    amountType: clean(r.amount_type),
     charges:
       r.pickup_charges_collected != null &&
       r.pickup_charges_collected !== '' &&
@@ -2747,6 +2751,13 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         </div>
       </div>
       <div className="card-equip">{d.equipment}</div>
+      {d.securityType && (
+        <div className="card-meta">
+          <span className="ellip" style={{ maxWidth: '100%' }}>
+            <ShieldCheck size={12} /> Security: <b>{d.securityType}</b>
+          </span>
+        </div>
+      )}
       {resched && (
         <div className="resched-chip">
           <RotateCcw size={12} /> Rescheduled
@@ -3116,6 +3127,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             label="Invoice total"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
+          <KV label="Security li thi" value={d.securityType || '—'} />
+          <KV label="Amount liya tha" value={d.amountType || '—'} />
           <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
           <KV label="Store manager" value={d.manager} full />
         </div>
