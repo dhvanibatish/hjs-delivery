@@ -774,24 +774,57 @@ function deliveredTs(x) {
   }
   return r.updated_at || null;
 }
-function inView(x, viewMode) {
+function inView(x, viewMode, vFrom, vTo) {
   const st = x.stage;
-  // pending = abhi kaam baaki (new / talked / scheduled)
+  // pending = abhi kaam baaki
   const pending = st !== 'delivered' && !isClosedStage(st);
   if (viewMode === 'archived') {
-    // Archived = ho-chuki entries: Delivered + Cancelled / Duplicate / Renewal
+    // Archived (all time) = ho-chuki entries: Delivered + Cancelled waghera
     return !pending;
   }
-  // Today (kaam waala view):
-  //   - saari pending (chahe purani ho)
-  //   - jo aaj create hui
-  //   - jo AAJ deliver hui (purani entry bhi) — kal se Today se hat jayegi,
-  //     par Archived mein hamesha rahegi.
-  return (
-    pending ||
-    isToday(createdTs(x)) ||
-    (st === 'delivered' && isToday(deliveredTs(x)))
-  );
+  if (viewMode === 'today') {
+    // Today (kaam waala view):
+    //   - saari pending (chahe purani ho)
+    //   - jo aaj create hui
+    //   - jo AAJ complete hui (purani entry bhi)
+    return (
+      pending ||
+      isToday(createdTs(x)) ||
+      (st === 'delivered' && isToday(deliveredTs(x)))
+    );
+  }
+  // yesterday / month / custom — date range ke hisaab se: jo us duration mein
+  // aayi ya us duration mein complete hui. Pending purani entries yahan nahi
+  // aatin (wo Today mein dikhti hain).
+  const [s, e] = viewBounds(viewMode, vFrom, vTo);
+  const cd = dayStr(createdTs(x));
+  const dd = st === 'delivered' ? dayStr(deliveredTs(x)) : '';
+  return (cd && cd >= s && cd <= e) || (dd && dd >= s && dd <= e);
+}
+/* view dropdown ke liye [start, end] — dayStr/todayStr neeche define hain
+   par hoisted functions hain, isliye yahan use kar sakte hain. */
+/* dropdown ka chhota label — live chip mein dikhta hai */
+function viewLabel(mode) {
+  if (mode === 'archived') return 'Archived';
+  if (mode === 'yesterday') return 'Yesterday';
+  if (mode === 'month') return 'This month';
+  if (mode === 'custom') return 'Custom';
+  return 'Today';
+}
+function viewBounds(mode, vFrom, vTo) {
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  if (mode === 'yesterday') {
+    const y = new Date(t);
+    y.setDate(y.getDate() - 1);
+    return [dayStr(y), dayStr(y)];
+  }
+  if (mode === 'month') {
+    const s = new Date(t.getFullYear(), t.getMonth(), 1);
+    return [dayStr(s), dayStr(t)];
+  }
+  if (mode === 'custom') return [vFrom || dayStr(t), vTo || dayStr(t)];
+  return [dayStr(t), dayStr(t)];
 }
 
 /* stat categories jinpe collapsible entries khulti hain.
@@ -1027,7 +1060,9 @@ export default function App({ session: extSession = null, view = 'board' }) {
   const [modal, setModal] = useState(null); // { invoiceId, toStage, mode }
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
-  const [viewMode, setViewMode] = useState('today'); // today | archived
+  const [viewMode, setViewMode] = useState('today'); // today|yesterday|month|custom|archived
+  const [vFrom, setVFrom] = useState(() => todayStr());
+  const [vTo, setVTo] = useState(() => todayStr());
   const [layoutMode, setLayoutMode] = useState('board'); // board | categories
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
@@ -1089,8 +1124,8 @@ export default function App({ session: extSession = null, view = 'board' }) {
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
   const viewItems = useMemo(
-    () => scoped.filter((x) => inView(x, viewMode)),
-    [scoped, viewMode],
+    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
+    [scoped, viewMode, vFrom, vTo],
   );
 
   // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
@@ -1342,6 +1377,14 @@ export default function App({ session: extSession = null, view = 'board' }) {
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
+              vFrom={vFrom}
+              vTo={vTo}
+              onVFrom={setVFrom}
+              onVTo={setVTo}
               layoutMode={layoutMode}
               onLayoutMode={setLayoutMode}
               onSwitchStore={() => {}}
@@ -1459,6 +1502,14 @@ export default function App({ session: extSession = null, view = 'board' }) {
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
+              vFrom={vFrom}
+              vTo={vTo}
+              onVFrom={setVFrom}
+              onVTo={setVTo}
               layoutMode={layoutMode}
               onLayoutMode={setLayoutMode}
               onSwitchStore={(b) =>
@@ -1872,7 +1923,7 @@ function Dashboard({ deliveries, onOpen }) {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
-  const [sel, setSel] = useState({ kind: 'all', store: null });
+  const [sel, setSel] = useState(null);
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -1941,6 +1992,7 @@ function Dashboard({ deliveries, onOpen }) {
   ];
 
   const rows = useMemo(() => {
+    if (!sel) return [];
     let list = base;
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
     const fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
@@ -1958,6 +2010,68 @@ function Dashboard({ deliveries, onOpen }) {
     : range === 'month' ? 'Is mahine'
     : range === 'all' ? 'Sabhi'
     : `${from} → ${to}`;
+
+  // ── Kisi number pe click → poora view badal jaata hai: sirf us subset ki
+  // list, upar Back button. Dobara dashboard pe aane ke liye Back dabao.
+  if (sel) {
+    return (
+      <div>
+        <button className="track-back" onClick={() => setSel(null)}>
+          <ArrowLeft size={16} /> Back to dashboard
+        </button>
+        <div className="dash-block">
+          <div className="dash-block-h">
+            {rows.length} entries
+            {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
+            {cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Customer</th>
+                  <th>Store</th>
+                  <th>Equipment</th>
+                  <th>Stage</th>
+                  <th>Amount</th>
+                  <th>Aayi</th>
+                  <th>Pickup date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">Koi entry nahi</td>
+                  </tr>
+                ) : (
+                  rows.map((x) => {
+                    const st = stageMeta(x.stage);
+                    return (
+                      <tr key={x.invoice_id} className="dash-row" onClick={() => onOpen(x)}>
+                        <td>{x.id}</td>
+                        <td>{x.customer}</td>
+                        <td>{branchLabel(x.branch)}</td>
+                        <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
+                        <td>
+                          <span className="dash-chip" style={{ background: st.soft, color: st.color }}>
+                            {st.short}
+                          </span>
+                        </td>
+                        <td>{x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'}</td>
+                        <td>{niceDate(createdTs(x)) || '—'}</td>
+                        <td>{niceDate(plannedDate(x)) || '—'}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -2000,7 +2114,7 @@ function Dashboard({ deliveries, onOpen }) {
       <div className="dash-cards">
         {cards.map((c) => {
           const n = cnt(metric[c.kind], base);
-          const on = sel.kind === c.kind && !sel.store;
+          const on = !!sel && sel.kind === c.kind && !sel.store;
           return (
             <button
               key={c.kind}
@@ -2069,57 +2183,6 @@ function Dashboard({ deliveries, onOpen }) {
                           {cnt(metric[k], list)}
                         </td>
                       ))}
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="dash-block">
-        <div className="dash-block-h">
-          {rows.length} entries
-          {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
-          {cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
-        </div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Store</th>
-                <th>Equipment</th>
-                <th>Stage</th>
-                <th>Amount</th>
-                <th>Aayi</th>
-                <th>Pickup date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="dash-empty">Koi entry nahi</td>
-                </tr>
-              ) : (
-                rows.map((x) => {
-                  const st = stageMeta(x.stage);
-                  return (
-                    <tr key={x.invoice_id} className="dash-row" onClick={() => onOpen(x)}>
-                      <td>{x.id}</td>
-                      <td>{x.customer}</td>
-                      <td>{branchLabel(x.branch)}</td>
-                      <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
-                      <td>
-                        <span className="dash-chip" style={{ background: st.soft, color: st.color }}>
-                          {st.short}
-                        </span>
-                      </td>
-                      <td>{x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'}</td>
-                      <td>{niceDate(createdTs(x)) || '—'}</td>
-                      <td>{niceDate(plannedDate(x)) || '—'}</td>
                     </tr>
                   );
                 })
@@ -2425,6 +2488,10 @@ function Header({
   count,
   viewMode,
   onViewMode,
+  vFrom,
+  vTo,
+  onVFrom,
+  onVTo,
   layoutMode,
   onLayoutMode,
   onSwitchStore,
@@ -2500,9 +2567,31 @@ function Header({
             onChange={(e) => onViewMode(e.target.value)}
           >
             <option value="today">Today</option>
-            <option value="archived">Archived</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="month">This month</option>
+            <option value="custom">Custom range</option>
+            <option value="archived">Archived (all time)</option>
           </select>
         </div>
+        {viewMode === 'custom' && (
+          <div className="view-range">
+            <input
+              className="dash-inp"
+              type="date"
+              value={vFrom}
+              max={vTo}
+              onChange={(e) => onVFrom && onVFrom(e.target.value)}
+            />
+            <span className="mx-arrow">–</span>
+            <input
+              className="dash-inp"
+              type="date"
+              value={vTo}
+              min={vFrom}
+              onChange={(e) => onVTo && onVTo(e.target.value)}
+            />
+          </div>
+        )}
         <div className="layout-toggle">
           <button
             className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
@@ -2552,7 +2641,7 @@ function Header({
             style={{ background: live ? T.greenBright : T.amber }}
           />
           {live
-            ? `${viewMode === 'archived' ? 'Archived' : 'Today'} · Total Pickups · ${count}`
+            ? `${viewLabel(viewMode)} · Total Pickups · ${count}`
             : 'Demo data'}
         </span>
       </div>
@@ -4881,6 +4970,8 @@ function StyleTag() {
       .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
 
       /* ── layout toggle (Stages / Categories) ── */
+      .view-range { display: inline-flex; align-items: center; gap: 6px; }
+      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
       .lt-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .lt-btn.active { background: ${T.forest}; color: #fff; }
