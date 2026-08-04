@@ -94,9 +94,38 @@ async function sbTrackSearch(phone, pin) {
 // photo upload → Supabase Storage bucket 'pickup-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
+/* Phone ki photo 3-5 MB ki hoti hai — waise ki waise upload karne se storage
+   aur egress dono udte hain. Upload se pehle canvas pe resize + JPEG compress
+   kar dete hain (lambi side max 1600px). 3 MB → ~250 KB, dikhne mein farak
+   nahi padta. Kuch galat ho jaye to original file hi chali jaati hai. */
+async function shrinkImage(file, maxDim = 1600, quality = 0.7) {
+  try {
+    if (!file || !/^image\//.test(file.type || '')) return file;
+    if (file.size < 300 * 1024) return file; // pehle se chhoti hai
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale);
+    const h = Math.round(bmp.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise((res) =>
+      canvas.toBlob(res, 'image/jpeg', quality),
+    );
+    if (!blob || blob.size >= file.size) return file; // faayda nahi to rehne do
+    return blob;
+  } catch (_) {
+    return file;
+  }
+}
 async function sbUploadPhoto(invoiceNumber, kind, file) {
   const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
-  const ext = (file.name && file.name.split('.').pop()) || 'jpg';
+  const small = await shrinkImage(file);
+  const shrunk = small !== file;
+  const ext = shrunk
+    ? 'jpg'
+    : (file.name && file.name.split('.').pop()) || 'jpg';
   const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
   const res = await fetch(
     `${CONFIG.url}/storage/v1/object/pickup-photos/${path}`,
@@ -104,10 +133,10 @@ async function sbUploadPhoto(invoiceNumber, kind, file) {
       method: 'POST',
       headers: {
         ...HDRS(),
-        'Content-Type': file.type || 'image/jpeg',
+        'Content-Type': shrunk ? 'image/jpeg' : file.type || 'image/jpeg',
         'x-upsert': 'true',
       },
-      body: file,
+      body: small,
     },
   );
   if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
@@ -1158,6 +1187,18 @@ export default function App({
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
+  // ── Egress bachane ke liye ──────────────────────────────────────────
+  // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
+  // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
+  // par ek save = ek chhoti update call (poora table nahi).
+  const applyLocal = (id, patch) => {
+    setDeliveries((prev) =>
+      prev.map((x) =>
+        x.invoice_id === id ? rowToDelivery({ ...x._raw, ...patch }) : x,
+      ),
+    );
+  };
+
   const buildPatch = (toStage, f, mode) => {
     const patch = { updated_at: new Date().toISOString() };
     if (mode === 'move') patch.status = stageToStatus(toStage);
@@ -1210,7 +1251,7 @@ export default function App({
     try {
       await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Marked as ${CLOSED[flag].label}`);
-      load();
+      applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
@@ -1247,7 +1288,7 @@ export default function App({
       await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping('Rescheduled ✓ — entry pending mein hi hai');
       jumpMobile('new');
-      load();
+      applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
@@ -1276,7 +1317,7 @@ export default function App({
           : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
       );
       if (mode === 'move') jumpMobile(toStage);
-      load();
+      applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
@@ -1323,7 +1364,7 @@ export default function App({
       await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
       jumpMobile(toStage);
-      load();
+      applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
@@ -1364,7 +1405,7 @@ export default function App({
       await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
       setActiveId(null);
       ping('Deleted — Supabase mein "Deleted" mark ho gaya');
-      load();
+      applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Delete failed: ' + e.message);
     }
