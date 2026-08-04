@@ -1065,6 +1065,9 @@ export default function App({
   openLogKey = 0,
   lang: extLang = null,
   search: extSearch = '',
+  onResults = null,
+  pickId = null,
+  pickKey = 0,
 }) {
   useEmbedFlag();
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
@@ -1195,15 +1198,50 @@ export default function App({
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
-  const viewItems = useMemo(() => {
-    const base = scoped.filter((x) => inView(x, viewMode, vFrom, vTo));
-    if (!hostSearch) return base;
-    return base.filter((x) =>
-      `${x.customer} ${x.id} ${x.area} ${x.phone}`
-        .toLowerCase()
-        .includes(hostSearch),
+  const viewItems = useMemo(
+    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
+    [scoped, viewMode, vFrom, vTo],
+  );
+
+  // hosted: topbar ke dropdown ke liye results upar bhejte hain (delivery
+  // app jaisa hi — poori list mein match, top 8)
+  useEffect(() => {
+    if (!hosted || !onResults) return;
+    if (!hostSearch) {
+      onResults([]);
+      return;
+    }
+    onResults(
+      scoped
+        .filter((x) =>
+          `${x.customer} ${x.id} ${x.area} ${x.phone}`
+            .toLowerCase()
+            .includes(hostSearch),
+        )
+        .slice(0, 8)
+        .map((x) => {
+          const closed = isClosedStage(x.stage);
+          const fresh = isToday(createdTs(x));
+          return {
+            key: x.invoice_id,
+            id: x.invoice_id,
+            name: x.customer,
+            sub: `${x.id} · ${x.equipment}`,
+            tag: closed ? stageMeta(x.stage).short : fresh ? 'Today' : 'Archived',
+            tagKind: closed ? 'cancel' : fresh ? 'today' : 'arch',
+            closed,
+          };
+        }),
     );
-  }, [scoped, viewMode, vFrom, vTo, hostSearch]);
+    // eslint-disable-next-line
+  }, [hostSearch, scoped, hosted]);
+
+  // topbar dropdown se koi result chuna gaya
+  useEffect(() => {
+    // pickKey har click pe badalta hai — wahi entry dobara chunne pe bhi khule
+    if (pickId) setActiveId(pickId);
+    // eslint-disable-next-line
+  }, [pickKey]);
 
   // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
   const searchResults = useMemo(() => {
