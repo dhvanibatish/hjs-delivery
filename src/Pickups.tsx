@@ -2649,7 +2649,7 @@ function Topbar({
           <Bell size={18} color={T.ink} />
           <span className="dot" />
         </button>
-        <div className="tb-user" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="tb-user">
           <div className="avatar">
             {(session.name || 'M').slice(0, 1).toUpperCase()}
           </div>
@@ -5318,6 +5318,7 @@ function StyleTag() {
       .tb-brand { display: none; align-items: center; gap: 9px; }
       .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
       .tb-actions { display: flex; align-items: center; gap: 12px; }
+      .tb-user { display: flex; align-items: center; gap: 10px; }
       .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
       .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .lang-btn.active { background: ${T.forest}; color: #fff; }
@@ -5507,7 +5508,9 @@ function StyleTag() {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
         .tb-brand span { font-size: 14px; }
-        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; align-items: center; gap: 6px; }
+        /* icons apni poori line lete hain aur barabar faila jaate hain —
+           warna right mein khaali jagah bach jaati thi */
+        .tb-actions { order: 1; flex: 1 1 100%; width: 100%; justify-content: space-between; align-items: center; gap: 6px; }
         .tb-user-text { display: none; }
         /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
         .tb-user { display: none; }
