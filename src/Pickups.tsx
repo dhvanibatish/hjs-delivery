@@ -1174,6 +1174,9 @@ export default function App({
   const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
+  // hosted mode: head login store switch kar sake (session App ka hai,
+  // isliye branch yahin local rakhte hain)
+  const [viewBranch, setViewBranch] = useState(null);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
@@ -1241,9 +1244,10 @@ export default function App({
     // Deleted (soft-deleted) entries app ke kisi bhi view mein nahi aati —
     // par Supabase mein status="Deleted" ke saath row bani rehti hai.
     const base = deliveries.filter((x) => x.stage !== 'deleted');
-    if (session.branch === 'ALL') return base;
-    return base.filter((x) => x.branch === session.branch);
-  }, [deliveries, session]);
+    const br = viewBranch || session.branch;
+    if (br === 'ALL') return base;
+    return base.filter((x) => x.branch === br);
+  }, [deliveries, session, viewBranch]);
 
   // Activity log ke liye alag scope — deleted entries bhi chahiye
   const scopedAll = useMemo(() => {
@@ -1606,7 +1610,8 @@ export default function App({
               onVTo={setVTo}
               layoutMode={layoutMode}
               onLayoutMode={setLayoutMode}
-              onSwitchStore={() => {}}
+              onSwitchStore={(b) => setViewBranch(b)}
+              branchView={viewBranch || session.branch}
             />
             {error && (
               <div className="err">
@@ -2726,6 +2731,7 @@ function Header({
   layoutMode,
   onLayoutMode,
   onSwitchStore,
+  branchView,
 }) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -2757,9 +2763,9 @@ function Header({
             color: T.ink,
           }}
         >
-          {session.branch === 'ALL'
+          {(branchView || session.branch) === 'ALL'
             ? 'All stores'
-            : branchLabel(session.branch)}{' '}
+            : branchLabel(branchView || session.branch)}{' '}
           pickups
         </h2>
         {mgr && (
@@ -2849,7 +2855,7 @@ function Header({
             />
             <select
               className="store-switch"
-              value={session.branch}
+              value={branchView || session.branch}
               onChange={(e) => onSwitchStore(e.target.value)}
             >
               <option value="ALL">All stores</option>
