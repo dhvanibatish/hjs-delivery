@@ -657,6 +657,36 @@ function stageFields(toStage, f) {
     return { Resolved: f.resolved ? 'Yes' : 'No', ...rmk };
   return {};
 }
+/* ── Kaun kar raha hai ─────────────────────────────────────────────────
+   Har app_log event ke saath login ka store + manager stamp hota hai, taaki
+   Activity log mein "kisne kiya" dikh sake. Koi naya column nahi. */
+let ACTOR = { by: null, byName: null };
+function setActor(session) {
+  if (!session) {
+    ACTOR = { by: null, byName: null };
+    return;
+  }
+  const code = session.authStore || session.branch;
+  ACTOR = {
+    by: code,
+    byName:
+      code === 'ALL'
+        ? 'Head office'
+        : STORE_MANAGERS[code] || branchLabel(code),
+  };
+}
+function actorStamp() {
+  return { by: ACTOR.by || null, by_name: ACTOR.byName || null };
+}
+function actorText(ev) {
+  if (!ev) return 'Record nahi';
+  const name = ev.by_name || ev.byName || '';
+  const code = ev.by || '';
+  if (!name && !code) return 'Record nahi (purana update)';
+  if (code === 'ALL') return name || 'Head office';
+  return name ? `${name} · ${branchLabel(code)}` : branchLabel(code);
+}
+
 function makeEvent(toStage, fields, mode) {
   return {
     ts: new Date().toISOString(),
@@ -664,6 +694,7 @@ function makeEvent(toStage, fields, mode) {
     label: (STAGES[stageIndex(toStage)] || {}).label || toStage,
     action: mode === 'edit' ? 'Edited' : 'Moved to',
     fields: stageFields(toStage, fields || {}),
+    ...actorStamp(),
   };
 }
 const existingLog = (d) =>
@@ -861,6 +892,9 @@ export default function App({
   openLogKey = 0,
   lang: extLang = null,
   search: extSearch = '',
+  onResults = null,
+  pickId = null,
+  pickKey = 0,
 }) {
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
@@ -883,6 +917,8 @@ export default function App({
   const [lastMove, setLastMove] = useState(null);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const [showLog, setShowLog] = useState(false); // activity log panel
+  // kaun logged-in hai — har app_log event isi se stamp hota hai
+  setActor(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
   // hosted mode mein page delivery app ka sidebar decide karta hai
   const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'tickets') : ownPage;
@@ -954,15 +990,50 @@ export default function App({
   // (dropdown delivery app ka hai, wo sirf deliveries dikhata hai)
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
-  const viewItems = useMemo(() => {
-    const base = scoped.filter((x) => inView(x, viewMode, vFrom, vTo));
-    if (!hostSearch) return base;
-    return base.filter((x) =>
-      `${x.customer} ${x.id} ${x.area} ${x.phone}`
-        .toLowerCase()
-        .includes(hostSearch),
+  const viewItems = useMemo(
+    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
+    [scoped, viewMode, vFrom, vTo],
+  );
+
+  // hosted: topbar ke dropdown ke liye results upar bhejte hain (delivery
+  // app jaisa hi — poori list mein match, top 8)
+  useEffect(() => {
+    if (!hosted || !onResults) return;
+    if (!hostSearch) {
+      onResults([]);
+      return;
+    }
+    onResults(
+      scoped
+        .filter((x) =>
+          `${x.customer} ${x.id} ${x.area} ${x.phone}`
+            .toLowerCase()
+            .includes(hostSearch),
+        )
+        .slice(0, 8)
+        .map((x) => {
+          const closed = isClosedStage(x.stage);
+          const fresh = isToday(createdTs(x));
+          return {
+            key: x.ticket_id,
+            id: x.ticket_id,
+            name: x.customer,
+            sub: `${x.id} · ${x.equipment}`,
+            tag: closed ? stageMeta(x.stage).short : fresh ? 'Today' : 'Archived',
+            tagKind: closed ? 'cancel' : fresh ? 'today' : 'arch',
+            closed,
+          };
+        }),
     );
-  }, [scoped, viewMode, vFrom, vTo, hostSearch]);
+    // eslint-disable-next-line
+  }, [hostSearch, scoped, hosted]);
+
+  // topbar dropdown se koi result chuna gaya
+  useEffect(() => {
+    // pickKey har click pe badalta hai — wahi entry dobara chunne pe bhi khule
+    if (pickId) setActiveId(pickId);
+    // eslint-disable-next-line
+  }, [pickKey]);
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1090,6 +1161,7 @@ export default function App({
           label: 'Deleted',
           action: 'Marked as',
           fields: {},
+          ...actorStamp(),
         },
       ],
     };
