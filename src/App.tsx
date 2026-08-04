@@ -1558,7 +1558,7 @@ export default function App() {
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
           session={session}
-          page={session.branch === 'ALL' ? page : 'deliveries'}
+          page={page}
           onNav={setPage}
         />
         <div
@@ -1571,7 +1571,7 @@ export default function App() {
         >
           <Topbar
             session={session}
-            page={session.branch === 'ALL' ? page : 'deliveries'}
+            page={page}
             onNav={setPage}
             search={search}
             setSearch={setSearch}
