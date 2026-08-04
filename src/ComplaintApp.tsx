@@ -642,6 +642,21 @@ function toLocalInput(v) {
 }
 
 /* app-controlled timeline */
+/* poori date + 12-ghante ka time — "23 Jul 2026, 5:43 PM" */
+function fmtFullDateTime(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d)) return String(ts);
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
 function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
   if (toStage === 'received') return {};
