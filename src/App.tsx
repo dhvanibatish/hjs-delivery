@@ -6787,6 +6787,11 @@ function StyleTag() {
       .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
       .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
       .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
+      /* card ke andar wala inline form — lamba button hone pe footer bahar
+         nikal jaata tha (justify-end + no wrap). Ab wrap hoke andar rehta hai. */
+      .inline-move .modal-foot { flex-wrap: wrap; gap: 8px; }
+      .inline-move .modal-foot .btn-ghost,
+      .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
