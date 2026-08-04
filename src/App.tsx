@@ -1182,6 +1182,8 @@ export default function App() {
   const [reloadTick, setReloadTick] = useState(0);
   // Activity log button — jis module pe ho, usi ka log khule
   const [logTick, setLogTick] = useState(0);
+  const [moduleRows, setModuleRows] = useState([]); // module ke search results
+  const [modulePick, setModulePick] = useState(null); // dropdown se chuna gaya
   const inModule = page === 'pickups' || page === 'complaints';
   const switchLang = (l) => {
     setHjsLang(l);
@@ -1252,6 +1254,25 @@ export default function App() {
       )
       .slice(0, 8);
   }, [scoped, search]);
+
+  // Topbar ka dropdown ek hi shape padhta hai — chahe deliveries ho ya module
+  const searchRows = useMemo(
+    () =>
+      searchResults.map((x) => {
+        const closed = isClosedStage(x.stage);
+        const fresh = isToday(createdTs(x));
+        return {
+          key: x.invoice_id,
+          id: x.invoice_id,
+          name: x.customer,
+          sub: `₹${Number(x.amount || 0).toLocaleString('en-IN')} · ${x.equipment}`,
+          tag: closed ? stageMeta(x.stage).short : fresh ? 'Today' : 'Archived',
+          tagKind: closed ? 'cancel' : fresh ? 'today' : 'arch',
+          closed,
+        };
+      }),
+    [searchResults],
+  );
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
@@ -1528,10 +1549,10 @@ export default function App() {
             onNav={setPage}
             search={search}
             setSearch={setSearch}
-            results={inModule ? [] : searchResults}
-            showResults={!inModule}
+            results={inModule ? moduleRows : searchRows}
             onPick={(x) => {
-              setActiveId(x.invoice_id);
+              if (inModule) setModulePick({ id: x.id, n: Date.now() });
+              else setActiveId(x.id);
               setSearch('');
             }}
             onReload={() => {
@@ -1556,6 +1577,9 @@ export default function App() {
                 openLogKey={logTick}
                 lang={lang}
                 search={search}
+                onResults={setModuleRows}
+                pickId={modulePick && modulePick.id}
+                pickKey={modulePick && modulePick.n}
               />
             ) : session.branch === 'ALL' && page === 'complaints' ? (
               <ComplaintsModule
@@ -1565,6 +1589,9 @@ export default function App() {
                 openLogKey={logTick}
                 lang={lang}
                 search={search}
+                onResults={setModuleRows}
+                pickId={modulePick && modulePick.id}
+                pickKey={modulePick && modulePick.n}
               />
             ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <>
@@ -3605,7 +3632,6 @@ function Topbar({
   search,
   setSearch,
   results,
-  showResults = true,
   onPick,
   onReload,
   onActivity,
@@ -3637,42 +3663,24 @@ function Topbar({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {search.trim() && showResults && (
+        {search.trim() && (
           <div className="search-dd">
             {!results || results.length === 0 ? (
               <div className="search-empty">Koi match nahi mila</div>
             ) : (
-              results.map((x) => {
-                const closed = isClosedStage(x.stage);
-                const today = isToday(createdTs(x));
-                const tagClass = closed
-                  ? 'search-tag cancel'
-                  : today
-                    ? 'search-tag today'
-                    : 'search-tag arch';
-                const tagText = closed
-                  ? stageMeta(x.stage).short
-                  : today
-                    ? 'Today'
-                    : 'Archived';
-                return (
-                  <button
-                    key={x.invoice_id}
-                    className={
-                      closed ? 'search-row is-cancelled' : 'search-row'
-                    }
-                    onClick={() => onPick(x)}
-                  >
-                    <div className="search-row-main">
-                      <span className="ellip search-name">{x.customer}</span>
-                      <span className={tagClass}>{tagText}</span>
-                    </div>
-                    <div className="ellip search-sub">
-                      ₹{Number(x.amount).toLocaleString('en-IN')} · {x.equipment}
-                    </div>
-                  </button>
-                );
-              })
+              results.map((x) => (
+                <button
+                  key={x.key}
+                  className={x.closed ? 'search-row is-cancelled' : 'search-row'}
+                  onClick={() => onPick(x)}
+                >
+                  <div className="search-row-main">
+                    <span className="ellip search-name">{x.name}</span>
+                    <span className={`search-tag ${x.tagKind}`}>{x.tag}</span>
+                  </div>
+                  <div className="ellip search-sub">{x.sub}</div>
+                </button>
+              ))
             )}
           </div>
         )}
