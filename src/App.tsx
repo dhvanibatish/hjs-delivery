@@ -98,6 +98,11 @@ async function sbUpdate(store, pw, invoiceId, patch) {
 async function sbTrack(invoice, phone) {
   return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
 }
+// customer tracking — usi invoice ka pickup (agar return shuru ho chuka hai).
+// Khaali aaye to matlab abhi koi pickup nahi — page pehle jaisa hi rehta hai.
+async function sbTrackPickup(invoice, phone) {
+  return sbRpc('track_pickup', { p_invoice: invoice, p_phone: phone });
+}
 // sales team — sirf phone se us customer ki saari deliveries (latest→old).
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
 async function sbTrackSearch(phone, pin) {
@@ -515,6 +520,21 @@ function statusToStage(s) {
   if (t.includes('talk')) return 'talked';
   return 'new'; // naya / unknown record → New Delivery
 }
+
+/* Pickup ke statuses delivery se alag hain ("Contacted", "Picked Up",
+   "Rescheduled"...), isliye customer tracker ke liye alag mapper. */
+function pickupStage(st) {
+  const t = String(st || '').toLowerCase();
+  if (t.includes('delet')) return 'deleted';
+  if (t.includes('cancel')) return 'cancelled';
+  if (t.includes('reschedul')) return 'new'; // 'schedul' se pehle
+  if (t.includes('picked')) return 'delivered';
+  if (t.includes('out for')) return 'dispatched';
+  if (t.includes('schedul')) return 'scheduled';
+  if (t.includes('contact')) return 'talked';
+  return 'new';
+}
+const isResched = (st) => /reschedul/i.test(String(st || ''));
 
 /* ── CLOSED STATES ──────────────────────────────────────────────────────
    Cancelled / Duplicate / Renewal — teeno "closed" hain: active pipeline se
@@ -5534,6 +5554,40 @@ const TRACK_STEPS = [
     icon: CheckCircle2,
   },
 ];
+/* Return / pickup ke steps — customer ki bhasha mein */
+const PICKUP_STEPS = [
+  {
+    id: 'new',
+    label: 'Return Requested',
+    desc: 'We have received the return request. Our team will call you to confirm the pickup date and time.',
+    icon: RotateCcw,
+  },
+  {
+    id: 'talked',
+    label: 'Confirmed With You',
+    desc: 'Our team has contacted you and the pickup date and time has been confirmed.',
+    icon: Phone,
+  },
+  {
+    id: 'scheduled',
+    label: 'Pickup Scheduled',
+    desc: 'Your pickup has been scheduled. Our team will arrive to collect the item.',
+    icon: ClipboardCheck,
+  },
+  {
+    id: 'dispatched',
+    label: 'Out for Pickup',
+    desc: 'Our team is on the way to your location to collect the item.',
+    icon: Truck,
+  },
+  {
+    id: 'delivered',
+    label: 'Picked Up',
+    desc: 'The item has been picked up successfully. Thank you for choosing Healthy Jeena Sikho.',
+    icon: CheckCircle2,
+  },
+];
+
 /* customer country-code dropdown — default +91 */
 const COUNTRY_CODES = ['+91', '+1', '+44', '+971', '+977', '+880', '+61'];
 function stepTime(log, stageId) {
@@ -5983,7 +6037,31 @@ function TrackPage({ invoice }) {
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
   const [rows, setRows] = useState([]);
   const [row, setRow] = useState(null);
+  const [pickup, setPickup] = useState(null); // usi order ka return, agar shuru hua ho
   const [err, setErr] = useState('');
+
+  // order chunte hi dekho ki iska return/pickup shuru hua hai ya nahi
+  useEffect(() => {
+    let alive = true;
+    setPickup(null);
+    if (!row || !row.invoice_number) return;
+    (async () => {
+      try {
+        const res = await sbTrackPickup(
+          row.invoice_number,
+          `+91${phone.replace(/\D/g, '')}`,
+        );
+        const pk = (res || [])[0] || null;
+        if (alive && pk && pickupStage(pk.status) !== 'deleted') setPickup(pk);
+      } catch (_) {
+        /* pickup na mile to page pehle jaisa hi chalta rahe */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line
+  }, [row]);
 
   const track = async () => {
     const digits = phone.replace(/\D/g, '');
@@ -6156,7 +6234,7 @@ function TrackPage({ invoice }) {
                 <ArrowLeft size={16} /> Back to my orders
               </button>
             )}
-            <TrackResult row={row} />
+            <TrackResult row={row} pickup={pickup} />
           </>
         )}
 
@@ -6302,7 +6380,11 @@ function SalesOrderCard({ row }) {
   );
 }
 
-function TrackResult({ row, showPhotos }) {
+function TrackResult({ row, pickup, showPhotos }) {
+  // Return shuru ho chuka hai to delivery ka timeline sikud jaata hai aur
+  // neeche pickup ka timeline chalne lagta hai.
+  const hasPickup = !!pickup;
+  const [openDel, setOpenDel] = useState(false);
   // row = safe fields from track_order RPC (poora delivery row NAHI)
   const equipment = equipmentText({
     line_items: row.line_items,
@@ -6400,12 +6482,48 @@ function TrackResult({ row, showPhotos }) {
         ))}
       </ul>
 
-      <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
-        {banner.text}
-      </div>
+      {!hasPickup && (
+        <div
+          className="track-banner"
+          style={{ background: banner.bg, color: banner.fg }}
+        >
+          {banner.text}
+        </div>
+      )}
+
+      {/* Return shuru ho gaya → delivery ka hissa ek line mein sikud jaata hai */}
+      {hasPickup && (
+        <button
+          className="phase-collapse"
+          onClick={() => setOpenDel((v) => !v)}
+        >
+          <span className="phase-tick">
+            <Check size={13} />
+          </span>
+          <span style={{ flex: 1, textAlign: 'left' }}>
+            Delivered
+            {niceDate(row.confirmed_date)
+              ? ` · ${niceDate(row.confirmed_date)}`
+              : ''}
+          </span>
+          <span className="phase-link">
+            {openDel ? 'Hide' : 'View details'}
+          </span>
+          <ChevronRight
+            size={16}
+            style={{
+              transform: openDel ? 'rotate(90deg)' : 'none',
+              transition: 'transform .15s',
+            }}
+          />
+        </button>
+      )}
 
       {/* the timeline */}
-      <div className="track-tl">
+      <div
+        className="track-tl"
+        style={hasPickup && !openDel ? { display: 'none' } : null}
+      >
         {steps.map((step) => {
           // array-index nahi, asli stage-index dekho (MBC mein ek step hata
           // diya jaata hai, isliye index shift ho jaata)
@@ -6559,6 +6677,161 @@ function TrackResult({ row, showPhotos }) {
                 {closedMeta.label}
               </div>
               <div className="ttl-desc">{closedMeta.cust}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {hasPickup && <PickupPhase pickup={pickup} />}
+    </div>
+  );
+}
+
+/* ── Return / Pickup ka hissa — customer ke liye ─────────────────────── */
+function PickupPhase({ pickup }) {
+  const stage = pickupStage(pickup.status);
+  const cancelled = stage === 'cancelled';
+  const idx = STAGES.findIndex((x) => x.id === stage);
+  const log = Array.isArray(pickup.app_log) ? pickup.app_log : [];
+  const resched = isResched(pickup.status);
+  const items = equipmentList({
+    line_items: pickup.line_items,
+    item_name: pickup.item_name,
+  });
+  const person = pickup.app_pickup_person || null;
+  const schedDate = niceDate(pickup.confirmed_date);
+  const schedTime = niceTime(pickup.confirmed_time);
+  const etaTime = niceTime(String(pickup.app_eta || '').slice(11, 16));
+
+  const banner = cancelled
+    ? { text: 'Pickup cancelled', bg: T.redSoft, fg: T.red }
+    : stage === 'delivered'
+      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
+      : stage === 'dispatched'
+        ? { text: 'Our team is on the way to collect the item', bg: T.violetSoft, fg: T.violet }
+        : stage === 'scheduled'
+          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
+          : stage === 'talked'
+            ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
+            : { text: 'Return request received', bg: T.slateSoft, fg: T.slate };
+
+  return (
+    <div className="phase-block">
+      <div className="phase-head">
+        <RotateCcw size={16} color={T.green} /> Return &amp; Pickup
+      </div>
+
+      {/* poora order wapas nahi bhi ja sakta — isliye items alag se */}
+      <div className="phase-items">
+        <div className="phase-items-h">Item being picked up</div>
+        <ul className="eq-list" style={{ marginTop: 8 }}>
+          {items.map((it, i) => (
+            <li key={i}>{it}</li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
+        {banner.text}
+      </div>
+
+      <div className="track-tl">
+        {PICKUP_STEPS.map((step, i) => {
+          if (i > idx) return null;
+          const current = !cancelled && i === idx;
+          const reachedTs =
+            stepTime(log, step.id) || (step.id === 'new' ? pickup.created_at : null);
+          const StepIcon = step.icon;
+          const showLine = i < idx || cancelled;
+          return (
+            <div className="ttl-row" key={step.id}>
+              <div className="ttl-left">
+                <div
+                  className="ttl-dot"
+                  style={{ background: T.green, borderColor: T.green, color: '#fff' }}
+                >
+                  <StepIcon size={16} />
+                </div>
+                {showLine && <span className="ttl-line" style={{ background: T.green }} />}
+              </div>
+              <div className="ttl-content">
+                <div
+                  className="ttl-title"
+                  style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
+                >
+                  {step.label}
+                  {current && <ArrowLeft className="ttl-now-arrow" size={18} />}
+                </div>
+                <div className="ttl-desc">{step.desc}</div>
+
+                {/* date abhi tay nahi hui — customer ko seedhi baat */}
+                {step.id === 'new' && resched && (
+                  <div className="ttl-extra">
+                    Our team will confirm the pickup date with you shortly.
+                  </div>
+                )}
+
+                {step.id === 'talked' && (schedDate || schedTime) && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Confirmed slot:</b> {schedDate || ''}
+                      {schedDate && schedTime ? ', ' : ''}
+                      {schedTime || ''}
+                    </div>
+                  </div>
+                )}
+
+                {step.id === 'scheduled' && (
+                  <div className="ttl-extra">
+                    {(schedDate || schedTime) && (
+                      <div>
+                        <b>Pickup slot:</b> {schedDate || ''}
+                        {schedDate && schedTime ? ', ' : ''}
+                        {schedTime || ''}
+                      </div>
+                    )}
+                    {person && (
+                      <div>
+                        <b>Pickup person:</b> {person}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {step.id === 'dispatched' && etaTime && (
+                  <div className="ttl-extra">
+                    <div>
+                      <b>Estimated arrival:</b> {etaTime}
+                    </div>
+                  </div>
+                )}
+
+                {reachedTs && (
+                  <div className="ttl-time">Updated: {fmtDateTime(reachedTs)}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {cancelled && (
+          <div className="ttl-row">
+            <div className="ttl-left">
+              <div
+                className="ttl-dot"
+                style={{ background: T.red, borderColor: T.red, color: '#fff' }}
+              >
+                <AlertTriangle size={16} />
+              </div>
+            </div>
+            <div className="ttl-content">
+              <div className="ttl-title" style={{ color: T.red, fontWeight: 800 }}>
+                Pickup cancelled
+              </div>
+              <div className="ttl-desc">
+                This pickup has been cancelled. Please contact the store for any
+                questions.
+              </div>
             </div>
           </div>
         )}
@@ -7178,6 +7451,14 @@ function StyleTag() {
       .ttl-time { font-size: 12px; color: ${T.green}; font-weight: 700; margin-top: 4px; }
       .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
       .ttl-extra b { font-weight: 700; }
+      /* customer tracker — delivery phase collapse + return section */
+      .phase-collapse { width: 100%; display: flex; align-items: center; gap: 10px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; padding: 12px 14px; font-size: 13.5px; font-weight: 800; color: ${T.green}; font-family: inherit; cursor: pointer; margin: 16px 0 4px; }
+      .phase-tick { width: 22px; height: 22px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .phase-link { font-size: 12px; font-weight: 700; opacity: .85; }
+      .phase-block { margin-top: 18px; padding-top: 18px; border-top: 1px dashed ${T.line}; }
+      .phase-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: ${T.ink}; margin-bottom: 12px; }
+      .phase-items-h { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; }
+      .phase-items { margin-bottom: 14px; }
       .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
       .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
       .track-back:hover { background: ${T.beige}; }
