@@ -1062,6 +1062,9 @@ export default function App({
   session: extSession = null,
   view = 'board',
   reloadKey = 0,
+  openLogKey = 0,
+  lang: extLang = null,
+  search: extSearch = '',
 }) {
   useEmbedFlag();
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
@@ -1143,6 +1146,21 @@ export default function App({
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
   }, [session]);
+  // hosted mode: delivery app ka EN/Hing toggle yahan bhi lag jaaye
+  useEffect(() => {
+    if (!extLang) return;
+    setHjsLang(extLang);
+    setLang(HJS_LANG);
+  }, [extLang]);
+  // hosted mode: topbar ka Activity log button
+  const firstLogKey = React.useRef(true);
+  useEffect(() => {
+    if (firstLogKey.current) {
+      firstLogKey.current = false;
+      return;
+    }
+    setShowLog(true);
+  }, [openLogKey]);
   // hosted mode: delivery app ka refresh button dabane pe reloadKey badhta hai
   const firstReload = React.useRef(true);
   useEffect(() => {
@@ -1172,11 +1190,20 @@ export default function App({
     return deliveries.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
+  // hosted mode mein topbar ka search seedha board ko filter karta hai
+  // (dropdown delivery app ka hai, wo sirf deliveries dikhata hai)
+  const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
+
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
-  const viewItems = useMemo(
-    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
-    [scoped, viewMode, vFrom, vTo],
-  );
+  const viewItems = useMemo(() => {
+    const base = scoped.filter((x) => inView(x, viewMode, vFrom, vTo));
+    if (!hostSearch) return base;
+    return base.filter((x) =>
+      `${x.customer} ${x.id} ${x.area} ${x.phone}`
+        .toLowerCase()
+        .includes(hostSearch),
+    );
+  }, [scoped, viewMode, vFrom, vTo, hostSearch]);
 
   // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
   const searchResults = useMemo(() => {
@@ -1534,6 +1561,17 @@ export default function App({
             mode={modal.mode}
             onClose={() => setModal(null)}
             onSave={commitModal}
+          />
+        )}
+        {showLog && (
+          <ActivityLog
+            deliveries={scopedAll}
+            session={session}
+            onClose={() => setShowLog(false)}
+            onOpen={(x) => {
+              setShowLog(false);
+              setActiveId(x.invoice_id);
+            }}
           />
         )}
         {toast && <Toast msg={toast} />}
