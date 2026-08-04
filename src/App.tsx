@@ -3418,17 +3418,11 @@ function Sidebar({ session, page, onNav }) {
     { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
     ...(isAll
       ? [
+          { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+          { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
         ]
-      : []),
-    ...(isAll
-      ? [
-          { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-        ]
-      : []),
-    ...(isAll
-      ? [{ id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' }]
       : []),
   ];
   const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
@@ -3571,10 +3565,10 @@ function Topbar({
           onChange={(e) => onNav && onNav(e.target.value)}
         >
           <option value="deliveries">Deliveries</option>
-          <option value="dashboard">Dashboard</option>
-          <option value="sla">Process &amp; SLA</option>
           <option value="pickups">Pickups</option>
           <option value="complaints">Complaints</option>
+          <option value="dashboard">Dashboard</option>
+          <option value="sla">Process &amp; SLA</option>
         </select>
       )}
       <div className="tb-actions">
