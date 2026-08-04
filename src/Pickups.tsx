@@ -75,6 +75,30 @@ async function sbList(store, pw) {
   // _lite = app_log ke bina (bada JSON). Timeline zarurat pe — dekho sbLogs().
   return sbRpc('pickup_list_lite', { p_store: store, p_password: pw });
 }
+// ── Sales pickup tracker (console ka CH tab) ────────────────────────
+async function pkSalesMatrix(from, to, status) {
+  return sbRpc('pickup_sales_matrix', {
+    p_from: from,
+    p_to: to,
+    p_status: status || 'all',
+  });
+}
+async function pkSalesList(sales, store, from, to, status) {
+  return sbRpc('pickup_sales_list', {
+    p_sales: sales || '',
+    p_store: store || '',
+    p_from: from,
+    p_to: to,
+    p_status: status || 'all',
+  });
+}
+async function pkSalesSearch(qq) {
+  return sbRpc('pickup_sales_search', { p_q: qq });
+}
+// ek pickup ka timeline (app_log) — order kholne pe
+async function pkSalesLog(invoiceNumber) {
+  return sbRpc('pickup_sales_log', { p_invoice: invoiceNumber });
+}
 // sirf app_log — ek invoice ka (drawer) ya sabka (Activity log)
 async function sbLogs(store, pw, invoice) {
   return sbRpc('pickup_logs', {
@@ -1090,6 +1114,7 @@ export default function App({
   openLogKey = 0,
   lang: extLang = null,
   search: extSearch = '',
+  route = null,
   onResults = null,
   pickId = null,
   pickKey = 0,
@@ -1098,6 +1123,8 @@ export default function App({
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
   const hosted = !!extSession;
+  // console ka "Sales Pickup" tab — sirf matrix page, koi login nahi
+  if (route === 'sales') return <PickupSalesPage />;
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -4235,70 +4262,188 @@ function stepTime(log, stageId) {
    /track → sales team ek customer ka number daale, us number ki saari
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
-function SalesTrackPage() {
-  const [unlocked, setUnlocked] = useState(false);
-  const [pin, setPin] = useState('');
-  const [gateBusy, setGateBusy] = useState(false);
-  const [gateErr, setGateErr] = useState('');
-  const [phone, setPhone] = useState('');
-  const [state, setState] = useState('idle'); // idle|loading|done|notfound|error
+function PickupSalesPage() {
+  // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
+  const [range, setRange] = useState('today');
+  const [from, setFrom] = useState(dayStr(Date.now()));
+  const [to, setTo] = useState(dayStr(Date.now()));
+  const [storeFilter, setStoreFilter] = useState(''); // '' = all stores
+  const [statusFilter, setStatusFilter] = useState('all'); // all|pending|delivered
+  const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
+  const [mState, setMState] = useState('loading'); // loading|done|error
+  const [mErr, setMErr] = useState('');
+  const [cell, setCell] = useState(null); // {sales, store}
   const [rows, setRows] = useState([]);
+  const [cState, setCState] = useState('idle');
+  const [q, setQ] = useState(''); // global search (customer/invoice/salesperson)
+  const [sRows, setSRows] = useState([]);
+  const [sState, setSState] = useState('idle'); // idle|loading|done
+  const [lq, setLq] = useState(''); // list search (cell view)
   const [selected, setSelected] = useState(null);
-  const [err, setErr] = useState('');
-
-  // PIN verify: empty phone se call — sahi PIN pe [] aata hai, galat pe error
-  const unlock = async () => {
-    if (!pin) {
-      setGateErr('Enter the sales PIN.');
-      return;
-    }
-    setGateBusy(true);
-    setGateErr('');
+  // order chunte hi uska timeline (app_log) le aao — customer link jaisa
+  // "Updated: ..." har stage pe dikhe
+  const pickOrder = async (r) => {
+    setSelected(r);
+    if (!r || !r.invoice_number || r.app_log) return;
     try {
-      await sbTrackSearch('', pin);
-      setUnlocked(true);
-    } catch (e) {
-      const msg = String(e.message || '');
-      // RPC sirf galat PIN pe hi 'pin' waala error deta hai. Baaki errors
-      // (function missing / permission / naya project setup) alag dikhao.
-      if (/pin|invalid|unauthor/i.test(msg)) {
-        setGateErr('Wrong PIN. Try again.');
-      } else {
-        setGateErr('Access error: ' + msg);
-      }
+      const det = (await pkSalesLog(r.invoice_number)) || {};
+      setSelected((cur) =>
+        cur && cur.invoice_number === r.invoice_number
+          ? {
+              ...cur,
+              app_log: det.app_log,
+              photo_delivered: det.photo_delivered,
+              customer_phone: det.customer_phone || cur.customer_phone,
+            }
+          : cur,
+      );
+    } catch (_) {
+      /* log na aaye to baaki detail phir bhi dikhti rahe */
     }
-    setGateBusy(false);
   };
 
-  const search = async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 10) {
-      setErr('Please enter a full 10-digit mobile number.');
+  // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) {
+      setSState('idle');
+      setSRows([]);
       return;
     }
-    setErr('');
-    setState('loading');
+    let alive = true;
+    setSState('loading');
+    const t = setTimeout(async () => {
+      try {
+        const res = await pkSalesSearch(term);
+        if (alive) {
+          setSRows(res || []);
+          setSState('done');
+        }
+      } catch (_) {
+        if (alive) setSState('done');
+      }
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  const bounds = () => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'month') {
+      const s = new Date(t.getFullYear(), t.getMonth(), 1);
+      return [mk(s), mk(t)];
+    }
+    if (range === 'custom') return [from, to];
+    return ['2000-01-01', '2999-12-31'];
+  };
+
+  const loadMatrix = async () => {
+    setMState('loading');
+    setCell(null);
     setSelected(null);
+    const [f, t] = bounds();
     try {
-      const res = await sbTrackSearch(`+91${digits}`, pin);
-      if (!res || res.length === 0) {
-        setRows([]);
-        setState('notfound');
-        return;
-      }
-      setRows(res);
-      setState('done');
+      const res = await pkSalesMatrix(f, t, statusFilter);
+      setMatrix(res || []);
+      setMState('done');
     } catch (e) {
-      // PIN galat ho gaya (e.g. changed) → wapas gate pe
-      if (String(e.message || '').toLowerCase().includes('pin')) {
-        setUnlocked(false);
-        setGateErr('Session expired — enter PIN again.');
-        return;
-      }
-      setErr(e.message || 'Something went wrong');
-      setState('error');
+      setMErr(e.message || 'error');
+      setMState('error');
     }
   };
+
+  useEffect(() => {
+    loadMatrix();
+    // eslint-disable-next-line
+  }, [range, from, to, statusFilter]);
+
+  const openCell = async (sales, store) => {
+    setCell({
+      sales,
+      store,
+      title:
+        sales && store
+          ? `${sales} · ${branchLabel(store)}`
+          : sales
+            ? sales
+            : store
+              ? branchLabel(store)
+              : 'All',
+    });
+    setSelected(null);
+    setLq('');
+    setCState('loading');
+    const [f, t] = bounds();
+    try {
+      const res = await pkSalesList(sales, store, f, t, statusFilter);
+      setRows(res || []);
+      setCState('done');
+    } catch (e) {
+      setCState('error');
+    }
+  };
+
+  // matrix ko pivot karo: salespeople (rows) × stores (cols jinme data hai)
+  const stores = [];
+  const people = [];
+  const map = {}; // sales|store -> cnt
+  const rowTotal = {};
+  const colTotal = {};
+  matrix.forEach((m) => {
+    if (!stores.includes(m.store)) stores.push(m.store);
+    if (!people.includes(m.salesperson)) people.push(m.salesperson);
+    map[`${m.salesperson}|${m.store}`] = Number(m.cnt);
+    rowTotal[m.salesperson] = (rowTotal[m.salesperson] || 0) + Number(m.cnt);
+    colTotal[m.store] = (colTotal[m.store] || 0) + Number(m.cnt);
+  });
+  // store order fixed rakho jaha possible
+  const STORE_ORDER = [
+    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
+  ];
+  stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
+  const shownStores = stores;
+  // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
+  const hasNum = (p) => /\d{6,}/.test(String(p || ''));
+  people.sort((a, b) => {
+    const na = hasNum(a) ? 1 : 0;
+    const nb = hasNum(b) ? 1 : 0;
+    if (na !== nb) return nb - na; // number waale pehle
+    return (rowTotal[b] || 0) - (rowTotal[a] || 0);
+  });
+  const shownPeople = people.filter(
+    (p) => !q.trim() || p.toLowerCase().includes(q.trim().toLowerCase()),
+  );
+
+  const shownRows = rows.filter((r) => {
+    if (!lq.trim()) return true;
+    const hay = `${r.customer_name || ''} ${r.invoice_number || ''} ${equipmentText(
+      { line_items: r.line_items, item_name: r.item_name },
+    )}`.toLowerCase();
+    return hay.includes(lq.trim().toLowerCase());
+  });
+
+  const rangeLabel =
+    range === 'today' ? 'Aaj'
+    : range === 'yesterday' ? 'Kal'
+    : range === '7d' ? 'Pichhle 7 din'
+    : range === 'month' ? 'Is mahine'
+    : range === 'all' ? 'Sabhi'
+    : `${from} → ${to}`;
 
   return (
     <div className="track-wrap" style={{ fontFamily: FONT }}>
@@ -4319,160 +4464,226 @@ function SalesTrackPage() {
         </div>
       </div>
 
-      <div className="track-body">
-        {!unlocked ? (
-          <div className="track-card">
-            <h1 className="track-h1">Sales access</h1>
-            <p className="track-sub">
-              Enter the sales PIN to look up customer deliveries.
-            </p>
-            <Field label="Sales PIN">
-              <input
-                className="inp"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="••••"
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
-                  setGateErr('');
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && unlock()}
-              />
-            </Field>
-            {gateErr && <div className="login-err">{gateErr}</div>}
-            <button
-              className="btn-primary"
-              style={{ width: '100%', marginTop: 4 }}
-              disabled={!pin || gateBusy}
-              onClick={unlock}
-            >
-              {gateBusy ? (
-                'Checking…'
-              ) : (
-                <>
-                  Unlock <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-            <div className="track-foot" style={{ marginTop: 6 }}>
-              Healthy Jeena Sikho · Internal use only
-            </div>
-          </div>
-        ) : selected ? (
+      <div className={cell || selected ? 'track-body' : 'track-body track-wide'}>
+        {/* DETAIL VIEW */}
+        {selected ? (
           <>
             <button className="track-back" onClick={() => setSelected(null)}>
               <ArrowLeft size={16} /> Back to list
             </button>
-            <TrackResult row={selected} />
+            <PkOrderCard row={selected} />
+            <PickupPhase pickup={selected} hideTop />
           </>
-        ) : (
-          <div className="track-card">
-            <h1 className="track-h1">Track a customer's pickups</h1>
-            <p className="track-sub">
-              Enter the customer's registered mobile number to see all their
-              orders, latest first.
-            </p>
-            <Field label="Customer mobile number">
-              <div className="phone-row">
-                <span className="code-fixed">+91</span>
+        ) : cell ? (
+          /* CELL LIST VIEW */
+          <>
+            <button
+              className="track-back"
+              onClick={() => {
+                setCell(null);
+                setStoreFilter('');
+              }}
+            >
+              <ArrowLeft size={16} /> Back to overview
+            </button>
+            <div className="sales-listbar">
+              <div className="sales-list-head">
+                {cell.title} · {shownRows.length}
+              </div>
+              <div className="sales-search">
+                <Search size={15} color={T.inkSoft} />
                 <input
-                  className="inp phone-input"
-                  inputMode="numeric"
-                  placeholder="Enter mobile number"
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value.replace(/\D/g, ''));
-                    setErr('');
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && search()}
+                  placeholder="Search name, invoice, product…"
+                  value={lq}
+                  onChange={(e) => setLq(e.target.value)}
                 />
               </div>
-            </Field>
-            {err && <div className="login-err">{err}</div>}
-            <button
-              className="btn-primary"
-              style={{ width: '100%', marginTop: 4 }}
-              disabled={state === 'loading'}
-              onClick={search}
-            >
-              {state === 'loading' ? (
-                'Searching…'
-              ) : (
-                <>
-                  Search <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-            {state === 'notfound' && (
-              <div className="track-msg">
-                No deliveries found for this number.
-              </div>
-            )}
-            {state === 'error' && (
-              <div className="track-msg">
-                Unable to search right now. Please try again.
-              </div>
-            )}
-          </div>
-        )}
-
-        {!selected && state === 'done' && rows.length > 0 && (
-          <div className="sales-list">
-            <div className="sales-list-head">
-              {rows.length} {rows.length === 1 ? 'delivery' : 'deliveries'} ·
-              latest first
             </div>
-            {rows.map((r) => {
-              const st = statusToStage(r.status);
-              const cancelled = st === 'cancelled';
-              const stg = stageMeta(st);
-              const equip = equipmentText({
-                line_items: r.line_items,
-                item_name: r.item_name,
-              });
-              const Icon = equipIcon(equip);
-              return (
-                <button
-                  key={r.invoice_number}
-                  className={cancelled ? 'sales-row is-cancelled' : 'sales-row'}
-                  onClick={() => setSelected(r)}
+            {cState === 'loading' ? (
+              <div className="track-msg">Loading…</div>
+            ) : shownRows.length === 0 ? (
+              <div className="track-msg">Koi pickup nahi mili.</div>
+            ) : (
+              <PkGroupedList rows={shownRows} onPick={pickOrder} />
+            )}
+          </>
+        ) : (
+          /* MATRIX OVERVIEW */
+          <>
+            <div className="mx-toolbar">
+              <div className="mx-search">
+                <Search size={16} color={T.inkSoft} />
+                <input
+                  placeholder="Search customer, invoice, salesperson…"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+              </div>
+              <div className="mx-daterow">
+                <select
+                  className="mx-select"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
                 >
-                  <div className="eq-ico" style={{ background: stg.soft }}>
-                    <Icon size={17} color={stg.color} />
+                  <option value="all">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="picked">Picked up</option>
+                </select>
+                <select
+                  className="mx-select"
+                  value={storeFilter}
+                  onChange={(e) => {
+                    const s = e.target.value;
+                    setStoreFilter(s);
+                    if (s) openCell('', s);
+                    else setCell(null);
+                  }}
+                >
+                  <option value="">All stores</option>
+                  {[
+                    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL',
+                    'LDH', 'CHD', 'NCR',
+                  ].map((s) => (
+                    <option key={s} value={s}>
+                      {branchLabel(s)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="mx-select"
+                  value={range}
+                  onChange={(e) => setRange(e.target.value)}
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="month">This month</option>
+                  <option value="all">All time</option>
+                  <option value="custom">Custom range</option>
+                </select>
+                {range === 'custom' && (
+                  <div className="mx-range">
+                    <input
+                      className="mx-date"
+                      type="date"
+                      value={from}
+                      max={to}
+                      onChange={(e) => setFrom(e.target.value)}
+                    />
+                    <span className="mx-arrow">–</span>
+                    <input
+                      className="mx-date"
+                      type="date"
+                      value={to}
+                      min={from}
+                      onChange={(e) => setTo(e.target.value)}
+                    />
                   </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="sales-row-top">
-                      <span
-                        className="ellip"
-                        style={{ fontWeight: 800, fontSize: 14.5 }}
-                      >
-                        {r.customer_name || 'Customer'}
-                      </span>
-                      <span
-                        className="sales-chip"
-                        style={{ background: stg.soft, color: stg.color }}
-                      >
-                        {stg.short}
-                      </span>
-                    </div>
-                    <div className="ellip sales-sub">{equip}</div>
-                    <div className="sales-meta">
-                      <span className="ellip">#{r.invoice_number}</span>
-                      <span>
-                        ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
-                      </span>
-                      {niceDate(r.created_at) && (
-                        <span>{niceDate(r.created_at)}</span>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight size={18} color={T.inkSoft} />
-                </button>
-              );
-            })}
-          </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mx-caption">
+              {sState === 'idle' &&
+                `Pickups by salesperson & store · ${rangeLabel}${statusFilter !== 'all' ? ' · ' + statusFilter[0].toUpperCase() + statusFilter.slice(1) : ''}`}
+            </div>
+
+            {sState !== 'idle' ? (
+              /* GLOBAL SEARCH RESULTS — matrix ki jagah */
+              <>
+                <div className="mx-caption">
+                  {sState === 'loading'
+                    ? 'Searching…'
+                    : `${sRows.length} result${sRows.length === 1 ? '' : 's'} for "${q.trim()}"`}
+                </div>
+                {sState === 'done' && sRows.length === 0 ? (
+                  <div className="track-msg">Kuch nahi mila.</div>
+                ) : (
+                  <PkGroupedList rows={sRows} onPick={pickOrder} />
+                )}
+              </>
+            ) : mState === 'loading' ? (
+              <div className="track-msg">Loading…</div>
+            ) : mState === 'error' ? (
+              <div className="track-msg">Unable to load. {mErr}</div>
+            ) : shownPeople.length === 0 ? (
+              <div className="track-msg">Is duration mein koi pickup nahi.</div>
+            ) : (
+              <div className="matrix-wrap">
+                <table className="matrix">
+                  <thead>
+                    <tr>
+                      <th className="mx-sticky">Salesperson</th>
+                      {shownStores.map((s) => (
+                        <th
+                          key={s}
+                          className="mx-store mx-hclick"
+                          title={`${branchLabel(s)} — click for all`}
+                          onClick={() => colTotal[s] && openCell('', s)}
+                        >
+                          {s}
+                        </th>
+                      ))}
+                      <th className="mx-total">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownPeople.map((person) => {
+                      const rt = rowTotal[person] || 0;
+                      return (
+                        <tr key={person}>
+                          <td
+                            className="mx-sticky mx-name mx-nclick"
+                            onClick={() => openCell(person, '')}
+                            title="Click for all deliveries"
+                          >
+                            {person}
+                          </td>
+                          {shownStores.map((s) => {
+                            const n = map[`${person}|${s}`] || 0;
+                            return (
+                              <td
+                                key={s}
+                                className={
+                                  n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
+                                }
+                                onClick={() => n && openCell(person, s)}
+                              >
+                                {n || '·'}
+                              </td>
+                            );
+                          })}
+                          <td
+                            className={rt ? 'mx-total mx-tclick' : 'mx-total'}
+                            onClick={() => rt && openCell(person, '')}
+                          >
+                            {rt}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="mx-footer">
+                      <td className="mx-sticky">Total</td>
+                      {shownStores.map((s) => (
+                        <td
+                          key={s}
+                          className={
+                            colTotal[s] ? 'mx-total mx-tclick' : 'mx-total'
+                          }
+                          onClick={() => colTotal[s] && openCell('', s)}
+                        >
+                          {colTotal[s] || 0}
+                        </td>
+                      ))}
+                      <td className="mx-total">
+                        {matrix.reduce((a, m) => a + Number(m.cnt), 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
 
         <div className="track-foot">
@@ -4482,6 +4693,140 @@ function SalesTrackPage() {
     </div>
   );
 }
+
+
+function PkGroupedList({ rows, onPick }) {
+  const order = ['new', 'talked', 'scheduled', 'dispatched']; // pending stages
+  const rank = (r) => {
+    const st = pickupStage(r.status);
+    const i = order.indexOf(st);
+    return i === -1 ? 99 : i;
+  };
+  const pending = rows
+    .filter((r) => order.includes(pickupStage(r.status)))
+    .sort((a, b) => rank(a) - rank(b));
+  const delivered = rows.filter((r) => pickupStage(r.status) === 'delivered');
+  const cancelled = rows.filter((r) => pickupStage(r.status) === 'cancelled');
+
+  const Row = (r) => {
+    const st = pickupStage(r.status);
+    const cancel = st === 'cancelled';
+    const stg = stageMeta(st);
+    const equip = equipmentText({
+      line_items: r.line_items,
+      item_name: r.item_name,
+    });
+    const Icon = equipIcon(equip);
+    return (
+      <button
+        key={r.invoice_number}
+        className={cancel ? 'sales-row is-cancelled' : 'sales-row'}
+        onClick={() => onPick(r)}
+      >
+        <div className="eq-ico" style={{ background: stg.soft }}>
+          <Icon size={17} color={stg.color} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="sales-row-top">
+            <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
+              {r.customer_name || 'Customer'}
+            </span>
+            <span
+              className="sales-chip"
+              style={{ background: stg.soft, color: stg.color }}
+            >
+              {stg.short}
+            </span>
+          </div>
+          <div className="ellip sales-sub">{equip}</div>
+          <div className="sales-meta">
+            <span className="ellip">#{r.invoice_number}</span>
+            <span>
+              ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
+            </span>
+            {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
+          </div>
+        </div>
+        <ChevronRight size={18} color={T.inkSoft} />
+      </button>
+    );
+  };
+
+  const Group = (title, list, color) =>
+    list.length === 0 ? null : (
+      <div className="sgroup">
+        <div className="sgroup-head">
+          <span className="sgroup-dot" style={{ background: color }} />
+          {title}
+          <span className="sgroup-count">{list.length}</span>
+        </div>
+        <div className="sales-list">{list.map(Row)}</div>
+      </div>
+    );
+
+  return (
+    <>
+      {Group('Pending', pending, T.blue)}
+      {Group('Delivered', delivered, T.green)}
+      {Group('Cancelled', cancelled, T.red)}
+    </>
+  );
+}
+
+/* Sales-only detail card — sab zaroori info ek jagah, systematically */
+function PkOrderCard({ row }) {
+  const store = deriveBranch(row);
+  const manager = STORE_MANAGERS[store] || '—';
+  const stage = pickupStage(row.status);
+  const stg = stageMeta(stage);
+  const val = (x) => (x && x !== 'null' ? x : null);
+  const money = (n) =>
+    n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : null;
+
+  const rows = [
+    ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
+    ['Salesperson', val(row.sale_person) || '—'],
+    ['Customer phone', val(row.phone) || '—'],
+    ['Store', branchLabel(store)],
+    ['Store manager', manager],
+    ['Pickup slot given',
+      val(row.confirmed_date)
+        ? `${niceDate(row.confirmed_date)}${val(row.confirmed_time) ? ', ' + niceTime(row.confirmed_time) : ''}`
+        : '—'],
+    ['Pickup person', val(row.app_pickup_person) || '—'],
+    ['Transport', val(row.app_vehicle) || '—'],
+    ['Estimated arrival', niceTime(String(row.app_eta || '').slice(11, 16)) || '—'],
+    ['Security li thi',
+      row.security_amount != null || val(row.security_type)
+        ? `${row.security_amount != null ? money(row.security_amount) : ''}${row.security_amount != null && val(row.security_type) ? ' · ' : ''}${val(row.security_type) || ''}`
+        : '—'],
+    ['Pickup charges', money(row.pickup_charges_collected) || '—'],
+    ['Pending collected', money(row.pending_collected) || '—'],
+    ['Pending amount', money(row.pending_amount) || '—'],
+    ['Invoice total', money(row.total_amount) || '—'],
+  ];
+
+
+  return (
+    <div className="soc">
+      <div className="soc-head">
+        <div>
+          <div className="soc-cust">{row.customer_name || 'Customer'}</div>
+          <div className="soc-inv">#{row.invoice_number}</div>
+        </div>
+      </div>
+      <div className="soc-grid">
+        {rows.map(([k, v]) => (
+          <div className="soc-item" key={k}>
+            <div className="soc-k">{k}</div>
+            <div className="soc-v">{v}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 function TrackPage({ invoice }) {
   const [phone, setPhone] = useState('');
@@ -5452,6 +5797,56 @@ function StyleTag() {
       .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
       .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
       .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
+      /* Sales matrix — toolbar + polished light table */
+      .mx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+      .mx-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 10px 14px; flex: 1; min-width: 220px; }
+      .mx-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 14px; color: ${T.ink}; width: 100%; }
+      .mx-daterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .mx-select { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .mx-range { display: inline-flex; align-items: center; gap: 6px; }
+      .mx-date { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 9px 12px; font-size: 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
+      .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
+      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
+      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
+      .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
+      .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
+      .mx-hclick { cursor: pointer; }
+      .mx-hclick:hover { background: ${T.green}; color: #fff; }
+      .matrix tbody td { border-bottom: 1px solid #F1EFE8; }
+      .matrix tbody tr:last-child td { border-bottom: none; }
+      .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
+      .matrix tbody tr:hover td { background: ${T.mint}; }
+      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: inherit; }
+      .matrix thead .mx-sticky { background: ${T.mint}; }
+      .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
+      .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
+      .matrix tbody tr:hover .mx-sticky { background: ${T.mint}; }
+      .mx-store { min-width: 64px; }
+      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 210px; font-size: 14px; }
+      .mx-nclick { cursor: pointer; }
+      .mx-nclick:hover { color: ${T.green}; text-decoration: underline; }
+      .mx-cell { font-weight: 800; font-size: 15.5px; }
+      .mx-click { color: ${T.green}; cursor: pointer; }
+      .mx-click:hover { text-decoration: underline; }
+      .mx-zero { color: #D0CEC4; font-weight: 500; }
+      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; font-size: 15px; }
+      .mx-tclick { cursor: pointer; }
+      .mx-tclick:hover { color: ${T.green}; text-decoration: underline; }
+      .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
+      .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
+      .mx-footer .mx-sticky { background: #F4F2EB !important; }
+      /* Sales-only order details card */
+      .soc { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 18px 18px 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
+      .soc-head { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #F1EFE8; margin-bottom: 4px; }
+      .soc-cust { font-size: 17px; font-weight: 800; color: ${T.ink}; }
+      .soc-inv { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; margin-top: 2px; }
+      .soc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+      .soc-item { padding: 11px 4px; border-bottom: 1px solid #F5F3EC; }
+      .soc-item:nth-child(odd) { padding-right: 16px; }
+      .soc-k { font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
+      .soc-v { font-size: 14px; font-weight: 600; color: ${T.ink}; }
+      @media (max-width: 560px) { .soc-grid { grid-template-columns: 1fr; } }
       .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
