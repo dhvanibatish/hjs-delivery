@@ -932,6 +932,9 @@ export default function App({
   const [lastMove, setLastMove] = useState(null);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const [showLog, setShowLog] = useState(false); // activity log panel
+  // hosted mode: head login store switch kar sake (session App ka hai,
+  // isliye branch yahin local rakhte hain)
+  const [viewBranch, setViewBranch] = useState(null);
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
@@ -990,9 +993,10 @@ export default function App({
   const scoped = useMemo(() => {
     if (!session) return [];
     const base = tickets.filter((x) => x.stage !== 'deleted');
-    if (session.branch === 'ALL') return base;
-    return base.filter((x) => x.branch === session.branch);
-  }, [tickets, session]);
+    const br = viewBranch || session.branch;
+    if (br === 'ALL') return base;
+    return base.filter((x) => x.branch === br);
+  }, [tickets, session, viewBranch]);
 
   // Activity log ke liye alag scope — deleted entries bhi chahiye
   const scopedAll = useMemo(() => {
@@ -1217,7 +1221,8 @@ export default function App({
               onVTo={setVTo}
               layoutMode={layoutMode}
               onLayoutMode={setLayoutMode}
-              onSwitchStore={() => {}}
+              onSwitchStore={(b) => setViewBranch(b)}
+              branchView={viewBranch || session.branch}
             />
             {error && (
               <div className="err">
@@ -2406,6 +2411,7 @@ function Header({
   layoutMode,
   onLayoutMode,
   onSwitchStore,
+  branchView,
 }) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -2513,7 +2519,7 @@ function Header({
             />
             <select
               className="store-switch"
-              value={session.branch}
+              value={branchView || session.branch}
               onChange={(e) => onSwitchStore(e.target.value)}
             >
               <option value="ALL">All stores</option>
