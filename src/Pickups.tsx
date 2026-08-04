@@ -75,7 +75,12 @@ async function sbLogin(store, pw) {
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
 async function sbList(store, pw) {
-  return sbRpc('pickup_list', { p_dev: pw });
+  // _lite = app_log ke bina (bada JSON). Timeline zarurat pe — dekho sbLogs().
+  return sbRpc('pickup_list_lite', { p_dev: pw });
+}
+// sirf app_log — ek invoice ka (drawer) ya sabka (Activity log)
+async function sbLogs(pw, invoice) {
+  return sbRpc('pickup_logs', { p_dev: pw, p_invoice: invoice || null });
 }
 // staff update — stage move/edit. Password + store-scope checked in DB.
 async function sbUpdate(store, pw, invoiceId, patch) {
@@ -1145,7 +1150,10 @@ export default function App({
       firstReload.current = false;
       return;
     }
-    if (session) load(); /* eslint-disable-next-line */
+    if (session) {
+      setLogsLoaded(false);
+      load();
+    } /* eslint-disable-next-line */
   }, [reloadKey]);
 
   const scoped = useMemo(() => {
@@ -1191,6 +1199,39 @@ export default function App({
   // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
   // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
   // par ek save = ek chhoti update call (poora table nahi).
+  // ── Timeline (app_log) on-demand — list ab uske bina aati hai ──────
+  const [logsLoaded, setLogsLoaded] = useState(false);
+  const mergeLogs = (rows) => {
+    const map = {};
+    (rows || []).forEach((r) => {
+      map[r.invoice_id] = r.app_log;
+    });
+    setDeliveries((prev) =>
+      prev.map((x) =>
+        map[x.invoice_id] !== undefined
+          ? rowToDelivery({ ...x._raw, app_log: map[x.invoice_id] })
+          : x,
+      ),
+    );
+  };
+  const loadLogs = async (invoice) => {
+    if (!CONFIGURED || !session) return;
+    try {
+      mergeLogs(await sbLogs(PICKUP_DEV_KEY, invoice || null));
+      if (!invoice) setLogsLoaded(true);
+    } catch (_) {}
+  };
+  useEffect(() => {
+    if (!activeId) return;
+    const row = deliveries.find((x) => x.invoice_id === activeId);
+    if (row && row._raw && row._raw.app_log === undefined) loadLogs(activeId);
+    // eslint-disable-next-line
+  }, [activeId]);
+  useEffect(() => {
+    if (showLog && !logsLoaded) loadLogs(null);
+    // eslint-disable-next-line
+  }, [showLog]);
+
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
       prev.map((x) =>
