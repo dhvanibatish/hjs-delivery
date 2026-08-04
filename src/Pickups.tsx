@@ -952,7 +952,12 @@ function rowToDelivery(r) {
     // Books se: security kis mode se li gayi thi (refund usi mode mein karna
     // hota hai) aur delivery pe amount kis mode se aaya tha. Sirf type.
     securityType: clean(r.security_type),
-    amountType: clean(r.amount_type),
+    securityAmount:
+      r.security_amount != null &&
+      r.security_amount !== '' &&
+      r.security_amount !== 'null'
+        ? Number(r.security_amount)
+        : null,
     charges:
       r.pickup_charges_collected != null &&
       r.pickup_charges_collected !== '' &&
@@ -3121,7 +3126,13 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
       {d.securityType && (
         <div className="card-meta">
           <span className="ellip" style={{ maxWidth: '100%' }}>
-            <ShieldCheck size={12} /> Security: <b>{d.securityType}</b>
+            <ShieldCheck size={12} /> Security:{' '}
+            <b>
+              {d.securityAmount != null
+                ? `₹${d.securityAmount.toLocaleString('en-IN')} · `
+                : ''}
+              {d.securityType}
+            </b>
           </span>
         </div>
       )}
@@ -3494,8 +3505,14 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             label="Invoice total"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
-          <KV label="Security li thi" value={d.securityType || '—'} />
-          <KV label="Amount liya tha" value={d.amountType || '—'} />
+          <KV
+            label="Security li thi"
+            value={
+              d.securityAmount != null || d.securityType
+                ? `${d.securityAmount != null ? '₹' + d.securityAmount.toLocaleString('en-IN') : ''}${d.securityAmount != null && d.securityType ? ' · ' : ''}${d.securityType || ''}`
+                : '—'
+            }
+          />
           <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
           <KV label="Store manager" value={d.manager} full />
         </div>
