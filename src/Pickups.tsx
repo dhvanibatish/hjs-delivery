@@ -95,6 +95,12 @@ async function pkSalesList(sales, store, from, to, status) {
 async function pkSalesSearch(qq) {
   return sbRpc('pickup_sales_search', { p_q: qq });
 }
+// usi invoice ki delivery (agar Supabase mein hai) — sales pickup detail pe
+// upar collapsed line ke liye. Purane invoices ki delivery row hoti hi nahi,
+// tab ye khaali aata hai aur kuch nahi dikhta.
+async function pkDeliveryPeek(invoiceNumber) {
+  return sbRpc('pickup_delivery_peek', { p_invoice: invoiceNumber });
+}
 // ek pickup ka timeline (app_log) — order kholne pe
 async function pkSalesLog(invoiceNumber) {
   return sbRpc('pickup_sales_log', { p_invoice: invoiceNumber });
@@ -4476,6 +4482,7 @@ function PickupSalesPage() {
               <ArrowLeft size={16} /> Back to list
             </button>
             <PkOrderCard row={selected} />
+            <DeliveryPhase invoice={selected.invoice_number} />
             <TrackResult row={selected} />
           </>
         ) : cell ? (
@@ -4698,6 +4705,89 @@ function PickupSalesPage() {
   );
 }
 
+
+/* Sales pickup detail pe upar — usi invoice ki delivery ka collapsed hissa.
+   Delivery record na mile to kuch render nahi hota. */
+function DeliveryPhase({ invoice }) {
+  const [row, setRow] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setRow(null);
+    setOpen(false);
+    if (!invoice) return;
+    (async () => {
+      try {
+        const res = await pkDeliveryPeek(invoice);
+        const d = (res || [])[0] || null;
+        if (alive && d) setRow(d);
+      } catch (_) {}
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [invoice]);
+
+  if (!row) return null;
+  const log = Array.isArray(row.app_log) ? row.app_log : [];
+  const done = /deliver/i.test(String(row.status || '')) &&
+    !/out for/i.test(String(row.status || ''));
+  const when = niceDate(row.confirmed_date);
+
+  return (
+    <div className="dphase">
+      <button className="phase-collapse" onClick={() => setOpen((v) => !v)}>
+        <span className="phase-tick">
+          {done ? <Check size={13} /> : <Truck size={13} />}
+        </span>
+        <span style={{ flex: 1, textAlign: 'left' }}>
+          {done ? 'Delivered' : `Delivery · ${row.status || '—'}`}
+          {when ? ` · ${when}` : ''}
+        </span>
+        <span className="phase-link">{open ? 'Hide' : 'View delivery'}</span>
+        <ChevronRight
+          size={16}
+          style={{
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform .15s',
+          }}
+        />
+      </button>
+      {open && (
+        <div className="dphase-body">
+          {log.length === 0 ? (
+            <div className="empty">Delivery ka koi timeline nahi mila</div>
+          ) : (
+            <div className="timeline">
+              {log.map((ev, i) => (
+                <div key={i} className="tl-row">
+                  <div className="tl-marker">
+                    <span className="tl-dot" style={{ background: T.green }} />
+                    {i < log.length - 1 && (
+                      <span className="tl-line" style={{ background: T.line }} />
+                    )}
+                  </div>
+                  <div style={{ paddingBottom: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      {ev.action} {ev.label}
+                    </div>
+                    <div className="tl-note">{fmtDateTime(ev.ts)}</div>
+                    {ev.fields &&
+                      Object.entries(ev.fields).map(([k, v]) => (
+                        <div key={k} className="tl-field">
+                          <b>{k}:</b> {String(v)}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PkGroupedList({ rows, onPick }) {
   const order = ['new', 'talked', 'scheduled', 'dispatched']; // pending stages
@@ -5800,6 +5890,20 @@ function StyleTag() {
       .track-back:hover { background: ${T.beige}; }
       .sales-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
       .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
+      .sgroup { margin-top: 18px; }
+      .sgroup:first-child { margin-top: 8px; }
+      .sgroup-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: ${T.ink}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
+      .sgroup-dot { width: 9px; height: 9px; border-radius: 50%; }
+      .sgroup-count { margin-left: 4px; font-size: 12px; font-weight: 800; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 999px; padding: 1px 9px; }
+      /* sales pickup detail — upar delivery ka collapsed hissa */
+      .dphase { margin-bottom: 16px; }
+      .dphase-body { background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 16px 16px 4px; margin-top: 8px; }
+      .phase-collapse { width: 100%; display: flex; align-items: center; gap: 10px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; padding: 12px 14px; font-size: 13.5px; font-weight: 800; color: ${T.green}; font-family: inherit; cursor: pointer; }
+      .phase-tick { width: 22px; height: 22px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .phase-link { font-size: 12px; font-weight: 700; opacity: .85; }
+      .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+      .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
+      .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
       .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
       /* Sales matrix — toolbar + polished light table */
       .mx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
