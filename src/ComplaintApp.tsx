@@ -2448,6 +2448,7 @@ function Header({
         )}
       </div>
       <div
+        className="hdr-controls"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -4159,11 +4160,14 @@ function StyleTag() {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
         .tb-brand span { font-size: 14px; }
-        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; gap: 8px; }
+        .tb-actions { order: 1; flex: 0 0 auto; width: auto; justify-content: flex-end; align-items: center; gap: 6px; }
         .tb-user-text { display: none; }
-        .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
-        .lang-toggle { order: 3; }
-        .icon-btn { width: 34px; height: 34px; }
+        /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
+        .tb-user { display: none; }
+        .page-switch { order: 2; flex: 1 1 100%; max-width: none; }
+        .tb-search { order: 3; flex: 1 1 100%; max-width: none; }
+        .icon-btn { width: 34px; height: 34px; flex-shrink: 0; }
+        .lang-btn { padding: 6px 8px; }
         main { padding: 10px 14px 60px !important; }
         main > div:first-child { margin-bottom: 14px !important; }
         h2 { font-size: 22px !important; }
@@ -4171,7 +4175,18 @@ function StyleTag() {
         .kv-grid { grid-template-columns: 1fr 1fr; }
         .modal { width: 100%; border-radius: 18px; }
         .glass-card { padding: 24px 20px; }
+        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
         .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
+      }
+      /* phone pe header ke controls (Today / Stages / All stores / chip) ek
+         doosre ke saath fit ho jaayein — pehle har ek apni line le leta tha */
+      @media (max-width: 760px) {
+        .hdr-controls { gap: 8px !important; width: 100%; }
+        .hdr-controls > * { flex: 0 1 auto; }
+        .store-switch { padding: 8px 10px 8px 30px; font-size: 12.5px; }
+        .lt-btn { padding: 8px 11px; font-size: 12px; }
+        .live-chip { font-size: 11.5px; padding: 7px 11px; }
+        .view-range .dash-inp { padding: 8px 10px; font-size: 12.5px; }
       }
       @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
       @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
