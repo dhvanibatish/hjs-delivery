@@ -66,25 +66,31 @@ async function sbRpc(fn, body) {
   return res.json();
 }
 // staff login — DB verifies password, returns [] if wrong
-// Pickups ke RPCs abhi dev-password lete hain. Login screen hata di gayi hai —
-// access delivery app ke head login (All stores) se control hota hai. Jab
-// pickup_list/pickup_update store-scoped ho jayein, ye constant hat jayega.
-const PICKUP_DEV_KEY = 'hjs_22';
+// Pickups ab delivery jaisa store-scoped hai — app_staff se verify hota hai.
 async function sbLogin(store, pw) {
-  return sbRpc('pickup_list', { p_dev: pw });
+  return sbRpc('pickup_list_lite', { p_store: store, p_password: pw });
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
 async function sbList(store, pw) {
   // _lite = app_log ke bina (bada JSON). Timeline zarurat pe — dekho sbLogs().
-  return sbRpc('pickup_list_lite', { p_dev: pw });
+  return sbRpc('pickup_list_lite', { p_store: store, p_password: pw });
 }
 // sirf app_log — ek invoice ka (drawer) ya sabka (Activity log)
-async function sbLogs(pw, invoice) {
-  return sbRpc('pickup_logs', { p_dev: pw, p_invoice: invoice || null });
+async function sbLogs(store, pw, invoice) {
+  return sbRpc('pickup_logs', {
+    p_store: store,
+    p_password: pw,
+    p_invoice: invoice || null,
+  });
 }
 // staff update — stage move/edit. Password + store-scope checked in DB.
 async function sbUpdate(store, pw, invoiceId, patch) {
-  return sbRpc('pickup_update', { p_dev: pw, p_invoice: invoiceId, p_patch: patch });
+  return sbRpc('pickup_update', {
+    p_store: store,
+    p_password: pw,
+    p_invoice: invoiceId,
+    p_patch: patch,
+  });
 }
 // public customer tracking — link se invoice + customer ka registered phone
 // NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
@@ -1153,7 +1159,7 @@ export default function App({
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, PICKUP_DEV_KEY)).map(rowToDelivery),
+        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1296,7 +1302,7 @@ export default function App({
   const loadLogs = async (invoice) => {
     if (!CONFIGURED || !session) return;
     try {
-      mergeLogs(await sbLogs(PICKUP_DEV_KEY, invoice || null));
+      mergeLogs(await sbLogs(session.authStore, session.pw, invoice || null));
       if (!invoice) setLogsLoaded(true);
     } catch (_) {}
   };
@@ -1369,7 +1375,7 @@ export default function App({
       return;
     }
     try {
-      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(`Marked as ${CLOSED[flag].label}`);
       applyLocal(invoiceId, patch);
     } catch (e) {
@@ -1405,7 +1411,7 @@ export default function App({
       return;
     }
     try {
-      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping('Rescheduled ✓ — entry pending mein hi hai');
       jumpMobile('new');
       applyLocal(invoiceId, patch);
@@ -1430,7 +1436,7 @@ export default function App({
       return;
     }
     try {
-      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(
         mode === 'edit'
           ? 'Updated ✓'
@@ -1481,7 +1487,7 @@ export default function App({
       return;
     }
     try {
-      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
       jumpMobile(toStage);
       applyLocal(invoiceId, patch);
@@ -1522,7 +1528,7 @@ export default function App({
       return;
     }
     try {
-      await sbUpdate(session.authStore, PICKUP_DEV_KEY, invoiceId, patch);
+      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
       setActiveId(null);
       ping('Deleted — Supabase mein "Deleted" mark ho gaya');
       applyLocal(invoiceId, patch);
