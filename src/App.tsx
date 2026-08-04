@@ -119,6 +119,12 @@ async function sbSalesMatrix(from, to, status) {
 async function sbSalesSearch(qq) {
   return sbRpc('sales_search', { p_q: qq });
 }
+// Sales tracker: ek order ka app_log (timeline ke "Updated" timestamps ke liye).
+// Sales list RPCs app_log nahi bhejtin — wo bhaari hai — isliye alag se.
+async function sbSalesLog(invoiceNumber) {
+  // { app_log, photo_delivered, customer_phone }
+  return sbRpc('sales_log', { p_invoice: invoiceNumber });
+}
 // Flexible list: store / salesperson / cell / all (date range + status)
 async function sbSalesList(sales, store, from, to, status) {
   return sbRpc('sales_list', {
@@ -5558,6 +5564,27 @@ function SalesTrackPage() {
   const [sState, setSState] = useState('idle'); // idle|loading|done
   const [lq, setLq] = useState(''); // list search (cell view)
   const [selected, setSelected] = useState(null);
+  // order chunte hi uska timeline (app_log) le aao — customer link jaisa
+  // "Updated: ..." har stage pe dikhe
+  const pickOrder = async (r) => {
+    setSelected(r);
+    if (!r || !r.invoice_number || r.app_log) return;
+    try {
+      const det = (await sbSalesLog(r.invoice_number)) || {};
+      setSelected((cur) =>
+        cur && cur.invoice_number === r.invoice_number
+          ? {
+              ...cur,
+              app_log: det.app_log,
+              photo_delivered: det.photo_delivered,
+              customer_phone: det.customer_phone || cur.customer_phone,
+            }
+          : cur,
+      );
+    } catch (_) {
+      /* log na aaye to baaki detail phir bhi dikhti rahe */
+    }
+  };
 
   // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
   useEffect(() => {
@@ -5729,7 +5756,7 @@ function SalesTrackPage() {
               <ArrowLeft size={16} /> Back to list
             </button>
             <SalesOrderCard row={selected} />
-            <TrackResult row={selected} />
+            <TrackResult row={selected} showPhotos />
           </>
         ) : cell ? (
           /* CELL LIST VIEW */
@@ -5761,7 +5788,7 @@ function SalesTrackPage() {
             ) : shownRows.length === 0 ? (
               <div className="track-msg">Koi delivery nahi mili.</div>
             ) : (
-              <SalesGroupedList rows={shownRows} onPick={setSelected} />
+              <SalesGroupedList rows={shownRows} onPick={pickOrder} />
             )}
           </>
         ) : (
@@ -5856,7 +5883,7 @@ function SalesTrackPage() {
                 {sState === 'done' && sRows.length === 0 ? (
                   <div className="track-msg">Kuch nahi mila.</div>
                 ) : (
-                  <SalesGroupedList rows={sRows} onPick={setSelected} />
+                  <SalesGroupedList rows={sRows} onPick={pickOrder} />
                 )}
               </>
             ) : mState === 'loading' ? (
@@ -6234,6 +6261,7 @@ function SalesOrderCard({ row }) {
   const rows = [
     ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
     ['Salesperson', val(row.salesperson) || '—'],
+    ['Customer phone', val(row.customer_phone) || '—'],
     ['Store', branchLabel(store)],
     ['Store manager', manager],
     ['Delivery slot given',
@@ -6274,7 +6302,7 @@ function SalesOrderCard({ row }) {
   );
 }
 
-function TrackResult({ row }) {
+function TrackResult({ row, showPhotos }) {
   // row = safe fields from track_order RPC (poora delivery row NAHI)
   const equipment = equipmentText({
     line_items: row.line_items,
@@ -6468,6 +6496,30 @@ function TrackResult({ row }) {
                     </div>
                   </div>
                 )}
+
+                {/* Delivery ki photos — sirf sales tracker mein (internal
+                    proof-of-delivery). Customer link pe ye nahi dikhtin. */}
+                {showPhotos &&
+                  step.id === 'delivered' &&
+                  row.photo_delivered &&
+                  row.photo_delivered !== 'null' && (
+                    <div className="photo-grid" style={{ marginTop: 10 }}>
+                      {String(row.photo_delivered)
+                        .split('|')
+                        .filter(Boolean)
+                        .map((ph, pi) => (
+                          <a
+                            key={ph + pi}
+                            className="photo-thumb"
+                            href={ph}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <img src={ph} alt={`delivery photo ${pi + 1}`} />
+                          </a>
+                        ))}
+                    </div>
+                  )}
 
                 {/* har stage pe — kab update hua (green chhota) */}
                 {reachedTs && (
