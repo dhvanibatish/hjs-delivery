@@ -455,6 +455,10 @@ function statusToStage(s) {
   return 'new';
 }
 
+/* Sales pickup page delivery se copy hua hai jahan alag mapper tha —
+   yahan statusToStage pehle se pickup statuses hi samajhta hai. */
+const pickupStage = (st) => statusToStage(st);
+
 /* ── CLOSED STATES ──────────────────────────────────────────────────────
    Cancelled / Duplicate / Renewal — teeno "closed" hain: active pipeline se
    hat jaati hain, apne color mein dikhti hain, aur drawer khol ke pata lag
@@ -4472,7 +4476,7 @@ function PickupSalesPage() {
               <ArrowLeft size={16} /> Back to list
             </button>
             <PkOrderCard row={selected} />
-            <PickupPhase pickup={selected} hideTop />
+            <TrackResult row={selected} />
           </>
         ) : cell ? (
           /* CELL LIST VIEW */
@@ -5817,7 +5821,7 @@ function StyleTag() {
       .matrix tbody tr:last-child td { border-bottom: none; }
       .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
       .matrix tbody tr:hover td { background: ${T.mint}; }
-      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: inherit; }
+      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
       .matrix thead .mx-sticky { background: ${T.mint}; }
       .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
       .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
