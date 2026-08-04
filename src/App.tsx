@@ -1182,8 +1182,14 @@ export default function App() {
   const [reloadTick, setReloadTick] = useState(0);
   // Activity log button — jis module pe ho, usi ka log khule
   const [logTick, setLogTick] = useState(0);
-  const [moduleRows, setModuleRows] = useState([]); // module ke search results
+  const [pickupRows, setPickupRows] = useState([]); // pickups ke search results
+  const [complaintRows, setComplaintRows] = useState([]); // complaints ke
   const [modulePick, setModulePick] = useState(null); // dropdown se chuna gaya
+  const isAllStores = session && session.branch === 'ALL';
+  const showPickups =
+    page === 'pickups' || (page === 'dashboard' && dashKind === 'pickups');
+  const showComplaints =
+    page === 'complaints' || (page === 'dashboard' && dashKind === 'complaints');
   const inModule = page === 'pickups' || page === 'complaints';
   const switchLang = (l) => {
     setHjsLang(l);
@@ -1272,6 +1278,20 @@ export default function App() {
         };
       }),
     [searchResults],
+  );
+
+  // Global search — teeno modules ek hi dropdown mein, module ka naam bhi
+  const allSearchRows = useMemo(
+    () => [
+      ...searchRows.map((r) => ({ ...r, mod: 'deliveries', modLabel: 'Delivery' })),
+      ...pickupRows.map((r) => ({ ...r, mod: 'pickups', modLabel: 'Pickup' })),
+      ...complaintRows.map((r) => ({
+        ...r,
+        mod: 'complaints',
+        modLabel: 'Complaint',
+      })),
+    ],
+    [searchRows, pickupRows, complaintRows],
   );
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
@@ -1549,10 +1569,16 @@ export default function App() {
             onNav={setPage}
             search={search}
             setSearch={setSearch}
-            results={inModule ? moduleRows : searchRows}
+            results={allSearchRows}
             onPick={(x) => {
-              if (inModule) setModulePick({ id: x.id, n: Date.now() });
-              else setActiveId(x.id);
+              // kisi bhi page se — result jis module ka hai, wahan le jao
+              if (x.mod === 'deliveries') {
+                setPage('deliveries');
+                setActiveId(x.id);
+              } else {
+                setPage(x.mod);
+                setModulePick({ mod: x.mod, id: x.id, n: Date.now() });
+              }
               setSearch('');
             }}
             onReload={() => {
@@ -1569,135 +1595,127 @@ export default function App() {
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'pickups' ? (
-              <PickupsModule
+            {/* Dashboard ka delivery/pickups/complaints switch */}
+            {isAllStores && page === 'dashboard' && (
+              <div className="dash-switch">
+                <div className="layout-toggle">
+                  <button
+                    className={dashKind === 'delivery' ? 'lt-btn active' : 'lt-btn'}
+                    onClick={() => setDashKind('delivery')}
+                  >
+                    <Truck size={14} /> Deliveries
+                  </button>
+                  <button
+                    className={dashKind === 'pickups' ? 'lt-btn active' : 'lt-btn'}
+                    onClick={() => setDashKind('pickups')}
+                  >
+                    <RotateCcw size={14} /> Pickups
+                  </button>
+                  <button
+                    className={dashKind === 'complaints' ? 'lt-btn active' : 'lt-btn'}
+                    onClick={() => setDashKind('complaints')}
+                  >
+                    <MessageSquareWarning size={14} /> Complaints
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Deliveries board */}
+            <div style={{ display: page === 'deliveries' ? 'block' : 'none' }}>
+              <Header
                 session={session}
-                view="board"
-                reloadKey={reloadTick}
-                openLogKey={logTick}
-                lang={lang}
-                search={search}
-                onResults={setModuleRows}
-                pickId={modulePick && modulePick.id}
-                pickKey={modulePick && modulePick.n}
+                live={CONFIGURED}
+                count={viewItems.length}
+                viewMode={viewMode}
+                onViewMode={setViewMode}
+                vFrom={vFrom}
+                vTo={vTo}
+                onVFrom={setVFrom}
+                onVTo={setVTo}
+                layoutMode={layoutMode}
+                onLayoutMode={setLayoutMode}
+                onSwitchStore={(b) =>
+                  setSession((s) => ({
+                    ...s,
+                    branch: b,
+                    storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
+                  }))
+                }
               />
-            ) : session.branch === 'ALL' && page === 'complaints' ? (
-              <ComplaintsModule
-                session={session}
-                view="board"
-                reloadKey={reloadTick}
-                openLogKey={logTick}
-                lang={lang}
-                search={search}
-                onResults={setModuleRows}
-                pickId={modulePick && modulePick.id}
-                pickKey={modulePick && modulePick.n}
-              />
-            ) : session.branch === 'ALL' && page === 'dashboard' ? (
-              <>
-                {/* ek hi Dashboard page — upar se delivery/pickups switch */}
-                <div className="dash-switch">
-                  <div className="layout-toggle">
-                    <button
-                      className={
-                        dashKind === 'delivery' ? 'lt-btn active' : 'lt-btn'
-                      }
-                      onClick={() => setDashKind('delivery')}
-                    >
-                      <Truck size={14} /> Deliveries
-                    </button>
-                    <button
-                      className={
-                        dashKind === 'pickups' ? 'lt-btn active' : 'lt-btn'
-                      }
-                      onClick={() => setDashKind('pickups')}
-                    >
-                      <RotateCcw size={14} /> Pickups
-                    </button>
-                    <button
-                      className={
-                        dashKind === 'complaints' ? 'lt-btn active' : 'lt-btn'
-                      }
-                      onClick={() => setDashKind('complaints')}
-                    >
-                      <MessageSquareWarning size={14} /> Complaints
-                    </button>
+              {error && (
+                <div className="err">
+                  <CloudOff size={18} color={T.red} />
+                  <div>
+                    <b>Supabase se connect nahi hua.</b> {error}
+                    <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+                      anon key + RLS SELECT policy check karo.
+                    </div>
                   </div>
                 </div>
-                {dashKind === 'pickups' ? (
-                  <PickupsModule session={session} view="dashboard" reloadKey={reloadTick} lang={lang} />
-                ) : dashKind === 'complaints' ? (
-                  <ComplaintsModule session={session} view="dashboard" reloadKey={reloadTick} lang={lang} />
-                ) : (
-                  <Dashboard
-                    deliveries={scoped}
-                    onOpen={(x) => setActiveId(x.invoice_id)}
-                  />
-                )}
-              </>
-            ) : session.branch === 'ALL' && page === 'sla' ? (
+              )}
+              <EntriesView
+                items={viewItems}
+                viewMode={viewMode}
+                layoutMode={effLayout}
+                loading={loading}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+                onMove={(x, toStage) =>
+                  setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+                }
+                onCommit={(dd, toStage, fields) =>
+                  applyMove(dd.invoice_id, toStage, fields, 'move')
+                }
+                focus={lastMove}
+              />
+            </div>
+
+            {/* Delivery dashboard + SLA */}
+            {isAllStores && page === 'dashboard' && dashKind === 'delivery' && (
+              <Dashboard
+                deliveries={scoped}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            )}
+            {isAllStores && page === 'sla' && (
               <SlaReport
                 deliveries={scoped}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
-            ) : (
-              <>
-                <Header
+            )}
+
+            {/* Pickups aur Complaints hamesha mounted rehte hain — isse
+                search har page se teeno modules mein chalta hai. Jo active
+                nahi hai wo sirf chhupa hota hai. */}
+            {isAllStores && (
+              <div style={{ display: showPickups ? 'block' : 'none' }}>
+                <PickupsModule
                   session={session}
-                  live={CONFIGURED}
-                  count={viewItems.length}
-                  viewMode={viewMode}
-                  onViewMode={setViewMode}
-            vFrom={vFrom}
-            vTo={vTo}
-            onVFrom={setVFrom}
-            onVTo={setVTo}
-                  vFrom={vFrom}
-                  vTo={vTo}
-                  onVFrom={setVFrom}
-                  onVTo={setVTo}
-              vFrom={vFrom}
-              vTo={vTo}
-              onVFrom={setVFrom}
-              onVTo={setVTo}
-                  layoutMode={layoutMode}
-                  onLayoutMode={setLayoutMode}
-                  onSwitchStore={(b) =>
-                    setSession((s) => ({
-                      ...s,
-                      branch: b,
-                      storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
-                    }))
-                  }
+                  view={page === 'dashboard' ? 'dashboard' : 'board'}
+                  reloadKey={reloadTick}
+                  openLogKey={page === 'pickups' ? logTick : 0}
+                  lang={lang}
+                  search={search}
+                  onResults={setPickupRows}
+                  pickId={modulePick && modulePick.mod === 'pickups' ? modulePick.id : null}
+                  pickKey={modulePick && modulePick.mod === 'pickups' ? modulePick.n : 0}
                 />
-                {error && (
-                  <div className="err">
-                    <CloudOff size={18} color={T.red} />
-                    <div>
-                      <b>Supabase se connect nahi hua.</b> {error}
-                      <div
-                        style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}
-                      >
-                        anon key + RLS SELECT policy check karo.
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <EntriesView
-                  items={viewItems}
-                  viewMode={viewMode}
-                  layoutMode={effLayout}
-                  loading={loading}
-                  onOpen={(x) => setActiveId(x.invoice_id)}
-                  onMove={(x, toStage) =>
-                    setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                  }
-                  onCommit={(dd, toStage, fields) =>
-                    applyMove(dd.invoice_id, toStage, fields, 'move')
-                  }
-                  focus={lastMove}
+              </div>
+            )}
+            {isAllStores && (
+              <div style={{ display: showComplaints ? 'block' : 'none' }}>
+                <ComplaintsModule
+                  session={session}
+                  view={page === 'dashboard' ? 'dashboard' : 'board'}
+                  reloadKey={reloadTick}
+                  openLogKey={page === 'complaints' ? logTick : 0}
+                  lang={lang}
+                  search={search}
+                  onResults={setComplaintRows}
+                  pickId={modulePick && modulePick.mod === 'complaints' ? modulePick.id : null}
+                  pickKey={modulePick && modulePick.mod === 'complaints' ? modulePick.n : 0}
                 />
-              </>
+              </div>
             )}
           </main>
         </div>
@@ -3678,7 +3696,9 @@ function Topbar({
                     <span className="ellip search-name">{x.name}</span>
                     <span className={`search-tag ${x.tagKind}`}>{x.tag}</span>
                   </div>
-                  <div className="ellip search-sub">{x.sub}</div>
+                  <div className="ellip search-sub">
+                    <span className="search-mod">{x.modLabel}</span> · {x.sub}
+                  </div>
                 </button>
               ))
             )}
@@ -7014,6 +7034,7 @@ function StyleTag() {
       .search-tag.cancel { background: ${T.redSoft}; color: ${T.red}; }
       .search-row.is-cancelled { background: #FCF2EF; }
       .search-row.is-cancelled:hover { background: #F8E6E0; }
+      .search-mod { font-weight: 800; color: ${T.green}; }
       .search-sub { font-size: 11.5px; color: ${T.inkSoft}; }
       .search-empty { padding: 14px; text-align: center; font-size: 12.5px; color: ${T.inkSoft}; }
       .m-board { display: flex; flex-direction: column; gap: 12px; }
