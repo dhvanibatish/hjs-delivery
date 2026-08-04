@@ -129,9 +129,6 @@ async function sbTrack(invoice, phone) {
 }
 // sales team — sirf phone se us customer ki saari deliveries (latest→old).
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
-async function sbTrackSearch(phone, pin) {
-  return sbRpc('pickup_track_search', { p_phone: phone, p_pin: pin });
-}
 // photo upload → Supabase Storage bucket 'pickup-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
