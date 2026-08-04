@@ -1180,6 +1180,9 @@ export default function App() {
   // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
   // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
   const [reloadTick, setReloadTick] = useState(0);
+  // Activity log button — jis module pe ho, usi ka log khule
+  const [logTick, setLogTick] = useState(0);
+  const inModule = page === 'pickups' || page === 'complaints';
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1525,7 +1528,8 @@ export default function App() {
             onNav={setPage}
             search={search}
             setSearch={setSearch}
-            results={searchResults}
+            results={inModule ? [] : searchResults}
+            showResults={!inModule}
             onPick={(x) => {
               setActiveId(x.invoice_id);
               setSearch('');
@@ -1537,15 +1541,31 @@ export default function App() {
             }}
             loading={loading}
             onLogout={() => setSession(null)}
-            onActivity={() => setShowLog(true)}
+            onActivity={() =>
+              inModule ? setLogTick((t) => t + 1) : setShowLog(true)
+            }
             lang={lang}
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'pickups' ? (
-              <PickupsModule session={session} view="board" reloadKey={reloadTick} />
+              <PickupsModule
+                session={session}
+                view="board"
+                reloadKey={reloadTick}
+                openLogKey={logTick}
+                lang={lang}
+                search={search}
+              />
             ) : session.branch === 'ALL' && page === 'complaints' ? (
-              <ComplaintsModule session={session} view="board" reloadKey={reloadTick} />
+              <ComplaintsModule
+                session={session}
+                view="board"
+                reloadKey={reloadTick}
+                openLogKey={logTick}
+                lang={lang}
+                search={search}
+              />
             ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <>
                 {/* ek hi Dashboard page — upar se delivery/pickups switch */}
@@ -1578,9 +1598,9 @@ export default function App() {
                   </div>
                 </div>
                 {dashKind === 'pickups' ? (
-                  <PickupsModule session={session} view="dashboard" reloadKey={reloadTick} />
+                  <PickupsModule session={session} view="dashboard" reloadKey={reloadTick} lang={lang} />
                 ) : dashKind === 'complaints' ? (
-                  <ComplaintsModule session={session} view="dashboard" reloadKey={reloadTick} />
+                  <ComplaintsModule session={session} view="dashboard" reloadKey={reloadTick} lang={lang} />
                 ) : (
                   <Dashboard
                     deliveries={scoped}
@@ -3585,6 +3605,7 @@ function Topbar({
   search,
   setSearch,
   results,
+  showResults = true,
   onPick,
   onReload,
   onActivity,
@@ -3616,7 +3637,7 @@ function Topbar({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {search.trim() && (
+        {search.trim() && showResults && (
           <div className="search-dd">
             {!results || results.length === 0 ? (
               <div className="search-empty">Koi match nahi mila</div>
