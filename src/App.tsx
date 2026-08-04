@@ -1198,7 +1198,9 @@ export default function App() {
   const [pickupRows, setPickupRows] = useState([]); // pickups ke search results
   const [complaintRows, setComplaintRows] = useState([]); // complaints ke
   const [modulePick, setModulePick] = useState(null); // dropdown se chuna gaya
-  const isAllStores = session && session.branch === 'ALL';
+  // head store switch kar le tab bhi wo head hi rehta hai — Dashboard /
+  // SLA / Complaints gayab nahi hone chahiye
+  const isAllStores = session && session.isHead;
   const showPickups =
     page === 'pickups' || (page === 'dashboard' && dashKind === 'pickups');
   const showComplaints =
@@ -3590,7 +3592,7 @@ function Login({ onLogin }) {
 
 /* ═════════════════════════════════════════════════════════════ SIDEBAR */
 function Sidebar({ session, page, onNav }) {
-  const isAll = session.branch === 'ALL';
+  const isAll = session.isHead;
   const nav = [
     { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
     // Pickups har store ke liye khula hai (RPC ab store-scoped hai)
