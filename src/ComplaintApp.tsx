@@ -854,7 +854,11 @@ function useIsMobile(bp = 760) {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
-export default function App({ session: extSession = null, view = 'board' }) {
+export default function App({
+  session: extSession = null,
+  view = 'board',
+  reloadKey = 0,
+}) {
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
   const hosted = !!extSession;
@@ -903,6 +907,15 @@ export default function App({ session: extSession = null, view = 'board' }) {
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
   }, [session]);
+  // hosted mode: delivery app ka refresh button dabane pe reloadKey badhta hai
+  const firstReload = React.useRef(true);
+  useEffect(() => {
+    if (firstReload.current) {
+      firstReload.current = false;
+      return;
+    }
+    if (session) load(); /* eslint-disable-next-line */
+  }, [reloadKey]);
 
   const scoped = useMemo(() => {
     if (!session) return [];
