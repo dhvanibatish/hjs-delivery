@@ -72,7 +72,17 @@ async function sbLogin(store, pw) {
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
 async function sbList(store, pw) {
-  return sbRpc('staff_list', { p_store: store, p_password: pw });
+  // _lite = app_log ke bina (wo har row mein bada JSON hota hai). Timeline
+  // sirf zarurat pe alag se aata hai — dekho sbLogs().
+  return sbRpc('staff_list_lite', { p_store: store, p_password: pw });
+}
+// sirf app_log — ek invoice ka (drawer khulne pe) ya sabka (Activity / SLA).
+async function sbLogs(store, pw, invoice) {
+  return sbRpc('staff_logs', {
+    p_store: store,
+    p_password: pw,
+    p_invoice: invoice || null,
+  });
 }
 // staff update — stage move/edit. Password + store-scope checked in DB.
 async function sbUpdate(store, pw, invoiceId, patch) {
@@ -1246,6 +1256,46 @@ export default function App() {
   // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
   // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
   // par ek save = ek chhoti update call (poora table nahi).
+  // ── Timeline (app_log) on-demand ───────────────────────────────────
+  // List ab bina app_log ke aati hai. Jahan timeline chahiye — drawer,
+  // Activity log, Process & SLA — wahin se ye fetch hota hai.
+  const [logsLoaded, setLogsLoaded] = useState(false);
+  const mergeLogs = (rows) => {
+    const map = {};
+    (rows || []).forEach((r) => {
+      map[r.invoice_id] = r.app_log;
+    });
+    setDeliveries((prev) =>
+      prev.map((x) =>
+        map[x.invoice_id] !== undefined
+          ? rowToDelivery({ ...x._raw, app_log: map[x.invoice_id] })
+          : x,
+      ),
+    );
+  };
+  const loadLogs = async (invoice) => {
+    if (!CONFIGURED || !session) return;
+    try {
+      const rows = await sbLogs(session.authStore, session.pw, invoice || null);
+      mergeLogs(rows);
+      if (!invoice) setLogsLoaded(true);
+    } catch (_) {
+      /* timeline na aaye to baaki app chalta rahe */
+    }
+  };
+  // drawer khulte hi us ek entry ka log
+  useEffect(() => {
+    if (!activeId) return;
+    const row = deliveries.find((x) => x.invoice_id === activeId);
+    if (row && row._raw && row._raw.app_log === undefined) loadLogs(activeId);
+    // eslint-disable-next-line
+  }, [activeId]);
+  // Activity log / SLA — inhe saare logs chahiye, ek hi baar
+  useEffect(() => {
+    if ((showLog || page === 'sla') && !logsLoaded) loadLogs(null);
+    // eslint-disable-next-line
+  }, [showLog, page]);
+
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
       prev.map((x) =>
@@ -1481,6 +1531,7 @@ export default function App() {
               setSearch('');
             }}
             onReload={() => {
+              setLogsLoaded(false);
               load();
               setReloadTick((t) => t + 1);
             }}
