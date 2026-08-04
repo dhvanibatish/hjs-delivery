@@ -1138,6 +1138,9 @@ export default function App() {
   const [page, setPage] = useState('deliveries'); // deliveries | dashboard
   const [showLog, setShowLog] = useState(false); // overall activity log panel
   const [dashKind, setDashKind] = useState('delivery'); // dashboard: delivery | pickups
+  // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
+  // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
+  const [reloadTick, setReloadTick] = useState(0);
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1436,7 +1439,10 @@ export default function App() {
               setActiveId(x.invoice_id);
               setSearch('');
             }}
-            onReload={load}
+            onReload={() => {
+              load();
+              setReloadTick((t) => t + 1);
+            }}
             loading={loading}
             onLogout={() => setSession(null)}
             onActivity={() => setShowLog(true)}
@@ -1445,9 +1451,9 @@ export default function App() {
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'pickups' ? (
-              <PickupsModule session={session} view="board" />
+              <PickupsModule session={session} view="board" reloadKey={reloadTick} />
             ) : session.branch === 'ALL' && page === 'complaints' ? (
-              <ComplaintsModule session={session} view="board" />
+              <ComplaintsModule session={session} view="board" reloadKey={reloadTick} />
             ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <>
                 {/* ek hi Dashboard page — upar se delivery/pickups switch */}
@@ -1480,9 +1486,9 @@ export default function App() {
                   </div>
                 </div>
                 {dashKind === 'pickups' ? (
-                  <PickupsModule session={session} view="dashboard" />
+                  <PickupsModule session={session} view="dashboard" reloadKey={reloadTick} />
                 ) : dashKind === 'complaints' ? (
-                  <ComplaintsModule session={session} view="dashboard" />
+                  <ComplaintsModule session={session} view="dashboard" reloadKey={reloadTick} />
                 ) : (
                   <Dashboard
                     deliveries={scoped}
