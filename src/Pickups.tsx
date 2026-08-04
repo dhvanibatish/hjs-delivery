@@ -668,6 +668,20 @@ function niceDateTime(v) {
   if (!d && !tm) return String(v);
   return [d, tm].filter(Boolean).join(', ');
 }
+/* poori date + 12-ghante ka time — "23 Jul 2026, 5:43 PM" */
+function fmtFullDateTime(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d)) return String(ts);
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
 /* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
 function toLocalInput(v) {
   if (!v || v === 'null') return '';
@@ -3677,6 +3691,11 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
           </div>
         )}
+        {/* sabse neeche — ye entry app mein kab aayi */}
+        <div className="created-note">
+          Entry app mein aayi: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
+        </div>
+
       </div>
     </div>
   );
@@ -5268,6 +5287,8 @@ function StyleTag() {
       .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
       .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 
+      .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
+      .created-note b { color: ${T.ink}; font-weight: 700; }
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
       .tl-marker { display: flex; flex-direction: column; align-items: center; }
