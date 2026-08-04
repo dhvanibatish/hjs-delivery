@@ -1162,6 +1162,7 @@ export default function App() {
   if (inv) return <TrackPage invoice={inv} />; // customer — single order
   if (params.has('order') || params.has('my'))
     return <TrackPage invoice="" />; // customer — phone se latest order
+  if (params.has('pickupsales')) return <PickupsModule route="sales" />;
   if (params.has('track') || params.has('sales') || isTrackPath)
     return <SalesTrackPage />; // sales — phone → list → timeline
 
