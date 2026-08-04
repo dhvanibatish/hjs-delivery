@@ -3234,6 +3234,11 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
           </div>
         )}
+        {/* sabse neeche — ye entry app mein kab aayi */}
+        <div className="created-note">
+          Ticket app mein aaya: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
+        </div>
+
       </div>
     </div>
   );
@@ -4007,6 +4012,8 @@ function StyleTag() {
       .auto-time b { font-weight: 800; }
       .auto-time svg { flex-shrink: 0; }
 
+      .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
+      .created-note b { color: ${T.ink}; font-weight: 700; }
       .timeline { margin-bottom: 8px; }
       .tl-row { display: flex; gap: 12px; }
       .tl-marker { display: flex; flex-direction: column; align-items: center; }
