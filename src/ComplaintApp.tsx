@@ -946,6 +946,18 @@ export default function App({
 
   const active = tickets.find((x) => x.ticket_id === activeId) || null;
 
+  // ── Egress bachane ke liye ──────────────────────────────────────────
+  // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
+  // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
+  // par ek save = ek chhoti update call (poora table nahi).
+  const applyLocal = (id, patch) => {
+    setTickets((prev) =>
+      prev.map((x) =>
+        x.ticket_id === id ? rowToTicket({ ...x._raw, ...patch }) : x,
+      ),
+    );
+  };
+
   const buildPatch = (toStage, f, mode) => {
     const patch = { updated_at: new Date().toISOString() };
     if (mode === 'move') patch.status = stageToStatus(toStage);
@@ -989,7 +1001,7 @@ export default function App({
           : `${L('tSaved')} ✓ · ${sLabel(landed)}`,
       );
       if (mode === 'move') jumpMobile(landed);
-      load();
+      applyLocal(ticketId, patch);
     } catch (e) {
       ping(`${L('tSaveFail')}: ` + e.message);
     }
@@ -1024,7 +1036,7 @@ export default function App({
       await sbPatch(ticketId, patch);
       ping(`${L('tMoved')} · ${sLabel(toStage)}`);
       jumpMobile(toStage);
-      load();
+      applyLocal(ticketId, patch);
     } catch (e) {
       ping(`${L('tSaveFail')}: ` + e.message);
     }
@@ -1050,7 +1062,7 @@ export default function App({
       await sbPatch(ticketId, patch);
       setActiveId(null);
       ping(L('tDeleted'));
-      load();
+      applyLocal(ticketId, patch);
     } catch (e) {
       ping(`${L('tDeleteFail')}: ` + e.message);
     }
