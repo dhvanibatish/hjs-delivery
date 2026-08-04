@@ -1024,7 +1024,11 @@ function useEmbedFlag() {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
-export default function App({ session: extSession = null, view = 'board' }) {
+export default function App({
+  session: extSession = null,
+  view = 'board',
+  reloadKey = 0,
+}) {
   useEmbedFlag();
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
@@ -1105,6 +1109,15 @@ export default function App({ session: extSession = null, view = 'board' }) {
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
   }, [session]);
+  // hosted mode: delivery app ka refresh button dabane pe reloadKey badhta hai
+  const firstReload = React.useRef(true);
+  useEffect(() => {
+    if (firstReload.current) {
+      firstReload.current = false;
+      return;
+    }
+    if (session) load(); /* eslint-disable-next-line */
+  }, [reloadKey]);
 
   const scoped = useMemo(() => {
     if (!session) return [];
@@ -3653,15 +3666,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             </Field>
             {f.flow === 'resched' && (
               <div className="flag-note" style={{ background: T.amberSoft, color: T.amber }}>
-                <b>Reschedule</b> — entry pehli stage mein hi pending rahegi, tile
-                pe "Rescheduled" likha aayega. Neeche remarks mein likh do customer
-                ne kya kaha (jaise "1-2 din mein confirm karenge").
+                <b>Reschedule</b> — entry pending mein hi rahegi, tile pe
+                "Rescheduled" dikhega. Neeche remarks zaroori hai.
               </div>
             )}
             {f.flow === 'cancelled' && (
               <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-                Ye pickup <b>Cancelled</b> mark hokar active list se hat jayegi —
-                date/time bharne ki zarurat nahi.
+                Ye pickup <b>Cancelled</b> mark hokar active list se hat
+                jayegi. Neeche wajah likhna zaroori hai.
               </div>
             )}
           </>
@@ -3753,12 +3765,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               <Field label={needRemarks ? 'Remarks *' : 'Remarks'}>
                 <textarea
                   className="inp"
-                  rows={2}
+                  rows={needRemarks ? 3 : 2}
                   placeholder={
                     needRemarks
                       ? f.flow === 'resched'
-                        ? 'Customer ne kya kaha? jaise "1-2 din mein confirm karenge"'
-                        : 'Cancel karne ki wajah likho…'
+                        ? 'Jaise: 1-2 din mein confirm karenge'
+                        : 'Cancel karne ki wajah…'
                       : 'Optional notes…'
                   }
                   value={f.remarks}
@@ -5069,13 +5081,13 @@ function StyleTag() {
       .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
       .edit-btn:hover { background: #dcebdd; }
 
-      .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+      .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.45; }
       .flag-note b { font-weight: 800; }
       .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
       .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
-      .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
+      .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 8px 11px; margin-top: -6px; line-height: 1.45; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
       .tp12 { display: flex; align-items: center; gap: 7px; }
       .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
