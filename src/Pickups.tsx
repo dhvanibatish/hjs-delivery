@@ -1536,7 +1536,7 @@ export default function App({
   // ── HOSTED: delivery app ke <main> ke andar — sirf content, koi chrome nahi
   if (hosted) {
     return (
-      <>
+      <div className="hjs-mod">
         <StyleTag />
         {page === 'dashboard' ? (
           <Dashboard
@@ -1627,12 +1627,13 @@ export default function App({
           />
         )}
         {toast && <Toast msg={toast} />}
-      </>
+      </div>
     );
   }
 
   return (
     <div
+      className="hjs-mod"
       style={{
         fontFamily: FONT,
         background: T.beige,
@@ -5201,13 +5202,13 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .hjs-mod .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
-      .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
-      .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
-      .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
-      .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
-      .column:nth-child(5) { border-top: 3px solid ${T.green}; }
+      .hjs-mod .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
+      .hjs-mod .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
+      .hjs-mod .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
+      .hjs-mod .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
+      .hjs-mod .column:nth-child(5) { border-top: 3px solid ${T.green}; }
       .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
       .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
@@ -5498,9 +5499,9 @@ function StyleTag() {
       .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
       @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
 
-      @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
-      @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-      @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
+      @media (max-width: 1400px) { .hjs-mod .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
+      @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .hjs-mod .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+      @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .hjs-mod .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
