@@ -105,13 +105,7 @@ async function sbTrackPickup(invoice, phone) {
 }
 // sales team — sirf phone se us customer ki saari deliveries (latest→old).
 // p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
-async function sbTrackSearch(phone, pin) {
-  return sbRpc('track_search', { p_phone: phone, p_pin: pin });
-}
 // Sales console: store code se us store ki saari active deliveries (PIN-free)
-async function sbSalesByStore(store) {
-  return sbRpc('sales_by_store', { p_store: store });
-}
 // Sales matrix: salesperson × store counts (date range + status)
 async function sbSalesMatrix(from, to, status) {
   return sbRpc('sales_matrix', {
@@ -141,14 +135,6 @@ async function sbSalesList(sales, store, from, to, status) {
   });
 }
 // Ek cell ki deliveries (salesperson + store, date range)
-async function sbSalesCell(sales, store, from, to) {
-  return sbRpc('sales_cell', {
-    p_sales: sales,
-    p_store: store,
-    p_from: from,
-    p_to: to,
-  });
-}
 // photo upload → Supabase Storage bucket 'delivery-photos'.
 // naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
 // return: public URL (deliveries table mein save hota hai)
