@@ -6038,30 +6038,20 @@ function TrackPage({ invoice }) {
   const [rows, setRows] = useState([]);
   const [row, setRow] = useState(null);
   const [pickup, setPickup] = useState(null); // usi order ka return, agar shuru hua ho
+  const [pickups, setPickups] = useState([]); // phone ke saare pickups
   const [err, setErr] = useState('');
 
-  // order chunte hi dekho ki iska return/pickup shuru hua hai ya nahi
+  // order chunte hi uska return/pickup bhi jodo (list mein already aa chuka hai)
   useEffect(() => {
-    let alive = true;
-    setPickup(null);
-    if (!row || !row.invoice_number) return;
-    (async () => {
-      try {
-        const res = await sbTrackPickup(
-          row.invoice_number,
-          `+91${phone.replace(/\D/g, '')}`,
-        );
-        const pk = (res || [])[0] || null;
-        if (alive && pk && pickupStage(pk.status) !== 'deleted') setPickup(pk);
-      } catch (_) {
-        /* pickup na mile to page pehle jaisa hi chalta rahe */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+    if (!row || !row.invoice_number) {
+      setPickup(null);
+      return;
+    }
+    setPickup(
+      pickups.find((x) => x.invoice_number === row.invoice_number) || null,
+    );
     // eslint-disable-next-line
-  }, [row]);
+  }, [row, pickups]);
 
   const track = async () => {
     const digits = phone.replace(/\D/g, '');
@@ -6073,22 +6063,37 @@ function TrackPage({ invoice }) {
     setState('loading');
     setRow(null);
     try {
-      const all = await sbTrack(invoice || '', `+91${digits}`);
+      const [all, pks] = await Promise.all([
+        sbTrack(invoice || '', `+91${digits}`),
+        // pickups alag se — kuch purane invoices delivery app se pehle ke hain,
+        // unki delivery row hoti hi nahi. Wo pickup bhi dikhna chahiye.
+        sbTrackPickup(invoice || '', `+91${digits}`).catch(() => []),
+      ]);
+      const pickList = (pks || []).filter(
+        (x) => pickupStage(x.status) !== 'deleted',
+      );
+      setPickups(pickList);
       // Renewal / Duplicate / Deleted = internal cheezein — customer ko na dikhe.
       // Cancelled dikhta hai (customer ko pata hona chahiye).
       const res = (all || []).filter((r) => {
         const st = statusToStage(r.status);
         return st !== 'renewal' && st !== 'duplicate' && st !== 'deleted';
       });
-      if (!res || res.length === 0) {
+      // jin pickups ki delivery row hai hi nahi — unhe apni entry bana do
+      const have = new Set(res.map((r) => r.invoice_number));
+      const orphan = pickList
+        .filter((x) => !have.has(x.invoice_number))
+        .map((x) => ({ ...x, _pickupOnly: true }));
+      const merged = [...res, ...orphan];
+      if (merged.length === 0) {
         setState('notfound');
         setRows([]);
         return;
       }
-      setRows(res);
+      setRows(merged);
       // Ek hi order → seedha timeline. Ek se zyada (jaise oxygen + cannula
       // alag invoices) → list dikhao, customer apna order chun le.
-      if (res.length === 1) setRow(res[0]);
+      if (merged.length === 1) setRow(merged[0]);
       setState('done');
     } catch (e) {
       setErr(e.message || 'Something went wrong');
@@ -6178,7 +6183,9 @@ function TrackPage({ invoice }) {
               {rows.length} orders found · choose one
             </div>
             {rows.map((r) => {
-              const st = statusToStage(r.status);
+              const st = r._pickupOnly
+                ? pickupStage(r.status)
+                : statusToStage(r.status);
               const stg = stageMeta(st);
               const equip = equipmentText({
                 line_items: r.line_items,
@@ -6206,7 +6213,7 @@ function TrackPage({ invoice }) {
                         className="sales-chip"
                         style={{ background: stg.soft, color: stg.color }}
                       >
-                        {stg.short}
+                        {r._pickupOnly ? 'Return' : stg.short}
                       </span>
                     </div>
                     <div className="sales-meta">
@@ -6234,7 +6241,11 @@ function TrackPage({ invoice }) {
                 <ArrowLeft size={16} /> Back to my orders
               </button>
             )}
-            <TrackResult row={row} pickup={pickup} />
+            {row._pickupOnly ? (
+              <PickupOnlyResult pickup={row} />
+            ) : (
+              <TrackResult row={row} pickup={pickup} />
+            )}
           </>
         )}
 
@@ -6687,8 +6698,36 @@ function TrackResult({ row, pickup, showPhotos }) {
   );
 }
 
+/* Kuch invoices delivery app se pehle ke hain — unki delivery row hoti hi
+   nahi. Un cases mein sirf pickup ka safar dikhta hai. */
+function PickupOnlyResult({ pickup }) {
+  const items = equipmentList({
+    line_items: pickup.line_items,
+    item_name: pickup.item_name,
+  });
+  const Icon = equipIcon(items.join(' '));
+  return (
+    <div className="track-result">
+      <div className="track-order">
+        <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
+          <Icon size={22} color={T.green} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: T.ink }}>
+            Order details
+          </div>
+          <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
+            Order #{pickup.invoice_number}
+          </div>
+        </div>
+      </div>
+      <PickupPhase pickup={pickup} hideTop />
+    </div>
+  );
+}
+
 /* ── Return / Pickup ka hissa — customer ke liye ─────────────────────── */
-function PickupPhase({ pickup }) {
+function PickupPhase({ pickup, hideTop }) {
   const stage = pickupStage(pickup.status);
   const cancelled = stage === 'cancelled';
   const idx = STAGES.findIndex((x) => x.id === stage);
@@ -6716,7 +6755,7 @@ function PickupPhase({ pickup }) {
             : { text: 'Return request received', bg: T.slateSoft, fg: T.slate };
 
   return (
-    <div className="phase-block">
+    <div className={hideTop ? 'phase-block no-top' : 'phase-block'}>
       <div className="phase-head">
         <RotateCcw size={16} color={T.green} /> Return &amp; Pickup
       </div>
@@ -7455,6 +7494,7 @@ function StyleTag() {
       .phase-collapse { width: 100%; display: flex; align-items: center; gap: 10px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; padding: 12px 14px; font-size: 13.5px; font-weight: 800; color: ${T.green}; font-family: inherit; cursor: pointer; margin: 16px 0 4px; }
       .phase-tick { width: 22px; height: 22px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .phase-link { font-size: 12px; font-weight: 700; opacity: .85; }
+      .phase-block.no-top { margin-top: 6px; padding-top: 0; border-top: none; }
       .phase-block { margin-top: 18px; padding-top: 18px; border-top: 1px dashed ${T.line}; }
       .phase-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: ${T.ink}; margin-bottom: 12px; }
       .phase-items-h { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; }
