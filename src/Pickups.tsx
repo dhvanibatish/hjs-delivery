@@ -3612,11 +3612,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
   const canSave =
     toStage === 'talked'
-      ? f.flow === 'cancelled'
-        ? true
-        : f.flow === 'resched'
-          ? !!String(f.remarks || '').trim()
-          : !!(f.date && f.time)
+      ? f.flow === 'cancelled' || f.flow === 'resched'
+        ? // reschedule / cancel — dono mein reason likhna zaroori hai
+          !!String(f.remarks || '').trim()
+        : !!(f.date && f.time)
     : toStage === 'scheduled' ? !!(f.person && f.vehicle)
     : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
     : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate && String(f.charges).trim() !== '')
@@ -3743,9 +3742,37 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             )}
           </>
         )}
-        <Field label="Remarks">
-          <textarea className="inp" rows={2} placeholder="Optional notes…" value={f.remarks} onChange={(e) => set('remarks', e.target.value)} />
-        </Field>
+        {(() => {
+          // pehli stage pe reschedule/cancel chuna to reason likhna zaroori
+          const needRemarks =
+            toStage === 'talked' &&
+            (f.flow === 'resched' || f.flow === 'cancelled');
+          const empty = !String(f.remarks || '').trim();
+          return (
+            <>
+              <Field label={needRemarks ? 'Remarks *' : 'Remarks'}>
+                <textarea
+                  className="inp"
+                  rows={2}
+                  placeholder={
+                    needRemarks
+                      ? f.flow === 'resched'
+                        ? 'Customer ne kya kaha? jaise "1-2 din mein confirm karenge"'
+                        : 'Cancel karne ki wajah likho…'
+                      : 'Optional notes…'
+                  }
+                  value={f.remarks}
+                  onChange={(e) => set('remarks', e.target.value)}
+                />
+              </Field>
+              {needRemarks && empty && (
+                <div className="req-note">
+                  Remarks bharna zaroori hai — kya baat hui, wo likh do.
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
