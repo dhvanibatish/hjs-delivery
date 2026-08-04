@@ -1693,7 +1693,8 @@ export default function App() {
             {/* Pickups aur Complaints hamesha mounted rehte hain — isse
                 search har page se teeno modules mein chalta hai. Jo active
                 nahi hai wo sirf chhupa hota hai. */}
-            {isAllStores && (
+            {/* Pickups har store ko dikhta hai */}
+            {(
               <div style={{ display: showPickups ? 'block' : 'none' }}>
                 <PickupsModule
                   session={session}
@@ -3585,9 +3586,10 @@ function Sidebar({ session, page, onNav }) {
   const isAll = session.branch === 'ALL';
   const nav = [
     { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
+    // Pickups har store ke liye khula hai (RPC ab store-scoped hai)
+    { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
     ...(isAll
       ? [
-          { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
           { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
@@ -3711,19 +3713,17 @@ function Topbar({
           </div>
         )}
       </div>
-      {session.isHead && (
-        <select
-          className="page-switch"
-          value={page}
-          onChange={(e) => onNav && onNav(e.target.value)}
-        >
-          <option value="deliveries">Deliveries</option>
-          <option value="pickups">Pickups</option>
-          <option value="complaints">Complaints</option>
-          <option value="dashboard">Dashboard</option>
-          <option value="sla">Process &amp; SLA</option>
-        </select>
-      )}
+      <select
+        className="page-switch"
+        value={page}
+        onChange={(e) => onNav && onNav(e.target.value)}
+      >
+        <option value="deliveries">Deliveries</option>
+        <option value="pickups">Pickups</option>
+        {session.isHead && <option value="complaints">Complaints</option>}
+        {session.isHead && <option value="dashboard">Dashboard</option>}
+        {session.isHead && <option value="sla">Process &amp; SLA</option>}
+      </select>
       <div className="tb-actions">
         <div className="lang-toggle">
           <button
