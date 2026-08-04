@@ -2734,6 +2734,7 @@ function Header({
         )}
       </div>
       <div
+        className="hdr-controls"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -5523,6 +5524,16 @@ function StyleTag() {
         .glass-card { padding: 24px 20px; }
         /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
         .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
+      }
+      /* phone pe header ke controls (Today / Stages / All stores / chip) ek
+         doosre ke saath fit ho jaayein — pehle har ek apni line le leta tha */
+      @media (max-width: 760px) {
+        .hdr-controls { gap: 8px !important; width: 100%; }
+        .hdr-controls > * { flex: 0 1 auto; }
+        .store-switch { padding: 8px 10px 8px 30px; font-size: 12.5px; }
+        .lt-btn { padding: 8px 11px; font-size: 12px; }
+        .live-chip { font-size: 11.5px; padding: 7px 11px; }
+        .view-range .dash-inp { padding: 8px 10px; font-size: 12.5px; }
       }
       @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
       @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
