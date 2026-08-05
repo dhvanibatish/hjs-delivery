@@ -39,7 +39,8 @@ const CSS = `
 .att-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 18px; }
 .att-stack > * + * { margin-top: 14px; }
 .att-muted { color: #64748b; font-size: 13px; }
-.att-h1 { font-size: 21px; font-weight: 650; letter-spacing: -0.02em; }
+.hjsatt h1, .hjsatt h2, .hjsatt h3, .hjsatt p, .hjsatt b, .hjsatt span, .hjsatt div { color: inherit; }
+.att-h1 { font-size: 21px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; }
 .att-h2 { font-size: 14px; font-weight: 650; color: #334155; margin-bottom: 9px; }
 
 .att-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
