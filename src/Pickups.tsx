@@ -71,9 +71,17 @@ async function sbLogin(store, pw) {
   return sbRpc('pickup_list_lite', { p_store: store, p_password: pw });
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
-async function sbList(store, pw) {
-  // _lite = app_log ke bina (bada JSON). Timeline zarurat pe — dekho sbLogs().
-  return sbRpc('pickup_list_lite', { p_store: store, p_password: pw });
+async function sbList(store, pw, days) {
+  // _lite = app_log ke bina. p_days = window (0 = sab kuch).
+  return sbRpc('pickup_list_lite', {
+    p_store: store,
+    p_password: pw,
+    p_days: days == null ? 90 : days,
+  });
+}
+// window se bahar wali entries — server pe search
+async function sbSearch(store, pw, q) {
+  return sbRpc('pickup_search', { p_store: store, p_password: pw, p_q: q });
 }
 // ── Sales pickup tracker (console ka CH tab) ────────────────────────
 async function pkSalesMatrix(from, to, status) {
@@ -1177,6 +1185,8 @@ export default function App({
   // hosted mode: head login store switch kar sake (session App ka hai,
   // isliye branch yahin local rakhte hain)
   const [viewBranch, setViewBranch] = useState(null);
+  const [fullHistory, setFullHistory] = useState(false);
+  const [remoteRows, setRemoteRows] = useState([]);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
@@ -1201,7 +1211,9 @@ export default function App({
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 90)).map(
+          rowToDelivery,
+        ),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1210,7 +1222,7 @@ export default function App({
   };
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
-  }, [session]);
+  }, [session, fullHistory]);
   // hosted mode: delivery app ka EN/Hing toggle yahan bhi lag jaaye
   useEffect(() => {
     if (!extLang) return;
@@ -1274,14 +1286,15 @@ export default function App({
       onResults([]);
       return;
     }
+    const local = scoped.filter((x) =>
+      `${x.customer} ${x.id} ${x.area} ${x.phone}`
+        .toLowerCase()
+        .includes(hostSearch),
+    );
+    const have = new Set(local.map((x) => x.invoice_id));
     onResults(
-      scoped
-        .filter((x) =>
-          `${x.customer} ${x.id} ${x.area} ${x.phone}`
-            .toLowerCase()
-            .includes(hostSearch),
-        )
-        .slice(0, 8)
+      [...local, ...remoteRows.filter((x) => !have.has(x.invoice_id))]
+        .slice(0, 10)
         .map((x) => {
           const closed = isClosedStage(x.stage);
           const fresh = isToday(createdTs(x));
@@ -1297,12 +1310,39 @@ export default function App({
         }),
     );
     // eslint-disable-next-line
-  }, [hostSearch, scoped, hosted]);
+  }, [hostSearch, scoped, hosted, remoteRows]);
+
+  // window se bahar wali entries server se
+  useEffect(() => {
+    if (!CONFIGURED || !session || !hostSearch || hostSearch.length < 2) {
+      setRemoteRows([]);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const res = await sbSearch(session.authStore, session.pw, hostSearch);
+        if (alive) setRemoteRows((res || []).map(rowToDelivery));
+      } catch (_) {
+        if (alive) setRemoteRows([]);
+      }
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line
+  }, [hostSearch, session]);
 
   // topbar dropdown se koi result chuna gaya
   useEffect(() => {
     // pickKey har click pe badalta hai — wahi entry dobara chunne pe bhi khule
-    if (pickId) setActiveId(pickId);
+    if (!pickId) return;
+    if (!deliveries.some((d) => d.invoice_id === pickId)) {
+      const extra = remoteRows.find((d) => d.invoice_id === pickId);
+      if (extra) setDeliveries((prev) => [...prev, extra]);
+    }
+    setActiveId(pickId);
     // eslint-disable-next-line
   }, [pickKey]);
 
