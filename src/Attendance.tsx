@@ -495,7 +495,7 @@ function TeamScreen({ me }) {
 }
 
 /* ---------------- shell ---------------- */
-export default function App() {
+export default function Attendance() {
   const [session, setSession] = useState(undefined);
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState("punch");
