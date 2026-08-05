@@ -291,6 +291,19 @@ const CSS = `
 .hjsatt .att-sumitem span { display: block; font-size: 12.5px; color: #475467; }
 .hjsatt .att-sumitem b { display: block; font-size: 15px; }
 
+/* ---------- range filter ---------- */
+.hjsatt .att-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 9px 11px; }
+.hjsatt .att-range input { width: auto; min-height: 36px; padding: 6px 9px; font-size: 13.5px; }
+.hjsatt .att-range .qk { display: flex; gap: 5px; flex-wrap: wrap; }
+.hjsatt .att-range .qk button { padding: 6px 11px; border-radius: 7px; font-size: 12.5px;
+  border: 1px solid #e5e7eb; color: #475467; background: #fff; }
+.hjsatt .att-range .qk button.on { background: #eff4ff; border-color: #b2ccff; color: #2563eb; font-weight: 650; }
+.hjsatt .att-stat.clk { cursor: pointer; }
+.hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
+.hjsatt .att-mk { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; font-weight: 700; font-size: 13px; }
+
 /* ---------- leave summary ---------- */
 .hjsatt .att-lvgrid { display: grid; gap: 11px;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); }
@@ -348,6 +361,90 @@ const markClass = (m: string) =>
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
+
+const letterOf = (st: string) => ({
+  Present: "P", Late: "L", "Half Day": "H", Absent: "A", "Week Off": "W", Holiday: "F",
+} as Record<string, string>)[st] || (st ? st[0] : "-");
+const MK_TINT: Record<string, [string, string]> = {
+  P: ["#ecfdf3", "#067647"], L: ["#fffaeb", "#b54708"], H: ["#fff6ed", "#c4320a"],
+  A: ["#fef3f2", "#b42318"], W: ["#f2f4f7", "#475467"], F: ["#f2f4f7", "#475467"],
+};
+const monthStart = (iso: string) => iso.slice(0, 8) + "01";
+const shiftMonth = (iso: string, n: number) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setMonth(d.getMonth() + n, 1);
+  return d.toISOString().slice(0, 10);
+};
+const lastDayOf = (iso: string) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setMonth(d.getMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+};
+
+function RangeBar({ range, setRange }: any) {
+  const today = istToday();
+  const presets: [string, () => any][] = [
+    ["This month", () => ({ from: monthStart(today), to: today })],
+    ["Last month", () => {
+      const p = shiftMonth(monthStart(today), -1);
+      return { from: p, to: lastDayOf(p) };
+    }],
+    ["Last 7 days", () => {
+      const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() - 6);
+      return { from: d.toISOString().slice(0, 10), to: today };
+    }],
+    ["This year", () => ({ from: today.slice(0, 4) + "-01-01", to: today })],
+  ];
+  const match = (r: any) => presets.find(([, f]) => {
+    const v = f(); return v.from === r.from && v.to === r.to;
+  })?.[0];
+  const active = match(range);
+  return (
+    <div className="att-range">
+      <div className="qk">
+        {presets.map(([label, f]) => (
+          <button key={label} className={active === label ? "on" : ""}
+            onClick={() => setRange(f())}>{label}</button>
+        ))}
+      </div>
+      <div className="att-flex" style={{ marginLeft: "auto" }}>
+        <input type="date" value={range.from} max={range.to}
+          onChange={(e) => setRange({ ...range, from: e.target.value })} />
+        <span className="att-muted">to</span>
+        <input type="date" value={range.to} min={range.from}
+          onChange={(e) => setRange({ ...range, to: e.target.value })} />
+      </div>
+    </div>
+  );
+}
+
+function DayListSheet({ title, rows, onClose }: any) {
+  return (
+    <Sheet title={title} onClose={onClose}>
+      <div className="att-list">
+        {!rows.length && <p className="att-empty">Nothing in this range.</p>}
+        {rows.map((r: any) => {
+          const L = letterOf(r.status);
+          const [bg, fg] = MK_TINT[L] || ["#eff8ff", "#175cd3"];
+          return (
+            <div className="att-row" key={r.work_date}>
+              <span style={{ width: 92, fontWeight: 650 }}>
+                {new Date(r.work_date + "T00:00:00").toLocaleDateString("en-GB",
+                  { day: "2-digit", month: "short" })}
+              </span>
+              <span className="att-mk" style={{ background: bg, color: fg }}>{L}</span>
+              <span className="grow att-muted">
+                {r.punch_in_at ? `${fmtTime(r.punch_in_at)} – ${fmtTime(r.punch_out_at)}` : "—"}
+              </span>
+              <b>{hhmm(r.worked_minutes)}</b>
+            </div>
+          );
+        })}
+      </div>
+      <p className="att-muted" style={{ marginTop: 10 }}>{rows.length} day(s)</p>
+    </Sheet>
+  );
+}
 
 const AV_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
 const Avatar = ({ name, lg }: any) => {
@@ -462,14 +559,17 @@ function HomeScreen({ me }: any) {
   const [board, setBoard] = useState<any[]>([]);
   const [err, setErr] = useState(""); const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [regOpen, setRegOpen] = useState(false);
+  const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
+  const [drill, setDrill] = useState<any>(null);
 
   const load = async () => {
-    const from = new Date(); from.setDate(from.getDate() - 30);
+    const back = new Date(); back.setDate(back.getDate() - 40);
+    const lo = [range.from, back.toISOString().slice(0, 10)].sort()[0];
     const [logs, sess, who] = await Promise.all([
       supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
-        .gte("work_date", from.toISOString().slice(0, 10)).order("work_date", { ascending: false }),
+        .gte("work_date", lo).order("work_date", { ascending: false }),
       supabase.rpc("my_sessions", {}),
       supabase.rpc("whos_in", {}),
     ]);
@@ -478,7 +578,7 @@ function HomeScreen({ me }: any) {
     setSessions(sess.data || []);
     setBoard(who.data || []);
   };
-  useEffect(() => { load(); }, [me.id]);
+  useEffect(() => { load(); }, [me.id, range.from, range.to]);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
   const open = sessions.find((s) => !s.out_at);
@@ -486,7 +586,7 @@ function HomeScreen({ me }: any) {
     const closed = sessions.filter((s) => s.out_at).reduce((a, s) => a + (s.minutes || 0), 0);
     const live = open ? (Date.now() - new Date(open.in_at).getTime()) / 60000 : 0;
     return closed + live;
-  }, [sessions, open]);
+  }, [sessions, open, tick]);
 
   const punch = async (dir: "in" | "out") => {
     setErr(""); setOk(""); setBusy(true);
@@ -505,16 +605,15 @@ function HomeScreen({ me }: any) {
 
   const [h, m, sec] = hms(workedMinutes);
 
-  const stats = useMemo(() => {
-    const mo = istToday().slice(0, 7);
-    const rows = recent.filter((r) => String(r.work_date).startsWith(mo));
-    return {
-      present: rows.filter((r) => ["Present", "Late"].includes(r.status)).length,
-      late: rows.filter((r) => r.status === "Late").length,
-      half: rows.filter((r) => r.status === "Half Day").length,
-      hrs: Math.round(rows.reduce((s, r) => s + (r.worked_minutes || 0), 0) / 60),
-    };
-  }, [recent]);
+  const inRange = useMemo(
+    () => recent.filter((r) => r.work_date >= range.from && r.work_date <= range.to),
+    [recent, range]);
+  const stats = useMemo(() => ({
+    present: inRange.filter((r) => ["Present", "Late"].includes(r.status)),
+    late: inRange.filter((r) => r.status === "Late"),
+    half: inRange.filter((r) => r.status === "Half Day"),
+    hrs: Math.round(inRange.reduce((s, r) => s + (r.worked_minutes || 0), 0) / 60),
+  }), [inRange]);
 
   const week = useMemo(() => {
     const t = new Date(istToday() + "T00:00:00");
@@ -525,9 +624,9 @@ function HomeScreen({ me }: any) {
       const log = recent.find((r: any) => r.work_date === key);
       const off = (me.week_off_days || []).includes(d.getDay());
       return {
-        key, dow: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i], num: d.getDate(),
+        key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
         isToday: key === istToday(),
-        status: log?.status || (off ? "Week Off" : key > istToday() ? "" : "Absent"),
+        status: log?.status || (off ? "Off" : key > istToday() ? "" : "Absent"),
         mins: log?.worked_minutes,
       };
     });
@@ -535,7 +634,7 @@ function HomeScreen({ me }: any) {
 
   const dayColor: Record<string, string> = {
     Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
-    Absent: "#dc2626", "Week Off": "#98a2b3",
+    Absent: "#dc2626", Off: "#98a2b3",
   };
   const inNow = board.filter((p) => p.state === "In").length;
 
@@ -589,11 +688,17 @@ function HomeScreen({ me }: any) {
           <Note>{err}</Note>
           <Note kind="ok">{ok}</Note>
 
+          <RangeBar range={range} setRange={setRange} />
+
           <div className="att-grid4">
-            <div className="att-stat"><b style={{ color: "#16a34a" }}>{stats.present}</b><span>Present</span></div>
-            <div className="att-stat"><b style={{ color: "#d97706" }}>{stats.late}</b><span>Late</span></div>
-            <div className="att-stat"><b style={{ color: "#ea580c" }}>{stats.half}</b><span>Half</span></div>
-            <div className="att-stat"><b style={{ color: "#2563eb" }}>{stats.hrs}</b><span>Hours</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Present days", r: stats.present })}>
+              <b style={{ color: "#16a34a" }}>{stats.present.length}</b><span>Present</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Late days", r: stats.late })}>
+              <b style={{ color: "#d97706" }}>{stats.late.length}</b><span>Late</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Half days", r: stats.half })}>
+              <b style={{ color: "#ea580c" }}>{stats.half.length}</b><span>Half</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "All worked days", r: inRange })}>
+              <b style={{ color: "#2563eb" }}>{stats.hrs}</b><span>Hours</span></div>
           </div>
         </div>
 
@@ -618,7 +723,7 @@ function HomeScreen({ me }: any) {
                   <span className="dn">{d.dow}</span>
                   <b className="dd">{String(d.num).padStart(2, "0")}</b>
                   <span className="ds" style={{ color: dayColor[d.status] || "#d0d5dd" }}>
-                    {d.status === "Week Off" ? "Off" : d.status === "Half Day" ? "Half" : d.status || "—"}
+                    {d.status === "Half Day" ? "Half" : d.status || "—"}
                   </span>
                   <span className="dh">{d.mins ? hhmm(d.mins) : ""}</span>
                 </div>
@@ -654,13 +759,13 @@ function HomeScreen({ me }: any) {
 
           <div className="att-list">
             <div className="att-hd">
-              <b>Last 30 days</b>
+              <b>Attendance log</b>
               <button className="att-btn sm line" onClick={() => setRegOpen(true)}>Missed a punch?</button>
             </div>
-            {recent.length === 0 && (
-              <p className="att-empty">Nothing here yet. Today is a good place to start.</p>
+            {inRange.length === 0 && (
+              <p className="att-empty">Nothing in this range yet.</p>
             )}
-            {recent.map((r) => (
+            {inRange.map((r) => (
               <div className="att-row" key={r.id}>
                 <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
                 <span className="grow att-muted">{fmtTime(r.punch_in_at)} – {fmtTime(r.punch_out_at)}</span>
@@ -673,6 +778,7 @@ function HomeScreen({ me }: any) {
       </div>
 
       {regOpen && <RegularizeSheet me={me} onClose={() => setRegOpen(false)} />}
+      {drill && <DayListSheet title={drill.t} rows={drill.r} onClose={() => setDrill(null)} />}
     </div>
   );
 }
@@ -756,7 +862,12 @@ const minsOfDay = (ts: any) => {
 const hourLabel = (h: number) =>
   `${String(h % 12 || 12).padStart(2, "0")}${h >= 12 ? "PM" : "AM"}`;
 
-function AttendanceScreen({ me }: any) {
+function AttendanceScreen({ me, tab }: any) {
+  if (tab === "matrix") return <div className="att-wrap"><MatrixTab me={me} /></div>;
+  return <AttSummary me={me} />;
+}
+
+function AttSummary({ me }: any) {
   const [wk, setWk] = useState(mondayOf(istToday()));
   const [sess, setSess] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
@@ -764,23 +875,28 @@ function AttendanceScreen({ me }: any) {
   const [hols, setHols] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [span, setSpan] = useState(7);
+  const [custom, setCustom] = useState<any>(null);
 
-  const wkEnd = addDays(wk, 6);
+  const wkEnd = custom ? custom.to : addDays(wk, span - 1);
+  const wkFrom = custom ? custom.from : wk;
+  const dayCount = Math.max(1, Math.min(62,
+    Math.round((new Date(wkEnd).getTime() - new Date(wkFrom).getTime()) / 86400000) + 1));
 
   const load = async () => {
     const [a, b, c, d] = await Promise.all([
       supabase.from("attendance_sessions").select("*").eq("employee_id", me.id)
-        .gte("work_date", wk).lte("work_date", wkEnd).order("in_at"),
+        .gte("work_date", wkFrom).lte("work_date", wkEnd).order("in_at"),
       supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
-        .gte("work_date", wk).lte("work_date", wkEnd),
+        .gte("work_date", wkFrom).lte("work_date", wkEnd),
       supabase.from("leaves").select("*").eq("employee_id", me.id).eq("status", "Approved")
-        .lte("from_date", wkEnd).gte("to_date", wk),
-      supabase.from("holidays").select("*").gte("hol_date", wk).lte("hol_date", wkEnd),
+        .lte("from_date", wkEnd).gte("to_date", wkFrom),
+      supabase.from("holidays").select("*").gte("hol_date", wkFrom).lte("hol_date", wkEnd),
     ]);
     setSess(a.data || []); setLogs(b.data || []); setLeaves(c.data || []); setHols(d.data || []);
   };
-  useEffect(() => { load(); }, [wk, me.id]);
+  useEffect(() => { load(); }, [wk, span, custom, me.id]);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
   const openSess = sess.find((x) => !x.out_at && x.work_date === istToday());
@@ -789,7 +905,7 @@ function AttendanceScreen({ me }: any) {
     const closed = day.filter((x) => x.out_at).reduce((a, x) => a + (x.minutes || 0), 0);
     const live = openSess ? (Date.now() - new Date(openSess.in_at).getTime()) / 60000 : 0;
     return closed + live;
-  }, [sess, openSess]);
+  }, [sess, openSess, tick]);
   const [th, tm, ts] = hms(todayMins);
 
   const punch = async (dir: "in" | "out") => {
@@ -819,8 +935,8 @@ function AttendanceScreen({ me }: any) {
     return [Math.max(0, lo), Math.min(24, Math.max(hi, lo + 4))];
   }, [sess, me]);
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
-    const key = addDays(wk, i);
+  const days = useMemo(() => Array.from({ length: dayCount }, (_, i) => {
+    const key = addDays(wkFrom, i);
     const d = new Date(key + "T00:00:00");
     const list = sess.filter((x) => x.work_date === key);
     const log = logs.find((x: any) => x.work_date === key);
@@ -831,11 +947,11 @@ function AttendanceScreen({ me }: any) {
     const mins = list.reduce((a, x) => a + (x.minutes || 0), 0)
       + (live && openSess ? (Date.now() - new Date(openSess.in_at).getTime()) / 60000 : 0);
     return {
-      key, dow: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i], num: d.getDate(),
+      key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
       isToday: key === istToday(), list, log, lv, hol, off, mins,
       first: list[0]?.in_at, last: list.filter((x) => x.out_at).slice(-1)[0]?.out_at,
     };
-  }), [wk, sess, logs, leaves, hols, me, openSess]);
+  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess, tick]);
 
   const pos = (t: any) => {
     const m = minsOfDay(t);
@@ -845,8 +961,8 @@ function AttendanceScreen({ me }: any) {
   const summary = useMemo(() => {
     const present = days.filter((d) => ["Present", "Late"].includes(d.log?.status)).length;
     const half = days.filter((d) => d.log?.status === "Half Day").length;
-    const weekend = days.filter((d) => d.off).length;
-    const holiday = days.filter((d) => d.hol && !d.off).length;
+    const weekend = days.filter((d) => d.off && !d.log).length;
+    const holiday = days.filter((d) => d.hol && !d.off && !d.log).length;
     const paid = days.filter((d) => d.lv && !d.log).length;
     return { present, half, weekend, holiday, paid,
       payable: present + half * 0.5 + weekend + holiday + paid,
@@ -857,12 +973,37 @@ function AttendanceScreen({ me }: any) {
     <div className="att-wrap">
       <div className="att-daterow">
         <div className="att-nav2">
-          <button onClick={() => setWk(addDays(wk, -7))}>‹</button>
-          <button onClick={() => setWk(mondayOf(istToday()))} style={{ fontSize: 13 }}>Today</button>
-          <button onClick={() => setWk(addDays(wk, 7))}>›</button>
+          <button onClick={() => { setCustom(null); setWk(addDays(wk, -span)); }}>‹</button>
+          <button style={{ fontSize: 13 }}
+            onClick={() => { setCustom(null); setWk(mondayOf(istToday())); }}>Today</button>
+          <button onClick={() => { setCustom(null); setWk(addDays(wk, span)); }}>›</button>
         </div>
-        <b style={{ fontSize: 15 }}>{dmy(wk)} — {dmy(wkEnd)}</b>
-        <span className="att-muted">{hhmm(summary.hours)} worked this week</span>
+        <b style={{ fontSize: 15 }}>{dmy(wkFrom)} — {dmy(wkEnd)}</b>
+        <span className="att-muted">{hhmm(summary.hours)} worked</span>
+      </div>
+
+      <div className="att-range" style={{ marginBottom: 12 }}>
+        <div className="qk">
+          <button className={!custom && span === 7 ? "on" : ""}
+            onClick={() => { setCustom(null); setSpan(7); setWk(mondayOf(istToday())); }}>Week</button>
+          <button className={!custom && span === 14 ? "on" : ""}
+            onClick={() => { setCustom(null); setSpan(14); setWk(mondayOf(istToday())); }}>Fortnight</button>
+          <button className={custom && custom.from === monthStart(istToday()) ? "on" : ""}
+            onClick={() => setCustom({ from: monthStart(istToday()), to: lastDayOf(istToday()) })}>
+            This month</button>
+          <button className={custom && custom.from === shiftMonth(monthStart(istToday()), -1) ? "on" : ""}
+            onClick={() => {
+              const pm = shiftMonth(monthStart(istToday()), -1);
+              setCustom({ from: pm, to: lastDayOf(pm) });
+            }}>Last month</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="date" value={wkFrom}
+            onChange={(e) => setCustom({ from: e.target.value, to: wkEnd })} />
+          <span className="att-muted">to</span>
+          <input type="date" value={wkEnd} min={wkFrom}
+            onChange={(e) => setCustom({ from: wkFrom, to: e.target.value })} />
+        </div>
       </div>
 
       <div className="att-shiftbar">
@@ -891,7 +1032,7 @@ function AttendanceScreen({ me }: any) {
             </div>
             <div className="att-dt">{d.first ? fmtTime(d.first) : ""}</div>
             <div className="att-track">
-              {d.off || d.hol ? (
+              {(d.off || d.hol) && !d.list.length ? (
                 <>
                   <div className="wk" />
                   <div className="chip">{d.hol ? d.hol.name : "Weekend"}</div>
@@ -951,6 +1092,152 @@ function AttendanceScreen({ me }: any) {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ================= monthly matrix ================= */
+function MatrixTab({ me }: any) {
+  const approver = ["manager", "admin"].includes(me.role);
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [rows, setRows] = useState<any[]>([]);
+  const [dates, setDates] = useState<string[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  const load = async () => {
+    setBusy(true);
+    const from = `${month}-01`;
+    const to = lastDayOf(from);
+    const all = Array.from(
+      { length: Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1 },
+      (_, i) => addDays(from, i));
+    setDates(all);
+
+    if (approver) {
+      const { data } = await supabase.rpc("muster_roll", { p_month: from });
+      const byEmp: Record<string, any> = {};
+      (data || []).forEach((r: any) => {
+        byEmp[r.emp_code] = byEmp[r.emp_code] || { code: r.emp_code, name: r.full_name, marks: {} };
+        byEmp[r.emp_code].marks[r.d] = r.mark;
+      });
+      setRows(Object.values(byEmp));
+    } else {
+      const [lg, lv, hl] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      const marks: Record<string, string> = {};
+      all.forEach((d) => {
+        const log = (lg.data || []).find((x: any) => x.work_date === d);
+        const leave = (lv.data || []).find((x: any) => d >= x.from_date && d <= x.to_date);
+        const hol = (hl.data || []).find((x: any) => x.hol_date === d);
+        const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
+        marks[d] = log ? letterOf(log.status)
+          : leave ? leave.leave_type
+          : hol ? "F"
+          : off ? "W"
+          : d > istToday() ? "" : "A";
+      });
+      setRows([{ code: me.emp_code, name: me.full_name, marks }]);
+    }
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, [month, me.id]);
+
+  const shown = rows.filter((r) =>
+    !q || `${r.name} ${r.code}`.toLowerCase().includes(q.toLowerCase()));
+
+  const tally = (m: Record<string, string>) => {
+    const v = Object.values(m);
+    return {
+      p: v.filter((x) => x === "P" || x === "L").length,
+      a: v.filter((x) => x === "A").length,
+      l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x)).length,
+    };
+  };
+
+  const exportCsv = () => downloadCsv(
+    shown.map((r) => {
+      const o: any = { Code: r.code, Name: r.name };
+      dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
+      const t = tally(r.marks);
+      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l;
+      return o;
+    }), `HJS_matrix_${month}.csv`);
+
+  return (
+    <>
+      <div className="att-range">
+        <div className="qk">
+          <button onClick={() => setMonth(shiftMonth(month + "-01", -1).slice(0, 7))}>‹ Previous</button>
+          <button className={month === istToday().slice(0, 7) ? "on" : ""}
+            onClick={() => setMonth(istToday().slice(0, 7))}>This month</button>
+          <button disabled={month >= istToday().slice(0, 7)}
+            onClick={() => setMonth(shiftMonth(month + "-01", 1).slice(0, 7))}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} />
+          <button className="att-btn sm" disabled={!shown.length} onClick={exportCsv}>CSV</button>
+        </div>
+      </div>
+
+      {approver && (
+        <input placeholder="Search by name or code" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ marginTop: 10 }} />
+      )}
+
+      <p className="att-muted" style={{ marginTop: 10 }}>
+        P present · L late · H half day · A absent · W week off · F holiday · CL/SL/EL = leave
+      </p>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-scroll" style={{ marginTop: 8 }}>
+          <table className="att-table">
+            <thead>
+              <tr>
+                <th className="name">Employee</th>
+                {dates.map((d) => (
+                  <th key={d} style={{ textAlign: "center",
+                    color: d === istToday() ? "#2563eb" : undefined }}>
+                    {String(new Date(d + "T00:00:00").getDate()).padStart(2, "0")}
+                  </th>
+                ))}
+                <th style={{ textAlign: "center" }}>P</th>
+                <th style={{ textAlign: "center" }}>A</th>
+                <th style={{ textAlign: "center" }}>Lv</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => {
+                const t = tally(r.marks);
+                return (
+                  <tr key={r.code}>
+                    <td className="name">{r.code} · {r.name}</td>
+                    {dates.map((d) => (
+                      <td key={d} style={{ textAlign: "center", padding: "7px 6px" }}>
+                        <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
+                      </td>
+                    ))}
+                    <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
+                    <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
+                    <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
+                  </tr>
+                );
+              })}
+              {!shown.length && (
+                <tr><td className="name" colSpan={dates.length + 4}>No data for this month.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1284,28 +1571,58 @@ function InboxScreen({ me, onCount }: any) {
 function TodayTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
+  const [date, setDate] = useState(istToday());
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.rpc("whos_in", {});
+      setBusy(true);
+      const { data } = await supabase.rpc("whos_in", { p_date: date });
       setRows(data || []); setBusy(false);
     })();
-  }, []);
+  }, [date]);
 
-  if (busy) return <p className="att-muted">Loading…</p>;
   const inNow = rows.filter((r) => r.state === "In").length;
   const done = rows.filter((r) => r.state === "Out").length;
+  const onLeave = rows.filter((r) => r.state === "Leave").length;
+  const notIn = rows.filter((r) => r.state === "Yet to check in").length;
+  const shown = filter ? rows.filter((r) => r.state === filter) : rows;
 
   return (
     <>
-      <div className="att-grid4">
-        <div className="att-stat"><b style={{ color: "#16a34a" }}>{inNow}</b><span>In now</span></div>
-        <div className="att-stat"><b style={{ color: "#6b7280" }}>{done}</b><span>Checked out</span></div>
-        <div className="att-stat"><b style={{ color: "#2563eb" }}>{rows.filter((r) => r.state === "Leave").length}</b><span>On leave</span></div>
-        <div className="att-stat"><b style={{ color: "#dc2626" }}>{rows.filter((r) => r.state === "Yet to check in").length}</b><span>Not in</span></div>
+      <div className="att-range">
+        <div className="qk">
+          <button className={date === istToday() ? "on" : ""}
+            onClick={() => setDate(istToday())}>Today</button>
+          <button onClick={() => setDate(addDays(date, -1))}>‹ Previous</button>
+          <button onClick={() => setDate(addDays(date, 1))} disabled={date >= istToday()}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="date" max={istToday()} value={date}
+            onChange={(e) => setDate(e.target.value)} />
+        </div>
       </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      <div className="att-grid4">
+        <div className={`att-stat clk ${filter === "In" ? "on" : ""}`}
+          onClick={() => setFilter(filter === "In" ? "" : "In")}>
+          <b style={{ color: "#16a34a" }}>{inNow}</b><span>In now</span></div>
+        <div className="att-stat clk" onClick={() => setFilter(filter === "Out" ? "" : "Out")}>
+          <b style={{ color: "#6b7280" }}>{done}</b><span>Checked out</span></div>
+        <div className="att-stat clk" onClick={() => setFilter(filter === "Leave" ? "" : "Leave")}>
+          <b style={{ color: "#2563eb" }}>{onLeave}</b><span>On leave</span></div>
+        <div className="att-stat clk"
+          onClick={() => setFilter(filter === "Yet to check in" ? "" : "Yet to check in")}>
+          <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
+      </div>
+      {filter && (
+        <p className="att-muted">Showing {filter} ·{" "}
+          <button style={{ color: "#2563eb" }} onClick={() => setFilter("")}>clear</button></p>
+      )}
       <div className="att-list">
-        {rows.map((r) => (
+        {shown.map((r) => (
           <div className="att-row" key={r.emp_code}>
             <Avatar name={r.full_name} />
             <div className="grow">
@@ -1321,7 +1638,7 @@ function TodayTab() {
             </div>
           </div>
         ))}
-        {!rows.length && <p className="att-empty">No active employees found.</p>}
+        {!shown.length && !busy && <p className="att-empty">Nobody in this list.</p>}
       </div>
     </>
   );
@@ -1814,6 +2131,7 @@ export default function Attendance() {
   const [tab, setTab] = useState("home");
   const [teamTab, setTeamTab] = useState("today");
   const [leaveTab, setLeaveTab] = useState("summary");
+  const [attTab, setAttTab] = useState("summary");
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
@@ -1917,7 +2235,10 @@ export default function Attendance() {
 
         {tab === "att" && (
           <div className="att-subbar">
-            <button className="att-tab on">Attendance Summary</button>
+            {[["summary", "Attendance Summary"], ["matrix", "Monthly matrix"]].map(([k, l]) => (
+              <button key={k} className={`att-tab ${attTab === k ? "on" : ""}`}
+                onClick={() => setAttTab(k)}>{l}</button>
+            ))}
           </div>
         )}
 
@@ -1932,7 +2253,7 @@ export default function Attendance() {
 
         <main className="att-main">
           {tab === "home" && <HomeScreen me={me} />}
-          {tab === "att" && <AttendanceScreen me={me} />}
+          {tab === "att" && <AttendanceScreen me={me} tab={attTab} />}
           {tab === "leaves" && <LeavesScreen me={me} tab={leaveTab} />}
           {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
           {tab === "team" && approver && <TeamScreen me={me} tab={teamTab} />}
