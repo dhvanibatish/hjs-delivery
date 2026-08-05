@@ -169,6 +169,11 @@ const CSS = `
 
 .hjsatt .att-sess { display: flex; align-items: center; gap: 8px; padding: 8px 0;
   font-size: 13px; border-top: 1px dashed #e5e7eb; }
+.hjsatt .att-pin { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px;
+  padding: 2px 7px; border-radius: 6px; background: #f2f4f7; color: #475467; }
+.hjsatt .att-pin.ok { background: #ecfdf3; color: #067647; }
+.hjsatt .att-pin.far { background: #fffaeb; color: #b54708; }
+.hjsatt .att-pin.none { background: #fef3f2; color: #b42318; }
 .hjsatt .att-sess span, .hjsatt .att-sess b { text-align: left; }
 
 .hjsatt .att-greet { border-radius: 10px; padding: 18px 20px; border: 1px solid #e5e7eb;
@@ -478,6 +483,20 @@ const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
   </svg>
 );
 
+const mapUrl = (lat: any, lng: any) => `https://www.google.com/maps?q=${lat},${lng}`;
+
+const Pin = ({ lat, lng, dist, ok, label }: any) => {
+  if (lat == null || lng == null)
+    return <span className="att-pin none">no location</span>;
+  return (
+    <a className={`att-pin ${ok === false ? "far" : "ok"}`} href={mapUrl(lat, lng)}
+      target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+      title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}>
+      ◉ {label || (dist == null ? "map" : `${dist} m`)}
+    </a>
+  );
+};
+
 const getPosition = (): Promise<GeolocationPosition> =>
   new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error("Location isn't supported on this device"));
@@ -665,14 +684,12 @@ function HomeScreen({ me }: any) {
 
             <div className="att-hms"><i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i></div>
 
-            {open && open.in_geo_ok === false && open.in_distance_m != null && (
-              <p style={{ color: "#d97706", fontSize: 12.5, marginTop: 4 }}>
-                {open.in_distance_m} m away from your branch
-              </p>
-            )}
-            {open && open.in_geo_ok === false && open.in_distance_m == null && (
-              <p style={{ color: "#d97706", fontSize: 12.5, marginTop: 4 }}>
-                Location not captured
+            {open && (
+              <p style={{ marginTop: 6 }}>
+                <Pin lat={open.in_lat} lng={open.in_lng} ok={open.in_geo_ok}
+                  label={open.in_distance_m != null
+                    ? `${open.in_distance_m} m from branch`
+                    : "location saved · open map"} />
               </p>
             )}
 
@@ -688,11 +705,12 @@ function HomeScreen({ me }: any) {
               <div style={{ marginTop: 12 }}>
                 {sessions.map((s, i) => (
                   <div className="att-sess" key={s.id}>
-                    <span className="att-muted" style={{ width: 20 }}>{i + 1}</span>
-                    <span className="grow" style={{ flex: 1 }}>
+                    <span className="att-muted" style={{ width: 18 }}>{i + 1}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
                       {fmtTime(s.in_at)} → {s.out_at ? fmtTime(s.out_at) : "running"}
                     </span>
-                    <b>{s.out_at ? hhmm(s.minutes) : "—"}</b>
+                    <Pin lat={s.in_lat} lng={s.in_lng} dist={s.in_distance_m} ok={s.in_geo_ok} />
+                    <b style={{ width: 56, textAlign: "right" }}>{s.out_at ? hhmm(s.minutes) : "—"}</b>
                   </div>
                 ))}
               </div>
@@ -1618,8 +1636,22 @@ function TodayTab() {
   useEffect(() => {
     (async () => {
       setBusy(true);
-      const { data } = await supabase.rpc("whos_in", { p_date: date });
-      setRows(data || []); setBusy(false);
+      const [{ data }, sess] = await Promise.all([
+        supabase.rpc("whos_in", { p_date: date }),
+        supabase.from("attendance_sessions")
+          .select("employee_id, in_at, in_lat, in_lng, in_distance_m, in_geo_ok")
+          .eq("work_date", date).order("in_at"),
+      ]);
+      const emps = await supabase.from("employees").select("id, emp_code");
+      const codeById: Record<string, string> = {};
+      (emps.data || []).forEach((e: any) => { codeById[e.id] = e.emp_code; });
+      const firstByCode: Record<string, any> = {};
+      (sess.data || []).forEach((x: any) => {
+        const c = codeById[x.employee_id];
+        if (c && !firstByCode[c]) firstByCode[c] = x;
+      });
+      setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code] })));
+      setBusy(false);
     })();
   }, [date]);
 
@@ -1676,6 +1708,12 @@ function TodayTab() {
                 {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
                 {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
               </p>
+              {r.punch && (
+                <p style={{ marginTop: 3 }}>
+                  <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
+                    dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
+                </p>
+              )}
             </div>
           </div>
         ))}
