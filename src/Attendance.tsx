@@ -303,6 +303,14 @@ const CSS = `
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
 .hjsatt .att-mk { display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 7px; font-weight: 700; font-size: 13px; }
+.hjsatt .att-mx th, .hjsatt .att-mx td { font-size: 14px; padding: 11px 10px; }
+.hjsatt .att-mx th { font-size: 11.5px; }
+.hjsatt .att-mx .att-mark { width: 30px; font-size: 15px; font-weight: 800; }
+.hjsatt .att-mx td.name, .hjsatt .att-mx th.name { min-width: 190px; font-size: 14.5px; }
+.hjsatt .att-mx tr.tot td { border-top: 0; padding: 0 10px 12px; }
+.hjsatt .att-totchips { display: flex; gap: 7px; flex-wrap: wrap; }
+.hjsatt .att-totchips span { font-size: 12px; font-weight: 650; padding: 3px 10px;
+  border-radius: 6px; white-space: nowrap; }
 
 /* ---------- leave summary ---------- */
 .hjsatt .att-lvgrid { display: grid; gap: 11px;
@@ -334,8 +342,9 @@ const fmtHM = (t: any) => {
   const hh = h % 12 || 12;
   return m ? `${hh}:${String(m).padStart(2, "0")} ${ap}` : `${hh}:00 ${ap}`;
 };
-const istToday = () =>
-  new Date(new Date().toLocaleString("en-US", { timeZone: TZ })).toISOString().slice(0, 10);
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 const hhmm = (mins: number | null) => {
   const m = Math.max(0, Math.round(mins || 0));
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
@@ -373,12 +382,12 @@ const monthStart = (iso: string) => iso.slice(0, 8) + "01";
 const shiftMonth = (iso: string, n: number) => {
   const d = new Date(iso + "T00:00:00");
   d.setMonth(d.getMonth() + n, 1);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 };
 const lastDayOf = (iso: string) => {
   const d = new Date(iso + "T00:00:00");
   d.setMonth(d.getMonth() + 1, 0);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 };
 
 function RangeBar({ range, setRange }: any) {
@@ -391,7 +400,7 @@ function RangeBar({ range, setRange }: any) {
     }],
     ["Last 7 days", () => {
       const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() - 6);
-      return { from: d.toISOString().slice(0, 10), to: today };
+      return { from: ymd(d), to: today };
     }],
     ["This year", () => ({ from: today.slice(0, 4) + "-01-01", to: today })],
   ];
@@ -566,7 +575,7 @@ function HomeScreen({ me }: any) {
 
   const load = async () => {
     const back = new Date(); back.setDate(back.getDate() - 40);
-    const lo = [range.from, back.toISOString().slice(0, 10)].sort()[0];
+    const lo = [range.from, ymd(back)].sort()[0];
     const [logs, sess, who] = await Promise.all([
       supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
         .gte("work_date", lo).order("work_date", { ascending: false }),
@@ -620,7 +629,7 @@ function HomeScreen({ me }: any) {
     const mon = new Date(t); mon.setDate(t.getDate() - ((t.getDay() + 6) % 7));
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(mon); d.setDate(mon.getDate() + i);
-      const key = d.toISOString().slice(0, 10);
+      const key = ymd(d);
       const log = recent.find((r: any) => r.work_date === key);
       const off = (me.week_off_days || []).includes(d.getDay());
       return {
@@ -656,9 +665,14 @@ function HomeScreen({ me }: any) {
 
             <div className="att-hms"><i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i></div>
 
-            {open && open.in_geo_ok === false && (
+            {open && open.in_geo_ok === false && open.in_distance_m != null && (
               <p style={{ color: "#d97706", fontSize: 12.5, marginTop: 4 }}>
-                {open.in_distance_m ?? "?"} m away from your branch
+                {open.in_distance_m} m away from your branch
+              </p>
+            )}
+            {open && open.in_geo_ok === false && open.in_distance_m == null && (
+              <p style={{ color: "#d97706", fontSize: 12.5, marginTop: 4 }}>
+                Location not captured
               </p>
             )}
 
@@ -844,11 +858,11 @@ function RegularizeSheet({ me, onClose }: any) {
 const mondayOf = (iso: string) => {
   const t = new Date(iso + "T00:00:00");
   t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
-  return t.toISOString().slice(0, 10);
+  return ymd(t);
 };
 const addDays = (iso: string, n: number) => {
   const t = new Date(iso + "T00:00:00"); t.setDate(t.getDate() + n);
-  return t.toISOString().slice(0, 10);
+  return ymd(t);
 };
 const dmy = (iso: string) =>
   new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
@@ -1152,10 +1166,13 @@ function MatrixTab({ me }: any) {
 
   const tally = (m: Record<string, string>) => {
     const v = Object.values(m);
+    const n = (x: string) => v.filter((y) => y === x).length;
     return {
-      p: v.filter((x) => x === "P" || x === "L").length,
-      a: v.filter((x) => x === "A").length,
+      p: n("P") + n("L"), present: n("P"), late: n("L"), half: n("H"),
+      a: n("A"), w: n("W"), f: n("F"),
       l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x)).length,
+      byLeave: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x))
+        .reduce((o: Record<string, number>, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {}),
     };
   };
 
@@ -1198,7 +1215,7 @@ function MatrixTab({ me }: any) {
 
       {!busy && (
         <div className="att-scroll" style={{ marginTop: 8 }}>
-          <table className="att-table">
+          <table className="att-table att-mx">
             <thead>
               <tr>
                 <th className="name">Employee</th>
@@ -1216,18 +1233,42 @@ function MatrixTab({ me }: any) {
             <tbody>
               {shown.map((r) => {
                 const t = tally(r.marks);
+                const chips: [string, number, string, string][] = [
+                  ["Present", t.present, "#ecfdf3", "#067647"],
+                  ["Late", t.late, "#fffaeb", "#b54708"],
+                  ["Half day", t.half, "#fff6ed", "#c4320a"],
+                  ["Absent", t.a, "#fef3f2", "#b42318"],
+                  ["Week off", t.w, "#f2f4f7", "#475467"],
+                  ["Holiday", t.f, "#f2f4f7", "#475467"],
+                  ...Object.entries(t.byLeave).map(
+                    ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
+                ];
                 return (
-                  <tr key={r.code}>
-                    <td className="name">{r.code} · {r.name}</td>
-                    {dates.map((d) => (
-                      <td key={d} style={{ textAlign: "center", padding: "7px 6px" }}>
-                        <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
+                  <>
+                    <tr key={r.code}>
+                      <td className="name">{r.code} · {r.name}</td>
+                      {dates.map((d) => (
+                        <td key={d} style={{ textAlign: "center" }}>
+                          <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
+                    </tr>
+                    <tr className="tot" key={r.code + "-t"}>
+                      <td className="name" colSpan={dates.length + 4}>
+                        <div className="att-totchips">
+                          {chips.filter(([, v]) => v > 0).map(([k, v, bg, fg]) => (
+                            <span key={k} style={{ background: bg, color: fg }}>{k} {v}</span>
+                          ))}
+                          {!chips.some(([, v]) => v > 0) && (
+                            <span style={{ background: "#f2f4f7", color: "#667085" }}>No marks yet</span>
+                          )}
+                        </div>
                       </td>
-                    ))}
-                    <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
-                    <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
-                    <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
-                  </tr>
+                    </tr>
+                  </>
                 );
               })}
               {!shown.length && (
@@ -1961,7 +2002,7 @@ function ReportsTab() {
         <>
           <p className="att-muted">P present · L late · H half · A absent · W week off · F holiday</p>
           <div className="att-scroll">
-            <table className="att-table">
+            <table className="att-table att-mx">
               <thead>
                 <tr>
                   <th className="name">Name</th>
