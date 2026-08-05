@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import Pickups from './Pickups.tsx'
 import ComplaintApp from './ComplaintApp.tsx'
-import Attendance from './Attendance.tsx'
+import Attendance from './Attendance system.tsx'
 
 const params = new URLSearchParams(window.location.search)
 const isPickup = params.has('pickups')
