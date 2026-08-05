@@ -1742,6 +1742,7 @@ export default function App() {
             {isAllStores && page === 'sla' && (
               <SlaReport
                 deliveries={scoped}
+                logsLoaded={logsLoaded}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             )}
@@ -2490,7 +2491,7 @@ function SlaTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
   );
 }
 
-function SlaReport({ deliveries, onOpen }) {
+function SlaReport({ deliveries, onOpen, logsLoaded }) {
   const [range, setRange] = useState('today'); // today|yesterday|7d|custom
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
@@ -2517,9 +2518,17 @@ function SlaReport({ deliveries, onOpen }) {
     return [from, to];
   }, [range, from, to]);
 
-  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati */
+  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati.
+     Jin rows ka timeline abhi load nahi hua unhe bhi chhod dete hain — warna
+     "koi stage move hua hi nahi" maankar sab breach dikhne lagti hain. */
   const live = useMemo(
-    () => deliveries.filter((d) => !isClosedStage(d.stage)),
+    () =>
+      deliveries.filter(
+        (d) =>
+          !isClosedStage(d.stage) &&
+          d._raw &&
+          Array.isArray(d._raw.app_log),
+      ),
     [deliveries],
   );
 
@@ -2801,6 +2810,13 @@ function SlaReport({ deliveries, onOpen }) {
       </div>
     );
   }
+
+  if (!logsLoaded)
+    return (
+      <div className="loading">
+        Timeline load ho raha hai… SLA usi se banti hai.
+      </div>
+    );
 
   return (
     <div>
