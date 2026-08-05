@@ -71,10 +71,19 @@ async function sbLogin(store, pw) {
   return sbRpc('staff_login', { p_store: store, p_password: pw });
 }
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
-async function sbList(store, pw) {
+async function sbList(store, pw, days) {
   // _lite = app_log ke bina (wo har row mein bada JSON hota hai). Timeline
   // sirf zarurat pe alag se aata hai — dekho sbLogs().
-  return sbRpc('staff_list_lite', { p_store: store, p_password: pw });
+  // p_days = window. 0 = sab kuch (Archived "purani entries laao")
+  return sbRpc('staff_list_lite', {
+    p_store: store,
+    p_password: pw,
+    p_days: days == null ? 90 : days,
+  });
+}
+// window se bahar wali entries — server pe search
+async function sbSearch(store, pw, q) {
+  return sbRpc('staff_search', { p_store: store, p_password: pw, p_q: q });
 }
 // sirf app_log — ek invoice ka (drawer khulne pe) ya sabka (Activity / SLA).
 async function sbLogs(store, pw, invoice) {
@@ -1193,6 +1202,9 @@ export default function App() {
   // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
   // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
   const [reloadTick, setReloadTick] = useState(0);
+  // list ab sirf ek window laati hai — saari pending + pichhle 90 din ki
+  // closed. Archived mein "purani entries laao" dabane pe poora history.
+  const [fullHistory, setFullHistory] = useState(false);
   // Activity log button — jis module pe ho, usi ka log khule
   const [logTick, setLogTick] = useState(0);
   const [pickupRows, setPickupRows] = useState([]); // pickups ke search results
@@ -1227,7 +1239,9 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw)).map(rowToDelivery),
+        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 90)).map(
+          rowToDelivery,
+        ),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1236,7 +1250,7 @@ export default function App() {
   };
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
-  }, [session]);
+  }, [session, fullHistory]);
 
   const scoped = useMemo(() => {
     if (!session) return [];
@@ -1261,20 +1275,46 @@ export default function App() {
     [scoped, viewMode, vFrom, vTo],
   );
 
+  // Window se bahar wali entries server se — 2+ akshar pe
+  const [remoteRows, setRemoteRows] = useState([]);
+  useEffect(() => {
+    const q = search.trim();
+    if (!CONFIGURED || !session || q.length < 2) {
+      setRemoteRows([]);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const res = await sbSearch(session.authStore, session.pw, q);
+        if (alive) setRemoteRows((res || []).map(rowToDelivery));
+      } catch (_) {
+        if (alive) setRemoteRows([]);
+      }
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line
+  }, [search, session]);
+
   // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    return scoped
-      .filter(
-        (x) =>
-          x.customer.toLowerCase().includes(q) ||
-          String(x.id).toLowerCase().includes(q) ||
-          x.area.toLowerCase().includes(q) ||
-          String(x.phone).toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [scoped, search]);
+    const local = scoped.filter(
+      (x) =>
+        x.customer.toLowerCase().includes(q) ||
+        String(x.id).toLowerCase().includes(q) ||
+        x.area.toLowerCase().includes(q) ||
+        String(x.phone).toLowerCase().includes(q),
+    );
+    // server se aayi purani entries jodo (jo list ke window mein nahi hain)
+    const have = new Set(local.map((x) => x.invoice_id));
+    const extra = remoteRows.filter((x) => !have.has(x.invoice_id));
+    return [...local, ...extra].slice(0, 10);
+  }, [scoped, search, remoteRows]);
 
   // Topbar ka dropdown ek hi shape padhta hai — chahe deliveries ho ya module
   const searchRows = useMemo(
@@ -1589,6 +1629,11 @@ export default function App() {
               // kisi bhi page se — result jis module ka hai, wahan le jao
               if (x.mod === 'deliveries') {
                 setPage('deliveries');
+                // window se bahar wali entry — pehle list mein daalo
+                if (!deliveries.some((d) => d.invoice_id === x.id)) {
+                  const extra = remoteRows.find((d) => d.invoice_id === x.id);
+                  if (extra) setDeliveries((prev) => [...prev, extra]);
+                }
                 setActiveId(x.id);
               } else {
                 setPage(x.mod);
@@ -1682,6 +1727,8 @@ export default function App() {
                   applyMove(dd.invoice_id, toStage, fields, 'move')
                 }
                 focus={lastMove}
+                fullHistory={fullHistory}
+                onFullHistory={() => setFullHistory(true)}
               />
             </div>
 
@@ -3119,6 +3166,8 @@ function EntriesView({
   onMove,
   onCommit,
   focus,
+  fullHistory,
+  onFullHistory,
 }) {
   const isMobile = useIsMobile();
   const [drill, setDrill] = useState(null); // null | total|pending|delivered|cancelled
@@ -3190,6 +3239,8 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          fullHistory={fullHistory}
+          onFullHistory={onFullHistory}
         />
       ) : isMobile ? (
         <MobileBoard
@@ -3289,7 +3340,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
 
 /* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
    color bhi badalta hai (green = delivered, red = cancelled). */
-function ArchivedList({ items, onOpen, onMove, onCommit }) {
+function ArchivedList({ items, onOpen, onMove, onCommit, fullHistory, onFullHistory }) {
   const [mode, setMode] = useState('delivered');
   const meta =
     mode === 'cancelled'
@@ -3328,6 +3379,11 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
           {rows.length}
         </span>
       </div>
+      {onFullHistory && !fullHistory && (
+        <button className="load-old" onClick={onFullHistory}>
+          <History size={14} /> Purani entries laao (90 din se pehle ki)
+        </button>
+      )}
       {rows.length === 0 ? (
         <div className="empty">Koi {meta.label.toLowerCase()} entry nahi</div>
       ) : (
@@ -7236,6 +7292,8 @@ function StyleTag() {
       .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); cursor: pointer; text-align: left; font-family: inherit; color: ${T.ink}; width: 100%; transition: transform .12s, box-shadow .12s, border-color .12s; }
       .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
       .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
+      .load-old { display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 1px dashed ${T.line}; border-radius: 11px; padding: 10px 15px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.green}; cursor: pointer; margin-bottom: 14px; }
+      .load-old:hover { background: ${T.mint}; border-color: ${T.green}; border-style: solid; }
       .drill-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
       .arch-select { font-size: 17px; font-weight: 800; font-family: inherit; color: ${T.ink}; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; outline: none; }
       .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
