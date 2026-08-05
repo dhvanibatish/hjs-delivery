@@ -74,6 +74,31 @@ const CSS = `
   font-weight: 700; text-align: center; padding: 0 5px; }
 .hjsatt .att-main { flex: 1; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .hjsatt .att-wrap { max-width: 660px; margin: 0 auto; padding: 16px 14px 48px; }
+.hjsatt .att-wrap.wide { max-width: 1180px; }
+.hjsatt .att-cols { display: grid; gap: 14px; align-items: start; }
+@media (min-width: 1000px) { .hjsatt .att-cols { grid-template-columns: 350px 1fr; } }
+.hjsatt .att-col { display: flex; flex-direction: column; gap: 13px; }
+
+.hjsatt .att-greet { border-radius: 20px; padding: 20px; border: 1px solid #23252c;
+  background: linear-gradient(115deg, #16232c 0%, #14161b 60%); }
+.hjsatt .att-greet h3 { font-size: 19px; font-weight: 750; letter-spacing: -0.02em; }
+.hjsatt .att-greet p { color: #9aa0ab; font-size: 13.5px; margin-top: 3px; }
+
+.hjsatt .att-hms { display: flex; justify-content: center; gap: 7px; margin-top: 6px; }
+.hjsatt .att-hms i { font-style: normal; background: #22242b; border-radius: 12px;
+  min-width: 56px; padding: 8px 6px; font-size: 26px; font-weight: 750;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em; text-align: center; }
+.hjsatt .att-hms u { text-decoration: none; align-self: center; color: #5c616b; font-size: 18px; }
+
+.hjsatt .att-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.hjsatt .att-day { background: #1c1e24; border: 1px solid #23252c; border-radius: 14px;
+  padding: 10px 4px; }
+.hjsatt .att-day.now { background: rgba(45,212,191,.12); border-color: rgba(45,212,191,.35); }
+.hjsatt .att-day span, .hjsatt .att-day b { display: block; text-align: center; }
+.hjsatt .att-day .dn { font-size: 10.5px; color: #8b8f9a; letter-spacing: .04em; }
+.hjsatt .att-day .dd { font-size: 16px; font-weight: 750; }
+.hjsatt .att-day .ds { font-size: 10px; font-weight: 700; margin-top: 5px; }
+.hjsatt .att-day .dh { font-size: 10px; color: #7b808b; }
 .hjsatt .att-center { min-height: 100%; display: flex; align-items: center;
   justify-content: center; padding: 24px 16px; }
 .hjsatt .att-card { background: #17181d; border: 1px solid #23252c; border-radius: 20px; padding: 17px; }
@@ -231,11 +256,11 @@ const Avatar = ({ name }: any) => {
 
 const getPosition = (): Promise<GeolocationPosition> =>
   new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error("Is device par location support nahi hai"));
+    if (!navigator.geolocation) return reject(new Error("Location isn't supported on this device"));
     navigator.geolocation.getCurrentPosition(resolve, (e) =>
       reject(new Error(e.code === 1
-        ? "Location permission band hai. Settings mein allow karke dobara koshish kijiye."
-        : "Location nahi mil rahi. Ek baar aur try kijiye.")),
+        ? "Location permission is blocked. Allow it in your browser settings and try again."
+        : "Couldn't get your location. Please try once more.")),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   });
 const downloadCsv = (rows: any[], filename: string) => {
@@ -256,7 +281,7 @@ const Sheet = ({ title, onClose, children }: any) => (
     <div onClick={(e) => e.stopPropagation()}>
       <div className="att-between" style={{ marginBottom: 15 }}>
         <b className="att-h1" style={{ fontSize: 19 }}>{title}</b>
-        <button className="att-muted" onClick={onClose}>Band karein</button>
+        <button className="att-muted" onClick={onClose}>Close</button>
       </div>
       {children}
     </div>
@@ -275,7 +300,7 @@ function Login() {
     const { error } = await supabase.auth.signInWithPassword({
       email: `${code.trim().toLowerCase()}${EMAIL_DOMAIN}`, password: pin,
     });
-    if (error) setErr("Employee code ya PIN galat hai.");
+    if (error) setErr("Wrong employee code or PIN.");
     setBusy(false);
   };
 
@@ -285,7 +310,7 @@ function Login() {
         <div style={{ marginBottom: 26 }}>
           <div className="att-logo" style={{ width: 48, height: 48, borderRadius: 15, fontSize: 16 }}>HJS</div>
           <h1 className="att-h1" style={{ marginTop: 16 }}>Attendance</h1>
-          <p className="att-muted" style={{ marginTop: 5 }}>Ek baar login karo — phir roz sirf punch.</p>
+          <p className="att-muted" style={{ marginTop: 5 }}>Sign in once. After that it's just check in and out.</p>
         </div>
         <div className="att-card att-stack">
           <div>
@@ -301,7 +326,7 @@ function Login() {
           </div>
           <Note>{err}</Note>
           <button className="att-btn" onClick={submit} disabled={busy || !code || pin.length < 6}>
-            {busy ? "Ek second…" : "Andar aao"}
+            {busy ? "Loading…" : "Sign in"}
           </button>
         </div>
       </div>
@@ -310,9 +335,20 @@ function Login() {
 }
 
 /* ========================= punch ========================= */
+const hms = (mins: number | null) => {
+  const t = Math.max(0, Math.floor((mins || 0) * 60));
+  return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60]
+    .map((n) => String(n).padStart(2, "0"));
+};
+const greetWord = () => {
+  const h = Number(new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: TZ }));
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+};
+
 function PunchScreen({ me }: any) {
   const [today, setToday] = useState<any>(null);
   const [recent, setRecent] = useState<any[]>([]);
+  const [mates, setMates] = useState<any[]>([]);
   const [err, setErr] = useState(""); const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
   const [, setTick] = useState(0);
@@ -326,8 +362,22 @@ function PunchScreen({ me }: any) {
     setRecent(data || []);
     setToday((data || []).find((r: any) => r.work_date === istToday()) || null);
   };
-  useEffect(() => { load(); }, [me.id]);
-  useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
+
+  const loadMates = async () => {
+    const [emps, logs] = await Promise.all([
+      supabase.from("employees").select("id, emp_code, full_name, designation")
+        .eq("active", true).neq("id", me.id).order("full_name").limit(8),
+      supabase.from("attendance_logs").select("employee_id, punch_in_at, punch_out_at")
+        .eq("work_date", istToday()),
+    ]);
+    setMates((emps.data || []).map((e: any) => {
+      const l = (logs.data || []).find((x: any) => x.employee_id === e.id);
+      return { ...e, state: !l?.punch_in_at ? "Yet to check in" : l.punch_out_at ? "Out" : "In" };
+    }));
+  };
+
+  useEffect(() => { load(); loadMates(); }, [me.id]);
+  useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
   const liveMinutes = useMemo(() => {
     if (!today?.punch_in_at) return null;
@@ -347,8 +397,8 @@ function PunchScreen({ me }: any) {
       const row = Array.isArray(data) ? data[0] : data;
       setToday(row);
       setOk(dir === "in"
-        ? `Check-in ho gaya — ${fmtTime(row.punch_in_at)}`
-        : `Din poora hua — ${hhmm(row.worked_minutes)} kaam`);
+        ? `Checked in at ${fmtTime(row.punch_in_at)}`
+        : `Day complete — ${hhmm(row.worked_minutes)} worked`);
       load();
     } catch (e: any) { setErr(e.message); }
     setBusy(false);
@@ -356,10 +406,11 @@ function PunchScreen({ me }: any) {
 
   const done = !!today?.punch_out_at;
   const inOnly = today?.punch_in_at && !today?.punch_out_at;
+  const [h, m, sec] = hms(liveMinutes);
 
   const stats = useMemo(() => {
-    const m = istToday().slice(0, 7);
-    const rows = recent.filter((r) => String(r.work_date).startsWith(m));
+    const mo = istToday().slice(0, 7);
+    const rows = recent.filter((r) => String(r.work_date).startsWith(mo));
     return {
       present: rows.filter((r) => ["Present", "Late"].includes(r.status)).length,
       late: rows.filter((r) => r.status === "Late").length,
@@ -368,72 +419,145 @@ function PunchScreen({ me }: any) {
     };
   }, [recent]);
 
+  // Monday -> Sunday of the current week
+  const week = useMemo(() => {
+    const t = new Date(istToday() + "T00:00:00");
+    const mon = new Date(t); mon.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(mon); d.setDate(mon.getDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const log = recent.find((r: any) => r.work_date === key);
+      const off = (me.week_off_days || []).includes(d.getDay());
+      return {
+        key, dow: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i], num: d.getDate(),
+        isToday: key === istToday(), future: key > istToday(),
+        status: log?.status || (off ? "Week Off" : key > istToday() ? "" : "Absent"),
+        mins: log?.worked_minutes,
+      };
+    });
+  }, [recent, me]);
+
+  const dayColor: Record<string, string> = {
+    Present: "#34d399", Late: "#fbbf24", "Half Day": "#fb923c",
+    Absent: "#fb7185", "Week Off": "#7b808b",
+  };
+
   return (
-    <div className="att-wrap att-stack">
-      <div className="att-flex">
-        <Avatar name={me.full_name} />
-        <div>
-          <h2 className="att-h1" style={{ fontSize: 21 }}>Hi, {String(me.full_name).split(" ")[0]}</h2>
-          <p className="att-muted">
-            {new Date().toLocaleDateString(IST, { weekday: "long", day: "numeric", month: "long", timeZone: TZ })}
-          </p>
-        </div>
-      </div>
+    <div className="att-wrap wide">
+      <div className="att-cols">
 
-      <div className="att-hero">
-        <p className="att-eyebrow">Aaj kitna kaam</p>
-        <p className="att-clock">{hhmm(liveMinutes)}</p>
-        <div className="att-inout">
-          <span>In <b>{fmtTime(today?.punch_in_at)}</b></span>
-          <span style={{ color: "#3a3d45" }}>·</span>
-          <span>Out <b>{fmtTime(today?.punch_out_at)}</b></span>
-        </div>
-        {today && (
-          <div style={{ marginTop: 13 }}>
-            <span className={pillClass(today.status)}>{today.status}</span>
-            {today.in_geo_ok === false && (
-              <span style={{ marginLeft: 8, color: "#fbbf24", fontSize: 12.5 }}>
-                branch se {today.in_distance_m ?? "?"} m door
-              </span>
-            )}
-          </div>
-        )}
-        <button className={`att-btn big ${done ? "off" : inOnly ? "red" : ""}`} style={{ marginTop: 20 }}
-          onClick={() => punch(inOnly ? "out" : "in")} disabled={busy || done}>
-          {busy ? "Location le raha hoon…" : done ? "Aaj ka din complete" : inOnly ? "Check out" : "Check in"}
-        </button>
-        <p className="att-muted" style={{ marginTop: 10, fontSize: 12 }}>
-          Punch ke saath location record hoti hai
-        </p>
-      </div>
-
-      <Note>{err}</Note>
-      <Note kind="ok">{ok}</Note>
-
-      <div className="att-grid4">
-        <div className="att-stat"><b style={{ color: "#34d399" }}>{stats.present}</b><span>Present</span></div>
-        <div className="att-stat"><b style={{ color: "#fbbf24" }}>{stats.late}</b><span>Late</span></div>
-        <div className="att-stat"><b style={{ color: "#fb923c" }}>{stats.half}</b><span>Half</span></div>
-        <div className="att-stat"><b style={{ color: "#60a5fa" }}>{stats.hrs}</b><span>Ghante</span></div>
-      </div>
-
-      <div>
-        <div className="att-between" style={{ marginBottom: 9 }}>
-          <h3 className="att-h2" style={{ margin: 0 }}>Pichhle 30 din</h3>
-          <button className="att-btn sm line" onClick={() => setRegOpen(true)}>Punch bhool gaye?</button>
-        </div>
-        <div className="att-list">
-          {recent.length === 0 && (
-            <p className="att-empty">Abhi kuch nahi hai. Aaj se shuruaat karo.</p>
-          )}
-          {recent.map((r) => (
-            <div className="att-row" key={r.id}>
-              <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
-              <span className="grow att-muted">{fmtTime(r.punch_in_at)} – {fmtTime(r.punch_out_at)}</span>
-              <span style={{ width: 58, textAlign: "right", color: "#9aa0ab" }}>{hhmm(r.worked_minutes)}</span>
-              <span className={pillClass(r.status)}>{r.status}</span>
+        {/* -------- left column -------- */}
+        <div className="att-col">
+          <div className="att-hero">
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+              <Avatar name={me.full_name} />
             </div>
-          ))}
+            <p style={{ fontWeight: 700 }}>{me.emp_code} · {me.full_name}</p>
+            <p className="att-muted">{me.designation || me.role}</p>
+            <p style={{ marginTop: 10, fontWeight: 700,
+              color: inOnly ? "#34d399" : done ? "#8b8f9a" : "#fb7185" }}>
+              {inOnly ? "In" : done ? "Done for today" : "Out"}
+            </p>
+
+            <div className="att-hms">
+              <i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i>
+            </div>
+
+            {today?.in_geo_ok === false && (
+              <p style={{ marginTop: 10, color: "#fbbf24", fontSize: 12.5 }}>
+                {today.in_distance_m ?? "?"} m away from your branch
+              </p>
+            )}
+
+            <button className={`att-btn big ${done ? "off" : inOnly ? "red" : ""}`} style={{ marginTop: 16 }}
+              onClick={() => punch(inOnly ? "out" : "in")} disabled={busy || done}>
+              {busy ? "Getting location…" : done ? "Day complete" : inOnly ? "Check out" : "Check in"}
+            </button>
+            <p className="att-muted" style={{ marginTop: 10, fontSize: 12 }}>
+              Your location is recorded with every punch
+            </p>
+          </div>
+
+          <Note>{err}</Note>
+          <Note kind="ok">{ok}</Note>
+
+          <div className="att-grid4">
+            <div className="att-stat"><b style={{ color: "#34d399" }}>{stats.present}</b><span>Present</span></div>
+            <div className="att-stat"><b style={{ color: "#fbbf24" }}>{stats.late}</b><span>Late</span></div>
+            <div className="att-stat"><b style={{ color: "#fb923c" }}>{stats.half}</b><span>Half</span></div>
+            <div className="att-stat"><b style={{ color: "#60a5fa" }}>{stats.hrs}</b><span>Hours</span></div>
+          </div>
+
+          <div>
+            <h3 className="att-h2">Team today</h3>
+            <div className="att-list">
+              {mates.map((p) => (
+                <div className="att-row" key={p.id}>
+                  <Avatar name={p.full_name} />
+                  <div className="grow">
+                    <p style={{ fontWeight: 600 }}>{p.emp_code} · {p.full_name}</p>
+                    <p style={{ fontSize: 12.5, fontWeight: 700,
+                      color: p.state === "In" ? "#34d399" : p.state === "Out" ? "#8b8f9a" : "#fb7185" }}>
+                      {p.state}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {!mates.length && <p className="att-empty">No colleagues to show.</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* -------- right column -------- */}
+        <div className="att-col">
+          <div className="att-greet">
+            <h3>{greetWord()}, {String(me.full_name).split(" ")[0]}</h3>
+            <p>
+              {new Date().toLocaleDateString(IST, {
+                weekday: "long", day: "numeric", month: "long", timeZone: TZ })}
+              {" · "}
+              {me.shift_start ? `${fmtHM(me.shift_start)} – ${fmtHM(me.shift_end)}` : ""}
+            </p>
+          </div>
+
+          <div className="att-card">
+            <div className="att-between" style={{ marginBottom: 12 }}>
+              <b>This week</b>
+              <span className="att-muted">{hhmm(week.reduce((s, d) => s + (d.mins || 0), 0))} total</span>
+            </div>
+            <div className="att-week">
+              {week.map((d) => (
+                <div className={`att-day ${d.isToday ? "now" : ""}`} key={d.key}>
+                  <span className="dn">{d.dow}</span>
+                  <b className="dd">{String(d.num).padStart(2, "0")}</b>
+                  <span className="ds" style={{ color: dayColor[d.status] || "#3a3d45" }}>
+                    {d.status === "Week Off" ? "Off" : d.status === "Half Day" ? "Half" : d.status || "—"}
+                  </span>
+                  <span className="dh">{d.mins ? hhmm(d.mins) : ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="att-between" style={{ marginBottom: 9 }}>
+              <h3 className="att-h2" style={{ margin: 0 }}>Last 30 days</h3>
+              <button className="att-btn sm line" onClick={() => setRegOpen(true)}>Missed a punch?</button>
+            </div>
+            <div className="att-list">
+              {recent.length === 0 && (
+                <p className="att-empty">Nothing here yet. Today is a good place to start.</p>
+              )}
+              {recent.map((r) => (
+                <div className="att-row" key={r.id}>
+                  <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
+                  <span className="grow att-muted">{fmtTime(r.punch_in_at)} – {fmtTime(r.punch_out_at)}</span>
+                  <span style={{ width: 58, textAlign: "right", color: "#9aa0ab" }}>{hhmm(r.worked_minutes)}</span>
+                  <span className={pillClass(r.status)}>{r.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -458,16 +582,16 @@ function RegularizeSheet({ me, onClose }: any) {
       req_punch_out: form.req_punch_out || null,
       reason: form.reason, status: "Pending",
     });
-    if (error) setMsg({ err: "Request nahi gayi: " + error.message, ok: "" });
-    else setMsg({ err: "", ok: "Manager ko bhej di gayi." });
+    if (error) setMsg({ err: "Couldn't send: " + error.message, ok: "" });
+    else setMsg({ err: "", ok: "Sent to your manager." });
     setBusy(false);
   };
 
   return (
-    <Sheet title="Punch bhool gaye?" onClose={onClose}>
+    <Sheet title="Missed a punch?" onClose={onClose}>
       <div className="att-card att-stack">
         <div>
-          <label>Kis din ka</label>
+          <label>Date</label>
           <input type="date" max={istToday()} value={form.work_date}
             onChange={(e) => setForm({ ...form, work_date: e.target.value })} />
         </div>
@@ -484,15 +608,15 @@ function RegularizeSheet({ me, onClose }: any) {
           </div>
         </div>
         <div>
-          <label>Kya hua tha</label>
-          <textarea rows={2} placeholder="Chhoti si wajah likh do" value={form.reason}
+          <label>What happened</label>
+          <textarea rows={2} placeholder="A short reason" value={form.reason}
             onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         </div>
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <button className="att-btn" onClick={submit}
           disabled={busy || !form.reason || (!form.req_punch_in && !form.req_punch_out)}>
-          {busy ? "Bhej raha hoon…" : "Request bhejo"}
+          {busy ? "Sending…" : "Send request"}
         </button>
       </div>
     </Sheet>
@@ -531,8 +655,8 @@ function LeavesScreen({ me }: any) {
   const apply = async () => {
     setMsg({ err: "", ok: "" });
     const { error } = await supabase.from("leaves").insert({ ...form, employee_id: me.id, days, status: "Pending" });
-    if (error) setMsg({ err: "Submit nahi hui: " + error.message, ok: "" });
-    else { setMsg({ err: "", ok: "Leave request bhej di gayi." }); setForm({ ...form, reason: "" }); load(); }
+    if (error) setMsg({ err: "Couldn't submit: " + error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Leave request sent." }); setForm({ ...form, reason: "" }); load(); }
   };
 
   const cancel = async (id: string) => {
@@ -542,10 +666,10 @@ function LeavesScreen({ me }: any) {
 
   return (
     <div className="att-wrap att-stack">
-      <h2 className="att-h1">Chhuttiyan</h2>
+      <h2 className="att-h1">Leave</h2>
 
       <div>
-        <h3 className="att-h2">Is saal ka balance</h3>
+        <h3 className="att-h2">This year's balance</h3>
         <div className="att-grid2">
           {bal.map((b) => {
             const pct = b.allocated > 0 ? Math.min(100, (b.used / b.allocated) * 100) : 0;
@@ -561,24 +685,24 @@ function LeavesScreen({ me }: any) {
               </div>
             );
           })}
-          {!bal.length && <p className="att-empty">Balance set nahi hai — admin se bolo.</p>}
+          {!bal.length && <p className="att-empty">No balance set yet — ask your admin.</p>}
         </div>
       </div>
 
       <div className="att-card att-stack">
-        <h3 className="att-h2" style={{ margin: 0 }}>Nayi chhutti maango</h3>
+        <h3 className="att-h2" style={{ margin: 0 }}>Apply for leave</h3>
         <select value={form.leave_type} onChange={(e) => setForm({ ...form, leave_type: e.target.value })}>
           {types.map((t) => <option key={t.code} value={t.code}>{t.name}{t.paid ? "" : " (unpaid)"}</option>)}
         </select>
         <div className="att-row2">
           <div>
-            <label>Kab se</label>
+            <label>From</label>
             <input type="date" value={form.from_date} onChange={(e) => setForm({
               ...form, from_date: e.target.value,
               to_date: e.target.value > form.to_date ? e.target.value : form.to_date })} />
           </div>
           <div>
-            <label>Kab tak</label>
+            <label>To</label>
             <input type="date" value={form.to_date} min={form.from_date}
               onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
           </div>
@@ -586,12 +710,12 @@ function LeavesScreen({ me }: any) {
         <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
           <input type="checkbox" checked={form.half_day}
             onChange={(e) => setForm({ ...form, half_day: e.target.checked, to_date: form.from_date })} />
-          Aadha din
+          Half day
         </label>
-        <textarea rows={2} placeholder="Wajah" value={form.reason}
+        <textarea rows={2} placeholder="Reason" value={form.reason}
           onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         <div className="att-between">
-          <span className="att-muted">{days} din</span>
+          <span className="att-muted">{days} day{days === 1 ? "" : "s"}</span>
           <button className="att-btn sm" onClick={apply} disabled={!form.reason}>Bhejo</button>
         </div>
         <Note>{msg.err}</Note>
@@ -599,13 +723,13 @@ function LeavesScreen({ me }: any) {
       </div>
 
       <div>
-        <h3 className="att-h2">Meri requests</h3>
+        <h3 className="att-h2">My requests</h3>
         <div className="att-list">
-          {!mine.length && <p className="att-empty">Abhi tak koi chhutti nahi maangi.</p>}
+          {!mine.length && <p className="att-empty">No leave requests yet.</p>}
           {mine.map((r) => (
             <div className="att-row" key={r.id}>
               <span style={{ width: 38, fontWeight: 700 }}>{r.leave_type}</span>
-              <span className="grow att-muted">{fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days} din</span>
+              <span className="grow att-muted">{fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</span>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
                 <button className="att-muted" onClick={() => cancel(r.id)}>Cancel</button>
@@ -677,18 +801,18 @@ function InboxScreen({ me, onCount }: any) {
       <h2 className="att-h1">Approvals {total > 0 && <span className="att-muted">({total})</span>}</h2>
       <Note>{err}</Note>
 
-      {total === 0 && <div className="att-list"><p className="att-empty">Sab clear hai. Kuch pending nahi.</p></div>}
+      {total === 0 && <div className="att-list"><p className="att-empty">All clear. Nothing pending.</p></div>}
 
       {leaves.length > 0 && (
         <div>
-          <h3 className="att-h2">Chhutti ki requests</h3>
+          <h3 className="att-h2">Leave requests</h3>
           <div className="att-list">
             {leaves.map((r) => (
               <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
                 <Avatar name={r.employees?.full_name} />
                 <div className="grow" style={{ minWidth: 140 }}>
                   <p style={{ fontWeight: 700 }}>{r.employees?.full_name}</p>
-                  <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days} din</p>
+                  <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</p>
                   <p style={{ color: "#9aa0ab", fontSize: 13.5, whiteSpace: "normal" }}>{r.reason}</p>
                 </div>
                 <button className="att-btn sm green" disabled={busy}
@@ -732,7 +856,7 @@ function InboxScreen({ me, onCount }: any) {
 function TeamScreen({ me }: any) {
   const [tab, setTab] = useState("today");
   const tabs: [string, string][] = [
-    ["today", "Aaj"], ["dash", "Dashboard"], ["staff", "Staff"],
+    ["today", "Today"], ["dash", "Dashboard"], ["staff", "Staff"],
     ["reports", "Reports"], ["payroll", "Payroll"],
   ];
   return (
@@ -774,7 +898,7 @@ function TodayTab() {
     })();
   }, []);
 
-  if (busy) return <p className="att-muted">Ek second…</p>;
+  if (busy) return <p className="att-muted">Loading…</p>;
   const present = rows.filter((r) => r.log?.punch_in_at).length;
 
   return (
@@ -796,7 +920,7 @@ function TodayTab() {
             </span>
           </div>
         ))}
-        {!rows.length && <p className="att-empty">Koi active employee nahi mila.</p>}
+        {!rows.length && <p className="att-empty">No active employees found.</p>}
       </div>
     </>
   );
@@ -817,7 +941,7 @@ function DashTab() {
     })();
   }, []);
 
-  if (busy) return <p className="att-muted">Ek second…</p>;
+  if (busy) return <p className="att-muted">Loading…</p>;
 
   const tot = branches.reduce((a, b) => ({
     total: a.total + b.total, present: a.present + b.present, late: a.late + b.late,
@@ -830,12 +954,12 @@ function DashTab() {
       <div className="att-grid4">
         <div className="att-stat"><b style={{ color: "#34d399" }}>{tot.present}</b><span>Present</span></div>
         <div className="att-stat"><b style={{ color: "#fbbf24" }}>{tot.late}</b><span>Late</span></div>
-        <div className="att-stat"><b style={{ color: "#60a5fa" }}>{tot.on_leave}</b><span>Chhutti</span></div>
+        <div className="att-stat"><b style={{ color: "#60a5fa" }}>{tot.on_leave}</b><span>On leave</span></div>
         <div className="att-stat"><b style={{ color: "#fb7185" }}>{tot.no_punch}</b><span>No punch</span></div>
       </div>
 
       <div>
-        <h3 className="att-h2">Branch-wise (aaj)</h3>
+        <h3 className="att-h2">Branch-wise (today)</h3>
         <div className="att-list">
           {branches.map((b) => {
             const marked = b.present + b.late + b.half_day;
@@ -850,12 +974,12 @@ function DashTab() {
               </div>
             );
           })}
-          {!branches.length && <p className="att-empty">Data nahi mila.</p>}
+          {!branches.length && <p className="att-empty">No data yet.</p>}
         </div>
       </div>
 
       <div>
-        <h3 className="att-h2">Pichhle 14 din</h3>
+        <h3 className="att-h2">Last 14 days</h3>
         <div className="att-card">
           <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 120 }}>
             {trend.map((d) => {
@@ -900,16 +1024,16 @@ function StaffTab({ me }: any) {
   };
   useEffect(() => { load(); }, []);
 
-  if (busy) return <p className="att-muted">Ek second…</p>;
+  if (busy) return <p className="att-muted">Loading…</p>;
   const shown = rows.filter((r) =>
     !q || `${r.full_name} ${r.emp_code}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <>
       <div className="att-flex">
-        <input placeholder="Naam ya code se dhoondho" value={q}
+        <input placeholder="Search by name or code" value={q}
           onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
-        {me.role === "admin" && <button className="att-btn sm" onClick={() => setAdd(true)}>+ Naya</button>}
+        {me.role === "admin" && <button className="att-btn sm" onClick={() => setAdd(true)}>+ New</button>}
       </div>
       <div className="att-list">
         {shown.map((r) => (
@@ -925,7 +1049,7 @@ function StaffTab({ me }: any) {
             {r.field_staff && <span className="att-pill p-Leave">Field</span>}
           </div>
         ))}
-        {!shown.length && <p className="att-empty">Koi nahi mila.</p>}
+        {!shown.length && <p className="att-empty">No match found.</p>}
       </div>
       {add && <EmployeeSheet branches={branches} onClose={() => { setAdd(false); load(); }} />}
       {edit && <EmployeeSheet branches={branches} row={edit} onClose={() => { setEdit(null); load(); }} />}
@@ -961,19 +1085,19 @@ function EmployeeSheet({ branches, row, onClose }: any) {
       };
 
       if (isNew) {
-        if (pin.length < 6) throw new Error("PIN kam se kam 6 digit ka rakho");
+        if (pin.length < 6) throw new Error("PIN must be at least 6 digits");
         const email = `${payload.emp_code.toLowerCase()}${EMAIL_DOMAIN}`;
         const { data: au, error: ae } = await signupClient.auth.signUp({ email, password: pin });
-        if (ae) throw new Error("Login banane mein dikkat: " + ae.message);
+        if (ae) throw new Error("Couldn't create the login: " + ae.message);
         payload.auth_user_id = au.user?.id;
         const { error } = await supabase.from("employees").insert(payload);
         if (error) throw new Error(error.message);
         await supabase.rpc("seed_leave_balances", {});
-        setMsg({ err: "", ok: `${payload.full_name} add ho gaye — code ${payload.emp_code}, PIN ${pin}` });
+        setMsg({ err: "", ok: `${payload.full_name} added — code ${payload.emp_code}, PIN ${pin}` });
       } else {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
-        setMsg({ err: "", ok: "Save ho gaya." });
+        setMsg({ err: "", ok: "Saved." });
       }
     } catch (e: any) { setMsg({ err: e.message, ok: "" }); }
     setBusy(false);
@@ -994,7 +1118,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
               onChange={(e) => setF({ ...f, emp_code: e.target.value })} placeholder="HJS007" />
           </div>
           <div>
-            <label>Naam</label>
+            <label>Name</label>
             <input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
           </div>
         </div>
@@ -1044,7 +1168,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         </div>
         <div className="att-row2">
           <div>
-            <label>Grace (minute)</label>
+            <label>Grace (minutes)</label>
             <input inputMode="numeric" value={f.grace_minutes}
               onChange={(e) => setF({ ...f, grace_minutes: e.target.value })} />
           </div>
@@ -1073,7 +1197,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
           <input type="checkbox" checked={f.field_staff}
             onChange={(e) => setF({ ...f, field_staff: e.target.checked })} />
-          Field staff (geo-fence lagu na ho)
+          Field staff (skip geo-fence)
         </label>
         {!isNew && (
           <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
@@ -1085,7 +1209,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <button className="att-btn" onClick={save} disabled={busy || !f.emp_code || !f.full_name}>
-          {busy ? "Save ho raha hai…" : isNew ? "Employee add karo" : "Save karo"}
+          {busy ? "Saving…" : isNew ? "Add employee" : "Save karo"}
         </button>
       </div>
     </Sheet>
@@ -1133,7 +1257,7 @@ function ReportsTab() {
           onClick={() => downloadCsv(data, `HJS_${kind}_${month}.csv`)}>CSV</button>
       </div>
 
-      {busy && <p className="att-muted">Ek second…</p>}
+      {busy && <p className="att-muted">Loading…</p>}
 
       {!busy && kind === "muster" && muster && (
         <>
@@ -1142,7 +1266,7 @@ function ReportsTab() {
             <table className="att-table">
               <thead>
                 <tr>
-                  <th className="name">Naam</th>
+                  <th className="name">Name</th>
                   {muster.dates.map((d) => <th key={d}>{new Date(d).getDate()}</th>)}
                 </tr>
               </thead>
@@ -1163,7 +1287,7 @@ function ReportsTab() {
 
       {!busy && kind === "late" && (
         <div className="att-list">
-          {!data.length && <p className="att-empty">Is month koi late nahi. Badhiya.</p>}
+          {!data.length && <p className="att-empty">No late marks this month. Nice.</p>}
           {data.map((r: any, i: number) => (
             <div className="att-row" key={i}>
               <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
@@ -1177,7 +1301,7 @@ function ReportsTab() {
 
       {!busy && kind === "absence" && (
         <div className="att-list">
-          {!data.length && <p className="att-empty">Data nahi mila.</p>}
+          {!data.length && <p className="att-empty">No data yet.</p>}
           {data.map((r: any, i: number) => (
             <div className="att-row" key={i}>
               <Avatar name={r.full_name} />
@@ -1216,10 +1340,10 @@ function PayrollTab() {
         <button className="att-btn sm" disabled={!rows.length}
           onClick={() => downloadCsv(rows, `HJS_payroll_${month}.csv`)}>CSV</button>
       </div>
-      {busy && <p className="att-muted">Ek second…</p>}
+      {busy && <p className="att-muted">Loading…</p>}
       {!busy && (
         <div className="att-list">
-          {!rows.length && <p className="att-empty">Is month ka data nahi mila.</p>}
+          {!rows.length && <p className="att-empty">No data for this month.</p>}
           {rows.map((r: any) => (
             <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
               <div className="att-between">
@@ -1245,10 +1369,10 @@ function MeScreen({ me }: any) {
 
   const changePin = async () => {
     setMsg({ err: "", ok: "" });
-    if (pin.length < 6) return setMsg({ err: "PIN kam se kam 6 digit ka rakho", ok: "" });
+    if (pin.length < 6) return setMsg({ err: "PIN must be at least 6 digits", ok: "" });
     const { error } = await supabase.auth.updateUser({ password: pin });
     if (error) setMsg({ err: error.message, ok: "" });
-    else { setMsg({ err: "", ok: "PIN badal gaya." }); setPin(""); }
+    else { setMsg({ err: "", ok: "PIN updated." }); setPin(""); }
   };
 
   const info: [string, string][] = [
@@ -1280,12 +1404,12 @@ function MeScreen({ me }: any) {
       </div>
 
       <div className="att-card att-stack">
-        <h3 className="att-h2" style={{ margin: 0 }}>PIN badlo</h3>
-        <input type="password" inputMode="numeric" placeholder="Naya 6 digit PIN"
+        <h3 className="att-h2" style={{ margin: 0 }}>Change PIN</h3>
+        <input type="password" inputMode="numeric" placeholder="New 6 digit PIN"
           value={pin} onChange={(e) => setPin(e.target.value)} />
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
-        <button className="att-btn sm" onClick={changePin} disabled={!pin}>Save karo</button>
+        <button className="att-btn sm" onClick={changePin} disabled={!pin}>Save</button>
       </div>
     </div>
   );
@@ -1327,21 +1451,21 @@ export default function Attendance() {
     <div className="hjsatt"><style>{CSS}</style>{children}</div>
   );
 
-  if (session === undefined) return shell(<div className="att-center att-muted">Ek second…</div>);
+  if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
   if (!session) return shell(<Login />);
   if (!me) return shell(
     <div className="att-center" style={{ flexDirection: "column", gap: 14, textAlign: "center" }}>
-      <p>Is login se koi employee record juda nahi hai. Admin se emp code link karwa lo.</p>
+      <p>This login isn't linked to an employee record yet. Ask your admin to link your employee code.</p>
       <button className="att-btn grey sm" onClick={() => supabase.auth.signOut()}>Sign out</button>
     </div>
   );
 
   const approver = ["manager", "admin"].includes(me.role);
-  const nav: [string, string][] = [["punch", "Punch"], ["leaves", "Chhuttiyan"]];
+  const nav: [string, string][] = [["punch", "Punch"], ["leaves", "Leave"]];
   if (approver) nav.push(["inbox", "Approvals"], ["team", "Team"]);
-  nav.push(["me", "Meri profile"]);
+  nav.push(["me", "Profile"]);
   const titles: Record<string, string> = {
-    punch: "Punch", leaves: "Chhuttiyan", inbox: "Approvals", team: "Team", me: "Meri profile",
+    punch: "Punch", leaves: "Leave", inbox: "Approvals", team: "Team", me: "Profile",
   };
 
   return shell(
