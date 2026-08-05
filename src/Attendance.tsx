@@ -1,8 +1,8 @@
 // ============================================================
-// HJS Attendance v2 — mobile-first, self-contained styles
-// Modules: Punch · Leaves (+balance) · Regularization · Approvals
-//          Team (Today / Dashboard / Staff / Reports / Payroll) · Me
-// Pehle hjs_attendance_v2.sql chala lena.
+// HJS Attendance v4 — dark theme (Zoho People jaisa vibe)
+// Desktop: left sidebar · Mobile: arrow se slide-out drawer
+// Saari CSS .hjsatt ke andar scoped — baaki apps par zero asar.
+// hjs_attendance_v2.sql pehle chal chuka ho.
 // ============================================================
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
@@ -13,7 +13,6 @@ const KEY_ = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(URL_, KEY_, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: "hjs-attendance" },
 });
-// naye employee ka login banane ke liye — apni session ko chhedta nahi
 const signupClient = createClient(URL_, KEY_, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -26,145 +25,190 @@ const TZ = "Asia/Kolkata";
 const CSS = `
 .hjsatt, .hjsatt * { box-sizing: border-box; margin: 0; padding: 0; }
 .hjsatt {
-  position: fixed; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  background: #f1f5f9; color: #0f172a;
+  position: fixed; inset: 0; display: flex; overflow: hidden; text-align: left;
+  background: #0a0a0c; color: #f2f3f5;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
+  font-size: 15px; line-height: 1.45; letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
 }
-.hjsatt h1, .hjsatt h2, .hjsatt h3, .hjsatt h4,
-.hjsatt p, .hjsatt b, .hjsatt span, .hjsatt div, .hjsatt td, .hjsatt th { color: inherit; }
-.hjsatt button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+.hjsatt h1, .hjsatt h2, .hjsatt h3, .hjsatt h4, .hjsatt p, .hjsatt b,
+.hjsatt span, .hjsatt div, .hjsatt td, .hjsatt th, .hjsatt li, .hjsatt a {
+  color: #f2f3f5; font-weight: inherit; text-align: left; }
+.hjsatt b { font-weight: 700; }
+.hjsatt button { font: inherit; cursor: pointer; border: 0; background: transparent;
+  color: #f2f3f5; text-align: left; }
 .hjsatt input, .hjsatt select, .hjsatt textarea {
-  font-family: inherit; font-size: 16px; width: 100%; padding: 12px 13px;
-  border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; color: #0f172a;
-  outline: none; -webkit-appearance: none; appearance: none; min-height: 46px;
-}
-.hjsatt select { padding-right: 34px;
-  background-image: linear-gradient(45deg, transparent 50%, #64748b 50%),
-                    linear-gradient(135deg, #64748b 50%, transparent 50%);
-  background-position: calc(100% - 18px) 21px, calc(100% - 13px) 21px;
+  font-family: inherit; font-size: 16px; width: 100%; padding: 13px 14px;
+  border: 1px solid #2c2e36; border-radius: 14px; background: #17181d; color: #f2f3f5;
+  outline: none; -webkit-appearance: none; appearance: none; min-height: 48px; }
+.hjsatt select { padding-right: 34px; color-scheme: dark;
+  background-image: linear-gradient(45deg, transparent 50%, #8b8f9a 50%),
+                    linear-gradient(135deg, #8b8f9a 50%, transparent 50%);
+  background-position: calc(100% - 18px) 22px, calc(100% - 13px) 22px;
   background-size: 5px 5px; background-repeat: no-repeat; }
-.hjsatt input[type=checkbox] { width: 20px; height: 20px; min-height: 0; accent-color: #0f766e; }
+.hjsatt input[type=date], .hjsatt input[type=time], .hjsatt input[type=month] { color-scheme: dark; }
+.hjsatt input[type=checkbox] { width: 21px; height: 21px; min-height: 0; accent-color: #2dd4bf; }
+.hjsatt input::placeholder, .hjsatt textarea::placeholder { color: #6b7079; }
 .hjsatt input:focus, .hjsatt select:focus, .hjsatt textarea:focus {
-  border-color: #0f766e; box-shadow: 0 0 0 3px #ccfbf1; }
-.hjsatt label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+  border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45,212,191,.16); }
+.hjsatt label { display: block; font-size: 12.5px; font-weight: 600; color: #8b8f9a;
+  margin-bottom: 7px; letter-spacing: .01em; }
 
-.att-wrap { max-width: 620px; margin: 0 auto;
-  padding: 18px 16px calc(96px + env(safe-area-inset-bottom)); }
-.att-center { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
-.att-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 16px; }
-.att-stack > * + * { margin-top: 13px; }
-.att-muted { color: #64748b; font-size: 13px; }
-.att-h1 { font-size: 21px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; }
-.att-h2 { font-size: 13.5px; font-weight: 650; color: #334155; margin-bottom: 8px; }
-.att-flex { display: flex; align-items: center; gap: 9px; }
-.att-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.att-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+/* ---------- layout: top tabs ---------- */
+.hjsatt { flex-direction: column; }
+.hjsatt .att-head { flex-shrink: 0; background: #101116; border-bottom: 1px solid #1f2027;
+  padding-top: calc(10px + env(safe-area-inset-top)); }
+.hjsatt .att-headtop { display: flex; align-items: center; gap: 11px; padding: 6px 15px 12px; }
+.hjsatt .att-logo { width: 40px; height: 40px; border-radius: 13px; flex-shrink: 0;
+  background: linear-gradient(140deg, #2dd4bf, #0ea5e9); display: flex;
+  align-items: center; justify-content: center; font-weight: 800; color: #06202a; font-size: 13px; }
+.hjsatt .att-headtop b { display: block; font-size: 17px; font-weight: 750; letter-spacing: -0.02em; }
+.hjsatt .att-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 0 9px;
+  scrollbar-width: none; }
+.hjsatt .att-tabs::-webkit-scrollbar { display: none; }
+.hjsatt .att-tab { position: relative; padding: 10px 14px 13px; font-size: 14.5px;
+  font-weight: 600; color: #8b8f9a; white-space: nowrap; flex-shrink: 0; }
+.hjsatt .att-tab.on { color: #2dd4bf; box-shadow: inset 0 -2.5px 0 #2dd4bf; }
+.hjsatt .att-tab .cnt { display: inline-block; margin-left: 6px; min-width: 19px; height: 19px;
+  line-height: 19px; border-radius: 99px; background: #f43f5e; color: #fff; font-size: 11px;
+  font-weight: 700; text-align: center; padding: 0 5px; }
+.hjsatt .att-main { flex: 1; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hjsatt .att-wrap { max-width: 660px; margin: 0 auto; padding: 16px 14px 48px; }
+.hjsatt .att-center { min-height: 100%; display: flex; align-items: center;
+  justify-content: center; padding: 24px 16px; }
+.hjsatt .att-card { background: #17181d; border: 1px solid #23252c; border-radius: 20px; padding: 17px; }
+.hjsatt .att-stack > * + * { margin-top: 13px; }
+.hjsatt .att-muted { color: #8b8f9a; font-size: 13px; }
+.hjsatt .att-h1 { font-size: 24px; font-weight: 750; letter-spacing: -0.025em; color: #fff; }
+.hjsatt .att-h2 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 9px; }
+.hjsatt .att-flex { display: flex; align-items: center; gap: 9px; }
+.hjsatt .att-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hjsatt .att-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-.att-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; min-height: 48px; padding: 13px; border-radius: 13px;
-  background: #0f766e; color: #fff; font-weight: 600; }
-.att-btn:active { transform: scale(.985); }
-.att-btn:disabled { opacity: .4; }
-.att-btn.sm { width: auto; min-height: 40px; padding: 9px 16px; font-size: 14px; border-radius: 11px; }
-.att-btn.grey { background: #e2e8f0; color: #334155; }
-.att-btn.red { background: #be123c; }
-.att-btn.green { background: #047857; }
-.att-btn.line { background: #fff; border: 1px solid #cbd5e1; color: #334155; }
-.att-btn.big { min-height: 62px; font-size: 17px; border-radius: 17px; }
-.att-btn.off { background: #cbd5e1; color: #475569; }
+/* ---------- buttons ---------- */
+.hjsatt .att-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 48px; padding: 13px; border-radius: 14px;
+  background: #2dd4bf; color: #062b28; font-weight: 700; }
+.hjsatt .att-btn:active { transform: scale(.985); }
+.hjsatt .att-btn:disabled { opacity: .35; }
+.hjsatt .att-btn.sm { width: auto; min-height: 40px; padding: 9px 16px;
+  font-size: 13.5px; border-radius: 12px; }
+.hjsatt .att-btn.grey { background: #262830; color: #dfe1e6; }
+.hjsatt .att-btn.red { background: linear-gradient(135deg, #fb7185, #e11d48); color: #fff; }
+.hjsatt .att-btn.green { background: #34d399; color: #05291d; }
+.hjsatt .att-btn.line { background: transparent; border: 1px solid #2f313a; color: #dfe1e6; }
+.hjsatt .att-btn.big { min-height: 66px; font-size: 18px; border-radius: 20px;
+  background: linear-gradient(135deg, #2dd4bf, #0ea5e9); color: #04222b;
+  box-shadow: 0 10px 30px rgba(45,212,191,.22); }
+.hjsatt .att-btn.big.red { background: linear-gradient(135deg, #fb7185, #e11d48); color: #fff;
+  box-shadow: 0 10px 30px rgba(225,29,72,.24); }
+.hjsatt .att-btn.off { background: #23252c; color: #7b808b; box-shadow: none; }
 
-.att-note { padding: 11px 13px; border-radius: 12px; font-size: 13.5px; }
-.att-note.err { background: #ffe4e6; color: #9f1239; }
-.att-note.ok { background: #d1fae5; color: #065f46; }
+.hjsatt .att-note { padding: 12px 14px; border-radius: 14px; font-size: 13.5px; }
+.hjsatt .att-note.err, .hjsatt .att-note.err span { background: rgba(244,63,94,.13); color: #fda4af; }
+.hjsatt .att-note.ok, .hjsatt .att-note.ok span { background: rgba(52,211,153,.13); color: #6ee7b7; }
 
-.att-pill { display: inline-block; padding: 3px 10px; border-radius: 999px;
+.hjsatt .att-pill { display: inline-block; padding: 4px 11px; border-radius: 999px;
   font-size: 11.5px; font-weight: 700; white-space: nowrap; }
-.p-Present, .p-Approved { background: #d1fae5; color: #065f46; }
-.p-Late, .p-Pending { background: #fef3c7; color: #92400e; }
-.p-HalfDay { background: #ffedd5; color: #9a3412; }
-.p-Absent, .p-Rejected { background: #ffe4e6; color: #9f1239; }
-.p-Leave { background: #e0f2fe; color: #075985; }
-.p-Off { background: #e2e8f0; color: #475569; }
+.hjsatt .p-Present, .hjsatt .p-Approved { background: rgba(52,211,153,.15); color: #34d399; }
+.hjsatt .p-Late, .hjsatt .p-Pending { background: rgba(251,191,36,.15); color: #fbbf24; }
+.hjsatt .p-HalfDay { background: rgba(251,146,60,.15); color: #fb923c; }
+.hjsatt .p-Absent, .hjsatt .p-Rejected { background: rgba(244,63,94,.15); color: #fb7185; }
+.hjsatt .p-Leave { background: rgba(96,165,250,.15); color: #60a5fa; }
+.hjsatt .p-Off { background: #23252c; color: #8b8f9a; }
 
-.att-hero { background: #fff; border: 1px solid #e2e8f0; border-radius: 22px;
-  padding: 24px 18px; text-align: center; }
-.att-clock { font-variant-numeric: tabular-nums; font-size: 42px; font-weight: 650;
-  letter-spacing: -0.035em; margin-top: 2px; }
-.att-eyebrow { font-size: 11px; letter-spacing: .11em; text-transform: uppercase; color: #94a3b8; }
-.att-inout { display: flex; justify-content: center; gap: 12px; margin-top: 9px;
-  font-size: 14px; color: #475569; }
+/* ---------- avatar ---------- */
+.hjsatt .att-av { width: 40px; height: 40px; border-radius: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px; color: #0a0a0c; }
 
-.att-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
-.att-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
-.att-stat { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
-  padding: 11px 5px; text-align: center; }
-.att-stat b { display: block; font-size: 19px; font-weight: 650; }
-.att-stat span { font-size: 11px; color: #64748b; }
+/* ---------- punch hero ---------- */
+.hjsatt .att-hero { border-radius: 24px; padding: 26px 18px 22px; text-align: center;
+  background: radial-gradient(120% 120% at 50% 0%, #1c2a35 0%, #14161b 55%, #131419 100%);
+  border: 1px solid #262d36; }
+.hjsatt .att-hero p, .hjsatt .att-hero div, .hjsatt .att-hero span { text-align: center; }
+.hjsatt .att-clock { font-variant-numeric: tabular-nums; font-size: 46px; font-weight: 750;
+  letter-spacing: -0.04em; margin-top: 4px; color: #fff; }
+.hjsatt .att-eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #7b808b; }
+.hjsatt .att-inout { display: flex; justify-content: center; gap: 14px; margin-top: 10px; font-size: 14px; }
+.hjsatt .att-inout span { color: #9aa0ab; }
+.hjsatt .att-inout b { color: #f2f3f5; }
 
-.att-bal { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; }
-.att-bal .n { font-size: 22px; font-weight: 650; }
-.att-bal .t { font-size: 12px; color: #64748b; }
-.att-bar { height: 5px; border-radius: 99px; background: #e2e8f0; margin-top: 8px; overflow: hidden; }
-.att-bar i { display: block; height: 100%; background: #0f766e; border-radius: 99px; }
+.hjsatt .att-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hjsatt .att-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.hjsatt .att-stat { background: #17181d; border: 1px solid #23252c; border-radius: 16px;
+  padding: 13px 6px; text-align: center; }
+.hjsatt .att-stat b { display: block; font-size: 21px; font-weight: 750; text-align: center; }
+.hjsatt .att-stat span { font-size: 11px; color: #8b8f9a; text-align: center; display: block; }
 
-.att-list { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; }
-.att-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 14px; }
-.att-row + .att-row { border-top: 1px solid #f1f5f9; }
-.att-row .grow { flex: 1; min-width: 0; }
-.att-row .grow p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.att-empty { padding: 16px; color: #64748b; font-size: 14px; }
+.hjsatt .att-bal { background: #17181d; border: 1px solid #23252c; border-radius: 16px; padding: 14px; }
+.hjsatt .att-bal .n { font-size: 25px; font-weight: 750; }
+.hjsatt .att-bal .t { font-size: 12.5px; color: #8b8f9a; }
+.hjsatt .att-bar { height: 6px; border-radius: 99px; background: #23252c; margin-top: 10px; overflow: hidden; }
+.hjsatt .att-bar i { display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #2dd4bf, #0ea5e9); }
 
-.att-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center;
-  justify-content: space-between; padding: 11px 16px; background: #fff;
-  border-bottom: 1px solid #e2e8f0; padding-top: calc(11px + env(safe-area-inset-top)); }
-.att-nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: #fff;
-  border-top: 1px solid #e2e8f0; padding-bottom: env(safe-area-inset-bottom); }
-.att-nav button { flex: 1; min-height: 54px; padding: 9px 2px; font-size: 12px;
-  font-weight: 600; color: #94a3b8; position: relative; }
-.att-nav button.on { color: #0f766e; box-shadow: inset 0 2px 0 #0f766e; }
-.att-nav .dot { position: absolute; top: 8px; left: 50%; margin-left: 8px;
-  min-width: 17px; height: 17px; line-height: 17px; border-radius: 99px;
-  background: #be123c; color: #fff; font-size: 10.5px; padding: 0 4px; }
+.hjsatt .att-list { background: #17181d; border: 1px solid #23252c; border-radius: 20px; overflow: hidden; }
+.hjsatt .att-row { display: flex; align-items: center; gap: 11px; padding: 13px 15px; font-size: 14px; }
+.hjsatt .att-row + .att-row { border-top: 1px solid #202127; }
+.hjsatt .att-row .grow { flex: 1; min-width: 0; }
+.hjsatt .att-row .grow p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hjsatt .att-empty { padding: 18px; color: #8b8f9a; font-size: 14px; }
 
-.att-seg { display: flex; gap: 3px; background: #e2e8f0; border-radius: 12px; padding: 3px;
-  overflow-x: auto; }
-.att-seg button { padding: 8px 13px; border-radius: 9px; font-size: 13px;
-  color: #475569; white-space: nowrap; }
-.att-seg button.on { background: #fff; font-weight: 600; color: #0f172a; }
+.hjsatt .att-seg { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px;
+  scrollbar-width: none; }
+.hjsatt .att-seg::-webkit-scrollbar { display: none; }
+.hjsatt .att-seg button { padding: 9px 15px; border-radius: 12px; font-size: 13.5px;
+  color: #9aa0ab; white-space: nowrap; background: #17181d; border: 1px solid #23252c; }
+.hjsatt .att-seg button.on { background: rgba(45,212,191,.14); color: #2dd4bf;
+  border-color: rgba(45,212,191,.3); font-weight: 700; }
 
-.att-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; }
-.att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
-.att-table th { text-align: left; padding: 9px 11px; background: #f8fafc; color: #64748b;
-  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; }
-.att-table td { padding: 9px 11px; border-top: 1px solid #f1f5f9; font-variant-numeric: tabular-nums; }
-.att-table td.name, .att-table th.name { position: sticky; left: 0; background: #fff;
-  font-weight: 600; box-shadow: 1px 0 0 #f1f5f9; }
-.att-table th.name { background: #f8fafc; }
-.att-mark { display: inline-block; width: 21px; text-align: center; font-weight: 700; font-size: 12px; }
-.m-P { color: #047857; } .m-L { color: #b45309; } .m-H { color: #c2410c; }
-.m-A { color: #be123c; } .m-W, .m-F { color: #94a3b8; } .m-X { color: #0369a1; }
+.hjsatt .att-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: #17181d; border: 1px solid #23252c; border-radius: 18px; }
+.hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.hjsatt .att-table th { padding: 10px 11px; background: #1c1e24; color: #8b8f9a;
+  font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; }
+.hjsatt .att-table td { padding: 10px 11px; border-top: 1px solid #202127;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-table td.name, .hjsatt .att-table th.name { position: sticky; left: 0;
+  background: #17181d; font-weight: 600; box-shadow: 1px 0 0 #202127; }
+.hjsatt .att-table th.name { background: #1c1e24; }
+.hjsatt .att-mark { display: inline-block; width: 21px; text-align: center;
+  font-weight: 700; font-size: 12px; }
+.hjsatt .m-P { color: #34d399; } .hjsatt .m-L { color: #fbbf24; }
+.hjsatt .m-H { color: #fb923c; } .hjsatt .m-A { color: #fb7185; }
+.hjsatt .m-W, .hjsatt .m-F { color: #5c616b; } .hjsatt .m-X { color: #60a5fa; }
 
-.att-sheet { position: fixed; inset: 0; z-index: 20; background: rgba(15,23,42,.45);
+.hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.65);
   display: flex; align-items: flex-end; justify-content: center; }
-.att-sheet > div { width: 100%; max-width: 620px; background: #f1f5f9;
-  border-radius: 20px 20px 0 0; padding: 18px 16px calc(20px + env(safe-area-inset-bottom));
-  max-height: 90%; overflow-y: auto; }
+.hjsatt .att-sheet > div { width: 100%; max-width: 660px; background: #0f1014;
+  border: 1px solid #23252c; border-bottom: 0;
+  border-radius: 24px 24px 0 0; padding: 18px 15px calc(20px + env(safe-area-inset-bottom));
+  max-height: 92%; overflow-y: auto; }
+@media (min-width: 900px) {
+  .hjsatt .att-sheet { align-items: center; }
+  .hjsatt .att-sheet > div { border-radius: 24px; border-bottom: 1px solid #23252c; max-height: 88%; }
+}
 `;
 
 /* ========================= helpers ========================= */
 const fmtTime = (ts: any) =>
-  ts ? new Date(ts).toLocaleTimeString(IST, { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: TZ }) : "—";
+  ts ? new Date(ts).toLocaleTimeString(IST, { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }) : "—";
 const fmtDate = (d: any) =>
   d ? new Date(d).toLocaleDateString(IST, { day: "2-digit", month: "short", timeZone: TZ }) : "—";
+const fmtHM = (t: any) => {
+  if (!t) return "—";
+  const [h, m] = String(t).split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  const hh = h % 12 || 12;
+  return m ? `${hh}:${String(m).padStart(2, "0")} ${ap}` : `${hh} ${ap}`;
+};
 const istToday = () =>
   new Date(new Date().toLocaleString("en-US", { timeZone: TZ })).toISOString().slice(0, 10);
 const hhmm = (mins: number | null) => {
-  if (mins == null) return "—";
+  if (mins == null) return "0h 00m";
   const m = Math.max(0, Math.round(mins));
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}h ${String(m % 60).padStart(2, "0")}m`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 };
 const pillClass = (s: string) => {
   const map: Record<string, string> = {
@@ -176,12 +220,21 @@ const pillClass = (s: string) => {
 };
 const markClass = (m: string) =>
   `att-mark m-${["P", "L", "H", "A", "W", "F"].includes(m) ? m : "X"}`;
+
+const AV_COLORS = ["#2dd4bf", "#60a5fa", "#fbbf24", "#fb7185", "#a78bfa", "#34d399", "#fb923c"];
+const Avatar = ({ name }: any) => {
+  const n = String(name || "?");
+  const initials = n.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  let h = 0; for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 997;
+  return <div className="att-av" style={{ background: AV_COLORS[h % AV_COLORS.length] }}>{initials}</div>;
+};
+
 const getPosition = (): Promise<GeolocationPosition> =>
   new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error("Is device par location support nahi hai"));
     navigator.geolocation.getCurrentPosition(resolve, (e) =>
       reject(new Error(e.code === 1
-        ? "Location permission band hai. Settings mein allow karke dobara try kijiye."
+        ? "Location permission band hai. Settings mein allow karke dobara koshish kijiye."
         : "Location nahi mil rahi. Ek baar aur try kijiye.")),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   });
@@ -196,14 +249,14 @@ const downloadCsv = (rows: any[], filename: string) => {
 };
 
 const Note = ({ kind = "err", children }: any) =>
-  !children ? null : <div className={`att-note ${kind}`}>{children}</div>;
+  !children ? null : <div className={`att-note ${kind}`}><span>{children}</span></div>;
 
 const Sheet = ({ title, onClose, children }: any) => (
   <div className="att-sheet" onClick={onClose}>
     <div onClick={(e) => e.stopPropagation()}>
-      <div className="att-between" style={{ marginBottom: 14 }}>
-        <b className="att-h1" style={{ fontSize: 18 }}>{title}</b>
-        <button className="att-muted" onClick={onClose}>Close</button>
+      <div className="att-between" style={{ marginBottom: 15 }}>
+        <b className="att-h1" style={{ fontSize: 19 }}>{title}</b>
+        <button className="att-muted" onClick={onClose}>Band karein</button>
       </div>
       {children}
     </div>
@@ -228,10 +281,11 @@ function Login() {
 
   return (
     <div className="att-center">
-      <div style={{ width: "100%", maxWidth: 380 }}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <h1 className="att-h1">HJS Attendance</h1>
-          <p className="att-muted" style={{ marginTop: 4 }}>Ek baar login — phir roz sirf punch.</p>
+      <div style={{ width: "100%", maxWidth: 390 }}>
+        <div style={{ marginBottom: 26 }}>
+          <div className="att-logo" style={{ width: 48, height: 48, borderRadius: 15, fontSize: 16 }}>HJS</div>
+          <h1 className="att-h1" style={{ marginTop: 16 }}>Attendance</h1>
+          <p className="att-muted" style={{ marginTop: 5 }}>Ek baar login karo — phir roz sirf punch.</p>
         </div>
         <div className="att-card att-stack">
           <div>
@@ -247,7 +301,7 @@ function Login() {
           </div>
           <Note>{err}</Note>
           <button className="att-btn" onClick={submit} disabled={busy || !code || pin.length < 6}>
-            {busy ? "Ek minute…" : "Sign in"}
+            {busy ? "Ek second…" : "Andar aao"}
           </button>
         </div>
       </div>
@@ -292,8 +346,9 @@ function PunchScreen({ me }: any) {
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
       setToday(row);
-      setOk(dir === "in" ? `Punch-in ${fmtTime(row.punch_in_at)} par record ho gaya.`
-                         : `Punch-out ${fmtTime(row.punch_out_at)} — aaj ${hhmm(row.worked_minutes)}.`);
+      setOk(dir === "in"
+        ? `Check-in ho gaya — ${fmtTime(row.punch_in_at)}`
+        : `Din poora hua — ${hhmm(row.worked_minutes)} kaam`);
       load();
     } catch (e: any) { setErr(e.message); }
     setBusy(false);
@@ -315,60 +370,67 @@ function PunchScreen({ me }: any) {
 
   return (
     <div className="att-wrap att-stack">
-      <div>
-        <p className="att-muted">
-          {new Date().toLocaleDateString(IST, { weekday: "long", day: "numeric", month: "long", timeZone: TZ })}
-        </p>
-        <h2 className="att-h1">Hi, {String(me.full_name).split(" ")[0]}</h2>
+      <div className="att-flex">
+        <Avatar name={me.full_name} />
+        <div>
+          <h2 className="att-h1" style={{ fontSize: 21 }}>Hi, {String(me.full_name).split(" ")[0]}</h2>
+          <p className="att-muted">
+            {new Date().toLocaleDateString(IST, { weekday: "long", day: "numeric", month: "long", timeZone: TZ })}
+          </p>
+        </div>
       </div>
 
       <div className="att-hero">
-        <p className="att-eyebrow">Aaj ka time</p>
+        <p className="att-eyebrow">Aaj kitna kaam</p>
         <p className="att-clock">{hhmm(liveMinutes)}</p>
         <div className="att-inout">
-          <span>In {fmtTime(today?.punch_in_at)}</span>
-          <span style={{ color: "#cbd5e1" }}>|</span>
-          <span>Out {fmtTime(today?.punch_out_at)}</span>
+          <span>In <b>{fmtTime(today?.punch_in_at)}</b></span>
+          <span style={{ color: "#3a3d45" }}>·</span>
+          <span>Out <b>{fmtTime(today?.punch_out_at)}</b></span>
         </div>
         {today && (
-          <div style={{ marginTop: 11 }}>
+          <div style={{ marginTop: 13 }}>
             <span className={pillClass(today.status)}>{today.status}</span>
             {today.in_geo_ok === false && (
-              <span style={{ marginLeft: 8, color: "#b45309", fontSize: 13 }}>
+              <span style={{ marginLeft: 8, color: "#fbbf24", fontSize: 12.5 }}>
                 branch se {today.in_distance_m ?? "?"} m door
               </span>
             )}
           </div>
         )}
-        <button className={`att-btn big ${done ? "off" : inOnly ? "red" : ""}`} style={{ marginTop: 18 }}
+        <button className={`att-btn big ${done ? "off" : inOnly ? "red" : ""}`} style={{ marginTop: 20 }}
           onClick={() => punch(inOnly ? "out" : "in")} disabled={busy || done}>
-          {busy ? "Location le raha hoon…" : done ? "Aaj ka din complete" : inOnly ? "Punch out" : "Punch in"}
+          {busy ? "Location le raha hoon…" : done ? "Aaj ka din complete" : inOnly ? "Check out" : "Check in"}
         </button>
-        <p className="att-muted" style={{ marginTop: 8, fontSize: 12 }}>Punch ke saath location record hoti hai</p>
+        <p className="att-muted" style={{ marginTop: 10, fontSize: 12 }}>
+          Punch ke saath location record hoti hai
+        </p>
       </div>
 
       <Note>{err}</Note>
       <Note kind="ok">{ok}</Note>
 
       <div className="att-grid4">
-        <div className="att-stat"><b>{stats.present}</b><span>Present</span></div>
-        <div className="att-stat"><b>{stats.late}</b><span>Late</span></div>
-        <div className="att-stat"><b>{stats.half}</b><span>Half</span></div>
-        <div className="att-stat"><b>{stats.hrs}</b><span>Hours</span></div>
+        <div className="att-stat"><b style={{ color: "#34d399" }}>{stats.present}</b><span>Present</span></div>
+        <div className="att-stat"><b style={{ color: "#fbbf24" }}>{stats.late}</b><span>Late</span></div>
+        <div className="att-stat"><b style={{ color: "#fb923c" }}>{stats.half}</b><span>Half</span></div>
+        <div className="att-stat"><b style={{ color: "#60a5fa" }}>{stats.hrs}</b><span>Ghante</span></div>
       </div>
 
       <div>
-        <div className="att-between" style={{ marginBottom: 8 }}>
+        <div className="att-between" style={{ marginBottom: 9 }}>
           <h3 className="att-h2" style={{ margin: 0 }}>Pichhle 30 din</h3>
           <button className="att-btn sm line" onClick={() => setRegOpen(true)}>Punch bhool gaye?</button>
         </div>
         <div className="att-list">
-          {recent.length === 0 && <p className="att-empty">Abhi koi record nahi. Pehla punch aaj se shuru kijiye.</p>}
+          {recent.length === 0 && (
+            <p className="att-empty">Abhi kuch nahi hai. Aaj se shuruaat karo.</p>
+          )}
           {recent.map((r) => (
             <div className="att-row" key={r.id}>
-              <span style={{ width: 56, fontWeight: 600 }}>{fmtDate(r.work_date)}</span>
+              <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
               <span className="grow att-muted">{fmtTime(r.punch_in_at)} – {fmtTime(r.punch_out_at)}</span>
-              <span style={{ width: 60, textAlign: "right", color: "#475569" }}>{hhmm(r.worked_minutes)}</span>
+              <span style={{ width: 58, textAlign: "right", color: "#9aa0ab" }}>{hhmm(r.worked_minutes)}</span>
               <span className={pillClass(r.status)}>{r.status}</span>
             </div>
           ))}
@@ -380,7 +442,7 @@ function PunchScreen({ me }: any) {
   );
 }
 
-/* ================= regularization sheet ================= */
+/* ================= regularization ================= */
 function RegularizeSheet({ me, onClose }: any) {
   const [form, setForm] = useState({
     work_date: istToday(), req_punch_in: "", req_punch_out: "", reason: "",
@@ -397,40 +459,40 @@ function RegularizeSheet({ me, onClose }: any) {
       reason: form.reason, status: "Pending",
     });
     if (error) setMsg({ err: "Request nahi gayi: " + error.message, ok: "" });
-    else setMsg({ err: "", ok: "Request manager ko bhej di gayi." });
+    else setMsg({ err: "", ok: "Manager ko bhej di gayi." });
     setBusy(false);
   };
 
   return (
-    <Sheet title="Missed punch — regularize" onClose={onClose}>
+    <Sheet title="Punch bhool gaye?" onClose={onClose}>
       <div className="att-card att-stack">
         <div>
-          <label>Date</label>
+          <label>Kis din ka</label>
           <input type="date" max={istToday()} value={form.work_date}
             onChange={(e) => setForm({ ...form, work_date: e.target.value })} />
         </div>
         <div className="att-row2">
           <div>
-            <label>Punch in</label>
+            <label>Check in</label>
             <input type="time" value={form.req_punch_in}
               onChange={(e) => setForm({ ...form, req_punch_in: e.target.value })} />
           </div>
           <div>
-            <label>Punch out</label>
+            <label>Check out</label>
             <input type="time" value={form.req_punch_out}
               onChange={(e) => setForm({ ...form, req_punch_out: e.target.value })} />
           </div>
         </div>
         <div>
-          <label>Kya hua tha?</label>
-          <textarea rows={2} placeholder="Reason" value={form.reason}
+          <label>Kya hua tha</label>
+          <textarea rows={2} placeholder="Chhoti si wajah likh do" value={form.reason}
             onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         </div>
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <button className="att-btn" onClick={submit}
           disabled={busy || !form.reason || (!form.req_punch_in && !form.req_punch_out)}>
-          {busy ? "Bhej raha hoon…" : "Request bhejein"}
+          {busy ? "Bhej raha hoon…" : "Request bhejo"}
         </button>
       </div>
     </Sheet>
@@ -469,7 +531,7 @@ function LeavesScreen({ me }: any) {
   const apply = async () => {
     setMsg({ err: "", ok: "" });
     const { error } = await supabase.from("leaves").insert({ ...form, employee_id: me.id, days, status: "Pending" });
-    if (error) setMsg({ err: "Leave submit nahi hui: " + error.message, ok: "" });
+    if (error) setMsg({ err: "Submit nahi hui: " + error.message, ok: "" });
     else { setMsg({ err: "", ok: "Leave request bhej di gayi." }); setForm({ ...form, reason: "" }); load(); }
   };
 
@@ -480,7 +542,7 @@ function LeavesScreen({ me }: any) {
 
   return (
     <div className="att-wrap att-stack">
-      <h2 className="att-h1">Leaves</h2>
+      <h2 className="att-h1">Chhuttiyan</h2>
 
       <div>
         <h3 className="att-h2">Is saal ka balance</h3>
@@ -495,55 +557,55 @@ function LeavesScreen({ me }: any) {
                 </div>
                 <div className="t">{b.name}</div>
                 <div className="att-bar"><i style={{ width: `${pct}%` }} /></div>
-                {b.pending > 0 && <div className="t" style={{ marginTop: 5 }}>{b.pending} pending</div>}
+                {b.pending > 0 && <div className="t" style={{ marginTop: 6 }}>{b.pending} pending</div>}
               </div>
             );
           })}
-          {!bal.length && <p className="att-empty">Balance set nahi hai — admin se bolein.</p>}
+          {!bal.length && <p className="att-empty">Balance set nahi hai — admin se bolo.</p>}
         </div>
       </div>
 
       <div className="att-card att-stack">
-        <h3 className="att-h2" style={{ margin: 0 }}>Nayi leave apply karein</h3>
+        <h3 className="att-h2" style={{ margin: 0 }}>Nayi chhutti maango</h3>
         <select value={form.leave_type} onChange={(e) => setForm({ ...form, leave_type: e.target.value })}>
           {types.map((t) => <option key={t.code} value={t.code}>{t.name}{t.paid ? "" : " (unpaid)"}</option>)}
         </select>
         <div className="att-row2">
           <div>
-            <label>From</label>
+            <label>Kab se</label>
             <input type="date" value={form.from_date} onChange={(e) => setForm({
               ...form, from_date: e.target.value,
               to_date: e.target.value > form.to_date ? e.target.value : form.to_date })} />
           </div>
           <div>
-            <label>To</label>
+            <label>Kab tak</label>
             <input type="date" value={form.to_date} min={form.from_date}
               onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
           </div>
         </div>
-        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0 }}>
+        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
           <input type="checkbox" checked={form.half_day}
             onChange={(e) => setForm({ ...form, half_day: e.target.checked, to_date: form.from_date })} />
-          Half day
+          Aadha din
         </label>
-        <textarea rows={2} placeholder="Reason" value={form.reason}
+        <textarea rows={2} placeholder="Wajah" value={form.reason}
           onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         <div className="att-between">
-          <span className="att-muted">{days} day{days === 1 ? "" : "s"}</span>
-          <button className="att-btn sm" onClick={apply} disabled={!form.reason}>Apply</button>
+          <span className="att-muted">{days} din</span>
+          <button className="att-btn sm" onClick={apply} disabled={!form.reason}>Bhejo</button>
         </div>
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
       </div>
 
       <div>
-        <h3 className="att-h2">Meri leaves</h3>
+        <h3 className="att-h2">Meri requests</h3>
         <div className="att-list">
-          {!mine.length && <p className="att-empty">Abhi tak koi leave apply nahi ki.</p>}
+          {!mine.length && <p className="att-empty">Abhi tak koi chhutti nahi maangi.</p>}
           {mine.map((r) => (
             <div className="att-row" key={r.id}>
-              <span style={{ width: 40, fontWeight: 600 }}>{r.leave_type}</span>
-              <span className="grow att-muted">{fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</span>
+              <span style={{ width: 38, fontWeight: 700 }}>{r.leave_type}</span>
+              <span className="grow att-muted">{fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days} din</span>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
                 <button className="att-muted" onClick={() => cancel(r.id)}>Cancel</button>
@@ -555,13 +617,13 @@ function LeavesScreen({ me }: any) {
 
       {regs.length > 0 && (
         <div>
-          <h3 className="att-h2">Meri regularization requests</h3>
+          <h3 className="att-h2">Regularization requests</h3>
           <div className="att-list">
             {regs.map((r) => (
               <div className="att-row" key={r.id}>
-                <span style={{ width: 56, fontWeight: 600 }}>{fmtDate(r.work_date)}</span>
+                <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
                 <span className="grow att-muted">
-                  {r.req_punch_in?.slice(0, 5) || "—"} – {r.req_punch_out?.slice(0, 5) || "—"}
+                  {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
                 </span>
                 <span className={pillClass(r.status)}>{r.status}</span>
               </div>
@@ -573,7 +635,7 @@ function LeavesScreen({ me }: any) {
   );
 }
 
-/* ========================= approvals inbox ========================= */
+/* ========================= approvals ========================= */
 function InboxScreen({ me, onCount }: any) {
   const [leaves, setLeaves] = useState<any[]>([]);
   const [regs, setRegs] = useState<any[]>([]);
@@ -615,18 +677,19 @@ function InboxScreen({ me, onCount }: any) {
       <h2 className="att-h1">Approvals {total > 0 && <span className="att-muted">({total})</span>}</h2>
       <Note>{err}</Note>
 
-      {total === 0 && <div className="att-list"><p className="att-empty">Kuch pending nahi. Sab clear hai.</p></div>}
+      {total === 0 && <div className="att-list"><p className="att-empty">Sab clear hai. Kuch pending nahi.</p></div>}
 
       {leaves.length > 0 && (
         <div>
-          <h3 className="att-h2">Leave requests</h3>
+          <h3 className="att-h2">Chhutti ki requests</h3>
           <div className="att-list">
             {leaves.map((r) => (
               <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
-                <div className="grow" style={{ minWidth: 150 }}>
-                  <p style={{ fontWeight: 600 }}>{r.employees?.full_name}</p>
-                  <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</p>
-                  <p style={{ color: "#475569", fontSize: 13.5, whiteSpace: "normal" }}>{r.reason}</p>
+                <Avatar name={r.employees?.full_name} />
+                <div className="grow" style={{ minWidth: 140 }}>
+                  <p style={{ fontWeight: 700 }}>{r.employees?.full_name}</p>
+                  <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days} din</p>
+                  <p style={{ color: "#9aa0ab", fontSize: 13.5, whiteSpace: "normal" }}>{r.reason}</p>
                 </div>
                 <button className="att-btn sm green" disabled={busy}
                   onClick={() => decideLeave(r.id, "Approved")}>Approve</button>
@@ -640,16 +703,17 @@ function InboxScreen({ me, onCount }: any) {
 
       {regs.length > 0 && (
         <div>
-          <h3 className="att-h2">Regularization requests</h3>
+          <h3 className="att-h2">Missed punch requests</h3>
           <div className="att-list">
             {regs.map((r) => (
               <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
-                <div className="grow" style={{ minWidth: 150 }}>
-                  <p style={{ fontWeight: 600 }}>{r.employees?.full_name}</p>
+                <Avatar name={r.employees?.full_name} />
+                <div className="grow" style={{ minWidth: 140 }}>
+                  <p style={{ fontWeight: 700 }}>{r.employees?.full_name}</p>
                   <p className="att-muted">
-                    {fmtDate(r.work_date)} · {r.req_punch_in?.slice(0, 5) || "—"} – {r.req_punch_out?.slice(0, 5) || "—"}
+                    {fmtDate(r.work_date)} · {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
                   </p>
-                  <p style={{ color: "#475569", fontSize: 13.5, whiteSpace: "normal" }}>{r.reason}</p>
+                  <p style={{ color: "#9aa0ab", fontSize: 13.5, whiteSpace: "normal" }}>{r.reason}</p>
                 </div>
                 <button className="att-btn sm green" disabled={busy}
                   onClick={() => decideReg(r.id, "Approved")}>Approve</button>
@@ -695,7 +759,7 @@ function TodayTab() {
   useEffect(() => {
     (async () => {
       const [emps, logs, lvs] = await Promise.all([
-        supabase.from("employees").select("id, emp_code, full_name, branches(name)")
+        supabase.from("employees").select("id, emp_code, full_name, designation, branches(name)")
           .eq("active", true).order("full_name"),
         supabase.from("attendance_logs").select("*").eq("work_date", istToday()),
         supabase.from("leaves").select("employee_id, leave_type").eq("status", "Approved")
@@ -710,20 +774,21 @@ function TodayTab() {
     })();
   }, []);
 
-  if (busy) return <p className="att-muted">Load ho raha hai…</p>;
+  if (busy) return <p className="att-muted">Ek second…</p>;
   const present = rows.filter((r) => r.log?.punch_in_at).length;
 
   return (
     <>
-      <p className="att-muted">{present} of {rows.length} ne punch kiya hai</p>
+      <p className="att-muted">{rows.length} mein se {present} ne punch kiya</p>
       <div className="att-list">
         {rows.map((r) => (
           <div className="att-row" key={r.id}>
+            <Avatar name={r.full_name} />
             <div className="grow">
-              <p style={{ fontWeight: 600 }}>{r.full_name}</p>
+              <p style={{ fontWeight: 700 }}>{r.emp_code} · {r.full_name}</p>
               <p className="att-muted">
-                {r.branches?.name || "—"} · {r.log
-                  ? `${fmtTime(r.log.punch_in_at)} – ${fmtTime(r.log.punch_out_at)}` : "koi punch nahi"}
+                {r.log ? `${fmtTime(r.log.punch_in_at)} – ${fmtTime(r.log.punch_out_at)}`
+                       : r.designation || r.branches?.name || "—"}
               </p>
             </div>
             <span className={pillClass(r.log?.status || (r.onLeave ? "Leave" : "Absent"))}>
@@ -752,7 +817,7 @@ function DashTab() {
     })();
   }, []);
 
-  if (busy) return <p className="att-muted">Load ho raha hai…</p>;
+  if (busy) return <p className="att-muted">Ek second…</p>;
 
   const tot = branches.reduce((a, b) => ({
     total: a.total + b.total, present: a.present + b.present, late: a.late + b.late,
@@ -763,10 +828,10 @@ function DashTab() {
   return (
     <>
       <div className="att-grid4">
-        <div className="att-stat"><b>{tot.present}</b><span>Present</span></div>
-        <div className="att-stat"><b>{tot.late}</b><span>Late</span></div>
-        <div className="att-stat"><b>{tot.on_leave}</b><span>Leave</span></div>
-        <div className="att-stat"><b style={{ color: "#be123c" }}>{tot.no_punch}</b><span>No punch</span></div>
+        <div className="att-stat"><b style={{ color: "#34d399" }}>{tot.present}</b><span>Present</span></div>
+        <div className="att-stat"><b style={{ color: "#fbbf24" }}>{tot.late}</b><span>Late</span></div>
+        <div className="att-stat"><b style={{ color: "#60a5fa" }}>{tot.on_leave}</b><span>Chhutti</span></div>
+        <div className="att-stat"><b style={{ color: "#fb7185" }}>{tot.no_punch}</b><span>No punch</span></div>
       </div>
 
       <div>
@@ -792,20 +857,21 @@ function DashTab() {
       <div>
         <h3 className="att-h2">Pichhle 14 din</h3>
         <div className="att-card">
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 110 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 120 }}>
             {trend.map((d) => {
               const h = ((d.present + d.late) / maxT) * 100;
               const ha = (d.absent / maxT) * 100;
               return (
                 <div key={d.d} style={{ flex: 1, display: "flex", flexDirection: "column",
-                  justifyContent: "flex-end", height: "100%", gap: 1 }}>
-                  <div style={{ height: `${ha}%`, background: "#fecdd3", borderRadius: "3px 3px 0 0" }} />
-                  <div style={{ height: `${h}%`, background: "#0f766e", borderRadius: ha ? 0 : "3px 3px 0 0" }} />
+                  justifyContent: "flex-end", height: "100%", gap: 2 }}>
+                  <div style={{ height: `${ha}%`, background: "#7f1d3a", borderRadius: "4px 4px 0 0" }} />
+                  <div style={{ height: `${h}%`, borderRadius: ha ? 0 : "4px 4px 0 0",
+                    background: "linear-gradient(180deg,#2dd4bf,#0ea5e9)" }} />
                 </div>
               );
             })}
           </div>
-          <div className="att-between" style={{ marginTop: 9 }}>
+          <div className="att-between" style={{ marginTop: 11 }}>
             <span className="att-muted">{fmtDate(trend[0]?.d)}</span>
             <span className="att-muted">present · absent</span>
             <span className="att-muted">{fmtDate(trend[trend.length - 1]?.d)}</span>
@@ -816,10 +882,11 @@ function DashTab() {
   );
 }
 
-/* ---------------- staff management ---------------- */
+/* ---------------- staff ---------------- */
 function StaffTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [q, setQ] = useState("");
   const [busy, setBusy] = useState(true);
   const [add, setAdd] = useState(false);
   const [edit, setEdit] = useState<any>(null);
@@ -833,28 +900,32 @@ function StaffTab({ me }: any) {
   };
   useEffect(() => { load(); }, []);
 
-  if (busy) return <p className="att-muted">Load ho raha hai…</p>;
+  if (busy) return <p className="att-muted">Ek second…</p>;
+  const shown = rows.filter((r) =>
+    !q || `${r.full_name} ${r.emp_code}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <>
-      <div className="att-between">
-        <p className="att-muted">{rows.filter((r) => r.active).length} active</p>
-        {me.role === "admin" && <button className="att-btn sm" onClick={() => setAdd(true)}>+ Employee</button>}
+      <div className="att-flex">
+        <input placeholder="Naam ya code se dhoondho" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        {me.role === "admin" && <button className="att-btn sm" onClick={() => setAdd(true)}>+ Naya</button>}
       </div>
       <div className="att-list">
-        {rows.map((r) => (
+        {shown.map((r) => (
           <div className="att-row" key={r.id} onClick={() => me.role === "admin" && setEdit(r)}>
+            <Avatar name={r.full_name} />
             <div className="grow">
-              <p style={{ fontWeight: 600 }}>{r.full_name} <span className="att-muted">{r.emp_code}</span></p>
+              <p style={{ fontWeight: 700 }}>{r.emp_code} · {r.full_name}</p>
               <p className="att-muted">
-                {r.branches?.name || "—"} · {r.designation || r.role} ·{" "}
-                {String(r.shift_start).slice(0, 5)}–{String(r.shift_end).slice(0, 5)}
+                {r.designation || r.role} · {fmtHM(r.shift_start)} – {fmtHM(r.shift_end)}
               </p>
             </div>
             {!r.active && <span className="att-pill p-Off">Inactive</span>}
             {r.field_staff && <span className="att-pill p-Leave">Field</span>}
           </div>
         ))}
+        {!shown.length && <p className="att-empty">Koi nahi mila.</p>}
       </div>
       {add && <EmployeeSheet branches={branches} onClose={() => { setAdd(false); load(); }} />}
       {edit && <EmployeeSheet branches={branches} row={edit} onClose={() => { setEdit(null); load(); }} />}
@@ -890,7 +961,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
       };
 
       if (isNew) {
-        if (pin.length < 6) throw new Error("PIN kam se kam 6 digit ka hona chahiye");
+        if (pin.length < 6) throw new Error("PIN kam se kam 6 digit ka rakho");
         const email = `${payload.emp_code.toLowerCase()}${EMAIL_DOMAIN}`;
         const { data: au, error: ae } = await signupClient.auth.signUp({ email, password: pin });
         if (ae) throw new Error("Login banane mein dikkat: " + ae.message);
@@ -898,7 +969,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         const { error } = await supabase.from("employees").insert(payload);
         if (error) throw new Error(error.message);
         await supabase.rpc("seed_leave_balances", {});
-        setMsg({ err: "", ok: `${payload.full_name} add ho gaye. Code ${payload.emp_code}, PIN ${pin}` });
+        setMsg({ err: "", ok: `${payload.full_name} add ho gaye — code ${payload.emp_code}, PIN ${pin}` });
       } else {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
@@ -923,7 +994,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
               onChange={(e) => setF({ ...f, emp_code: e.target.value })} placeholder="HJS007" />
           </div>
           <div>
-            <label>Name</label>
+            <label>Naam</label>
             <input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
           </div>
         </div>
@@ -973,7 +1044,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         </div>
         <div className="att-row2">
           <div>
-            <label>Grace (min)</label>
+            <label>Grace (minute)</label>
             <input inputMode="numeric" value={f.grace_minutes}
               onChange={(e) => setF({ ...f, grace_minutes: e.target.value })} />
           </div>
@@ -984,25 +1055,28 @@ function EmployeeSheet({ branches, row, onClose }: any) {
           </div>
         </div>
         <div>
-          <label>Week off</label>
+          <label>Weekly off</label>
           <div style={{ display: "flex", gap: 5 }}>
-            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-              <button key={i} onClick={() => toggleOff(i)}
-                style={{
-                  flex: 1, minHeight: 40, borderRadius: 10, fontWeight: 600,
-                  background: (f.week_off_days || []).includes(i) ? "#0f766e" : "#e2e8f0",
-                  color: (f.week_off_days || []).includes(i) ? "#fff" : "#475569",
-                }}>{d}</button>
-            ))}
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => {
+              const on = (f.week_off_days || []).includes(i);
+              return (
+                <button key={i} onClick={() => toggleOff(i)}
+                  style={{
+                    flex: 1, minHeight: 42, borderRadius: 12, fontWeight: 700, textAlign: "center",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: on ? "#2dd4bf" : "#23252c", color: on ? "#062b28" : "#8b8f9a",
+                  }}>{d}</button>
+              );
+            })}
           </div>
         </div>
-        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0 }}>
+        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
           <input type="checkbox" checked={f.field_staff}
             onChange={(e) => setF({ ...f, field_staff: e.target.checked })} />
-          Field staff (geo-fence apply na ho)
+          Field staff (geo-fence lagu na ho)
         </label>
         {!isNew && (
-          <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0 }}>
+          <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#dfe1e6" }}>
             <input type="checkbox" checked={f.active}
               onChange={(e) => setF({ ...f, active: e.target.checked })} />
             Active
@@ -1011,7 +1085,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <button className="att-btn" onClick={save} disabled={busy || !f.emp_code || !f.full_name}>
-          {busy ? "Save ho raha hai…" : isNew ? "Employee add karein" : "Save"}
+          {busy ? "Save ho raha hai…" : isNew ? "Employee add karo" : "Save karo"}
         </button>
       </div>
     </Sheet>
@@ -1059,7 +1133,7 @@ function ReportsTab() {
           onClick={() => downloadCsv(data, `HJS_${kind}_${month}.csv`)}>CSV</button>
       </div>
 
-      {busy && <p className="att-muted">Load ho raha hai…</p>}
+      {busy && <p className="att-muted">Ek second…</p>}
 
       {!busy && kind === "muster" && muster && (
         <>
@@ -1068,7 +1142,7 @@ function ReportsTab() {
             <table className="att-table">
               <thead>
                 <tr>
-                  <th className="name">Name</th>
+                  <th className="name">Naam</th>
                   {muster.dates.map((d) => <th key={d}>{new Date(d).getDate()}</th>)}
                 </tr>
               </thead>
@@ -1089,10 +1163,10 @@ function ReportsTab() {
 
       {!busy && kind === "late" && (
         <div className="att-list">
-          {!data.length && <p className="att-empty">Is month koi late mark nahi. Badhiya.</p>}
+          {!data.length && <p className="att-empty">Is month koi late nahi. Badhiya.</p>}
           {data.map((r: any, i: number) => (
             <div className="att-row" key={i}>
-              <span style={{ width: 56, fontWeight: 600 }}>{fmtDate(r.work_date)}</span>
+              <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
               <span className="grow">{r.full_name}</span>
               <span className="att-muted">{fmtTime(r.punch_in_at)}</span>
               <span className="att-pill p-Late">{r.late_minutes}m</span>
@@ -1106,8 +1180,9 @@ function ReportsTab() {
           {!data.length && <p className="att-empty">Data nahi mila.</p>}
           {data.map((r: any, i: number) => (
             <div className="att-row" key={i}>
+              <Avatar name={r.full_name} />
               <div className="grow">
-                <p style={{ fontWeight: 600 }}>{r.full_name}</p>
+                <p style={{ fontWeight: 700 }}>{r.full_name}</p>
                 <p className="att-muted">{r.branch}</p>
               </div>
               <span className="att-pill p-Late">{r.late_marks} late</span>
@@ -1141,7 +1216,7 @@ function PayrollTab() {
         <button className="att-btn sm" disabled={!rows.length}
           onClick={() => downloadCsv(rows, `HJS_payroll_${month}.csv`)}>CSV</button>
       </div>
-      {busy && <p className="att-muted">Load ho raha hai…</p>}
+      {busy && <p className="att-muted">Ek second…</p>}
       {!busy && (
         <div className="att-list">
           {!rows.length && <p className="att-empty">Is month ka data nahi mila.</p>}
@@ -1149,11 +1224,11 @@ function PayrollTab() {
             <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
               <div className="att-between">
                 <b>{r.full_name}</b>
-                <b>{r.payable_amount ?? "—"}</b>
+                <b style={{ color: "#2dd4bf" }}>{r.payable_amount ?? "—"}</b>
               </div>
-              <p className="att-muted" style={{ marginTop: 3 }}>
-                {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid lv ·{" "}
-                {r.unpaid_leaves} LOP · {r.absent_days} absent → <b>{r.payable_days} payable</b>
+              <p className="att-muted" style={{ marginTop: 4 }}>
+                {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid ·{" "}
+                {r.unpaid_leaves} LOP · {r.absent_days} absent → {r.payable_days} payable
               </p>
             </div>
           ))}
@@ -1163,14 +1238,14 @@ function PayrollTab() {
   );
 }
 
-/* ========================= me ========================= */
+/* ========================= profile ========================= */
 function MeScreen({ me }: any) {
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState({ err: "", ok: "" });
 
   const changePin = async () => {
     setMsg({ err: "", ok: "" });
-    if (pin.length < 6) return setMsg({ err: "PIN kam se kam 6 digit ka rakhein", ok: "" });
+    if (pin.length < 6) return setMsg({ err: "PIN kam se kam 6 digit ka rakho", ok: "" });
     const { error } = await supabase.auth.updateUser({ password: pin });
     if (error) setMsg({ err: error.message, ok: "" });
     else { setMsg({ err: "", ok: "PIN badal gaya." }); setPin(""); }
@@ -1181,13 +1256,20 @@ function MeScreen({ me }: any) {
     ["Branch", me.branches?.name || "—"],
     ["Designation", me.designation || "—"],
     ["Role", me.role],
-    ["Shift", `${String(me.shift_start).slice(0, 5)} – ${String(me.shift_end).slice(0, 5)}`],
+    ["Shift", `${fmtHM(me.shift_start)} – ${fmtHM(me.shift_end)}`],
     ["Phone", me.phone || "—"],
   ];
 
   return (
     <div className="att-wrap att-stack">
-      <h2 className="att-h1">{me.full_name}</h2>
+      <div className="att-flex">
+        <Avatar name={me.full_name} />
+        <div>
+          <h2 className="att-h1" style={{ fontSize: 21 }}>{me.full_name}</h2>
+          <p className="att-muted">{me.designation || me.role}</p>
+        </div>
+      </div>
+
       <div className="att-list">
         {info.map(([k, v]) => (
           <div className="att-row" key={k}>
@@ -1198,15 +1280,13 @@ function MeScreen({ me }: any) {
       </div>
 
       <div className="att-card att-stack">
-        <h3 className="att-h2" style={{ margin: 0 }}>PIN badlein</h3>
+        <h3 className="att-h2" style={{ margin: 0 }}>PIN badlo</h3>
         <input type="password" inputMode="numeric" placeholder="Naya 6 digit PIN"
           value={pin} onChange={(e) => setPin(e.target.value)} />
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
-        <button className="att-btn sm" onClick={changePin} disabled={!pin}>Save</button>
+        <button className="att-btn sm" onClick={changePin} disabled={!pin}>Save karo</button>
       </div>
-
-      <button className="att-btn line" onClick={() => supabase.auth.signOut()}>Sign out</button>
     </div>
   );
 }
@@ -1247,44 +1327,51 @@ export default function Attendance() {
     <div className="hjsatt"><style>{CSS}</style>{children}</div>
   );
 
-  if (session === undefined) return shell(<div className="att-center att-muted">Load ho raha hai…</div>);
+  if (session === undefined) return shell(<div className="att-center att-muted">Ek second…</div>);
   if (!session) return shell(<Login />);
   if (!me) return shell(
     <div className="att-center" style={{ flexDirection: "column", gap: 14, textAlign: "center" }}>
-      <p>Is login se koi employee record juda hua nahi hai. Admin se emp code link karwa lijiye.</p>
+      <p>Is login se koi employee record juda nahi hai. Admin se emp code link karwa lo.</p>
       <button className="att-btn grey sm" onClick={() => supabase.auth.signOut()}>Sign out</button>
     </div>
   );
 
   const approver = ["manager", "admin"].includes(me.role);
-  const tabs: [string, string][] = [["punch", "Punch"], ["leaves", "Leaves"]];
-  if (approver) tabs.push(["inbox", "Inbox"], ["team", "Team"]);
-  tabs.push(["me", "Me"]);
+  const nav: [string, string][] = [["punch", "Punch"], ["leaves", "Chhuttiyan"]];
+  if (approver) nav.push(["inbox", "Approvals"], ["team", "Team"]);
+  nav.push(["me", "Meri profile"]);
+  const titles: Record<string, string> = {
+    punch: "Punch", leaves: "Chhuttiyan", inbox: "Approvals", team: "Team", me: "Meri profile",
+  };
 
   return shell(
     <>
-      <div className="att-top">
-        <div className="att-flex">
-          <b style={{ fontSize: 14 }}>HJS Attendance</b>
-          <span className="att-muted">{me.emp_code}</span>
+      <div className="att-head">
+        <div className="att-headtop">
+          <div className="att-logo">HJS</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b>{titles[tab]}</b>
+            <span className="att-muted">{me.full_name} · {me.emp_code}</span>
+          </div>
+          <button className="att-btn line sm" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
-        <span className="att-muted">{me.branches?.name || ""}</span>
+        <div className="att-tabs">
+          {nav.map(([k, label]) => (
+            <button key={k} className={`att-tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>
+              {label}
+              {k === "inbox" && pending > 0 && <span className="cnt">{pending}</span>}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {tab === "punch" && <PunchScreen me={me} />}
-      {tab === "leaves" && <LeavesScreen me={me} />}
-      {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
-      {tab === "team" && approver && <TeamScreen me={me} />}
-      {tab === "me" && <MeScreen me={me} />}
-
-      <div className="att-nav">
-        {tabs.map(([k, label]) => (
-          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
-            {k === "inbox" && pending > 0 && <span className="dot">{pending}</span>}
-            {label}
-          </button>
-        ))}
-      </div>
+      <main className="att-main">
+        {tab === "punch" && <PunchScreen me={me} />}
+        {tab === "leaves" && <LeavesScreen me={me} />}
+        {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
+        {tab === "team" && approver && <TeamScreen me={me} />}
+        {tab === "me" && <MeScreen me={me} />}
+      </main>
     </>
   );
 }
