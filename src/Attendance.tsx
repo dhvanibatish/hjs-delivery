@@ -373,6 +373,12 @@ const CSS = `
 .hjsatt .att-pname { color: #2563eb; cursor: pointer; }
 .hjsatt .att-pname:hover { text-decoration: underline; }
 
+.hjsatt .att-balhd { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 8px; }
+.hjsatt .att-baledit { width: 26px; height: 26px; border-radius: 7px; border: 1px solid #e5e7eb;
+  background: #fff; color: #98a2b3; font-size: 12px; flex-shrink: 0; }
+.hjsatt .att-baledit:hover { color: #2563eb; border-color: #b2ccff; }
+
 /* ---------- daily verification ---------- */
 .hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
   padding: 18px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
@@ -2746,6 +2752,9 @@ function LeavesScreen({ me, tab }: any) {
   const [regs, setRegs] = useState<any[]>([]);
   const [hols, setHols] = useState<any[]>([]);
   const [apply, setApply] = useState(false);
+  const [editBal, setEditBal] = useState<any>(null);
+  const isAdmin = me.role === "admin";
+  const who = me;
 
   const load = async () => {
     const [t, b, l, r, h] = await Promise.all([
@@ -2848,9 +2857,18 @@ function LeavesScreen({ me, tab }: any) {
           const [bg, fg] = LV_TINT[b.leave_type] || ["#f2f4f7", "#475467"];
           return (
             <div className="att-lv" key={b.leave_type}>
-              <h4>{b.name}</h4>
+              <div className="att-balhd">
+                <h4>{b.name}</h4>
+                {isAdmin && (
+                  <button className="att-baledit" title="Set allotment"
+                    onClick={() => setEditBal(b)}>✎</button>
+                )}
+              </div>
               <div className="att-lvic" style={{ background: bg, color: fg }}>{b.leave_type}</div>
               <hr />
+              <div className="att-lvrow">
+                <span className="att-muted">Allotted</span><b>{b.allotted}</b>
+              </div>
               <div className="att-lvrow">
                 <span className="att-muted">Available</span>
                 <b style={{ color: b.remaining < 0 ? "#dc2626" : "#16a34a" }}>{b.remaining}</b>
@@ -2868,6 +2886,11 @@ function LeavesScreen({ me, tab }: any) {
         })}
         {!bal.length && <p className="att-empty">No balance set yet — ask your admin.</p>}
       </div>
+
+      {editBal && (
+        <BalanceSheet b={editBal} who={who || me} year={year}
+          onClose={() => { setEditBal(null); load(); }} />
+      )}
 
       <div className="att-list">
         <div className="att-hd"><b>Upcoming leaves & holidays</b></div>
@@ -4129,6 +4152,87 @@ function MeScreen({ me }: any) {
         To change your 4-digit code, sign out and use "Forgot code?" on the sign-in screen.
       </p>
     </div>
+  );
+}
+
+function BalanceSheet({ b, who, year, onClose }: any) {
+  const [val, setVal] = useState(String(b.allotted ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [scope, setScope] = useState<"one" | "team" | "all">("one");
+  const [teams, setTeams] = useState<any[]>([]);
+  const [teamId, setTeamId] = useState("");
+
+  useEffect(() => {
+    supabase.from("teams").select("id, name").order("name")
+      .then(({ data }) => setTeams(data || []));
+  }, []);
+
+  const save = async () => {
+    const num = Number(val);
+    if (isNaN(num) || num < 0) return setMsg({ err: "Enter a number, 0 or more.", ok: "" });
+    setBusy(true); setMsg({ err: "", ok: "" });
+
+    const { error } = scope === "one"
+      ? await supabase.rpc("set_leave_balance", {
+          p_emp: who.id, p_type: b.leave_type, p_allotted: num, p_year: year })
+      : await supabase.rpc("set_leave_balance_bulk", {
+          p_type: b.leave_type, p_allotted: num,
+          p_team: scope === "team" ? (teamId || null) : null, p_year: year });
+
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Saved." }); setTimeout(onClose, 700); }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={`${b.name} allotment`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted">
+          How many <b>{b.name.toLowerCase()}</b> days for {year}. Booked days stay as they
+          are — only the allotment changes, and Available recalculates itself.
+        </p>
+
+        <div>
+          <label>Days allotted</label>
+          <input type="number" min="0" step="0.5" value={val} autoFocus
+            onChange={(e) => setVal(e.target.value)} />
+        </div>
+
+        <div>
+          <label>Apply to</label>
+          <select value={scope} onChange={(e) => setScope(e.target.value as any)}>
+            <option value="one">Just {who.full_name}</option>
+            <option value="team">A whole team</option>
+            <option value="all">Everyone in the company</option>
+          </select>
+        </div>
+
+        {scope === "team" && (
+          <div>
+            <label>Team</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">— pick a team —</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {scope === "all" && (
+          <div className="att-note err">
+            <span>This overwrites the {b.name.toLowerCase()} allotment for every active
+            employee, including anyone you've already set individually.</span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={save}
+          disabled={busy || (scope === "team" && !teamId)}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 
