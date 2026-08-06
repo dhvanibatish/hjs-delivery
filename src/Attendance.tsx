@@ -14,11 +14,6 @@ const KEY_ = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(URL_, KEY_, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: "hjs-attendance" },
 });
-const signupClient = createClient(URL_, KEY_, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
-
-const EMAIL_DOMAIN = "@hjs.local";
 const IST = "en-IN";
 const TZ = "Asia/Kolkata";
 
@@ -545,20 +540,77 @@ const Sheet = ({ title, onClose, children }: any) => (
 );
 
 /* ========================= login ========================= */
+// 4-digit code ko Supabase ke minimum password length tak pad karte hain.
+const codeToPassword = (code: string) => `hjs-${code}-att`;
+
 function Login() {
+  const [stage, setStage] = useState<"email" | "set" | "enter">("email");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [pin, setPin] = useState("");
+  const [code2, setCode2] = useState("");
   const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const submit = async () => {
-    setErr(""); setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: `${code.trim().toLowerCase()}${EMAIL_DOMAIN}`, password: pin,
-    });
-    if (error) setErr("Wrong employee code or PIN.");
+  const digits = (v: string) => v.replace(/\D/g, "").slice(0, 4);
+
+  const checkEmail = async () => {
+    setErr(""); setOk(""); setBusy(true);
+    const e = email.trim().toLowerCase();
+    const { data, error } = await supabase.rpc("email_status", { p_email: e });
+    if (error) setErr(error.message);
+    else if (data === "not_found")
+      setErr("This email isn't registered. Ask your admin to add you.");
+    else setStage(data === "ready" ? "enter" : "set");
     setBusy(false);
   };
+
+  const claim = async () => {
+    const { error } = await supabase.rpc("claim_employee");
+    if (error) { setErr(error.message); await supabase.auth.signOut(); return false; }
+    return true;
+  };
+
+  const createCode = async () => {
+    setErr("");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const pw = codeToPassword(code);
+    let { error } = await supabase.auth.signUp({ email: e, password: pw });
+    if (error) {
+      // auth user pehle se hai -> seedha sign in try karo
+      const r = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      error = r.error;
+    }
+    if (error) setErr(error.message);
+    else await claim();
+    setBusy(false);
+  };
+
+  const signIn = async () => {
+    setErr("");
+    if (code.length !== 4) return setErr("Enter your 4-digit code.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: e, password: codeToPassword(code),
+    });
+    if (error) setErr("Wrong code. Try again, or use \u2018Forgot code\u2019.");
+    else await claim();
+    setBusy(false);
+  };
+
+  const forgot = async () => {
+    setErr(""); setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    if (error) setErr(error.message);
+    else setOk("Reset link sent to your email. Open it, set a new password, then sign in with those 4 digits.");
+    setBusy(false);
+  };
+
+  const back = () => { setStage("email"); setCode(""); setCode2(""); setErr(""); setOk(""); };
 
   return (
     <div className="att-center" style={{ width: "100%" }}>
@@ -567,26 +619,81 @@ function Login() {
           <div className="att-raillogo" style={{ marginBottom: 14 }}>HJS</div>
           <h1 className="att-h1">Attendance</h1>
           <p className="att-muted" style={{ marginTop: 3 }}>
-            Sign in once. After that it's just check in and check out.
+            {stage === "email" ? "Sign in with your work email."
+              : stage === "set" ? "Set a 4-digit code you'll remember."
+              : "Enter your 4-digit code."}
           </p>
         </div>
+
         <div className="att-card att-stack">
-          <div>
-            <label>Employee code</label>
-            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="HJS001"
-              autoCapitalize="characters" autoCorrect="off" style={{ textTransform: "uppercase" }} />
-          </div>
-          <div>
-            <label>PIN</label>
-            <input value={pin} onChange={(e) => setPin(e.target.value)} type="password"
-              inputMode="numeric" placeholder="6 digit PIN"
-              onKeyDown={(e) => e.key === "Enter" && submit()} />
-          </div>
-          <Note>{err}</Note>
-          <button className="att-btn" onClick={submit} disabled={busy || !code || pin.length < 6}>
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
+          {stage === "email" && (
+            <>
+              <div>
+                <label>Email</label>
+                <input type="email" value={email} inputMode="email" autoCapitalize="none"
+                  autoCorrect="off" placeholder="name@gmail.com"
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && checkEmail()} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={checkEmail}
+                disabled={busy || !email.includes("@")}>
+                {busy ? "Checking…" : "Continue"}
+              </button>
+            </>
+          )}
+
+          {stage === "set" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div>
+                <label>Create your 4-digit code</label>
+                <input type="password" inputMode="numeric" value={code} placeholder="••••"
+                  style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
+                  onChange={(e) => setCode(digits(e.target.value))} />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <input type="password" inputMode="numeric" value={code2} placeholder="••••"
+                  style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
+                  onChange={(e) => setCode2(digits(e.target.value))}
+                  onKeyDown={(e) => e.key === "Enter" && createCode()} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={createCode}
+                disabled={busy || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Saving…" : "Save code and sign in"}
+              </button>
+              <button className="att-muted" onClick={back}>Use a different email</button>
+            </>
+          )}
+
+          {stage === "enter" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div>
+                <label>4-digit code</label>
+                <input type="password" inputMode="numeric" value={code} placeholder="••••"
+                  autoFocus style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
+                  onChange={(e) => setCode(digits(e.target.value))}
+                  onKeyDown={(e) => e.key === "Enter" && signIn()} />
+              </div>
+              <Note>{err}</Note>
+              <Note kind="ok">{ok}</Note>
+              <button className="att-btn" onClick={signIn} disabled={busy || code.length !== 4}>
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+              <div className="att-between">
+                <button className="att-muted" onClick={back}>Different email</button>
+                <button className="att-muted" onClick={forgot} disabled={busy}>Forgot code?</button>
+              </div>
+            </>
+          )}
         </div>
+
+        <p className="att-muted" style={{ marginTop: 12, textAlign: "center" }}>
+          You stay signed in on this device until you sign out.
+        </p>
       </div>
     </div>
   );
@@ -632,11 +739,14 @@ function HomeScreen({ me }: any) {
   const punch = async (dir: "in" | "out") => {
     setErr(""); setOk(""); setBusy(true);
     try {
-      const pos = await getPosition();
-      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", {
-        p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
-        p_accuracy: Math.round(pos.coords.accuracy),
-      });
+      // Check-in par location zaroori hai, check-out par nahi.
+      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
+      if (dir === "in") {
+        const pos = await getPosition();
+        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+                 p_accuracy: Math.round(pos.coords.accuracy) };
+      }
+      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
       if (error) throw new Error(error.message);
       setOk(dir === "in" ? "Checked in." : "Checked out. You can check in again anytime.");
       await load();
@@ -709,7 +819,7 @@ function HomeScreen({ me }: any) {
             <button className={`att-btn big ${open ? "gout" : "gin"}`} style={{ marginTop: 12 }}
               onClick={() => punch(open ? "out" : "in")}
               disabled={busy || (!open && !isMobile())}>
-              {busy ? "Getting location…" : open ? "Check-out" : "Check-in"}
+              {busy ? (open ? "Checking out…" : "Getting location…") : open ? "Check-out" : "Check-in"}
             </button>
             <p className="att-muted" style={{ marginTop: 9, fontSize: 12 }}>
               {!open && !isMobile()
@@ -967,11 +1077,13 @@ function AttSummary({ me }: any) {
   const punch = async (dir: "in" | "out") => {
     setErr(""); setBusy(true);
     try {
-      const pos = await getPosition();
-      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", {
-        p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
-        p_accuracy: Math.round(pos.coords.accuracy),
-      });
+      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
+      if (dir === "in") {
+        const pos = await getPosition();
+        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+                 p_accuracy: Math.round(pos.coords.accuracy) };
+      }
+      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
       if (error) throw new Error(error.message);
       await load();
     } catch (e: any) { setErr(e.message); }
@@ -1073,7 +1185,7 @@ function AttSummary({ me }: any) {
           disabled={busy || (!openSess && !isMobile())}
           title={!openSess && !isMobile() ? "Check-in works only on a phone" : ""}
           onClick={() => punch(openSess ? "out" : "in")}>
-          <span>{busy ? "Getting location…" : openSess ? "Check-out" : "Check-in"}</span>
+          <span>{busy ? (openSess ? "Checking out…" : "Getting location…") : openSess ? "Check-out" : "Check-in"}</span>
           <b>{th}:{tm}:{ts} Hrs</b>
         </button>
         {!openSess && !isMobile() && (
@@ -1641,15 +1753,21 @@ function InboxScreen({ me, onCount }: any) {
   const [err, setErr] = useState("");
 
   const load = async () => {
-    const [l, r] = await Promise.all([
-      supabase.from("leaves").select("*, employees(full_name, emp_code)")
-        .eq("status", "Pending").order("from_date"),
-      supabase.from("regularizations").select("*, employees(full_name, emp_code)")
-        .eq("status", "Pending").order("work_date"),
+    // NOTE: leaves/regularizations ke paas employees se DO foreign key hain
+    // (employee_id aur approved_by), isliye nested select ambiguous ho jata hai.
+    // Employees alag fetch karke map kar rahe hain.
+    const [l, r, emps] = await Promise.all([
+      supabase.from("leaves").select("*").eq("status", "Pending").order("from_date"),
+      supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
+      supabase.from("employees").select("id, emp_code, full_name, designation"),
     ]);
+    if (l.error) setErr(l.error.message);
+    const byId: Record<string, any> = {};
+    (emps.data || []).forEach((e: any) => { byId[e.id] = e; });
+    const attach = (x: any) => ({ ...x, emp: byId[x.employee_id] });
     const keep = (x: any) => me.role === "admin" || x.employee_id !== me.id;
-    const L = (l.data || []).filter(keep);
-    const R = (r.data || []).filter(keep);
+    const L = (l.data || []).filter(keep).map(attach);
+    const R = (r.data || []).filter(keep).map(attach);
     setLeaves(L); setRegs(R); onCount(L.length + R.length);
   };
   useEffect(() => { load(); }, []);
@@ -1681,9 +1799,9 @@ function InboxScreen({ me, onCount }: any) {
           <div className="att-hd"><b>Leave requests</b><span className="att-muted">{leaves.length}</span></div>
           {leaves.map((r) => (
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
-              <Avatar name={r.employees?.full_name} />
+              <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.employees?.full_name}</b>
+                <p><b>{r.emp?.emp_code} · {r.emp?.full_name}</b>
                   {r.employee_id === me.id && (
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
@@ -1704,9 +1822,9 @@ function InboxScreen({ me, onCount }: any) {
           <div className="att-hd"><b>Missed punch requests</b><span className="att-muted">{regs.length}</span></div>
           {regs.map((r) => (
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
-              <Avatar name={r.employees?.full_name} />
+              <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.employees?.full_name}</b>
+                <p><b>{r.emp?.emp_code} · {r.emp?.full_name}</b>
                   {r.employee_id === me.id && (
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
@@ -1917,7 +2035,9 @@ function StaffTab({ me }: any) {
       </div>
       <div className="att-list">
         {shown.map((r) => (
-          <div className="att-row" key={r.id} onClick={() => me.role === "admin" && setEdit(r)}>
+          <div className="att-row" key={r.id}
+            style={{ cursor: me.role === "admin" ? "pointer" : "default" }}
+            onClick={() => me.role === "admin" && setEdit(r)}>
             <Avatar name={r.full_name} />
             <div className="grow">
               <p><b>{r.emp_code}</b> · {r.full_name}</p>
@@ -1925,6 +2045,7 @@ function StaffTab({ me }: any) {
                 {r.designation || r.role} · {fmtHM(r.shift_start)} – {fmtHM(r.shift_end)}
               </p>
             </div>
+            {!r.auth_user_id && <span className="att-pill p-Late">code pending</span>}
             {!r.active && <span className="att-pill p-Off">Inactive</span>}
             {r.field_staff && <span className="att-pill p-Leave">Field</span>}
           </div>
@@ -1940,14 +2061,22 @@ function StaffTab({ me }: any) {
 function EmployeeSheet({ branches, row, onClose }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
-    emp_code: "", full_name: "", phone: "", designation: "",
+    emp_code: "", full_name: "", email: "", phone: "", designation: "",
     branch_id: branches[0]?.id || null, role: "staff",
     shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
     field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
   });
-  const [pin, setPin] = useState("");
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
+
+  const resetCode = async () => {
+    if (!row) return;
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("reset_employee_code", { p_emp: row.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else setMsg({ err: "", ok: "Code cleared. They can set a new one on their next sign in." });
+    setBusy(false);
+  };
 
   const save = async () => {
     setBusy(true); setMsg({ err: "", ok: "" });
@@ -1955,6 +2084,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
       const payload: any = {
         emp_code: String(f.emp_code).trim().toUpperCase(),
         full_name: String(f.full_name).trim(),
+        email: String(f.email || "").trim().toLowerCase() || null,
         phone: f.phone || null, designation: f.designation || null,
         branch_id: f.branch_id, role: f.role,
         shift_start: f.shift_start, shift_end: f.shift_end,
@@ -1964,15 +2094,13 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         monthly_gross: f.monthly_gross === "" || f.monthly_gross == null ? null : Number(f.monthly_gross),
       };
       if (isNew) {
-        if (pin.length < 6) throw new Error("PIN must be at least 6 digits");
-        const email = `${payload.emp_code.toLowerCase()}${EMAIL_DOMAIN}`;
-        const { data: au, error: ae } = await signupClient.auth.signUp({ email, password: pin });
-        if (ae) throw new Error("Couldn't create the login: " + ae.message);
-        payload.auth_user_id = au.user?.id;
+        if (!payload.email || !payload.email.includes("@"))
+          throw new Error("A work email is required — they sign in with it");
         const { error } = await supabase.from("employees").insert(payload);
         if (error) throw new Error(error.message);
         await supabase.rpc("seed_leave_balances", {});
-        setMsg({ err: "", ok: `${payload.full_name} added — code ${payload.emp_code}, PIN ${pin}` });
+        setMsg({ err: "",
+          ok: `${payload.full_name} added. Tell them to open the app, enter ${payload.email} and set their own 4-digit code.` });
       } else {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
@@ -2001,11 +2129,21 @@ function EmployeeSheet({ branches, row, onClose }: any) {
             <input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
           </div>
         </div>
-        {isNew && (
-          <div>
-            <label>PIN (6 digits)</label>
-            <input value={pin} inputMode="numeric" onChange={(e) => setPin(e.target.value)} placeholder="482913" />
-          </div>
+        <div>
+          <label>Work email {isNew && <span style={{ color: "#dc2626" }}>*</span>}</label>
+          <input type="email" value={f.email || ""} inputMode="email" autoCapitalize="none"
+            placeholder="name@gmail.com"
+            onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <p className="att-muted" style={{ marginTop: 6 }}>
+            {isNew
+              ? "They sign in with this email and set their own 4-digit code the first time."
+              : row?.auth_user_id ? "Code is set." : "Code not set yet — they'll create one on first sign in."}
+          </p>
+        </div>
+        {!isNew && row?.auth_user_id && (
+          <button className="att-btn line sm" onClick={resetCode} disabled={busy}>
+            Reset their 4-digit code
+          </button>
         )}
         <div className="att-row2">
           <div>
@@ -2248,13 +2386,14 @@ function PayrollTab() {
 }
 
 function TeamScreen({ me, tab }: any) {
+  const approver = ["manager", "admin"].includes(me.role);
   return (
     <div className="att-wrap att-stack">
-      {tab === "today" && <TodayTab />}
-      {tab === "dash" && <DashTab />}
-      {tab === "staff" && <StaffTab me={me} />}
-      {tab === "reports" && <ReportsTab />}
-      {tab === "payroll" && <PayrollTab />}
+      {(tab === "today" || !approver) && <TodayTab />}
+      {approver && tab === "dash" && <DashTab />}
+      {approver && tab === "staff" && <StaffTab me={me} />}
+      {approver && tab === "reports" && <ReportsTab />}
+      {approver && tab === "payroll" && <PayrollTab />}
     </div>
   );
 }
@@ -2274,6 +2413,7 @@ function MeScreen({ me }: any) {
 
   const info: [string, string][] = [
     ["Employee code", me.emp_code],
+    ["Email", me.email || "—"],
     ["Branch", me.branches?.name || "—"],
     ["Designation", me.designation || "—"],
     ["Role", me.role],
@@ -2366,13 +2506,13 @@ export default function Attendance() {
     ["att", "Attendance", "clock"],
     ["leaves", "Leave Tracker", "cal"],
   ];
-  if (approver) nav.push(["inbox", "Approvals", "check"], ["team", "Team", "users"]);
-  nav.push(["me", "Profile", "user"]);
+  if (approver) nav.push(["inbox", "Approvals", "check"]);
+  nav.push(["team", "Team", "users"], ["me", "Profile", "user"]);
 
-  const teamTabs: [string, string][] = [
-    ["today", "Today"], ["dash", "Dashboard"], ["staff", "Staff"],
-    ["reports", "Reports"], ["payroll", "Payroll"],
-  ];
+  const teamTabs: [string, string][] = approver
+    ? [["today", "Today"], ["dash", "Dashboard"], ["staff", "Staff"],
+       ["reports", "Reports"], ["payroll", "Payroll"]]
+    : [["today", "Today"]];
   const titles: Record<string, string> = {
     home: "My Space", att: "Attendance", leaves: "Leave Tracker",
     inbox: "Approvals", team: "Team", me: "My Profile",
@@ -2412,7 +2552,7 @@ export default function Attendance() {
           ))}
         </div>
 
-        {tab === "team" && (
+        {tab === "team" && approver && (
           <div className="att-subbar">
             {teamTabs.map(([k, l]) => (
               <button key={k} className={`att-tab ${teamTab === k ? "on" : ""}`}
@@ -2444,7 +2584,7 @@ export default function Attendance() {
           {tab === "att" && <AttendanceScreen me={me} tab={attTab} />}
           {tab === "leaves" && <LeavesScreen me={me} tab={leaveTab} />}
           {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
-          {tab === "team" && approver && <TeamScreen me={me} tab={teamTab} />}
+          {tab === "team" && <TeamScreen me={me} tab={approver ? teamTab : "today"} />}
           {tab === "me" && <MeScreen me={me} />}
         </main>
       </div>
