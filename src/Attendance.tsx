@@ -940,7 +940,10 @@ function HomeScreen({ me }: any) {
     Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
     Absent: "#dc2626", Off: "#98a2b3",
   };
-  const inNow = board.filter((p) => p.state === "In").length;
+  const myTeamName = me.teams?.name || null;
+  const myTeam = board.filter((p) =>
+    !myTeamName || p.team === myTeamName || p.emp_code === me.emp_code);
+  const inNow = myTeam.filter((p) => p.state === "In").length;
 
   return (
     <div className="att-wrap">
@@ -1087,18 +1090,18 @@ function HomeScreen({ me }: any) {
             </div>
           </div>
 
-          {/* who's in */}
+          {/* who's in — sirf apni team, poora board Team tab mein */}
           <div className="att-list">
             <div className="att-hd">
               <b>Who's in right now</b>
               <span className="att-pill p-Present">{inNow} in</span>
             </div>
-            {board.map((p) => (
+            {myTeam.slice(0, 12).map((p) => (
               <div className="att-row" key={p.emp_code}>
                 <Avatar name={p.full_name} />
                 <div className="grow">
                   <p><b>{p.emp_code}</b> · {p.full_name}</p>
-                  <p className="att-muted">{p.designation || p.branch}</p>
+                  <p className="att-muted">{p.designation || p.team}</p>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[p.state] }}>{p.state}</p>
@@ -1110,7 +1113,10 @@ function HomeScreen({ me }: any) {
                 </div>
               </div>
             ))}
-            {!board.length && <p className="att-empty">No employees found.</p>}
+            {!myTeam.length && <p className="att-empty">No teammates to show.</p>}
+            {myTeam.length > 12 && (
+              <p className="att-empty">+{myTeam.length - 12} more · open Team for the full board</p>
+            )}
           </div>
 
           <div className="att-list">
@@ -3311,6 +3317,7 @@ function MeScreen({ me }: any) {
   const info: [string, string][] = [
     ["Employee code", me.emp_code],
     ["Email", me.email || "—"],
+    ["Team", me.teams?.name || "—"],
     ["Branch", me.branches?.name || "—"],
     ["Designation", me.designation || "—"],
     ["Role", me.role],
@@ -3368,7 +3375,7 @@ export default function Attendance() {
 
   useEffect(() => {
     if (!session) { setMe(null); return; }
-    supabase.from("employees").select("*, branches(name)")
+    supabase.from("employees").select("*, branches(name), teams(name)")
       .eq("auth_user_id", session.user.id).single()
       .then(({ data }) => setMe(data));
   }, [session]);
