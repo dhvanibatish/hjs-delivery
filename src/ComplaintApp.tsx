@@ -41,8 +41,8 @@ import {
    1) CONFIG  ── url + ANON PUBLIC key (SERVICE_ROLE nahi). Khaali = DEMO.
    ══════════════════════════════════════════════════════════════════════ */
 const CONFIG = {
-  url: 'https://bkiorfluddgdujpkcfjm.supabase.co',
-  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraW9yZmx1ZGRnZHVqcGtjZmptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjE1MzEsImV4cCI6MjEwMDA5NzUzMX0.dqggpSuocXcxPYeCfXmVQqPrxfCbR2LiZ-lVN_mOJas',
+  url: 'https://idcmfebqizovivuvsuns.supabase.co',
+  key: 'sb_publishable_T6E3AVHgJE7KKmMV3Ko7tQ_qXvap_V_',
   table: 'tickets',
 };
 const CONFIGURED = !!(CONFIG.url && CONFIG.key);
@@ -768,35 +768,25 @@ function hoursSince(ts) {
       24–48 ghante  → "Archived" me.
       48+ ghante    → kahin nahi (view se gayab; Supabase me safe rehti hai).
 */
+/*
+  Ek ticket kaha dikhe:
+  - Today     → saari pending (chahe purani ho) + jo aaj aayi + jo aaj band hui
+  - Archived  → saari ho-chuki entries (all time)
+  - Yesterday / This month / Custom → us duration mein aayi ya band hui
+*/
 function inView(x, viewMode, vFrom, vTo) {
   const st = x.stage;
-  // pending = abhi kaam baaki
-  const pending = st !== 'delivered' && !isClosedStage(st);
-  if (viewMode === 'archived') {
-    // Archived (all time) = ho-chuki entries: Delivered + Cancelled waghera
-    return !pending;
-  }
+  const pending = st !== 'resolution' && !isClosedStage(st);
+  if (viewMode === 'archived') return !pending;
   if (viewMode === 'today') {
-    // Today (kaam waala view):
-    //   - saari pending (chahe purani ho)
-    //   - jo aaj create hui
-    //   - jo AAJ complete hui (purani entry bhi)
-    return (
-      pending ||
-      isToday(createdTs(x)) ||
-      (st === 'delivered' && isToday(deliveredTs(x)))
-    );
+    return pending || isToday(createdTs(x)) || isToday(closedTs(x));
   }
-  // yesterday / month / custom — date range ke hisaab se: jo us duration mein
-  // aayi ya us duration mein complete hui. Pending purani entries yahan nahi
-  // aatin (wo Today mein dikhti hain).
   const [s, e] = viewBounds(viewMode, vFrom, vTo);
   const cd = dayStr(createdTs(x));
-  const dd = st === 'delivered' ? dayStr(deliveredTs(x)) : '';
+  const dd = pending ? '' : dayStr(closedTs(x));
   return (cd && cd >= s && cd <= e) || (dd && dd >= s && dd <= e);
 }
-/* view dropdown ke liye [start, end] — dayStr/todayStr neeche define hain
-   par hoisted functions hain, isliye yahan use kar sakte hain. */
+/* view dropdown ke liye [start, end] — dayStr/todayStr hoisted hain */
 function viewBounds(mode, vFrom, vTo) {
   const t = new Date();
   t.setHours(0, 0, 0, 0);
@@ -932,13 +922,11 @@ export default function App({
   const [lastMove, setLastMove] = useState(null);
   const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
   const [showLog, setShowLog] = useState(false); // activity log panel
-  // hosted mode: head login store switch kar sake (session App ka hai,
-  // isliye branch yahin local rakhte hain)
+  // hosted mode: head login store switch kar sake
   const [viewBranch, setViewBranch] = useState(null);
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
-  // hosted mode mein page delivery app ka sidebar decide karta hai
   const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'tickets') : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const switchLang = (l) => {
@@ -980,7 +968,7 @@ export default function App({
     }
     setShowLog(true);
   }, [openLogKey]);
-  // hosted mode: delivery app ka refresh button dabane pe reloadKey badhta hai
+  // hosted mode: delivery app ka refresh button
   const firstReload = React.useRef(true);
   useEffect(() => {
     if (firstReload.current) {
@@ -1005,8 +993,6 @@ export default function App({
     return tickets.filter((x) => x.branch === session.branch);
   }, [tickets, session]);
 
-  // hosted mode mein topbar ka search seedha board ko filter karta hai
-  // (dropdown delivery app ka hai, wo sirf deliveries dikhata hai)
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
   const viewItems = useMemo(
@@ -1014,8 +1000,7 @@ export default function App({
     [scoped, viewMode, vFrom, vTo],
   );
 
-  // hosted: topbar ke dropdown ke liye results upar bhejte hain (delivery
-  // app jaisa hi — poori list mein match, top 8)
+  // hosted: topbar ke dropdown ke liye results upar bhejte hain
   useEffect(() => {
     if (!hosted || !onResults) return;
     if (!hostSearch) {
@@ -1049,7 +1034,6 @@ export default function App({
 
   // topbar dropdown se koi result chuna gaya
   useEffect(() => {
-    // pickKey har click pe badalta hai — wahi entry dobara chunne pe bhi khule
     if (pickId) setActiveId(pickId);
     // eslint-disable-next-line
   }, [pickKey]);
@@ -1073,8 +1057,8 @@ export default function App({
 
   // ── Egress bachane ke liye ──────────────────────────────────────────
   // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
-  // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
-  // par ek save = ek chhoti update call (poora table nahi).
+  // usi row ko local state mein patch kar dete hain — ek save = ek chhoti
+  // update call (poora table nahi).
   const applyLocal = (id, patch) => {
     setTickets((prev) =>
       prev.map((x) =>
@@ -1211,10 +1195,6 @@ export default function App({
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
-            vFrom={vFrom}
-            vTo={vTo}
-            onVFrom={setVFrom}
-            onVTo={setVTo}
               vFrom={vFrom}
               vTo={vTo}
               onVFrom={setVFrom}
@@ -1343,18 +1323,10 @@ export default function App({
                   count={viewItems.length}
                   viewMode={viewMode}
                   onViewMode={setViewMode}
-            vFrom={vFrom}
-            vTo={vTo}
-            onVFrom={setVFrom}
-            onVTo={setVTo}
                   vFrom={vFrom}
                   vTo={vTo}
                   onVFrom={setVFrom}
                   onVTo={setVTo}
-              vFrom={vFrom}
-              vTo={vTo}
-              onVFrom={setVFrom}
-              onVTo={setVTo}
                   layoutMode={layoutMode}
                   onLayoutMode={setLayoutMode}
                   onSwitchStore={(b) =>
@@ -1420,6 +1392,17 @@ export default function App({
           mode={modal.mode}
           onClose={() => setModal(null)}
           onSave={commitModal}
+        />
+      )}
+      {showLog && (
+        <ActivityLog
+          tickets={scopedAll}
+          session={session}
+          onClose={() => setShowLog(false)}
+          onOpen={(x) => {
+            setShowLog(false);
+            setActiveId(x.ticket_id);
+          }}
         />
       )}
       {toast && <Toast msg={toast} />}
@@ -1752,6 +1735,7 @@ function Dashboard({ tickets, onOpen }) {
           </table>
         </div>
       </div>
+
     </div>
   );
 }
@@ -2365,11 +2349,7 @@ function Topbar({
             Hing
           </button>
         </div>
-        <button
-          className="icon-btn"
-          onClick={onActivity}
-          title="Activity log"
-        >
+        <button className="icon-btn" onClick={onActivity} title="Activity log">
           <History size={17} color={T.ink} />
         </button>
         <button className="icon-btn" onClick={onReload} title="Reload">
@@ -3258,7 +3238,6 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
         <div className="created-note">
           Ticket app mein aaya: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
         </div>
-
       </div>
     </div>
   );
@@ -3586,11 +3565,8 @@ function Toast({ msg }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════ STYLES */
 /* ═════════════════════════════════════════════════ ACTIVITY LOG (overall)
-   Saari entries ke app_log events ek jagah, latest pehle — Books / Bigin ke
-   audit trail jaisa. Data wahi hai jo har entry ke andar timeline mein
-   dikhta hai; yahan sab merge karke "kisne kya kab kiya" ek screen pe.
+   Saari entries ke app_log events ek jagah, latest pehle — audit trail jaisa.
    Delete hui entries bhi yahan aati hain (view se hatti hain, log se nahi). */
 const ACT_KINDS = [
   { id: 'all', label: 'Sab updates' },
@@ -3621,7 +3597,6 @@ function actTitle(ev) {
     (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
     ev.label ||
     ev.stage;
-  if (ev.label === 'Rescheduled') return 'Reschedule kiya';
   if (k === 'delete') return 'Entry delete ki';
   if (k === 'closed') return `${lbl} mark kiya`;
   if (k === 'edit') return `${lbl} edit kiya`;
@@ -3707,7 +3682,7 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
     });
   }, [all, bounds, store, kind, q]);
 
-  // din ke hisaab se group — heading ke neeche us din ke updates
+  // din ke hisaab se group
   const days = [];
   const byDay = {};
   rows.forEach((r) => {
@@ -3739,7 +3714,7 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
           <div className="act-search">
             <Search size={15} color={T.inkSoft} />
             <input
-              placeholder="Customer, invoice, store, naam…"
+              placeholder="Customer, ticket, store, naam…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -3870,6 +3845,7 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
   );
 }
 
+/* ══════════════════════════════════════════════════════════════ STYLES */
 function StyleTag() {
   return (
     <style>{`
@@ -3987,8 +3963,7 @@ function StyleTag() {
       .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
       .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
       .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
-      /* card ke andar wala inline form — lamba button hone pe footer bahar
-         nikal jaata tha (justify-end + no wrap). Ab wrap hoke andar rehta hai. */
+      /* card ke andar wala inline form — lamba button bahar nikal jaata tha */
       .inline-move .modal-foot { flex-wrap: wrap; gap: 8px; }
       .inline-move .modal-foot .btn-ghost,
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
@@ -4164,14 +4139,12 @@ function StyleTag() {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
         .tb-brand span { font-size: 14px; }
-        /* icons apni poori line lete hain aur barabar faila jaate hain —
-           warna right mein khaali jagah bach jaati thi */
+        /* icons apni poori line lete hain aur barabar faila jaate hain */
         .tb-actions { order: 1; flex: 1 1 100%; width: 100%; justify-content: space-between; align-items: center; gap: 6px; }
         .tb-user-text { display: none; }
-        /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
         .tb-user { display: none; }
-        .page-switch { order: 2; flex: 1 1 100%; max-width: none; }
-        .tb-search { order: 3; flex: 1 1 100%; max-width: none; }
+        .tb-search { order: 2; flex: 1 1 100%; max-width: none; }
+        .lang-toggle { order: 3; }
         .icon-btn { width: 34px; height: 34px; flex-shrink: 0; }
         .lang-btn { padding: 6px 8px; }
         main { padding: 10px 14px 60px !important; }
@@ -4181,11 +4154,9 @@ function StyleTag() {
         .kv-grid { grid-template-columns: 1fr 1fr; }
         .modal { width: 100%; border-radius: 18px; }
         .glass-card { padding: 24px 20px; }
-        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
         .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
       }
-      /* phone pe header ke controls (Today / Stages / All stores / chip) ek
-         doosre ke saath fit ho jaayein — pehle har ek apni line le leta tha */
+      /* phone pe header ke controls ek doosre ke saath fit ho jaayein */
       @media (max-width: 760px) {
         .hdr-controls { gap: 8px !important; width: 100%; }
         .hdr-controls > * { flex: 0 1 auto; }
