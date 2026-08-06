@@ -5,7 +5,7 @@
 // Multiple check-in / check-out per day (sessions).
 // Chalao: hjs_attendance_v2.sql phir hjs_attendance_v3.sql
 // ============================================================
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
@@ -58,7 +58,7 @@ const CSS = `
   justify-content: center; font-size: 12px; font-weight: 800; color: #fff; }
 .hjsatt .att-railbtn { width: 100%; padding: 9px 2px 7px; border-radius: 10px;
   display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
-.hjsatt .att-railbtn span { font-size: 10.5px; color: #9fb0cd; text-align: center;
+.hjsatt .att-railbtn span { font-size: 10.5px; color: #cbd7ea; text-align: center;
   line-height: 1.25; font-weight: 500; }
 .hjsatt .att-railbtn .ic { width: 34px; height: 30px; border-radius: 9px; display: flex;
   align-items: center; justify-content: center; }
@@ -83,7 +83,7 @@ const CSS = `
   padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
 .hjsatt .att-scope::-webkit-scrollbar { display: none; }
 .hjsatt .att-scopebtn { padding: 12px 14px 13px; font-size: 14.5px; font-weight: 600;
-  color: #9fb0cd; white-space: nowrap; flex-shrink: 0; }
+  color: #cbd7ea; white-space: nowrap; flex-shrink: 0; }
 .hjsatt .att-scopebtn.on { color: #fff; box-shadow: inset 0 -2.5px 0 #fff; }
 .hjsatt .att-scopebtn .cnt { display: inline-block; margin-left: 6px; min-width: 18px; height: 18px;
   line-height: 18px; border-radius: 99px; background: #dc2626; color: #fff; font-size: 10.5px;
@@ -355,6 +355,18 @@ const CSS = `
 .hjsatt .att-pcard .nm { font-weight: 700; font-size: 14px; }
 .hjsatt .att-pcard .dz { font-size: 12.5px; color: #6b7280; }
 .hjsatt .att-pcard a { font-size: 12px; color: #2563eb; word-break: break-all; }
+
+/* ---------- selection bar + detail ---------- */
+.hjsatt .att-selbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #eff4ff; border: 1px solid #b2ccff; border-radius: 10px; padding: 10px 13px; }
+.hjsatt .att-selbar b { color: #1849a9; }
+.hjsatt .att-etable td.cb, .hjsatt .att-etable th.cb { width: 38px; text-align: center; padding: 8px; }
+.hjsatt .att-etable tr.sel td { background: #f5f8ff; }
+.hjsatt .att-etable td.link { color: #2563eb; font-weight: 650; cursor: pointer; }
+.hjsatt .att-etable td.link:hover { text-decoration: underline; }
+.hjsatt .att-dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 14px; }
+.hjsatt .att-dl dt { color: #6b7280; font-size: 13px; }
+.hjsatt .att-dl dd { font-weight: 600; }
 
 /* ---------- employee list table ---------- */
 .hjsatt .att-etable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -1814,19 +1826,114 @@ function PersonCard({ p }: any) {
   );
 }
 
-function DirectoryTab() {
+function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const rows: [string, any][] = [
+    ["Employee ID", p.emp_code],
+    ["Full name", p.full_name],
+    ["Nick name", p.nickname],
+    ["Designation", p.designation],
+    ["Department", p.team],
+    ["Reporting manager", p.manager_name],
+    ["Work email", p.email],
+    ["Personal email", p.personal_email],
+    ["Mobile", p.phone],
+    ["Employment type", p.employment_type],
+    ["Employee status", p.employee_status],
+    ["Source of hire", p.source_of_hire],
+    ["Date of joining", p.date_of_joining ? fmtDate(p.date_of_joining) : null],
+    ["Date of birth", p.date_of_birth ? fmtDate(p.date_of_birth) : null],
+    ["Today", p.state],
+  ];
+
+  const remove = async (hard: boolean) => {
+    setBusy(true);
+    const { error } = await supabase.rpc("delete_employee", { p_emp: p.id, p_hard: hard });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { onDeleted(); onClose(); }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={p.full_name} onClose={onClose}>
+      <div className="att-card">
+        <div className="att-flex" style={{ marginBottom: 14 }}>
+          <Avatar name={p.full_name} lg />
+          <div>
+            <p style={{ fontSize: 17, fontWeight: 700 }}>{p.full_name}</p>
+            <p className="att-muted">{p.emp_code} · {p.designation || "—"}</p>
+            <p style={{ fontWeight: 700, fontSize: 13, marginTop: 4, color: stateColor[p.state] }}>
+              {p.state}
+            </p>
+          </div>
+        </div>
+        <dl className="att-dl">
+          {rows.map(([k, v]) => (
+            <React.Fragment key={k}>
+              <dt>{k}</dt>
+              <dd>{v || <span className="att-muted">—</span>}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      </div>
+
+      {canEdit && (
+        <div className="att-card" style={{ marginTop: 12 }}>
+          <Note>{msg.err}</Note>
+          {!confirmDel ? (
+            <div className="att-flex">
+              <button className="att-btn sm line" disabled={busy}
+                onClick={() => remove(false)}>Deactivate</button>
+              <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                disabled={busy} onClick={() => setConfirmDel(true)}>Delete permanently</button>
+            </div>
+          ) : (
+            <div className="att-note err">
+              <span>This wipes {p.full_name}'s attendance and leave history too.</span>
+              <div className="att-flex" style={{ marginTop: 10 }}>
+                <button className="att-btn sm" style={{ background: "#b42318" }}
+                  disabled={busy} onClick={() => remove(true)}>Yes, delete</button>
+                <button className="att-btn sm grey" onClick={() => setConfirmDel(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+function DirectoryTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [team, setTeam] = useState("");
   const [sort, setSort] = useState<{ k: string; asc: boolean }>({ k: "emp_code", asc: true });
   const [busy, setBusy] = useState(true);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<any>(null);
+  const canEdit = ["admin"].includes(me?.role);
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.rpc("directory", {});
-      setRows(data || []); setBusy(false);
-    })();
-  }, []);
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    setRows(data || []); setBusy(false); setSel(new Set());
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = (id: string) => {
+    const n = new Set(sel);
+    n.has(id) ? n.delete(id) : n.add(id);
+    setSel(n);
+  };
+
+  const bulkRemove = async (hard: boolean) => {
+    for (const id of Array.from(sel)) {
+      await supabase.rpc("delete_employee", { p_emp: id, p_hard: hard });
+    }
+    load();
+  };
 
   if (busy) return <p className="att-muted">Loading…</p>;
 
@@ -1868,12 +1975,40 @@ function DirectoryTab() {
           }), "HJS_employees.csv")}>CSV</button>
       </div>
 
+      {sel.size > 0 && (
+        <div className="att-selbar">
+          <b>{sel.size} selected</b>
+          <button className="att-btn sm line" onClick={() => setSel(new Set())}>Clear</button>
+          <div style={{ marginLeft: "auto" }} className="att-flex">
+            <button className="att-btn sm line" onClick={() => downloadCsv(
+              shown.filter((r) => sel.has(r.id)).map((r) => {
+                const o: any = {}; cols.forEach(([k, l]) => { o[l] = r[k] ?? ""; }); return o;
+              }), "HJS_selected.csv")}>Export selected</button>
+            {canEdit && (
+              <>
+                <button className="att-btn sm line" onClick={() => bulkRemove(false)}>Deactivate</button>
+                <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                  onClick={() => { if (confirm(`Delete ${sel.size} people permanently? This wipes their attendance too.`)) bulkRemove(true); }}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <p className="att-muted">Total record count: {shown.length}</p>
 
       <div className="att-scroll">
         <table className="att-etable">
           <thead>
             <tr>
+              <th className="cb">
+                <input type="checkbox"
+                  checked={shown.length > 0 && shown.every((r) => sel.has(r.id))}
+                  onChange={(e) => setSel(e.target.checked
+                    ? new Set(shown.map((r) => r.id)) : new Set())} />
+              </th>
               {cols.map(([k, label], i) => (
                 <th key={k} className={i === 0 ? "first" : ""} onClick={() => flip(k)}>
                   {label}
@@ -1884,9 +2019,13 @@ function DirectoryTab() {
           </thead>
           <tbody>
             {shown.map((r) => (
-              <tr key={r.emp_code}>
-                <td className="first">{r.emp_code}</td>
-                <td>{r.first_name || r.full_name}</td>
+              <tr key={r.emp_code} className={sel.has(r.id) ? "sel" : ""}>
+                <td className="cb">
+                  <input type="checkbox" checked={sel.has(r.id)}
+                    onChange={() => toggle(r.id)} />
+                </td>
+                <td className="first link" onClick={() => setOpen(r)}>{r.emp_code}</td>
+                <td className="link" onClick={() => setOpen(r)}>{r.first_name || r.full_name}</td>
                 <td>{r.last_name || "—"}</td>
                 <td>{r.nickname || "—"}</td>
                 <td>{r.email
@@ -1910,11 +2049,14 @@ function DirectoryTab() {
               </tr>
             ))}
             {!shown.length && (
-              <tr><td className="first" colSpan={cols.length}>No match found.</td></tr>
+              <tr><td className="first" colSpan={cols.length + 1}>No match found.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {open && <PersonSheet p={open} canEdit={canEdit}
+        onClose={() => setOpen(null)} onDeleted={load} />}
     </>
   );
 }
@@ -2393,7 +2535,7 @@ function HolidaysTab({ me }: any) {
 function OrgScreen({ me, tab }: any) {
   return (
     <div className="att-wrap att-stack">
-      {tab === "directory" && <DirectoryTab />}
+      {tab === "directory" && <DirectoryTab me={me} />}
       {tab === "dept" && <DeptTab />}
       {tab === "tree" && <EmpTreeTab />}
       {tab === "people" && <PeopleTab />}
@@ -3392,11 +3534,6 @@ function OrgTab() {
   if (busy) return <p className="att-muted">Loading…</p>;
 
   const membersOf = (teamId: string) => emps.filter((e) => e.team_id === teamId);
-  const mgrName = (t: any) => {
-    const m = emps.find((e) => e.id === t.manager_id);
-    return m ? m.full_name : "No manager";
-  };
-
   // level 1 = teams, level 2 = members
   const roots = teams.map((t) => ({ ...t, _kind: "team" }));
 
@@ -3424,7 +3561,7 @@ function OrgTab() {
         childrenOf={(n: any) => (n._kind === "team" ? membersOf(n.id) : [])}
         countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
         toCard={(n: any) => n._kind === "team"
-          ? { name: n.name, sub: mgrName(n) }
+          ? { name: n.name, sub: `${membersOf(n.id).length} people` }
           : { name: n.full_name, sub: `${n.emp_code} · ${n.designation || "—"}` }}
       />
     </>
@@ -3618,17 +3755,6 @@ function TeamScreen({ me, tab }: any) {
 
 /* ========================= profile ========================= */
 function MeScreen({ me }: any) {
-  const [pin, setPin] = useState("");
-  const [msg, setMsg] = useState({ err: "", ok: "" });
-
-  const changePin = async () => {
-    setMsg({ err: "", ok: "" });
-    if (pin.length < 6) return setMsg({ err: "PIN must be at least 6 digits", ok: "" });
-    const { error } = await supabase.auth.updateUser({ password: pin });
-    if (error) setMsg({ err: error.message, ok: "" });
-    else { setMsg({ err: "", ok: "PIN updated." }); setPin(""); }
-  };
-
   const info: [string, string][] = [
     ["Employee code", me.emp_code],
     ["Email", me.email || "—"],
@@ -3659,14 +3785,9 @@ function MeScreen({ me }: any) {
         ))}
       </div>
 
-      <div className="att-card att-stack">
-        <h3 className="att-h2" style={{ margin: 0 }}>Change PIN</h3>
-        <input type="password" inputMode="numeric" placeholder="New 6 digit PIN"
-          value={pin} onChange={(e) => setPin(e.target.value)} />
-        <Note>{msg.err}</Note>
-        <Note kind="ok">{msg.ok}</Note>
-        <button className="att-btn sm" onClick={changePin} disabled={!pin}>Save</button>
-      </div>
+      <p className="att-muted">
+        To change your 4-digit code, sign out and use "Forgot code?" on the sign-in screen.
+      </p>
     </div>
   );
 }
@@ -3817,7 +3938,7 @@ export default function Attendance() {
       case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
       case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
-      case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab /></div>;
+      case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab me={me} /></div>;
       case "home/org/emptree":      return <div className="att-wrap att-stack"><EmpTreeTab /></div>;
       case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab /></div>;
       case "home/org/deptdir":      return <div className="att-wrap att-stack"><DeptTab /></div>;
@@ -3852,7 +3973,7 @@ export default function Attendance() {
         {mods.map((m) => (
           <button key={m.k} className={`att-railbtn ${mod === m.k ? "on" : ""}`}
             onClick={() => goMod(m.k)}>
-            <div className="ic"><Icon n={m.icon} c={mod === m.k ? "#fff" : "#9fb0cd"} /></div>
+            <div className="ic"><Icon n={m.icon} c={mod === m.k ? "#ffffff" : "#cbd7ea"} /></div>
             <span>{m.label}</span>
             {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
           </button>
