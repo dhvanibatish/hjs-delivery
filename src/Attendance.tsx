@@ -356,6 +356,38 @@ const CSS = `
 .hjsatt .att-pcard .dz { font-size: 12.5px; color: #6b7280; }
 .hjsatt .att-pcard a { font-size: 12px; color: #2563eb; word-break: break-all; }
 
+/* ---------- employee list table ---------- */
+.hjsatt .att-etable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.hjsatt .att-etable th { text-align: left; padding: 11px 12px; background: #f9fafb;
+  color: #475467; font-size: 12px; font-weight: 650; white-space: nowrap;
+  border-bottom: 1px solid #e5e7eb; cursor: pointer; }
+.hjsatt .att-etable th:hover { background: #f2f4f7; }
+.hjsatt .att-etable td { padding: 11px 12px; border-bottom: 1px solid #f1f2f4; white-space: nowrap; }
+.hjsatt .att-etable tr:hover td { background: #fafbff; }
+.hjsatt .att-etable td.first, .hjsatt .att-etable th.first { position: sticky; left: 0;
+  background: #fff; font-weight: 650; box-shadow: 1px 0 0 #f1f2f4; }
+.hjsatt .att-etable th.first { background: #f9fafb; }
+.hjsatt .att-arrow2 { color: #98a2b3; font-size: 10px; margin-left: 4px; }
+
+/* ---------- zoho-style column tree ---------- */
+.hjsatt .att-tw { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 4px 2px 14px; }
+.hjsatt .att-trow { display: flex; align-items: flex-start; min-width: min-content; }
+.hjsatt .att-tcol { display: flex; flex-direction: column; gap: 10px; }
+.hjsatt .att-tcard { display: flex; gap: 10px; align-items: center; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; width: 262px;
+  cursor: pointer; text-align: left; }
+.hjsatt .att-tcard:hover { border-color: #b2ccff; }
+.hjsatt .att-tcard.on { border-color: #2563eb; background: #f5f8ff;
+  box-shadow: 0 0 0 1px #2563eb; }
+.hjsatt .att-tcard .nm { font-weight: 650; font-size: 14px; display: block; }
+.hjsatt .att-tcard .dz { font-size: 12.5px; color: #6b7280; display: block; }
+.hjsatt .att-tjoin { display: flex; align-items: center; align-self: center; }
+.hjsatt .att-tstub { width: 20px; height: 1px; background: #d0d5dd; }
+.hjsatt .att-tbadge { background: #2563eb; color: #fff; font-size: 11.5px; font-weight: 700;
+  border-radius: 5px; padding: 3px 9px; }
+.hjsatt .att-tbadge.grey { background: #eef0f3; color: #475467; }
+.hjsatt .att-tspine { align-self: stretch; border-left: 1px solid #d0d5dd; }
+
 /* ---------- reporting tree ---------- */
 .hjsatt .att-rt { margin-left: 16px; padding-left: 14px; border-left: 1px solid #e5e7eb; }
 .hjsatt .att-rtrow { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
@@ -1774,6 +1806,8 @@ function PersonCard({ p }: any) {
 function DirectoryTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState("");
+  const [team, setTeam] = useState("");
+  const [sort, setSort] = useState<{ k: string; asc: boolean }>({ k: "emp_code", asc: true });
   const [busy, setBusy] = useState(true);
 
   useEffect(() => {
@@ -1784,29 +1818,76 @@ function DirectoryTab() {
   }, []);
 
   if (busy) return <p className="att-muted">Loading…</p>;
-  const shown = rows.filter((r) => !q ||
-    `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team} ${r.email || ""}`
-      .toLowerCase().includes(q.toLowerCase()));
 
-  const groups: Record<string, any[]> = {};
-  shown.forEach((r) => { (groups[r.team] = groups[r.team] || []).push(r); });
-  const names = Object.keys(groups).sort();
+  const teams = Array.from(new Set(rows.map((r) => r.team))).sort();
+  const cols: [string, string][] = [
+    ["emp_code", "Employee ID"], ["full_name", "Name"], ["email", "Email address"],
+    ["team", "Department"], ["designation", "Designation"],
+    ["manager_name", "Reporting to"], ["phone", "Phone"], ["state", "Status"],
+  ];
+
+  const shown = rows
+    .filter((r) => !team || r.team === team)
+    .filter((r) => !q || cols.some(([k]) =>
+      String(r[k] || "").toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => {
+      const x = String(a[sort.k] || ""), y = String(b[sort.k] || "");
+      return (sort.asc ? 1 : -1) * x.localeCompare(y, undefined, { numeric: true });
+    });
+
+  const flip = (k: string) =>
+    setSort(sort.k === k ? { k, asc: !sort.asc } : { k, asc: true });
 
   return (
     <>
-      <input placeholder="Search name, code, designation, team, email"
-        value={q} onChange={(e) => setQ(e.target.value)} />
-      <p className="att-muted">{shown.length} of {rows.length} people</p>
-      {names.map((tn) => (
-        <Section key={tn} title={tn} count={groups[tn].length} open={!!q || names.length <= 3}>
-          <div style={{ padding: 12 }}>
-            <div className="att-people">
-              {groups[tn].map((p) => <PersonCard p={p} key={p.emp_code} />)}
-            </div>
-          </div>
-        </Section>
-      ))}
-      {!shown.length && <div className="att-list"><p className="att-empty">No match found.</p></div>}
+      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+        <input placeholder="Search anything" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+        <select value={team} onChange={(e) => setTeam(e.target.value)} style={{ width: "auto" }}>
+          <option value="">All departments</option>
+          {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button className="att-btn sm" disabled={!shown.length}
+          onClick={() => downloadCsv(shown.map((r) => {
+            const o: any = {}; cols.forEach(([k, l]) => { o[l] = r[k] ?? ""; }); return o;
+          }), "HJS_employees.csv")}>CSV</button>
+      </div>
+
+      <p className="att-muted">Total record count: {shown.length}</p>
+
+      <div className="att-scroll">
+        <table className="att-etable">
+          <thead>
+            <tr>
+              {cols.map(([k, label], i) => (
+                <th key={k} className={i === 0 ? "first" : ""} onClick={() => flip(k)}>
+                  {label}
+                  {sort.k === k && <span className="att-arrow2">{sort.asc ? "\u25b2" : "\u25bc"}</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => (
+              <tr key={r.emp_code}>
+                <td className="first">{r.emp_code}</td>
+                <td>{r.full_name}</td>
+                <td>{r.email
+                  ? <a href={`mailto:${r.email}`} style={{ color: "#2563eb" }}>{r.email}</a>
+                  : <span className="att-muted">—</span>}</td>
+                <td>{r.team}</td>
+                <td>{r.designation || "—"}</td>
+                <td>{r.manager_name || "—"}</td>
+                <td>{r.phone || "—"}</td>
+                <td><span style={{ fontWeight: 650, color: stateColor[r.state] }}>{r.state}</span></td>
+              </tr>
+            ))}
+            {!shown.length && (
+              <tr><td className="first" colSpan={cols.length}>No match found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -1872,6 +1953,60 @@ function DeptTab() {
   );
 }
 
+function TreeCard({ p, on, onClick, count }: any) {
+  return (
+    <button className={`att-tcard ${on ? "on" : ""}`} onClick={onClick}>
+      <Avatar name={p.name} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="nm">{p.name}</span>
+        <span className="dz">{p.sub}</span>
+      </span>
+      {count > 0 && <span className={`att-tbadge ${on ? "" : "grey"}`}>{count}</span>}
+    </button>
+  );
+}
+
+// Zoho jaisa horizontal column tree: ek column select karo, agla column khul jata hai
+function ColumnTree({ roots, childrenOf, countOf, toCard }: any) {
+  const [path, setPath] = useState<any[]>([]);
+
+  const columns: any[][] = [roots];
+  path.forEach((node) => {
+    const ch = childrenOf(node);
+    if (ch.length) columns.push(ch);
+  });
+
+  const pick = (level: number, node: any) => {
+    const next = path.slice(0, level);
+    if (path[level] && path[level].id === node.id) setPath(next);   // dobara click = band
+    else setPath([...next, node]);
+  };
+
+  return (
+    <div className="att-tw">
+      <div className="att-trow">
+        {columns.map((col, li) => (
+          <div key={li} style={{ display: "flex", alignItems: "flex-start" }}>
+            {li > 0 && (
+              <div className="att-tjoin">
+                <span className="att-tstub" />
+                <span className="att-tbadge">{col.length}</span>
+                <span className="att-tstub" />
+              </div>
+            )}
+            <div className="att-tcol">
+              {col.map((n: any) => (
+                <TreeCard key={n.id} p={toCard(n)} count={countOf(n)}
+                  on={path[li]?.id === n.id} onClick={() => pick(li, n)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function EmpTreeTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState("");
@@ -1891,45 +2026,34 @@ function EmpTreeTab() {
     const k = r.reports_to || "root";
     (kids[k] = kids[k] || []).push(r);
   });
-  const countAll = (id: string): number =>
-    (kids[id] || []).reduce((a, c) => a + 1 + countAll(c.id), 0);
+  const deep = (id: string): number =>
+    (kids[id] || []).reduce((a, c) => a + 1 + deep(c.id), 0);
 
-  const Node = ({ p, depth }: any) => {
-    const ch = kids[p.id] || [];
-    const [open, setOpen] = useState(depth < 1);
-    const hit = !q || `${p.full_name} ${p.emp_code} ${p.designation || ""}`
-      .toLowerCase().includes(q.toLowerCase());
+  if (q) {
+    const hits = rows.filter((r) =>
+      `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+        .toLowerCase().includes(q.toLowerCase()));
     return (
-      <div>
-        <div className="att-rtrow" style={{ opacity: hit ? 1 : 0.45 }}>
-          {ch.length > 0 ? (
-            <button className="att-muted" style={{ width: 16 }} onClick={() => setOpen(!open)}>
-              {open ? "\u25be" : "\u25b8"}
-            </button>
-          ) : <span style={{ width: 16 }} />}
-          <Avatar name={p.full_name} />
-          <div className="grow" style={{ flex: 1, minWidth: 0 }}>
-            <p><b>{p.full_name}</b> <span className="att-muted">{p.emp_code}</span></p>
-            <p className="att-muted">{p.designation || "—"} · {p.team}</p>
-          </div>
-          {ch.length > 0 && <span className="cnt2">{countAll(p.id)}</span>}
+      <>
+        <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
+        <p className="att-muted">{hits.length} found · clear the search to see the tree</p>
+        <div className="att-people">
+          {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
         </div>
-        {open && ch.length > 0 && (
-          <div className="att-rt">
-            {ch.map((c: any) => <Node p={c} depth={depth + 1} key={c.id} />)}
-          </div>
-        )}
-      </div>
+      </>
     );
-  };
+  }
 
   return (
     <>
       <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="att-card">
-        {(kids["root"] || []).map((p: any) => <Node p={p} depth={0} key={p.id} />)}
-        {!(kids["root"] || []).length && <p className="att-empty">No reporting lines set yet.</p>}
-      </div>
+      <p className="att-muted">Tap a card to open the people reporting to them</p>
+      <ColumnTree
+        roots={kids["root"] || []}
+        childrenOf={(n: any) => kids[n.id] || []}
+        countOf={(n: any) => deep(n.id)}
+        toCard={(n: any) => ({ name: n.full_name, sub: `${n.emp_code} · ${n.designation || "—"}` })}
+      />
     </>
   );
 }
@@ -3180,17 +3304,17 @@ function DesignationSheet({ onClose }: any) {
   );
 }
 
-function OrgTab({ me }: any) {
+function OrgTab() {
   const [teams, setTeams] = useState<any[]>([]);
   const [emps, setEmps] = useState<any[]>([]);
-  const [busy, setBusy] = useState(true);
   const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
 
   useEffect(() => {
     (async () => {
       const [t, e] = await Promise.all([
         supabase.from("teams").select("*").order("name"),
-        supabase.from("employees").select("*").eq("active", true).order("full_name"),
+        supabase.rpc("directory", {}),
       ]);
       setTeams(t.data || []); setEmps(e.data || []); setBusy(false);
     })();
@@ -3198,80 +3322,42 @@ function OrgTab({ me }: any) {
 
   if (busy) return <p className="att-muted">Loading…</p>;
 
-  const byId: Record<string, any> = {};
-  emps.forEach((e) => { byId[e.id] = e; });
-  const match = (e: any) =>
-    !q || `${e.full_name} ${e.emp_code} ${e.designation || ""}`.toLowerCase().includes(q.toLowerCase());
+  const membersOf = (teamId: string) => emps.filter((e) => e.team_id === teamId);
+  const mgrName = (t: any) => {
+    const m = emps.find((e) => e.id === t.manager_id);
+    return m ? m.full_name : "No manager";
+  };
 
-  const shown = teams
-    .map((t) => ({
-      ...t,
-      manager: t.manager_id ? byId[t.manager_id] : null,
-      members: emps.filter((e) => e.team_id === t.id && e.id !== t.manager_id),
-    }))
-    .filter((t) => t.members.length || t.manager)
-    .filter((t) => !q || t.members.some(match) || (t.manager && match(t.manager))
-                || t.name.toLowerCase().includes(q.toLowerCase()));
+  // level 1 = teams, level 2 = members
+  const roots = teams.map((t) => ({ ...t, _kind: "team" }));
 
-  const unassigned = emps.filter((e) => !e.team_id).filter(match);
+  if (q) {
+    const hits = emps.filter((r) =>
+      `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+        .toLowerCase().includes(q.toLowerCase()));
+    return (
+      <>
+        <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+        <p className="att-muted">{hits.length} found</p>
+        <div className="att-people">
+          {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
-      <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
-      <p className="att-muted">{emps.length} people · {teams.length} teams</p>
-
-      <div className="att-tree">
-        {shown.map((t) => (
-          <details className="att-tnode" key={t.id} open={!!q || shown.length <= 4}>
-            <summary className="att-thead" style={{ cursor: "pointer", listStyle: "none" }}>
-              {t.manager ? <Avatar name={t.manager.full_name} /> : <div className="att-av"
-                style={{ background: "#cbd5e1" }}>—</div>}
-              <div className="grow" style={{ flex: 1, minWidth: 0 }}>
-                <p className="nm">{t.name}</p>
-                <p className="att-muted">
-                  {t.manager ? `${t.manager.full_name} · ${t.manager.designation || "Manager"}`
-                             : "No manager set"}
-                </p>
-              </div>
-              <span className="att-chip">{t.members.length} member{t.members.length === 1 ? "" : "s"}</span>
-            </summary>
-            {t.members.filter(match).map((m: any) => (
-              <div className="att-tmem" key={m.id}>
-                <div className="grow" style={{ flex: 1, minWidth: 0 }}>
-                  <p><b>{m.emp_code}</b> · {m.full_name}</p>
-                  <p className="dz">
-                    {m.designation || "—"}
-                    {m.reports_to && byId[m.reports_to]
-                      ? ` → reports to ${byId[m.reports_to].full_name}` : ""}
-                  </p>
-                </div>
-                {!m.email && <span className="att-pill p-Absent">no email</span>}
-              </div>
-            ))}
-          </details>
-        ))}
-
-        {unassigned.length > 0 && (
-          <div className="att-tnode">
-            <div className="att-thead">
-              <div className="att-av" style={{ background: "#cbd5e1" }}>?</div>
-              <div className="grow" style={{ flex: 1 }}>
-                <p className="nm">No team assigned</p>
-                <p className="att-muted">Set their team in Staff</p>
-              </div>
-              <span className="att-chip">{unassigned.length}</span>
-            </div>
-            {unassigned.map((m) => (
-              <div className="att-tmem" key={m.id}>
-                <div className="grow" style={{ flex: 1 }}>
-                  <p><b>{m.emp_code}</b> · {m.full_name}</p>
-                  <p className="dz">{m.designation || "—"}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{teams.length} teams · tap a team to see its people</p>
+      <ColumnTree
+        roots={roots}
+        childrenOf={(n: any) => (n._kind === "team" ? membersOf(n.id) : [])}
+        countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
+        toCard={(n: any) => n._kind === "team"
+          ? { name: n.name, sub: mgrName(n) }
+          : { name: n.full_name, sub: `${n.emp_code} · ${n.designation || "—"}` }}
+      />
     </>
   );
 }
@@ -3664,7 +3750,7 @@ export default function Attendance() {
       case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
       case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab /></div>;
       case "home/org/emptree":      return <div className="att-wrap att-stack"><EmpTreeTab /></div>;
-      case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab me={me} /></div>;
+      case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab /></div>;
       case "home/org/deptdir":      return <div className="att-wrap att-stack"><DeptTab /></div>;
       case "home/org/people":       return <div className="att-wrap att-stack"><PeopleTab /></div>;
       case "home/org/notice":       return <div className="att-wrap att-stack"><NoticeTab me={me} /></div>;
