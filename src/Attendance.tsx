@@ -1977,6 +1977,7 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Designation", p.designation],
     ["Department", p.team],
     ["Reporting manager", p.manager_name],
+    ["Also reports to", p.co_manager_name],
     ["Email", p.email],
     ["Mobile", p.phone],
     ["Employment type", p.employment_type],
