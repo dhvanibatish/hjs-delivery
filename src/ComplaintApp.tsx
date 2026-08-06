@@ -129,6 +129,27 @@ const STORE_MANAGERS = {
 
 /* Technician / handler store-wise — ab form me use nahi hota */
 
+/* Technician list — store-wise nahi, sabhi stores ke liye common */
+const TECHNICIANS = [
+  { name: 'Sonu', phone: '+91 84472 92843' },
+  { name: 'Arvind', phone: '+91 72106 69844' },
+  { name: 'Hemant', phone: '+91 97736 41804' },
+  { name: 'Nitin', phone: '+91 70074 13101' },
+  { name: 'Rajan', phone: '+91 85953 53451' },
+  { name: 'Nitish', phone: '+91 99118 14167' },
+  { name: 'Pradeep', phone: '+91 97606 29197' },
+  { name: 'Uday', phone: '+91 85957 59588' },
+];
+const techPhoneOf = (name) =>
+  (TECHNICIANS.find((t) => t.name === name) || {}).phone || '';
+/* form ke fields se asli naam/phone — 'Other' hone par manual wale */
+const techNameOf = (f) =>
+  f.tech === 'Other' ? String(f.techOther || '').trim() : f.tech || '';
+const techPhoneVal = (f) =>
+  f.tech === 'Other'
+    ? String(f.techPhoneOther || '').trim()
+    : techPhoneOf(f.tech);
+
 const ACTIONS = [
   'Technician ghar bheja',
   'Part / spare order kiya',
@@ -192,6 +213,14 @@ const STAGES = [
     soft: T.blueSoft,
   },
   {
+    id: 'tech',
+    label: 'Technician Assigned',
+    short: 'Technician',
+    status: 'Technician Assigned',
+    color: T.violet,
+    soft: T.violetSoft,
+  },
+  {
     id: 'status',
     label: 'Work in Progress',
     short: 'In Progress',
@@ -213,6 +242,7 @@ const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 // peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
 const STAGE_COLS = {
   talk: { talk_date: null, talk_time: null, stage1_remarks: null },
+  tech: { technician: null, technician_phone: null, tech_remarks: null },
   status: {
     action_taken: null,
     action_other: null,
@@ -234,16 +264,19 @@ function clearAhead(toStage) {
 const HINDI = {
   received: { label: 'Ticket Mila', short: 'Naya' },
   talk: { label: 'Customer Se Baat Hui', short: 'Baat Hui' },
+  tech: { label: 'Technician Bheja', short: 'Technician' },
   status: { label: 'Kaam Jaari Hai', short: 'Jaari' },
   resolution: { label: 'Samasya Hal Hui', short: 'Hal Hui' },
 };
 const HINDI_MOVE = {
   talk: 'Customer se baat karein',
+  tech: 'Technician assign karein',
   status: 'Kaam shuru karein',
   resolution: 'Hal hua mark karein',
 };
 const ENG_MOVE = {
   talk: 'Talk to customer',
+  tech: 'Assign a technician',
   status: 'Start the work',
   resolution: 'Mark as resolved',
 };
@@ -355,6 +388,28 @@ const TXT = {
     en: 'Please note what the customer said.',
     hi: 'Customer ne kya kaha — likhna zaroori hai.',
   },
+  // technician stage
+  chooseTech: { en: 'Which technician? *', hi: 'Kaunsa technician? *' },
+  techName: { en: "Technician's name *", hi: 'Technician ka naam *' },
+  techNamePh: { en: 'Full name…', hi: 'Poora naam…' },
+  techPhone: { en: 'Phone number *', hi: 'Phone number *' },
+  techPhonePh: { en: '+91 …', hi: '+91 …' },
+  techOtherOpt: { en: 'Other (not in the list)', hi: 'Other (list me nahi hai)' },
+  techAutoPhone: {
+    en: 'The number will be saved automatically:',
+    hi: 'Number apne aap save hoga:',
+  },
+  techOtherRequired: {
+    en: 'You selected "Other" — both name and number are required.',
+    hi: 'Aapne "Other" chuna — naam aur number dono bharna zaroori hai.',
+  },
+  techRemarksPh: {
+    en: 'When will they visit, what to carry…',
+    hi: 'Kab jayega, kya le kar jayega…',
+  },
+  techShort: { en: 'Technician', hi: 'Technician' },
+  techPhoneShort: { en: 'Phone', hi: 'Phone' },
+  techAssigned: { en: 'Technician', hi: 'Technician' },
   workDone: { en: 'What work was done? *', hi: 'Kya kaam kiya? *' },
   workDoneOther: {
     en: 'Describe the work done *',
@@ -486,6 +541,7 @@ function statusToStage(s) {
   if (t.includes('resolv') || t.includes('closed') || t.includes('suljh'))
     return 'resolution';
   if (t.includes('progress') || t.includes('chalu')) return 'status';
+  if (t.includes('technician') || t.includes('assign')) return 'tech';
   if (t.includes('talk') || t.includes('baat')) return 'talk';
   return 'received';
 }
@@ -562,6 +618,10 @@ const STAGE_HINT = {
   talk: {
     en: 'Call the customer and note the issue',
     hi: 'Customer ko call karke dikkat note karein',
+  },
+  tech: {
+    en: 'Choose a technician — name and number get saved',
+    hi: 'Technician chunein — naam aur number save honge',
   },
   status: {
     en: 'Enter the work done and expected resolution date',
@@ -662,6 +722,12 @@ function stageFields(toStage, f) {
   if (toStage === 'received') return {};
   if (toStage === 'talk')
     return { Date: f.date || '—', Time: f.time || '—', ...rmk };
+  if (toStage === 'tech')
+    return {
+      Technician: techNameOf(f) || '—',
+      Phone: techPhoneVal(f) || '—',
+      ...rmk,
+    };
   if (toStage === 'status')
     return {
       Action: (f.action === 'Other' ? f.actionOther : f.action) || '—',
@@ -859,6 +925,8 @@ function rowToTicket(r) {
     area: clean(r.city) || '—',
     equipment: clean(r.product) || 'Equipment',
     subject: clean(r.subject) || '—',
+    technician: clean(r.technician) || '',
+    technicianPhone: clean(r.technician_phone) || '',
     opened: r.opening_time || r.created_at || null,
     expected: clean(r.expected_date) || '—',
     stage: statusToStage(r.status),
@@ -1074,6 +1142,10 @@ export default function App({
       patch.talk_date = f.date || null;
       patch.talk_time = f.time || null;
       patch.stage1_remarks = f.remarks || null;
+    } else if (toStage === 'tech') {
+      patch.technician = techNameOf(f) || null;
+      patch.technician_phone = techPhoneVal(f) || null;
+      patch.tech_remarks = f.remarks || null;
     } else if (toStage === 'status') {
       patch.action_taken = f.action || null;
       patch.action_other = f.action === 'Other' ? f.actionOther || null : null;
@@ -1484,6 +1556,7 @@ function Dashboard({ tickets, onOpen }) {
   const stageMetric = {
     received: (x) => x.stage === 'received',
     talk: (x) => x.stage === 'talk',
+    tech: (x) => x.stage === 'tech',
     status: (x) => x.stage === 'status',
     resolution: (x) => x.stage === 'resolution',
   };
@@ -1686,6 +1759,7 @@ function Dashboard({ tickets, onOpen }) {
                 <th>{L('colTotal')}</th>
                 <th>{sShort('received')}</th>
                 <th>{sShort('talk')}</th>
+                <th>{sShort('tech')}</th>
                 <th>{sShort('status')}</th>
                 <th>{sShort('resolution')}</th>
                 <th>{L('colPending')}</th>
@@ -1709,7 +1783,7 @@ function Dashboard({ tickets, onOpen }) {
                       >
                         {list.length}
                       </td>
-                      {['received', 'talk', 'status', 'resolution'].map((k) => (
+                      {['received', 'talk', 'tech', 'status', 'resolution'].map((k) => (
                         <td
                           key={k}
                           className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
@@ -2817,6 +2891,15 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
           </span>
         </div>
       )}
+      {d.technician && (
+        <div className="card-tech">
+          <Wrench size={12} />
+          <span className="ellip">
+            <b>{d.technician}</b>
+            {d.technicianPhone ? ` · ${d.technicianPhone}` : ''}
+          </span>
+        </div>
+      )}
       {closed ? (
         <div
           className="card-done"
@@ -2923,8 +3006,17 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
       ],
     },
     {
-      id: 'status',
+      id: 'tech',
       i: 2,
+      rows: [
+        [L('techShort'), show(r.technician)],
+        [L('techPhoneShort'), show(r.technician_phone)],
+        [L('remarksShort'), show(r.tech_remarks)],
+      ],
+    },
+    {
+      id: 'status',
+      i: 3,
       rows: [
         [
           L('workDoneShort'),
@@ -2936,7 +3028,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     },
     {
       id: 'resolution',
-      i: 3,
+      i: 4,
       rows: [
         [L('resolvedShort'), r.is_resolved ? L('yes') : L('no')],
         [
@@ -3286,7 +3378,30 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
         ? r.stage3_remarks
         : toStage === 'status'
           ? r.stage2_remarks
-          : r.stage1_remarks) || '',
+          : toStage === 'tech'
+            ? r.tech_remarks
+            : r.stage1_remarks) || '',
+    // technician — saved naam list me hai to dropdown, warna 'Other' + manual
+    tech:
+      r.technician && r.technician !== 'null'
+        ? TECHNICIANS.some((t) => t.name === r.technician)
+          ? r.technician
+          : 'Other'
+        : '',
+    techOther:
+      r.technician &&
+      r.technician !== 'null' &&
+      !TECHNICIANS.some((t) => t.name === r.technician)
+        ? r.technician
+        : '',
+    techPhoneOther:
+      r.technician &&
+      r.technician !== 'null' &&
+      !TECHNICIANS.some((t) => t.name === r.technician)
+        ? (r.technician_phone && r.technician_phone !== 'null'
+            ? r.technician_phone
+            : '')
+        : '',
     action: (r.action_taken && r.action_taken !== 'null' && r.action_taken) || '',
     actionOther:
       (r.action_other && r.action_other !== 'null' && r.action_other) || '',
@@ -3305,9 +3420,14 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   const otherAction = f.action === 'Other';
   // On-spot fix — wahin theek ho gaya, seedha Resolved.
   const spot = toStage === 'status' && f.action === 'Store pe repair kiya';
+  const otherTech = f.tech === 'Other';
   const canSave =
     toStage === 'talk'
       ? !!f.remarks.trim() // customer ne kya kaha — MANDATORY
+      : toStage === 'tech'
+        ? otherTech
+          ? !!(f.techOther.trim() && f.techPhoneOther.trim())
+          : !!f.tech
       : toStage === 'status'
         ? spot
           ? !!(f.action && f.resolved)
@@ -3328,7 +3448,9 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
       ? L('whatCustomerSaidPh')
       : toStage === 'resolution'
         ? L('remarksResolvePh')
-        : L('remarksPh');
+        : toStage === 'tech'
+          ? L('techRemarksPh')
+          : L('remarksPh');
 
   const inner = (
     <>
@@ -3375,8 +3497,72 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
           </div>
         )}
 
+        {toStage === 'tech' && (
+          <>
+            <Field label={L('chooseTech')}>
+              <select
+                className="inp"
+                value={f.tech}
+                onChange={(e) => set('tech', e.target.value)}
+              >
+                <option value="">{L('select')}</option>
+                {TECHNICIANS.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name} · {t.phone}
+                  </option>
+                ))}
+                <option value="Other">{L('techOtherOpt')}</option>
+              </select>
+            </Field>
+            {f.tech && !otherTech && (
+              <div className="tech-phone">
+                <Phone size={15} />
+                <span>
+                  {L('techAutoPhone')} <b>{techPhoneOf(f.tech)}</b>
+                </span>
+              </div>
+            )}
+            {otherTech && (
+              <>
+                <Field label={L('techName')}>
+                  <input
+                    className="inp"
+                    placeholder={L('techNamePh')}
+                    value={f.techOther}
+                    onChange={(e) => set('techOther', e.target.value)}
+                  />
+                </Field>
+                <Field label={L('techPhone')}>
+                  <input
+                    className="inp"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder={L('techPhonePh')}
+                    value={f.techPhoneOther}
+                    onChange={(e) => set('techPhoneOther', e.target.value)}
+                  />
+                </Field>
+                {(!f.techOther.trim() || !f.techPhoneOther.trim()) && (
+                  <div className="req-note">{L('techOtherRequired')}</div>
+                )}
+              </>
+            )}
+          </>
+        )}
+
         {toStage === 'status' && (
           <>
+            {r.technician && r.technician !== 'null' && (
+              <div className="prev-line">
+                <Wrench size={14} />
+                <span>
+                  {L('techAssigned')}: <b>{r.technician}</b>
+                  {r.technician_phone && r.technician_phone !== 'null'
+                    ? ` · ${r.technician_phone}`
+                    : ''}
+                </span>
+              </div>
+            )}
             <Field label={L('workDone')}>
               <select
                 className="inp"
@@ -3938,12 +4124,13 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .hjs-complaints .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .hjs-complaints .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .hjs-complaints .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
       .hjs-complaints .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
-      .hjs-complaints .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
-      .hjs-complaints .column:nth-child(4) { border-top: 3px solid ${T.green}; }
+      .hjs-complaints .column:nth-child(3) { border-top: 3px solid ${T.violet}; }
+      .hjs-complaints .column:nth-child(4) { border-top: 3px solid ${T.amber}; }
+      .hjs-complaints .column:nth-child(5) { border-top: 3px solid ${T.green}; }
       .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
       .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
@@ -3968,6 +4155,12 @@ function StyleTag() {
       .inline-move .modal-foot .btn-ghost,
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
+      .card-tech { display: flex; align-items: center; gap: 6px; margin-top: 9px; background: ${T.violetSoft}; color: ${T.violet}; border-radius: 9px; padding: 6px 9px; font-size: 11.5px; font-weight: 600; }
+      .card-tech b { font-weight: 800; }
+      .card-tech svg { flex-shrink: 0; }
+      .tech-phone { display: flex; align-items: center; gap: 8px; background: ${T.violetSoft}; border: 1px solid #ddd6ef; color: ${T.violet}; border-radius: 11px; padding: 11px 13px; font-size: 13px; line-height: 1.4; }
+      .tech-phone b { font-weight: 800; }
+      .tech-phone svg { flex-shrink: 0; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
@@ -4132,7 +4325,7 @@ function StyleTag() {
       .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
       @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
 
-      @media (max-width: 1400px) { .hjs-complaints .board { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; } }
+      @media (max-width: 1400px) { .hjs-complaints .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .hjs-complaints .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .hjs-complaints .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
