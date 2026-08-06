@@ -497,15 +497,28 @@ const Pin = ({ lat, lng, dist, ok, label }: any) => {
   );
 };
 
-const getPosition = (): Promise<GeolocationPosition> =>
-  new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error("Location isn't supported on this device"));
-    navigator.geolocation.getCurrentPosition(resolve, (e) =>
-      reject(new Error(e.code === 1
-        ? "Location permission is blocked. Allow it in your browser settings and try again."
-        : "Couldn't get your location. Please try once more.")),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-  });
+const isMobile = () =>
+  /Android|iPhone|iPad|iPod|Windows Phone|webOS|Mobile/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
+
+const once = (opts: PositionOptions): Promise<GeolocationPosition> =>
+  new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, opts));
+
+const getPosition = async (): Promise<GeolocationPosition> => {
+  if (!navigator.geolocation) throw new Error("Location isn't supported on this device");
+  try {
+    return await once({ enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+  } catch (e: any) {
+    if (e?.code === 1)
+      throw new Error("Location permission is blocked. Allow it in your browser settings and try again.");
+    try {
+      // fallback: low accuracy, allow a slightly cached fix
+      return await once({ enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
+    } catch {
+      throw new Error("Couldn't get your location. Move near a window or turn GPS on, then try again.");
+    }
+  }
+};
 const downloadCsv = (rows: any[], filename: string) => {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -694,11 +707,14 @@ function HomeScreen({ me }: any) {
             )}
 
             <button className={`att-btn big ${open ? "gout" : "gin"}`} style={{ marginTop: 12 }}
-              onClick={() => punch(open ? "out" : "in")} disabled={busy}>
+              onClick={() => punch(open ? "out" : "in")}
+              disabled={busy || (!open && !isMobile())}>
               {busy ? "Getting location…" : open ? "Check-out" : "Check-in"}
             </button>
             <p className="att-muted" style={{ marginTop: 9, fontSize: 12 }}>
-              Location is recorded with every punch
+              {!open && !isMobile()
+                ? "Check-in works only on your phone. Check-out can be done from anywhere."
+                : "Location is recorded with every punch"}
             </p>
 
             {sessions.length > 0 && (
@@ -841,8 +857,12 @@ function RegularizeSheet({ me, onClose }: any) {
       <div className="att-card att-stack">
         <div>
           <label>Date</label>
-          <input type="date" max={istToday()} value={form.work_date}
+          <input type="date" max={istToday()} min={addDays(istToday(), -15)}
+            value={form.work_date}
             onChange={(e) => setForm({ ...form, work_date: e.target.value })} />
+          <p className="att-muted" style={{ marginTop: 6 }}>
+            Only the last 15 days can be regularized.
+          </p>
         </div>
         <div className="att-row2">
           <div>
@@ -863,8 +883,12 @@ function RegularizeSheet({ me, onClose }: any) {
         </div>
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
+        {form.req_punch_in && form.req_punch_out && form.req_punch_out <= form.req_punch_in && (
+          <Note>Check-out time must be after check-in time.</Note>
+        )}
         <button className="att-btn" onClick={submit}
-          disabled={busy || !form.reason || (!form.req_punch_in && !form.req_punch_out)}>
+          disabled={busy || !form.reason.trim() || (!form.req_punch_in && !form.req_punch_out)
+            || (!!form.req_punch_in && !!form.req_punch_out && form.req_punch_out <= form.req_punch_in)}>
           {busy ? "Sending…" : "Send request"}
         </button>
       </div>
@@ -1045,11 +1069,18 @@ function AttSummary({ me }: any) {
             [ {fmtHM(me.shift_start)} – {fmtHM(me.shift_end)} ]
           </span>
         </div>
-        <button className={`att-checkbtn ${openSess ? "out" : ""}`} disabled={busy}
+        <button className={`att-checkbtn ${openSess ? "out" : ""}`}
+          disabled={busy || (!openSess && !isMobile())}
+          title={!openSess && !isMobile() ? "Check-in works only on a phone" : ""}
           onClick={() => punch(openSess ? "out" : "in")}>
           <span>{busy ? "Getting location…" : openSess ? "Check-out" : "Check-in"}</span>
           <b>{th}:{tm}:{ts} Hrs</b>
         </button>
+        {!openSess && !isMobile() && (
+          <span className="att-muted" style={{ width: "100%" }}>
+            Check-in works only on your phone. Check-out can be done from anywhere.
+          </span>
+        )}
       </div>
 
       <Note>{err}</Note>
@@ -1470,25 +1501,81 @@ function LeavesScreen({ me, tab }: any) {
   );
 }
 
+const LEAVE_RULES: Record<string, {
+  single?: boolean; fixedDays?: number; reasonReq?: boolean;
+  pastDays: number; futureDays: number; note: string;
+}> = {
+  SL:    { reasonReq: true, pastDays: 30, futureDays: 7,
+           note: "Can be applied up to 30 days back. Reason is required." },
+  CL:    { pastDays: 0, futureDays: 365,
+           note: "Apply in advance — backdated casual leave isn't allowed." },
+  EL:    { pastDays: 0, futureDays: 365,
+           note: "Apply in advance — backdated earned leave isn't allowed." },
+  SHORT: { single: true, fixedDays: 0.25, reasonReq: true, pastDays: 7, futureDays: 30,
+           note: "Single day only, counts as a quarter day. Reason is required." },
+  HALF:  { single: true, fixedDays: 0.5, reasonReq: true, pastDays: 7, futureDays: 30,
+           note: "Single day only, counts as half a day. Reason is required." },
+};
+
 function ApplyLeaveSheet({ me, types, onClose }: any) {
+  const today = istToday();
   const [form, setForm] = useState<any>({
-    leave_type: types[0]?.code || "CL", from_date: istToday(),
-    to_date: istToday(), half_day: false, reason: "",
+    leave_type: types[0]?.code || "CL", from_date: today, to_date: today, reason: "",
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
 
+  const rule = LEAVE_RULES[form.leave_type]
+    || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: false };
+  const minDate = addDays(today, -rule.pastDays);
+  const maxDate = addDays(today, rule.futureDays);
+
+  // type badalte hi dates ko rule ke andar le aao
+  const setType = (code: string) => {
+    const r = LEAVE_RULES[code]
+      || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: false };
+    const lo = addDays(today, -r.pastDays);
+    const hi = addDays(today, r.futureDays);
+    let f = form.from_date < lo ? lo : form.from_date > hi ? hi : form.from_date;
+    let t = r.single ? f : form.to_date;
+    if (t < f) t = f;
+    if (t > hi) t = hi;
+    setForm({ ...form, leave_type: code, from_date: f, to_date: t });
+  };
+
+  const setFrom = (v: string) => {
+    const t = rule.single || v > form.to_date ? v : form.to_date;
+    setForm({ ...form, from_date: v, to_date: t });
+  };
+
   const days = useMemo(() => {
+    if (rule.fixedDays) return rule.fixedDays;
     const d = (new Date(form.to_date).getTime() - new Date(form.from_date).getTime()) / 86400000 + 1;
-    return form.half_day ? 0.5 : Math.max(1, d);
-  }, [form]);
+    return Math.max(1, Math.round(d));
+  }, [form, rule]);
+
+  const problem = useMemo(() => {
+    if (form.to_date < form.from_date) return "To date can't be before the from date.";
+    if (form.from_date < minDate || form.to_date > maxDate)
+      return `For ${form.leave_type}, pick a date between ${fmtDate(minDate)} and ${fmtDate(maxDate)}.`;
+    if (rule.single && form.to_date !== form.from_date)
+      return "This leave type is for a single day only.";
+    if (rule.reasonReq && !form.reason.trim()) return "Reason is required for this leave type.";
+    if (days > 60) return "One request can't be longer than 60 days.";
+    return "";
+  }, [form, rule, days, minDate, maxDate]);
 
   const submit = async () => {
+    if (problem) { setMsg({ err: problem, ok: "" }); return; }
     setBusy(true); setMsg({ err: "", ok: "" });
-    const { error } = await supabase.from("leaves")
-      .insert({ ...form, employee_id: me.id, days, status: "Pending" });
-    if (error) setMsg({ err: "Couldn't submit: " + error.message, ok: "" });
-    else setMsg({ err: "", ok: "Leave request sent." });
+    const { error } = await supabase.from("leaves").insert({
+      employee_id: me.id, leave_type: form.leave_type,
+      from_date: form.from_date, to_date: form.to_date,
+      half_day: form.leave_type === "HALF", days,
+      reason: form.reason.trim(), status: "Pending",
+    });
+    if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
+    else setMsg({ err: "", ok: "Leave request sent for approval." });
     setBusy(false);
   };
 
@@ -1497,43 +1584,50 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
       <div className="att-card att-stack">
         <div>
           <label>Leave type</label>
-          <select value={form.leave_type} onChange={(e) => setForm({ ...form, leave_type: e.target.value })}>
+          <select value={form.leave_type} onChange={(e) => setType(e.target.value)}>
             {types.map((t: any) => (
               <option key={t.code} value={t.code}>{t.name}{t.paid ? "" : " (unpaid)"}</option>
             ))}
           </select>
+          {rule.note && (
+            <p className="att-muted" style={{ marginTop: 6 }}>{rule.note}</p>
+          )}
         </div>
+
         <div className="att-row2">
           <div>
-            <label>From</label>
-            <input type="date" value={form.from_date} onChange={(e) => setForm({
-              ...form, from_date: e.target.value,
-              to_date: e.target.value > form.to_date ? e.target.value : form.to_date })} />
+            <label>{rule.single ? "Date" : "From"}</label>
+            <input type="date" value={form.from_date} min={minDate} max={maxDate}
+              onChange={(e) => setFrom(e.target.value)} />
           </div>
-          <div>
-            <label>To</label>
-            <input type="date" value={form.to_date} min={form.from_date}
-              onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
-          </div>
+          {!rule.single && (
+            <div>
+              <label>To</label>
+              <input type="date" value={form.to_date} min={form.from_date} max={maxDate}
+                onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
+            </div>
+          )}
         </div>
-        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
-          <input type="checkbox" checked={form.half_day}
-            onChange={(e) => setForm({ ...form, half_day: e.target.checked, to_date: form.from_date })} />
-          Half day
-        </label>
+
         <div>
-          <label>Reason</label>
-          <textarea rows={2} placeholder="Reason" value={form.reason}
+          <label>Reason {rule.reasonReq && <span style={{ color: "#dc2626" }}>*</span>}</label>
+          <textarea rows={2} value={form.reason}
+            placeholder={rule.reasonReq ? "Required" : "Optional"}
             onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         </div>
+
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <div className="att-between">
-          <span className="att-muted">{days} day{days === 1 ? "" : "s"}</span>
-          <button className="att-btn sm" onClick={submit} disabled={busy || !form.reason}>
+          <span className="att-muted">
+            {days} day{days === 1 ? "" : "s"}
+            {rule.fixedDays ? " (counted)" : ""}
+          </span>
+          <button className="att-btn sm" onClick={submit} disabled={busy || !!problem}>
             {busy ? "Sending…" : "Apply"}
           </button>
         </div>
+        {problem && !msg.err && <p className="att-muted">{problem}</p>}
       </div>
     </Sheet>
   );
@@ -1553,8 +1647,9 @@ function InboxScreen({ me, onCount }: any) {
       supabase.from("regularizations").select("*, employees(full_name, emp_code)")
         .eq("status", "Pending").order("work_date"),
     ]);
-    const L = (l.data || []).filter((x: any) => x.employee_id !== me.id);
-    const R = (r.data || []).filter((x: any) => x.employee_id !== me.id);
+    const keep = (x: any) => me.role === "admin" || x.employee_id !== me.id;
+    const L = (l.data || []).filter(keep);
+    const R = (r.data || []).filter(keep);
     setLeaves(L); setRegs(R); onCount(L.length + R.length);
   };
   useEffect(() => { load(); }, []);
@@ -1588,7 +1683,10 @@ function InboxScreen({ me, onCount }: any) {
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.employees?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.employees?.full_name}</b></p>
+                <p><b>{r.employees?.full_name}</b>
+                  {r.employee_id === me.id && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
+                </p>
                 <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</p>
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
               </div>
@@ -1608,7 +1706,10 @@ function InboxScreen({ me, onCount }: any) {
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.employees?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.employees?.full_name}</b></p>
+                <p><b>{r.employees?.full_name}</b>
+                  {r.employee_id === me.id && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
+                </p>
                 <p className="att-muted">
                   {fmtDate(r.work_date)} · {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
                 </p>
@@ -2123,12 +2224,20 @@ function PayrollTab() {
           {rows.map((r: any) => (
             <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
               <div className="att-between">
-                <b>{r.full_name}</b>
-                <b style={{ color: "#2563eb" }}>{r.payable_amount ?? "—"}</b>
+                <b>{r.emp_code} · {r.full_name}</b>
+                <b style={{ color: r.monthly_gross ? "#2563eb" : "#98a2b3" }}>
+                  {r.monthly_gross ? `₹ ${Number(r.payable_amount).toLocaleString("en-IN")}` : "salary not set"}
+                </b>
               </div>
-              <p className="att-muted" style={{ marginTop: 3 }}>
-                {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid ·{" "}
-                {r.unpaid_leaves} LOP · {r.absent_days} absent → {r.payable_days} payable
+              <p className="att-muted" style={{ marginTop: 4 }}>
+                Counted {r.counted_days} of {r.month_days} days ·{" "}
+                {r.present_days} present · {r.half_days} half · {r.week_offs} week off ·{" "}
+                {r.holidays} holiday · {r.paid_leaves} paid leave · {r.unpaid_leaves} LOP ·{" "}
+                <span style={{ color: "#b42318" }}>{r.absent_days} absent</span>
+              </p>
+              <p className="att-muted" style={{ marginTop: 2 }}>
+                Payable <b>{r.payable_days}</b> days
+                {r.monthly_gross ? ` × ₹${r.per_day}/day` : ""}
               </p>
             </div>
           ))}
@@ -2234,7 +2343,7 @@ export default function Attendance() {
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
       ]);
       setPending([...(l.data || []), ...(r.data || [])]
-        .filter((x: any) => x.employee_id !== me.id).length);
+        .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length);
     })();
   }, [me, tab]);
 
