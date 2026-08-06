@@ -503,24 +503,54 @@ const isMobile = () =>
   /Android|iPhone|iPad|iPod|Windows Phone|webOS|Mobile/i.test(navigator.userAgent)
   || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
 
+const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 const once = (opts: PositionOptions): Promise<GeolocationPosition> =>
   new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, opts));
 
+const GPS_HELP = () => isIOS()
+  ? "Turn on Settings → Privacy & Security → Location Services, and allow location for your browser."
+  : "Pull down the notification shade and turn on Location, then tap Check-in again.";
+
+// Pehle network/wifi wali fast location (GPS band ho tab bhi chalti hai),
+// phir GPS se refine. Isse zyadatar bar pehli hi koshish mein mil jati hai.
 const getPosition = async (): Promise<GeolocationPosition> => {
   if (!navigator.geolocation) throw new Error("Location isn't supported on this device");
+
   try {
-    return await once({ enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    const perm: any = (navigator as any).permissions
+      && await (navigator as any).permissions.query({ name: "geolocation" });
+    if (perm && perm.state === "denied")
+      throw new Error("PERM");
+  } catch (e: any) {
+    if (e?.message === "PERM")
+      throw new Error("Location is blocked for this site. Allow it in your browser settings, then try again.");
+  }
+
+  // 1) fast, low accuracy, thoda purana fix bhi chalega
+  try {
+    return await once({ enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
   } catch (e: any) {
     if (e?.code === 1)
-      throw new Error("Location permission is blocked. Allow it in your browser settings and try again.");
-    try {
-      // fallback: low accuracy, allow a slightly cached fix
-      return await once({ enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
-    } catch {
-      throw new Error("Couldn't get your location. Move near a window or turn GPS on, then try again.");
-    }
+      throw new Error("Location permission is blocked. Allow it for this site, then try again.");
+  }
+
+  // 2) GPS se, zyada time dekar
+  try {
+    return await once({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  } catch (e: any) {
+    if (e?.code === 1)
+      throw new Error("Location permission is blocked. Allow it for this site, then try again.");
+  }
+
+  // 3) aakhri koshish — kuch bhi mil jaye
+  try {
+    return await once({ enableHighAccuracy: false, timeout: 25000, maximumAge: 600000 });
+  } catch {
+    throw new Error("Location is off. " + GPS_HELP());
   }
 };
+
 const downloadCsv = (rows: any[], filename: string) => {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -884,7 +914,15 @@ function HomeScreen({ me }: any) {
             )}
           </div>
 
-          <Note>{err}</Note>
+          {err && (
+            <div className="att-note err">
+              <span>{err}</span>
+              <button className="att-btn sm line" style={{ marginTop: 9 }}
+                onClick={() => punch(open ? "out" : "in")} disabled={busy}>
+                Try again
+              </button>
+            </div>
+          )}
           <Note kind="ok">{ok}</Note>
 
           <RangeBar range={range} setRange={setRange} />
