@@ -44,20 +44,23 @@ const CSS = `
   background-size: 5px 5px; background-repeat: no-repeat; }
 .hjsatt input[type=checkbox] { width: 18px; height: 18px; min-height: 0; accent-color: #2563eb; }
 
-/* date / month / time — inhe native picker chahiye, warna icon gayab ho jata hai */
+/* date / month / time — native icon wapas, apne rang mein */
 .hjsatt input[type=date], .hjsatt input[type=month], .hjsatt input[type=time] {
-  -webkit-appearance: none; appearance: none; padding-right: 38px; position: relative;
-  background-image: url("data:image/svg+xml;utf8,\
-<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' \
-fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round'>\
-<rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/></svg>");
-  background-repeat: no-repeat; background-position: calc(100% - 11px) center; cursor: pointer; }
+  -webkit-appearance: none; appearance: none;
+  min-width: 148px; cursor: pointer; }
+.hjsatt input[type=month] { min-width: 128px; }
+.hjsatt input[type=time] { min-width: 108px; }
 
 .hjsatt input[type=date]::-webkit-calendar-picker-indicator,
 .hjsatt input[type=month]::-webkit-calendar-picker-indicator,
 .hjsatt input[type=time]::-webkit-calendar-picker-indicator {
-  position: absolute; right: 0; top: 0; width: 100%; height: 100%;
-  opacity: 0; cursor: pointer; }
+  margin-left: 8px; padding: 2px; cursor: pointer; opacity: 1;
+  filter: invert(32%) sepia(87%) saturate(2000%) hue-rotate(212deg) brightness(95%); }
+.hjsatt input[type=date]::-webkit-calendar-picker-indicator:hover,
+.hjsatt input[type=month]::-webkit-calendar-picker-indicator:hover,
+.hjsatt input[type=time]::-webkit-calendar-picker-indicator:hover {
+  background: #eff4ff; border-radius: 4px; }
+
 .hjsatt input::placeholder, .hjsatt textarea::placeholder { color: #9ca3af; }
 .hjsatt input:focus, .hjsatt select:focus, .hjsatt textarea:focus {
   border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
@@ -4495,7 +4498,8 @@ function VerifyPanel({ onCount }: any) {
 
         <div className="att-flex">
           <input type="date" value={date} max={istToday()}
-            onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
+            onChange={(e) => setDate(e.target.value)}
+            style={{ width: "auto", minWidth: 168 }} />
           {pending.length > 0 && (
             <button className="att-btn green" disabled={busy}
               onClick={() => approveMany(rows)}>
