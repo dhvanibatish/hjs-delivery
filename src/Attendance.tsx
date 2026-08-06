@@ -369,24 +369,35 @@ const CSS = `
 .hjsatt .att-etable th.first { background: #f9fafb; }
 .hjsatt .att-arrow2 { color: #98a2b3; font-size: 10px; margin-left: 4px; }
 
-/* ---------- zoho-style column tree ---------- */
-.hjsatt .att-tw { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 4px 2px 14px; }
-.hjsatt .att-trow { display: flex; align-items: flex-start; min-width: min-content; }
-.hjsatt .att-tcol { display: flex; flex-direction: column; gap: 10px; }
+/* ---------- org chart with real connectors ---------- */
+.hjsatt .att-tw { overflow: auto; -webkit-overflow-scrolling: touch; padding: 6px 2px 16px; }
+.hjsatt .att-node { display: flex; align-items: center; }
 .hjsatt .att-tcard { display: flex; gap: 10px; align-items: center; background: #fff;
-  border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; width: 262px;
-  cursor: pointer; text-align: left; }
-.hjsatt .att-tcard:hover { border-color: #b2ccff; }
-.hjsatt .att-tcard.on { border-color: #2563eb; background: #f5f8ff;
-  box-shadow: 0 0 0 1px #2563eb; }
+  border: 1px solid #d0d5dd; border-radius: 8px; padding: 10px 12px; width: 264px;
+  flex-shrink: 0; text-align: left; }
+.hjsatt .att-tcard.can { cursor: pointer; }
+.hjsatt .att-tcard.can:hover { border-color: #2563eb; }
+.hjsatt .att-tcard.on { border-color: #2563eb; background: #f5f8ff; }
 .hjsatt .att-tcard .nm { font-weight: 650; font-size: 14px; display: block; }
 .hjsatt .att-tcard .dz { font-size: 12.5px; color: #6b7280; display: block; }
-.hjsatt .att-tjoin { display: flex; align-items: center; align-self: center; }
-.hjsatt .att-tstub { width: 20px; height: 1px; background: #d0d5dd; }
-.hjsatt .att-tbadge { background: #2563eb; color: #fff; font-size: 11.5px; font-weight: 700;
-  border-radius: 5px; padding: 3px 9px; }
+.hjsatt .att-tbadge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700;
+  border-radius: 5px; padding: 2px 7px; flex-shrink: 0; }
 .hjsatt .att-tbadge.grey { background: #eef0f3; color: #475467; }
-.hjsatt .att-tspine { align-self: stretch; border-left: 1px solid #d0d5dd; }
+
+/* parent -> children connector */
+.hjsatt .att-stub { width: 22px; height: 1px; background: #d0d5dd; flex-shrink: 0; }
+.hjsatt .att-kids { display: flex; flex-direction: column; justify-content: center; }
+.hjsatt .att-kid { display: flex; align-items: center; position: relative; padding: 5px 0; }
+/* vertical spine */
+.hjsatt .att-kid:before { content: ""; position: absolute; left: 0; width: 1px;
+  background: #d0d5dd; top: 0; bottom: 0; }
+.hjsatt .att-kid:first-child:before { top: 50%; }
+.hjsatt .att-kid:last-child:before { bottom: 50%; }
+.hjsatt .att-kid:only-child:before { display: none; }
+/* horizontal stub into each child */
+.hjsatt .att-kid:after { content: ""; position: absolute; left: 0; top: 50%;
+  width: 22px; height: 1px; background: #d0d5dd; }
+.hjsatt .att-kid > * { margin-left: 22px; }
 
 /* ---------- reporting tree ---------- */
 .hjsatt .att-rt { margin-left: 16px; padding-left: 14px; border-left: 1px solid #e5e7eb; }
@@ -1821,9 +1832,13 @@ function DirectoryTab() {
 
   const teams = Array.from(new Set(rows.map((r) => r.team))).sort();
   const cols: [string, string][] = [
-    ["emp_code", "Employee ID"], ["full_name", "Name"], ["email", "Email address"],
-    ["team", "Department"], ["designation", "Designation"],
-    ["manager_name", "Reporting to"], ["phone", "Phone"], ["state", "Status"],
+    ["emp_code", "Employee ID"], ["first_name", "First Name"], ["last_name", "Last Name"],
+    ["nickname", "Nick name"], ["email", "Email address"],
+    ["personal_email", "Personal Email"], ["phone", "Personal Mobile"], ["team", "Department"],
+    ["designation", "Designation"], ["employment_type", "Employment Type"],
+    ["employee_status", "Employee Status"], ["source_of_hire", "Source of Hire"],
+    ["date_of_joining", "Date of Joining"], ["manager_name", "Reporting Manager"],
+    ["date_of_birth", "Date of Birth"], ["state", "Today"],
   ];
 
   const shown = rows
@@ -1871,14 +1886,26 @@ function DirectoryTab() {
             {shown.map((r) => (
               <tr key={r.emp_code}>
                 <td className="first">{r.emp_code}</td>
-                <td>{r.full_name}</td>
+                <td>{r.first_name || r.full_name}</td>
+                <td>{r.last_name || "—"}</td>
+                <td>{r.nickname || "—"}</td>
                 <td>{r.email
                   ? <a href={`mailto:${r.email}`} style={{ color: "#2563eb" }}>{r.email}</a>
                   : <span className="att-muted">—</span>}</td>
+                <td>{r.personal_email
+                  ? <a href={`mailto:${r.personal_email}`} style={{ color: "#2563eb" }}>{r.personal_email}</a>
+                  : <span className="att-muted">—</span>}</td>
+                <td>{r.phone
+                  ? <a href={`tel:${r.phone}`} style={{ color: "#2563eb" }}>{r.phone}</a>
+                  : <span className="att-muted">—</span>}</td>
                 <td>{r.team}</td>
                 <td>{r.designation || "—"}</td>
+                <td>{r.employment_type || "—"}</td>
+                <td>{r.employee_status || "—"}</td>
+                <td>{r.source_of_hire || "—"}</td>
+                <td>{r.date_of_joining ? fmtDate(r.date_of_joining) : "—"}</td>
                 <td>{r.manager_name || "—"}</td>
-                <td>{r.phone || "—"}</td>
+                <td>{r.date_of_birth ? fmtDate(r.date_of_birth) : "—"}</td>
                 <td><span style={{ fontWeight: 650, color: stateColor[r.state] }}>{r.state}</span></td>
               </tr>
             ))}
@@ -1953,55 +1980,60 @@ function DeptTab() {
   );
 }
 
-function TreeCard({ p, on, onClick, count }: any) {
+function TreeCard({ p, open, canOpen, onClick, count }: any) {
   return (
-    <button className={`att-tcard ${on ? "on" : ""}`} onClick={onClick}>
+    <button className={`att-tcard ${canOpen ? "can" : ""} ${open ? "on" : ""}`}
+      onClick={canOpen ? onClick : undefined}>
       <Avatar name={p.name} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span className="nm">{p.name}</span>
         <span className="dz">{p.sub}</span>
       </span>
-      {count > 0 && <span className={`att-tbadge ${on ? "" : "grey"}`}>{count}</span>}
+      {count > 0 && (
+        <span className={`att-tbadge ${open ? "" : "grey"}`}>
+          {open ? "\u2212" : "+"} {count}
+        </span>
+      )}
     </button>
   );
 }
 
-// Zoho jaisa horizontal column tree: ek column select karo, agla column khul jata hai
-function ColumnTree({ roots, childrenOf, countOf, toCard }: any) {
-  const [path, setPath] = useState<any[]>([]);
+// Asli org chart: parent se uske apne bachchon tak hi line jaati hai
+function OrgNode({ node, childrenOf, countOf, toCard, depth }: any) {
+  const kids = childrenOf(node);
+  const [open, setOpen] = useState(depth < 1);
+  return (
+    <div className="att-node">
+      <TreeCard p={toCard(node)} count={kids.length} canOpen={kids.length > 0}
+        open={open && kids.length > 0} onClick={() => setOpen(!open)} />
+      {open && kids.length > 0 && (
+        <>
+          <span className="att-stub" />
+          <div className="att-kids">
+            {kids.map((k: any) => (
+              <div className="att-kid" key={k.id}>
+                <OrgNode node={k} childrenOf={childrenOf} countOf={countOf}
+                  toCard={toCard} depth={depth + 1} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-  const columns: any[][] = [roots];
-  path.forEach((node) => {
-    const ch = childrenOf(node);
-    if (ch.length) columns.push(ch);
-  });
-
-  const pick = (level: number, node: any) => {
-    const next = path.slice(0, level);
-    if (path[level] && path[level].id === node.id) setPath(next);   // dobara click = band
-    else setPath([...next, node]);
-  };
-
+function OrgChart({ roots, childrenOf, countOf, toCard }: any) {
   return (
     <div className="att-tw">
-      <div className="att-trow">
-        {columns.map((col, li) => (
-          <div key={li} style={{ display: "flex", alignItems: "flex-start" }}>
-            {li > 0 && (
-              <div className="att-tjoin">
-                <span className="att-tstub" />
-                <span className="att-tbadge">{col.length}</span>
-                <span className="att-tstub" />
-              </div>
-            )}
-            <div className="att-tcol">
-              {col.map((n: any) => (
-                <TreeCard key={n.id} p={toCard(n)} count={countOf(n)}
-                  on={path[li]?.id === n.id} onClick={() => pick(li, n)} />
-              ))}
-            </div>
+      <div className="att-kids">
+        {roots.map((r: any) => (
+          <div className="att-kid" key={r.id} style={{ paddingBottom: 14 }}>
+            <OrgNode node={r} childrenOf={childrenOf} countOf={countOf}
+              toCard={toCard} depth={0} />
           </div>
         ))}
+        {!roots.length && <p className="att-empty">Nothing to show.</p>}
       </div>
     </div>
   );
@@ -2047,8 +2079,8 @@ function EmpTreeTab() {
   return (
     <>
       <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
-      <p className="att-muted">Tap a card to open the people reporting to them</p>
-      <ColumnTree
+      <p className="att-muted">Click the + on a card to open the people reporting to them</p>
+      <OrgChart
         roots={kids["root"] || []}
         childrenOf={(n: any) => kids[n.id] || []}
         countOf={(n: any) => deep(n.id)}
@@ -3038,6 +3070,18 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
 
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const removeEmp = async (hard: boolean) => {
+    if (!row) return;
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("delete_employee", { p_emp: row.id, p_hard: hard });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: hard ? "Employee deleted." : "Employee deactivated." });
+           setTimeout(onClose, 900); }
+    setBusy(false);
+  };
+
   const resetCode = async () => {
     if (!row) return;
     setBusy(true); setMsg({ err: "", ok: "" });
@@ -3245,6 +3289,31 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         <button className="att-btn" onClick={save} disabled={busy || !f.emp_code || !f.full_name}>
           {busy ? "Saving…" : isNew ? "Add employee" : "Save"}
         </button>
+
+        {!isNew && (
+          <div style={{ borderTop: "1px solid #eaecf0", paddingTop: 13, marginTop: 4 }}>
+            {!confirmDel ? (
+              <div className="att-flex">
+                <button className="att-btn sm line" disabled={busy || !f.active}
+                  onClick={() => removeEmp(false)}>Deactivate</button>
+                <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                  disabled={busy} onClick={() => setConfirmDel(true)}>Delete permanently</button>
+              </div>
+            ) : (
+              <div className="att-note err">
+                <span>
+                  This wipes {f.full_name}'s attendance, leaves and everything else. Deactivating
+                  keeps the record and the history — that's usually what you want.
+                </span>
+                <div className="att-flex" style={{ marginTop: 10 }}>
+                  <button className="att-btn sm" style={{ background: "#b42318" }}
+                    disabled={busy} onClick={() => removeEmp(true)}>Yes, delete</button>
+                  <button className="att-btn sm grey" onClick={() => setConfirmDel(false)}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Sheet>
   );
@@ -3349,8 +3418,8 @@ function OrgTab() {
   return (
     <>
       <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
-      <p className="att-muted">{teams.length} teams · tap a team to see its people</p>
-      <ColumnTree
+      <p className="att-muted">{teams.length} teams · click the + on a team to see its people</p>
+      <OrgChart
         roots={roots}
         childrenOf={(n: any) => (n._kind === "team" ? membersOf(n.id) : [])}
         countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
