@@ -112,7 +112,8 @@ const BRANCH_NAMES = {
   Gurugram: 'Gurugram',
   Noida: 'Noida',
 };
-const branchLabel = (code) => BRANCH_NAMES[code] || code;
+const branchLabel = (code) =>
+  (REGIONS[code] && REGIONS[code].label) || BRANCH_NAMES[code] || code;
 
 /* Store managers (branch → name) */
 const STORE_MANAGERS = {
@@ -164,6 +165,48 @@ const ACTIONS = [
    LOGIN  ── store dropdown se choose karke store-wise PIN daalo.
    Head login se saare stores dikhte hain.
    ══════════════════════════════════════════════════════════════════════ */
+/* ── Region grouping — Punjab / Delhi NCR ek saath dekhne ke liye ──── */
+const REGIONS = {
+  PUNJAB: {
+    label: 'Punjab (all stores)',
+    stores: ['Mohali', 'Ludhiana', 'Jalandhar'],
+  },
+  NCR: {
+    label: 'Delhi side (all stores)',
+    // Jaipur aur Lucknow bhi Delhi side ke under aate hain
+    stores: [
+      'Janakpuri',
+      'Shastri Nagar',
+      'Gurugram',
+      'Noida',
+      'Jaipur',
+      'Lucknow',
+    ],
+  },
+};
+/* login / switcher dropdown me heading-wise list */
+const STORE_GROUPS = [
+  { label: 'Punjab', stores: ['Mohali', 'Ludhiana', 'Jalandhar'] },
+  {
+    label: 'Delhi side',
+    stores: [
+      'Janakpuri',
+      'Shastri Nagar',
+      'Gurugram',
+      'Noida',
+      'Jaipur',
+      'Lucknow',
+    ],
+  },
+];
+const isRegionCode = (b) => !!REGIONS[b];
+/* ek branch code ke andar kaunse stores aate hain */
+function storesOf(branch) {
+  if (branch === 'ALL') return null; // null = sab
+  if (REGIONS[branch]) return REGIONS[branch].stores;
+  return [branch];
+}
+
 const STORE_ORDER = [
   'Mohali',
   'Ludhiana',
@@ -175,9 +218,9 @@ const STORE_ORDER = [
   'Gurugram',
   'Noida',
 ];
-/* All stores = 2222, baaki 1001 se shuru */
+/* All stores = 2222 · Punjab = 3001 · Delhi NCR = 3002 · store 1001 se shuru */
 const LOCAL_PW = (() => {
-  const m = { ALL: '2222' };
+  const m = { ALL: '2222', PUNJAB: '3001', NCR: '3002' };
   STORE_ORDER.forEach((c, i) => {
     m[c] = String(1001 + i);
   });
@@ -185,10 +228,15 @@ const LOCAL_PW = (() => {
 })();
 function sessionFor(branch) {
   const isHead = branch === 'ALL';
+  const isRegion = isRegionCode(branch);
   return {
     branch,
     authStore: branch,
     isHead,
+    isRegion,
+    // region login apne stores ke beech switch kar sake
+    canSwitch: isHead || isRegion,
+    switchList: isHead ? STORE_ORDER : isRegion ? REGIONS[branch].stores : [],
     name: isHead ? 'All stores' : branchLabel(branch),
     storeName: isHead ? 'All stores' : branchLabel(branch),
   };
@@ -362,6 +410,18 @@ const TXT = {
     hi: 'Sirf head delete kar sakta hai. View se hat jayega par database mein "Deleted" ke saath safe rahega.',
   },
   locked: { en: 'locked', hi: 'locked' },
+  lockedTitle: {
+    en: 'This ticket is closed',
+    hi: 'Ye ticket band ho chuka hai',
+  },
+  lockedNote: {
+    en: 'The issue was resolved, so the stages can no longer be edited. If a change is needed, ask head office (All stores login).',
+    hi: 'Samasya hal ho chuki hai, isliye stages ab edit nahi ho sakti. Kuch badalna ho to head office (All stores login) se kehna.',
+  },
+  headCanEdit: {
+    en: 'Head office login — you can still edit this closed ticket.',
+    hi: 'Head office login — aap ye band ticket bhi edit kar sakte hain.',
+  },
   nextStepBadge: { en: 'Next step', hi: 'Agla step' },
   // KV labels
   kvPhone: { en: 'Phone', hi: 'Phone' },
@@ -389,7 +449,7 @@ const TXT = {
     hi: 'Customer ne kya kaha — likhna zaroori hai.',
   },
   // technician stage
-  chooseTech: { en: 'Which technician? *', hi: 'Kaunsa technician? *' },
+  chooseTech: { en: 'Technician person *', hi: 'Technician person *' },
   techName: { en: "Technician's name *", hi: 'Technician ka naam *' },
   techNamePh: { en: 'Full name…', hi: 'Poora naam…' },
   techPhone: { en: 'Phone number *', hi: 'Phone number *' },
@@ -1050,15 +1110,17 @@ export default function App({
     if (!session) return [];
     const base = tickets.filter((x) => x.stage !== 'deleted');
     const br = viewBranch || session.branch;
-    if (br === 'ALL') return base;
-    return base.filter((x) => x.branch === br);
+    const list = storesOf(br);
+    if (!list) return base; // ALL
+    return base.filter((x) => list.includes(x.branch));
   }, [tickets, session, viewBranch]);
 
   // Activity log ke liye alag scope — deleted entries bhi chahiye
   const scopedAll = useMemo(() => {
     if (!session) return [];
-    if (session.branch === 'ALL') return tickets;
-    return tickets.filter((x) => x.branch === session.branch);
+    const list = storesOf(session.branch);
+    if (!list) return tickets; // ALL
+    return tickets.filter((x) => list.includes(x.branch));
   }, [tickets, session]);
 
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
@@ -1303,6 +1365,7 @@ export default function App({
         {active && (
           <Drawer
             d={active}
+            isHead={session.isHead}
             canDelete={session.isHead}
             onDelete={() => removeEntry(active.ticket_id)}
             onClose={() => setActiveId(null)}
@@ -1354,7 +1417,7 @@ export default function App({
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
           session={session}
-          page={session.branch === 'ALL' ? page : 'tickets'}
+          page={session.isHead || session.isRegion ? page : 'tickets'}
           onNav={setPage}
         />
         <div
@@ -1382,7 +1445,7 @@ export default function App({
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'dashboard' ? (
+            {(session.isHead || session.isRegion) && page === 'dashboard' ? (
               <Dashboard
                 tickets={scoped}
                 onOpen={(x) => setActiveId(x.ticket_id)}
@@ -1445,6 +1508,7 @@ export default function App({
       {active && (
         <Drawer
           d={active}
+          isHead={session.isHead}
           canDelete={session.isHead}
           onDelete={() => removeEntry(active.ticket_id)}
           onClose={() => setActiveId(null)}
@@ -1716,10 +1780,14 @@ function Dashboard({ tickets, onOpen }) {
             }}
           >
             <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
+            {STORE_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.stores.map((c) => (
+                  <option key={c} value={c}>
+                    {branchLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
@@ -2211,10 +2279,19 @@ function Login({ onLogin }) {
             >
               <option value="">Select store…</option>
               <option value="ALL">All stores</option>
-              {STORE_ORDER.map((c) => (
-                <option key={c} value={c}>
-                  {branchLabel(c)}
+              {Object.keys(REGIONS).map((rk) => (
+                <option key={rk} value={rk}>
+                  {REGIONS[rk].label}
                 </option>
+              ))}
+              {STORE_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.stores.map((c) => (
+                    <option key={c} value={c}>
+                      {branchLabel(c)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </Field>
@@ -2261,7 +2338,8 @@ function Login({ onLogin }) {
               ? 'Live · Connected to Supabase'
               : 'Not connected · check Supabase key'}
             <br />
-            Store PIN: starts at <b>1001</b> · All stores: <b>2222</b>
+            Store PIN: <b>1001</b> se · Punjab: <b>3001</b> · Delhi NCR:{' '}
+            <b>3002</b> · All stores: <b>2222</b>
           </div>
         </div>
       </div>
@@ -2271,14 +2349,14 @@ function Login({ onLogin }) {
 
 /* ═════════════════════════════════════════════════════════════ SIDEBAR */
 function Sidebar({ session, page, onNav }) {
-  const isAll = session.branch === 'ALL';
+  const isAll = session.isHead || session.isRegion;
   const nav = [
     { id: 'tickets', icon: LayoutDashboard, label: 'Complaints' },
     ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
     { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
     { id: 'reports', icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
-  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
+  const mgr = STORE_MANAGERS[session.branch] || null;
   return (
     <aside className="sidebar">
       <div className="brand" style={{ padding: '22px 20px 18px' }}>
@@ -2317,9 +2395,7 @@ function Sidebar({ session, page, onNav }) {
         <Building2 size={15} color={T.greenBright} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>
-            {session.branch === 'ALL'
-              ? 'All stores'
-              : branchLabel(session.branch)}
+            {branchLabel(session.branch)}
           </div>
           <div
             className="ellip"
@@ -2472,7 +2548,7 @@ function Header({
     day: 'numeric',
     month: 'long',
   });
-  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
+  const mgr = STORE_MANAGERS[session.branch] || null;
   return (
     <div
       style={{
@@ -2564,7 +2640,7 @@ function Header({
             <Package size={14} /> {L('categories')}
           </button>
         </div>
-        {session.isHead && (
+        {(session.canSwitch || session.isHead) && (
           <div style={{ position: 'relative' }}>
             <Building2
               size={15}
@@ -2576,12 +2652,36 @@ function Header({
               value={branchView || session.branch}
               onChange={(e) => onSwitchStore(e.target.value)}
             >
-              <option value="ALL">All stores</option>
-              {Object.keys(BRANCH_NAMES).map((c) => (
-                <option key={c} value={c}>
-                  {branchLabel(c)}
-                </option>
-              ))}
+              {session.isHead ? (
+                <>
+                  <option value="ALL">All stores</option>
+                  {Object.keys(REGIONS).map((rk) => (
+                    <option key={rk} value={rk}>
+                      {REGIONS[rk].label}
+                    </option>
+                  ))}
+                  {STORE_GROUPS.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.stores.map((c) => (
+                        <option key={c} value={c}>
+                          {branchLabel(c)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <option value={session.branch}>
+                    {branchLabel(session.branch)}
+                  </option>
+                  {(session.switchList || []).map((c) => (
+                    <option key={c} value={c}>
+                      {branchLabel(c)}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
         )}
@@ -2980,7 +3080,16 @@ function FooterTotal({ items }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
+function Drawer({
+  d,
+  onClose,
+  onAdvance,
+  onSetStage,
+  onEditStage,
+  canDelete,
+  onDelete,
+  isHead,
+}) {
   const [confirmDel, setConfirmDel] = useState(false);
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
@@ -2993,6 +3102,9 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
   const reachedIdx = cancelled
     ? reachedIdxFromLog(d._raw && d._raw.app_log)
     : idx;
+  // Resolved ticket band ho jaata hai — sirf head office (All stores) edit
+  // kar sakta hai. Baaki logins ke liye stages aur Edit buttons locked.
+  const resolvedLock = d.stage === 'resolution' && !isHead;
   const r = d._raw || {};
 
   const blocks = [
@@ -3126,11 +3238,56 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
               })}
             </div>
           </>
+        ) : resolvedLock ? (
+          <>
+            <div
+              className="cancel-note"
+              style={{
+                background: T.mint,
+                color: T.green,
+                borderColor: '#cfe3d0',
+              }}
+            >
+              <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div style={{ fontWeight: 800 }}>{L('lockedTitle')}</div>
+                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
+                  {L('lockedNote')}
+                </div>
+              </div>
+            </div>
+            <div className="sec-title" style={{ marginTop: 16 }}>
+              {L('prevStages')}
+            </div>
+            <div className="stage-picker">
+              {STAGES.map((st2) => (
+                <button
+                  key={st2.id}
+                  className="stage-pick-btn"
+                  disabled
+                  style={{
+                    background: '#EDEBE4',
+                    color: T.inkSoft,
+                    borderColor: T.line,
+                    cursor: 'default',
+                  }}
+                >
+                  <Check size={12} style={{ marginRight: 4, verticalAlign: -1 }} />
+                  {sShort(st2.id)}
+                </button>
+              ))}
+            </div>
+          </>
         ) : (
           <>
             <div className="sec-title" style={{ marginTop: 16 }}>
               {L('moveToStage')}
             </div>
+            {d.stage === 'resolution' && isHead && (
+              <div className="head-edit-note">
+                <ShieldCheck size={14} /> {L('headCanEdit')}
+              </div>
+            )}
             {next ? (
               <div className="next-hint">
                 <span className="col-pip" style={{ background: next.color }} />
@@ -3190,13 +3347,16 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
         </div>
 
         {blocks.map((b) => {
-          const limit = cancelled ? reachedIdx : idx + 1;
+          const limit = cancelled || resolvedLock ? reachedIdx : idx + 1;
           if (b.i > limit) return null;
           const st = STAGES[b.i];
           const filled = cancelled ? b.i <= reachedIdx : b.i <= idx;
-          const editable = filled && !cancelled;
+          const editable = filled && !cancelled && !resolvedLock;
           return (
-            <div key={b.id} style={cancelled ? { opacity: 0.75 } : null}>
+            <div
+              key={b.id}
+              style={cancelled || resolvedLock ? { opacity: 0.75 } : null}
+            >
               <div
                 className="sec-title stage-block-title"
                 style={{ justifyContent: 'space-between' }}
@@ -3207,9 +3367,9 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                 </span>
                 {editable ? (
                   <button className="mini-edit" onClick={() => onEditStage(b.id)}>
-                    <Pencil size={13} /> Edit
+                    <Pencil size={13} /> {L('edit')}
                   </button>
-                ) : cancelled ? (
+                ) : cancelled || resolvedLock ? (
                   <span
                     className="next-badge"
                     style={{ color: T.inkSoft, background: T.slateSoft }}
@@ -3935,10 +4095,14 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
                 onChange={(e) => setStore(e.target.value)}
               >
                 <option value="ALL">All stores</option>
-                {STORE_ORDER.map((s) => (
-                  <option key={s} value={s}>
-                    {branchLabel(s)}
-                  </option>
+                {STORE_GROUPS.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.stores.map((c) => (
+                      <option key={c} value={c}>
+                        {branchLabel(c)}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             )}
@@ -4220,6 +4384,8 @@ function StyleTag() {
       .next-hint b { font-weight: 800; }
       .next-hint .col-pip { width: 10px; height: 10px; }
       .next-hint.done { background: ${T.mint}; border-color: #cfe3d0; color: ${T.green}; font-weight: 800; }
+      .head-edit-note { display: flex; align-items: center; gap: 7px; background: ${T.amberSoft}; border: 1px solid #eddcbf; color: ${T.amber}; border-radius: 11px; padding: 10px 13px; font-size: 12.5px; font-weight: 700; margin-bottom: 12px; line-height: 1.4; }
+      .head-edit-note svg { flex-shrink: 0; }
       .next-badge { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 4px 10px; border-radius: 8px; }
       .sec-title.stage-block-title { font-size: 15px; }
       .block-next-note { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 8px; background: ${T.cream}; border: 1px dashed ${T.line}; border-radius: 10px; padding: 8px 11px; }
