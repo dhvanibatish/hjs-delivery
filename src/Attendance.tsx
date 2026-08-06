@@ -21,8 +21,9 @@ const TZ = "Asia/Kolkata";
 const CSS = `
 .hjsatt, .hjsatt * { box-sizing: border-box; margin: 0; padding: 0; }
 .hjsatt {
-  position: fixed; inset: 0; display: flex; overflow: hidden; text-align: left;
+  min-height: 100dvh; display: flex; text-align: left;
   background: #f0f1f4; color: #1f2328;
+  overscroll-behavior-y: contain;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 14.5px; line-height: 1.45; -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -51,7 +52,8 @@ const CSS = `
 /* ---------- rail ---------- */
 .hjsatt .att-rail { width: 82px; flex-shrink: 0; background: #223354; display: flex;
   flex-direction: column; align-items: center; gap: 3px; padding: 12px 6px;
-  padding-top: calc(12px + env(safe-area-inset-top)); overflow-y: auto; }
+  padding-top: calc(12px + env(safe-area-inset-top));
+  position: sticky; top: 0; align-self: flex-start; max-height: 100dvh; overflow-y: auto; }
 .hjsatt .att-rail::-webkit-scrollbar { display: none; }
 .hjsatt .att-raillogo { width: 38px; height: 38px; border-radius: 10px; margin-bottom: 10px;
   background: linear-gradient(140deg, #38bdf8, #2563eb); display: flex; align-items: center;
@@ -71,7 +73,9 @@ const CSS = `
 
 /* ---------- body ---------- */
 .hjsatt .att-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.hjsatt .att-topbar { flex-shrink: 0; background: #223354; display: flex; align-items: center;
+.hjsatt .att-main { flex: 1; min-width: 0; }
+.hjsatt .att-topbar { position: sticky; top: 0; z-index: 12; flex-shrink: 0;
+  background: #223354; display: flex; align-items: center;
   gap: 12px; padding: 0 16px; height: 54px; padding-top: env(safe-area-inset-top);
   height: calc(54px + env(safe-area-inset-top)); }
 .hjsatt .att-topbar b, .hjsatt .att-topbar span { color: #fff; }
@@ -79,7 +83,8 @@ const CSS = `
 .hjsatt .att-signout { border: 1px solid rgba(255,255,255,.28); border-radius: 7px;
   padding: 6px 12px; font-size: 13px; color: #fff; }
 
-.hjsatt .att-scope { flex-shrink: 0; background: #223354; display: flex; gap: 2px;
+.hjsatt .att-scope { position: sticky; top: 54px; z-index: 11; flex-shrink: 0;
+  background: #223354; display: flex; gap: 2px;
   padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
 .hjsatt .att-scope::-webkit-scrollbar { display: none; }
 .hjsatt .att-scopebtn { padding: 12px 14px 13px; font-size: 14.5px; font-weight: 600;
@@ -103,11 +108,21 @@ const CSS = `
   line-height: 18px; border-radius: 99px; background: #dc2626; color: #fff; font-size: 10.5px;
   font-weight: 700; text-align: center; padding: 0 5px; }
 
-.hjsatt .att-main { flex: 1; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-
 @media (max-width: 899px) {
   .hjsatt .att-rail { display: none; }
-  .hjsatt .att-mtabs { display: flex; }
+  .hjsatt .att-mtabs { display: flex; position: sticky; top: 0; z-index: 12; }
+  .hjsatt .att-topbar { position: static; }
+  .hjsatt .att-scope { position: static; }
+  .hjsatt .att-card, .hjsatt .att-list { box-shadow: none; }
+  .hjsatt .att-tcard { width: 240px; }
+}
+
+/* phone pe hover effects band — scroll pe repaint kam */
+@media (hover: none) {
+  .hjsatt .att-etable tr:hover td { background: inherit; }
+  .hjsatt .att-grp:hover { background: #fff; }
+  .hjsatt .att-tcard:hover { border-color: #d0d5dd; }
+  .hjsatt .att-railbtn:hover .ic { background: transparent; }
 }
 
 /* ---------- generic ---------- */
@@ -684,6 +699,22 @@ const downloadCsv = (rows: any[], filename: string) => {
   a.click();
 };
 
+// Har second sirf ye chhota component re-render hota hai, poori screen nahi.
+function LiveClock({ startedAt, baseMinutes = 0, boxes = true }: any) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const t = setInterval(() => tick((x: number) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+
+  const mins = baseMinutes +
+    (startedAt ? (Date.now() - new Date(startedAt).getTime()) / 60000 : 0);
+  const [h, m, sec] = hms(mins);
+  if (!boxes) return <>{h}:{m}:{sec}</>;
+  return <div className="att-hms"><i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i></div>;
+}
+
 const Note = ({ kind = "err", children }: any) =>
   !children ? null : <div className={`att-note ${kind}`}><span>{children}</span></div>;
 
@@ -991,7 +1022,6 @@ function HomeScreen({ me }: any) {
   const [board, setBoard] = useState<any[]>([]);
   const [err, setErr] = useState(""); const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tick, setTick] = useState(0);
   const [regOpen, setRegOpen] = useState(false);
   const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
   const [drill, setDrill] = useState<any>(null);
@@ -1018,14 +1048,10 @@ function HomeScreen({ me }: any) {
     setPeers(pr.data || []);
   };
   useEffect(() => { load(); }, [me.id, range.from, range.to]);
-  useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
-
   const open = sessions.find((s) => !s.out_at);
-  const workedMinutes = useMemo(() => {
-    const closed = sessions.filter((s) => s.out_at).reduce((a, s) => a + (s.minutes || 0), 0);
-    const live = open ? (Date.now() - new Date(open.in_at).getTime()) / 60000 : 0;
-    return closed + live;
-  }, [sessions, open, tick]);
+  const closedMinutes = useMemo(
+    () => sessions.filter((s) => s.out_at).reduce((a, s) => a + (s.minutes || 0), 0),
+    [sessions]);
 
   const punch = async (dir: "in" | "out") => {
     setErr(""); setOk(""); setBusy(true);
@@ -1044,8 +1070,6 @@ function HomeScreen({ me }: any) {
     } catch (e: any) { setErr(e.message); }
     setBusy(false);
   };
-
-  const [h, m, sec] = hms(workedMinutes);
 
   const inRange = useMemo(
     () => recent.filter((r) => r.work_date >= range.from && r.work_date <= range.to),
@@ -1099,7 +1123,7 @@ function HomeScreen({ me }: any) {
               {open && <i className="att-live" />}{open ? "In" : "Out"}
             </p>
 
-            <div className="att-hms"><i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i></div>
+            <LiveClock startedAt={open?.in_at} baseMinutes={closedMinutes} />
 
             {open && (
               <p style={{ marginTop: 6 }}>
@@ -1383,7 +1407,6 @@ function AttSummary({ me }: any) {
   const [hols, setHols] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [tick, setTick] = useState(0);
   const [span, setSpan] = useState(7);
   const [custom, setCustom] = useState<any>(null);
 
@@ -1405,16 +1428,11 @@ function AttSummary({ me }: any) {
     setSess(a.data || []); setLogs(b.data || []); setLeaves(c.data || []); setHols(d.data || []);
   };
   useEffect(() => { load(); }, [wk, span, custom, me.id]);
-  useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
-
   const openSess = sess.find((x) => !x.out_at && x.work_date === istToday());
-  const todayMins = useMemo(() => {
-    const day = sess.filter((x) => x.work_date === istToday());
-    const closed = day.filter((x) => x.out_at).reduce((a, x) => a + (x.minutes || 0), 0);
-    const live = openSess ? (Date.now() - new Date(openSess.in_at).getTime()) / 60000 : 0;
-    return closed + live;
-  }, [sess, openSess, tick]);
-  const [th, tm, ts] = hms(todayMins);
+  const todayClosed = useMemo(
+    () => sess.filter((x) => x.work_date === istToday() && x.out_at)
+              .reduce((a, x) => a + (x.minutes || 0), 0),
+    [sess]);
 
   const punch = async (dir: "in" | "out") => {
     setErr(""); setBusy(true);
@@ -1461,7 +1479,7 @@ function AttSummary({ me }: any) {
       isToday: key === istToday(), list, log, lv, hol, off, mins,
       first: list[0]?.in_at, last: list.filter((x) => x.out_at).slice(-1)[0]?.out_at,
     };
-  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess, tick]);
+  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess]);
 
   const pos = (t: any) => {
     const m = minsOfDay(t);
@@ -1528,7 +1546,7 @@ function AttSummary({ me }: any) {
           title={!openSess && !isMobile() ? "Check-in works only on a phone" : ""}
           onClick={() => punch(openSess ? "out" : "in")}>
           <span>{busy ? (openSess ? "Checking out…" : "Getting location…") : openSess ? "Check-out" : "Check-in"}</span>
-          <b>{th}:{tm}:{ts} Hrs</b>
+          <b><LiveClock startedAt={openSess?.in_at} baseMinutes={todayClosed} boxes={false} /> Hrs</b>
         </button>
         {!openSess && !isMobile() && (
           <span className="att-muted" style={{ width: "100%" }}>
@@ -1923,7 +1941,6 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
   const rows: [string, any][] = [
     ["Employee ID", p.emp_code],
     ["Full name", p.full_name],
-    ["Nick name", p.nickname],
     ["Designation", p.designation],
     ["Department", p.team],
     ["Reporting manager", p.manager_name],
@@ -2037,7 +2054,7 @@ function DirectoryTab({ me }: any) {
   const teams = Array.from(new Set(rows.map((r) => r.team))).sort();
   const cols: [string, string][] = [
     ["emp_code", "Employee ID"], ["first_name", "First Name"], ["last_name", "Last Name"],
-    ["nickname", "Nick name"], ["email", "Email address"],
+    ["email", "Email address"],
     ["personal_email", "Personal Email"], ["phone", "Personal Mobile"], ["team", "Department"],
     ["designation", "Designation"], ["employment_type", "Employment Type"],
     ["employee_status", "Employee Status"], ["source_of_hire", "Source of Hire"],
@@ -2124,7 +2141,6 @@ function DirectoryTab({ me }: any) {
                 <td className="first link" onClick={() => setOpen(r)}>{r.emp_code}</td>
                 <td className="link" onClick={() => setOpen(r)}>{r.first_name || r.full_name}</td>
                 <td>{r.last_name || "—"}</td>
-                <td>{r.nickname || "—"}</td>
                 <td>{r.email
                   ? <a href={`mailto:${r.email}`} style={{ color: "#2563eb" }}>{r.email}</a>
                   : <span className="att-muted">—</span>}</td>
@@ -3420,7 +3436,8 @@ function StaffTab({ me }: any) {
 function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
-    emp_code: "", full_name: "", email: "", phone: "", designation: "",
+    emp_code: "", full_name: "", first_name: "", last_name: "",
+    email: "", phone: "", designation: "",
     branch_id: branches[0]?.id || null, team_id: null, reports_to: null, role: "staff",
     shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
     field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
@@ -3455,6 +3472,9 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
       const payload: any = {
         emp_code: String(f.emp_code).trim().toUpperCase(),
         full_name: String(f.full_name).trim(),
+        first_name: (f.first_name || "").trim() || String(f.full_name).trim().split(" ")[0],
+        last_name: (f.last_name || "").trim()
+          || String(f.full_name).trim().split(" ").slice(1).join(" ") || null,
         email: String(f.email || "").trim().toLowerCase() || null,
         phone: f.phone || null, designation: f.designation || null,
         branch_id: f.branch_id || null,
@@ -3501,8 +3521,20 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
               onChange={(e) => setF({ ...f, emp_code: e.target.value })} placeholder="HJS007" />
           </div>
           <div>
-            <label>Name</label>
+            <label>Full name</label>
             <input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>First name</label>
+            <input value={f.first_name || ""}
+              onChange={(e) => setF({ ...f, first_name: e.target.value })} />
+          </div>
+          <div>
+            <label>Last name</label>
+            <input value={f.last_name || ""}
+              onChange={(e) => setF({ ...f, last_name: e.target.value })} />
           </div>
         </div>
         <div>
@@ -4008,6 +4040,71 @@ function MeScreen({ me }: any) {
   );
 }
 
+/* ================= account linking ================= */
+function LinkAccount({ session, onDone }: any) {
+  const email = session?.user?.email || "";
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [tried, setTried] = useState(false);
+
+  // pehle chup-chaap link karne ki koshish — email list mein hui to seedha andar
+  const link = async (withName: boolean) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("register_self", {
+      p_full_name: withName ? name.trim() : (email.split("@")[0] || "New user"),
+      p_emp_code: code.trim() || null,
+      p_phone: null,
+    });
+    if (error) setErr(error.message);
+    else onDone();
+    setBusy(false);
+    setTried(true);
+  };
+
+  useEffect(() => { link(false); }, []);
+
+  return (
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 420 }}>
+        <h2 className="att-h1">Let's finish setting you up</h2>
+        <p className="att-muted" style={{ marginTop: 6 }}>
+          Signed in as <b>{email}</b>
+        </p>
+
+        {busy && !tried && <p className="att-muted" style={{ marginTop: 12 }}>Linking your account…</p>}
+
+        {tried && (
+          <div className="att-stack" style={{ marginTop: 14 }}>
+            <p className="att-muted">
+              This email isn't on the employee list yet. Enter your name and an admin
+              will approve you.
+            </p>
+            <div>
+              <label>Your full name</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
+            </div>
+            <div>
+              <label>Employee code <span className="att-muted">(if you know it)</span></label>
+              <input value={code} onChange={(e) => setCode(e.target.value)}
+                placeholder="VGN-E148" style={{ textTransform: "uppercase" }} />
+            </div>
+            <Note>{err}</Note>
+            <button className="att-btn" disabled={busy || !name.trim()}
+              onClick={() => link(true)}>
+              {busy ? "Sending…" : "Request access"}
+            </button>
+          </div>
+        )}
+
+        <button className="att-btn line sm" style={{ marginTop: 14, width: "100%" }}
+          onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </div>
+    </div>
+  );
+}
+
 /* ========================= shell ========================= */
 // Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
 type View = { k: string; label: string };
@@ -4128,12 +4225,7 @@ export default function Attendance() {
 
   if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
   if (!session) return shell(<Login />);
-  if (!me) return shell(
-    <div className="att-center" style={{ flexDirection: "column", gap: 13, textAlign: "center" }}>
-      <p>This login isn't linked to an employee record yet. Ask your admin to link your employee code.</p>
-      <button className="att-btn grey sm" onClick={() => supabase.auth.signOut()}>Sign out</button>
-    </div>
-  );
+  if (!me) return shell(<LinkAccount session={session} onDone={() => setSession({ ...session })} />);
 
   if (me.approval_status === "Pending") return shell(
     <div className="att-center">
