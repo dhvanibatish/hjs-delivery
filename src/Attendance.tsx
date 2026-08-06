@@ -386,22 +386,29 @@ const CSS = `
 .hjsatt .att-vteam { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
   border-bottom: 1px solid #eaecf0; }
 .hjsatt .att-vteam b { font-size: 14.5px; }
-.hjsatt .att-vwrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-  overflow: hidden; }
+.hjsatt .att-vwrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
+.hjsatt .att-vwrap > .att-vteam:first-child { border-radius: 12px 12px 0 0; }
+.hjsatt .att-vwrap > .att-vrow:last-child { border-radius: 0 0 12px 12px; }
 .hjsatt .att-vrow { display: flex; align-items: center; gap: 12px; padding: 13px 16px;
   border-bottom: 1px solid #f4f5f6; }
 .hjsatt .att-vrow:last-child { border-bottom: 0; }
-.hjsatt .att-vrow.done { background: #fcfdfe; }
-.hjsatt .att-vrow.done .nm { color: #667085; }
+.hjsatt .att-vrow.ok { background: #f6fef9; box-shadow: inset 3px 0 0 #16a34a; }
+.hjsatt .att-vrow.hold { background: #fffcf5; box-shadow: inset 3px 0 0 #d97706; }
+.hjsatt .att-vrow.cut { background: #fffbfa; box-shadow: inset 3px 0 0 #b42318; }
+.hjsatt .att-vrow.cut .nm { color: #667085; text-decoration: line-through; }
+.hjsatt .att-pencil { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #667085; flex-shrink: 0; font-size: 13px; }
+.hjsatt .att-pencil:hover { background: #f5f6f8; color: #2563eb; }
 .hjsatt .att-vtime { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 13.5px;
   color: #344054; white-space: nowrap; }
 .hjsatt .att-vempty { text-align: center; padding: 44px 20px; color: #667085; }
 .hjsatt .att-vempty .big { font-size: 34px; margin-bottom: 8px; }
 .hjsatt .att-menu { position: relative; }
+.hjsatt .att-pop.up { top: auto; bottom: 34px; }
 .hjsatt .att-dots { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
   background: #fff; color: #667085; font-size: 17px; line-height: 1; flex-shrink: 0; }
 .hjsatt .att-dots:hover { background: #f5f6f8; }
-.hjsatt .att-pop { position: absolute; right: 0; top: 34px; z-index: 30; background: #fff;
+.hjsatt .att-pop { position: absolute; right: 0; top: 34px; z-index: 60; background: #fff;
   border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 10px 26px rgba(16,24,40,.14);
   min-width: 190px; overflow: hidden; }
 .hjsatt .att-pop button { display: block; width: 100%; text-align: left; padding: 10px 13px;
@@ -4126,8 +4133,17 @@ function MeScreen({ me }: any) {
 }
 
 /* ================= manager ka daily verification ================= */
-function VerifyRow({ r, onSet, busy, date }: any) {
+function VerifyRow({ r, onSet, onClear, busy, date }: any) {
   const [menu, setMenu] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [up, setUp] = useState(false);
+
+  // neeche jagah kam ho to menu upar khulega
+  const openMenu = (setter: any, cur: boolean) => (e: any) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    setUp(window.innerHeight - box.bottom < 230);
+    setter(!cur);
+  };
   const [confirm, setConfirm] = useState<null | "hold" | "cancel">(null);
   const [note, setNote] = useState("");
 
@@ -4139,7 +4155,8 @@ function VerifyRow({ r, onSet, busy, date }: any) {
 
   return (
     <>
-      <div className={`att-vrow ${r.status ? "done" : ""}`}>
+      <div className={`att-vrow ${r.status === "Approved" ? "ok"
+        : r.status === "On hold" ? "hold" : r.status === "Cancelled" ? "cut" : ""}`}>
         <Avatar name={r.full_name} />
 
         <div className="grow" style={{ minWidth: 0 }}>
@@ -4156,7 +4173,9 @@ function VerifyRow({ r, onSet, busy, date }: any) {
           </p>
           {r.status && (
             <p className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-              {r.status} by {r.verified_by_name || "—"}{r.note ? ` — ${r.note}` : ""}
+              {r.status} by {r.verified_by_name || "—"}
+              {r.verified_at ? ` at ${fmtTime(r.verified_at)}` : ""}
+              {r.note ? ` — ${r.note}` : ""}
             </p>
           )}
         </div>
@@ -4171,37 +4190,69 @@ function VerifyRow({ r, onSet, busy, date }: any) {
         </div>
 
         {r.status ? (
-          <span className="att-vtag" style={{
-            background: tone[r.status]?.bg, color: tone[r.status]?.fg }}>{r.status}</span>
-        ) : (
-          <button className="att-btn sm green" disabled={busy}
-            onClick={() => onSet(r.employee_id, "Approved")}>Approve</button>
-        )}
+          <>
+            <span className="att-vtag" style={{
+              background: tone[r.status]?.bg, color: tone[r.status]?.fg }}>{r.status}</span>
 
-        <div className="att-menu">
-          <button className="att-dots" onClick={() => setMenu(!menu)}
-            aria-label="More options">⋯</button>
-          {menu && (
-            <>
-              <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
-                onClick={() => setMenu(false)} />
-              <div className="att-pop">
-                {r.status && (
-                  <button onClick={() => { setMenu(false); onSet(r.employee_id, "Approved"); }}>
-                    Mark approved
-                  </button>
-                )}
-                <button onClick={() => { setMenu(false); setConfirm("hold"); }}>
-                  Put on hold
-                </button>
-                <div className="sep" />
-                <button className="danger" onClick={() => { setMenu(false); setConfirm("cancel"); }}>
-                  Cancel this attendance
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+            <div className="att-menu">
+              <button className="att-pencil" onClick={openMenu(setEdit, edit)}
+                aria-label="Change this">✎</button>
+              {edit && (
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    onClick={() => setEdit(false)} />
+                  <div className={`att-pop ${up ? "up" : ""}`}>
+                    <button onClick={() => { setEdit(false); onClear(r.employee_id); }}>
+                      Change to not approved
+                    </button>
+                    {r.status !== "On hold" && (
+                      <button onClick={() => { setEdit(false); setConfirm("hold"); }}>
+                        Put on hold
+                      </button>
+                    )}
+                    {r.status !== "Cancelled" && (
+                      <>
+                        <div className="sep" />
+                        <button className="danger"
+                          onClick={() => { setEdit(false); setConfirm("cancel"); }}>
+                          Cancel this attendance
+                        </button>
+                      </>
+                    )}
+                    <div className="sep" />
+                    <button onClick={() => setEdit(false)}>Cancel — leave it as is</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <button className="att-btn sm green" disabled={busy}
+              onClick={() => onSet(r.employee_id, "Approved")}>Approve</button>
+
+            <div className="att-menu">
+              <button className="att-dots" onClick={openMenu(setMenu, menu)}
+                aria-label="More options">⋯</button>
+              {menu && (
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    onClick={() => setMenu(false)} />
+                  <div className={`att-pop ${up ? "up" : ""}`}>
+                    <button onClick={() => { setMenu(false); setConfirm("hold"); }}>
+                      Put on hold
+                    </button>
+                    <div className="sep" />
+                    <button className="danger"
+                      onClick={() => { setMenu(false); setConfirm("cancel"); }}>
+                      Cancel this attendance
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {confirm && (
@@ -4252,7 +4303,7 @@ function VerifyPanel({ onCount }: any) {
   const [date, setDate] = useState(istToday());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [filter, setFilter] = useState<"todo" | "all">("todo");
+  const [filter, setFilter] = useState<"todo" | "all">("all");
 
   const load = async (d = date) => {
     const { data, error } = await supabase.rpc("verification_queue", { p_date: d });
@@ -4267,6 +4318,13 @@ function VerifyPanel({ onCount }: any) {
     const { error } = await supabase.rpc("set_verification", {
       p_emp: emp, p_status: status, p_date: date, p_note: note || null,
     });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  const clearOne = async (emp: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("clear_verification", { p_emp: emp, p_date: date });
     if (error) setErr(error.message);
     await load(); setBusy(false);
   };
@@ -4330,11 +4388,11 @@ function VerifyPanel({ onCount }: any) {
 
       {rows.length > 0 && (
         <div className="att-seg">
-          <button className={filter === "todo" ? "on" : ""} onClick={() => setFilter("todo")}>
-            Still to check ({pending.length})
-          </button>
           <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>
             Everyone ({rows.length})
+          </button>
+          <button className={filter === "todo" ? "on" : ""} onClick={() => setFilter("todo")}>
+            Still to check ({pending.length})
           </button>
         </div>
       )}
@@ -4375,7 +4433,8 @@ function VerifyPanel({ onCount }: any) {
               )}
             </div>
             {g.map((r) => (
-              <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} date={date} />
+              <VerifyRow key={r.employee_id} r={r} onSet={setOne} onClear={clearOne}
+                busy={busy} date={date} />
             ))}
           </div>
         );
