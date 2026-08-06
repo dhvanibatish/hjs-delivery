@@ -21,9 +21,8 @@ const TZ = "Asia/Kolkata";
 const CSS = `
 .hjsatt, .hjsatt * { box-sizing: border-box; margin: 0; padding: 0; }
 .hjsatt {
-  min-height: 100dvh; display: flex; text-align: left;
+  position: fixed; inset: 0; display: flex; overflow: hidden; text-align: left;
   background: #f0f1f4; color: #1f2328;
-  overscroll-behavior-y: contain;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 14.5px; line-height: 1.45; -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -52,8 +51,7 @@ const CSS = `
 /* ---------- rail ---------- */
 .hjsatt .att-rail { width: 82px; flex-shrink: 0; background: #223354; display: flex;
   flex-direction: column; align-items: center; gap: 3px; padding: 12px 6px;
-  padding-top: calc(12px + env(safe-area-inset-top));
-  position: sticky; top: 0; align-self: flex-start; max-height: 100dvh; overflow-y: auto; }
+  padding-top: calc(12px + env(safe-area-inset-top)); overflow-y: auto; }
 .hjsatt .att-rail::-webkit-scrollbar { display: none; }
 .hjsatt .att-raillogo { width: 38px; height: 38px; border-radius: 10px; margin-bottom: 10px;
   background: linear-gradient(140deg, #38bdf8, #2563eb); display: flex; align-items: center;
@@ -72,10 +70,9 @@ const CSS = `
   font-size: 10px; font-weight: 700; text-align: center; padding: 0 4px; }
 
 /* ---------- body ---------- */
-.hjsatt .att-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.hjsatt .att-main { flex: 1; min-width: 0; }
-.hjsatt .att-topbar { position: sticky; top: 0; z-index: 12; flex-shrink: 0;
-  background: #223354; display: flex; align-items: center;
+.hjsatt .att-body { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.hjsatt .att-main { flex: 1; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hjsatt .att-topbar { flex-shrink: 0; background: #223354; display: flex; align-items: center;
   gap: 12px; padding: 0 16px; height: 54px; padding-top: env(safe-area-inset-top);
   height: calc(54px + env(safe-area-inset-top)); }
 .hjsatt .att-topbar b, .hjsatt .att-topbar span { color: #fff; }
@@ -83,8 +80,7 @@ const CSS = `
 .hjsatt .att-signout { border: 1px solid rgba(255,255,255,.28); border-radius: 7px;
   padding: 6px 12px; font-size: 13px; color: #fff; }
 
-.hjsatt .att-scope { position: sticky; top: 54px; z-index: 11; flex-shrink: 0;
-  background: #223354; display: flex; gap: 2px;
+.hjsatt .att-scope { flex-shrink: 0; background: #223354; display: flex; gap: 2px;
   padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
 .hjsatt .att-scope::-webkit-scrollbar { display: none; }
 .hjsatt .att-scopebtn { padding: 12px 14px 13px; font-size: 14.5px; font-weight: 600;
@@ -109,10 +105,13 @@ const CSS = `
   font-weight: 700; text-align: center; padding: 0 5px; }
 
 @media (max-width: 899px) {
+  /* iOS: fixed shell + inner scroll atakta hai -> normal page scroll */
+  .hjsatt { position: static; overflow: visible; min-height: 100dvh;
+    display: block; overscroll-behavior-y: contain; }
   .hjsatt .att-rail { display: none; }
+  .hjsatt .att-body { display: block; overflow: visible; }
+  .hjsatt .att-main { overflow: visible; }
   .hjsatt .att-mtabs { display: flex; position: sticky; top: 0; z-index: 12; }
-  .hjsatt .att-topbar { position: static; }
-  .hjsatt .att-scope { position: static; }
   .hjsatt .att-card, .hjsatt .att-list { box-shadow: none; }
   .hjsatt .att-tcard { width: 240px; }
 }
