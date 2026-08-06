@@ -319,6 +319,22 @@ const CSS = `
 .hjsatt .att-totchips span { font-size: 12px; font-weight: 650; padding: 3px 10px;
   border-radius: 6px; white-space: nowrap; }
 
+/* ---------- org tree ---------- */
+.hjsatt .att-tree { display: flex; flex-direction: column; gap: 10px; }
+.hjsatt .att-tnode { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
+.hjsatt .att-thead { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid #f1f2f4; }
+.hjsatt .att-thead .nm { font-weight: 700; font-size: 15px; }
+.hjsatt .att-tmem { display: flex; align-items: center; gap: 10px; padding: 9px 14px 9px 26px;
+  border-top: 1px solid #f6f7f8; position: relative; }
+.hjsatt .att-tmem:before { content: ""; position: absolute; left: 14px; top: 0; bottom: 50%;
+  width: 1px; background: #e5e7eb; }
+.hjsatt .att-tmem:after { content: ""; position: absolute; left: 14px; top: 50%;
+  width: 7px; height: 1px; background: #e5e7eb; }
+.hjsatt .att-tmem .dz { font-size: 12px; color: #6b7280; }
+.hjsatt .att-chip { font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 5px;
+  background: #eff4ff; color: #2563eb; }
+
 /* ---------- leave summary ---------- */
 .hjsatt .att-lvgrid { display: grid; gap: 11px;
   grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); }
@@ -2087,17 +2103,24 @@ function DashTab() {
 function StaffTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
+  const [desigs, setDesigs] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(true);
   const [add, setAdd] = useState(false);
   const [edit, setEdit] = useState<any>(null);
+  const [mgD, setMgD] = useState(false);
 
   const load = async () => {
-    const [e, b] = await Promise.all([
-      supabase.from("employees").select("*, branches(name)").order("full_name"),
+    const [e, b, t, d] = await Promise.all([
+      supabase.from("employees").select("*, branches(name), teams(name)").order("full_name"),
       supabase.from("branches").select("*").order("name"),
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("designations").select("*").eq("active", true)
+        .order("sort_order").order("name"),
     ]);
-    setRows(e.data || []); setBranches(b.data || []); setBusy(false);
+    setRows(e.data || []); setBranches(b.data || []);
+    setTeams(t.data || []); setDesigs(d.data || []); setBusy(false);
   };
   useEffect(() => { load(); }, []);
 
@@ -2110,7 +2133,12 @@ function StaffTab({ me }: any) {
       <div className="att-flex">
         <input placeholder="Search by name or code" value={q}
           onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
-        {me.role === "admin" && <button className="att-btn sm" onClick={() => setAdd(true)}>+ New</button>}
+        {me.role === "admin" && (
+          <>
+            <button className="att-btn sm line" onClick={() => setMgD(true)}>Designations</button>
+            <button className="att-btn sm" onClick={() => setAdd(true)}>+ New</button>
+          </>
+        )}
       </div>
       <div className="att-list">
         {shown.map((r) => (
@@ -2121,9 +2149,12 @@ function StaffTab({ me }: any) {
             <div className="grow">
               <p><b>{r.emp_code}</b> · {r.full_name}</p>
               <p className="att-muted">
-                {r.designation || r.role} · {fmtHM(r.shift_start)} – {fmtHM(r.shift_end)}
+                {r.designation || r.role}
+                {r.teams?.name ? ` · ${r.teams.name}` : ""}
+                {" · "}{fmtHM(r.shift_start)} – {fmtHM(r.shift_end)}
               </p>
             </div>
+            {!r.email && <span className="att-pill p-Absent">no email</span>}
             {!r.auth_user_id && <span className="att-pill p-Late">code pending</span>}
             {!r.active && <span className="att-pill p-Off">Inactive</span>}
             {r.field_staff && <span className="att-pill p-Leave">Field</span>}
@@ -2131,17 +2162,20 @@ function StaffTab({ me }: any) {
         ))}
         {!shown.length && <p className="att-empty">No match found.</p>}
       </div>
-      {add && <EmployeeSheet branches={branches} onClose={() => { setAdd(false); load(); }} />}
-      {edit && <EmployeeSheet branches={branches} row={edit} onClose={() => { setEdit(null); load(); }} />}
+      {add && <EmployeeSheet branches={branches} teams={teams} desigs={desigs} people={rows}
+        onClose={() => { setAdd(false); load(); }} />}
+      {edit && <EmployeeSheet branches={branches} teams={teams} desigs={desigs} people={rows}
+        row={edit} onClose={() => { setEdit(null); load(); }} />}
+      {mgD && <DesignationSheet onClose={() => { setMgD(false); load(); }} />}
     </>
   );
 }
 
-function EmployeeSheet({ branches, row, onClose }: any) {
+function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
     emp_code: "", full_name: "", email: "", phone: "", designation: "",
-    branch_id: branches[0]?.id || null, role: "staff",
+    branch_id: branches[0]?.id || null, team_id: null, reports_to: null, role: "staff",
     shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
     field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
   });
@@ -2165,7 +2199,10 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         full_name: String(f.full_name).trim(),
         email: String(f.email || "").trim().toLowerCase() || null,
         phone: f.phone || null, designation: f.designation || null,
-        branch_id: f.branch_id, role: f.role,
+        branch_id: f.branch_id || null,
+        team_id: f.team_id || null,
+        reports_to: f.reports_to || null,
+        role: f.role,
         shift_start: f.shift_start, shift_end: f.shift_end,
         grace_minutes: Number(f.grace_minutes) || 0,
         field_staff: f.field_staff, active: f.active,
@@ -2200,7 +2237,7 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         <div className="att-row2">
           <div>
             <label>Employee code</label>
-            <input value={f.emp_code} disabled={!isNew} style={{ textTransform: "uppercase" }}
+            <input value={f.emp_code} style={{ textTransform: "uppercase" }}
               onChange={(e) => setF({ ...f, emp_code: e.target.value })} placeholder="HJS007" />
           </div>
           <div>
@@ -2231,13 +2268,44 @@ function EmployeeSheet({ branches, row, onClose }: any) {
           </div>
           <div>
             <label>Designation</label>
-            <input value={f.designation || ""} onChange={(e) => setF({ ...f, designation: e.target.value })} />
+            <select value={f.designation || ""}
+              onChange={(e) => setF({ ...f, designation: e.target.value })}>
+              <option value="">— select —</option>
+              {(desigs || []).map((d: any) => (
+                <option key={d.id} value={d.name}>{d.name}</option>
+              ))}
+              {f.designation && !(desigs || []).some((d: any) => d.name === f.designation) && (
+                <option value={f.designation}>{f.designation}</option>
+              )}
+            </select>
           </div>
         </div>
         <div className="att-row2">
           <div>
-            <label>Branch</label>
-            <select value={f.branch_id || ""} onChange={(e) => setF({ ...f, branch_id: e.target.value })}>
+            <label>Team</label>
+            <select value={f.team_id || ""}
+              onChange={(e) => setF({ ...f, team_id: e.target.value || null })}>
+              <option value="">— none —</option>
+              {(teams || []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Reports to</label>
+            <select value={f.reports_to || ""}
+              onChange={(e) => setF({ ...f, reports_to: e.target.value || null })}>
+              <option value="">— none —</option>
+              {(people || []).filter((x: any) => x.id !== row?.id).map((x: any) => (
+                <option key={x.id} value={x.id}>{x.emp_code} · {x.full_name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Branch (for geo-fence)</label>
+            <select value={f.branch_id || ""}
+              onChange={(e) => setF({ ...f, branch_id: e.target.value || null })}>
+              <option value="">— none —</option>
               {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
@@ -2309,6 +2377,156 @@ function EmployeeSheet({ branches, row, onClose }: any) {
         </button>
       </div>
     </Sheet>
+  );
+}
+
+function DesignationSheet({ onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [name, setName] = useState("");
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  const load = async () => {
+    const { data } = await supabase.from("designations").select("*")
+      .order("sort_order").order("name");
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    if (!name.trim()) return;
+    const { error } = await supabase.from("designations")
+      .insert({ name: name.trim(), sort_order: 100 });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setName(""); setMsg({ err: "", ok: "Added." }); load(); }
+  };
+
+  const toggle = async (r: any) => {
+    await supabase.from("designations").update({ active: !r.active }).eq("id", r.id);
+    load();
+  };
+
+  return (
+    <Sheet title="Designations" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-flex">
+          <input placeholder="New designation" value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()} style={{ flex: 1 }} />
+          <button className="att-btn sm" onClick={add} disabled={!name.trim()}>Add</button>
+        </div>
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <p className="att-muted">These show up in the designation dropdown.</p>
+      </div>
+      <div className="att-list" style={{ marginTop: 12 }}>
+        {rows.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span className="grow">{r.name}</span>
+            {!r.active && <span className="att-pill p-Off">hidden</span>}
+            <button className="att-muted" onClick={() => toggle(r)}>
+              {r.active ? "Hide" : "Show"}
+            </button>
+          </div>
+        ))}
+        {!rows.length && <p className="att-empty">None yet.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+function OrgTab({ me }: any) {
+  const [teams, setTeams] = useState<any[]>([]);
+  const [emps, setEmps] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const [t, e] = await Promise.all([
+        supabase.from("teams").select("*").order("name"),
+        supabase.from("employees").select("*").eq("active", true).order("full_name"),
+      ]);
+      setTeams(t.data || []); setEmps(e.data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  const byId: Record<string, any> = {};
+  emps.forEach((e) => { byId[e.id] = e; });
+  const match = (e: any) =>
+    !q || `${e.full_name} ${e.emp_code} ${e.designation || ""}`.toLowerCase().includes(q.toLowerCase());
+
+  const shown = teams
+    .map((t) => ({
+      ...t,
+      manager: t.manager_id ? byId[t.manager_id] : null,
+      members: emps.filter((e) => e.team_id === t.id && e.id !== t.manager_id),
+    }))
+    .filter((t) => t.members.length || t.manager)
+    .filter((t) => !q || t.members.some(match) || (t.manager && match(t.manager))
+                || t.name.toLowerCase().includes(q.toLowerCase()));
+
+  const unassigned = emps.filter((e) => !e.team_id).filter(match);
+
+  return (
+    <>
+      <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{emps.length} people · {teams.length} teams</p>
+
+      <div className="att-tree">
+        {shown.map((t) => (
+          <div className="att-tnode" key={t.id}>
+            <div className="att-thead">
+              {t.manager ? <Avatar name={t.manager.full_name} /> : <div className="att-av"
+                style={{ background: "#cbd5e1" }}>—</div>}
+              <div className="grow" style={{ flex: 1, minWidth: 0 }}>
+                <p className="nm">{t.name}</p>
+                <p className="att-muted">
+                  {t.manager ? `${t.manager.full_name} · ${t.manager.designation || "Manager"}`
+                             : "No manager set"}
+                </p>
+              </div>
+              <span className="att-chip">{t.members.length} member{t.members.length === 1 ? "" : "s"}</span>
+            </div>
+            {t.members.filter(match).map((m: any) => (
+              <div className="att-tmem" key={m.id}>
+                <div className="grow" style={{ flex: 1, minWidth: 0 }}>
+                  <p><b>{m.emp_code}</b> · {m.full_name}</p>
+                  <p className="dz">
+                    {m.designation || "—"}
+                    {m.reports_to && byId[m.reports_to]
+                      ? ` → reports to ${byId[m.reports_to].full_name}` : ""}
+                  </p>
+                </div>
+                {!m.email && <span className="att-pill p-Absent">no email</span>}
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {unassigned.length > 0 && (
+          <div className="att-tnode">
+            <div className="att-thead">
+              <div className="att-av" style={{ background: "#cbd5e1" }}>?</div>
+              <div className="grow" style={{ flex: 1 }}>
+                <p className="nm">No team assigned</p>
+                <p className="att-muted">Set their team in Staff</p>
+              </div>
+              <span className="att-chip">{unassigned.length}</span>
+            </div>
+            {unassigned.map((m) => (
+              <div className="att-tmem" key={m.id}>
+                <div className="grow" style={{ flex: 1 }}>
+                  <p><b>{m.emp_code}</b> · {m.full_name}</p>
+                  <p className="dz">{m.designation || "—"}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
