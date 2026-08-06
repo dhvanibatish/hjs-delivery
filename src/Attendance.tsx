@@ -164,6 +164,13 @@ const CSS = `
 
 .hjsatt .att-sess { display: flex; align-items: center; gap: 8px; padding: 8px 0;
   font-size: 13px; border-top: 1px dashed #e5e7eb; }
+.hjsatt .att-codewrap { position: relative; }
+.hjsatt .att-codewrap input { letter-spacing: 0.55em; font-size: 20px; text-align: center;
+  padding-right: 46px; }
+.hjsatt .att-eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; }
+.hjsatt .att-eye:hover { background: #f2f4f7; }
 .hjsatt .att-pin { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px;
   padding: 2px 7px; border-radius: 6px; background: #f2f4f7; color: #475467; }
 .hjsatt .att-pin.ok { background: #ecfdf3; color: #067647; }
@@ -540,6 +547,33 @@ const Sheet = ({ title, onClose, children }: any) => (
 );
 
 /* ========================= login ========================= */
+const EyeIcon = ({ off }: any) => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#667085"
+    strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+    {off && <path d="m4 4 16 16" />}
+  </svg>
+);
+
+function CodeInput({ value, onChange, show, setShow, autoFocus, onEnter, placeholder }: any) {
+  return (
+    <div className="att-codewrap">
+      <input
+        type={show ? "text" : "password"}
+        inputMode="numeric" autoComplete="off" autoFocus={autoFocus}
+        value={value} placeholder={placeholder || "••••"}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        onKeyDown={(e) => e.key === "Enter" && onEnter && onEnter()}
+      />
+      <button className="att-eye" type="button" onClick={() => setShow(!show)}
+        aria-label={show ? "Hide code" : "Show code"} title={show ? "Hide code" : "Show code"}>
+        <EyeIcon off={show} />
+      </button>
+    </div>
+  );
+}
+
 // 4-digit code ko Supabase ke minimum password length tak pad karte hain.
 const codeToPassword = (code: string) => `hjs-${code}-att`;
 
@@ -551,8 +585,7 @@ function Login() {
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
-
-  const digits = (v: string) => v.replace(/\D/g, "").slice(0, 4);
+  const [show, setShow] = useState(false);
 
   const checkEmail = async () => {
     setErr(""); setOk(""); setBusy(true);
@@ -578,14 +611,28 @@ function Login() {
     setBusy(true);
     const e = email.trim().toLowerCase();
     const pw = codeToPassword(code);
-    let { error } = await supabase.auth.signUp({ email: e, password: pw });
-    if (error) {
-      // auth user pehle se hai -> seedha sign in try karo
-      const r = await supabase.auth.signInWithPassword({ email: e, password: pw });
-      error = r.error;
+
+    const up = await supabase.auth.signUp({ email: e, password: pw });
+    let session = up.data?.session || null;
+
+    if (!session) {
+      // user pehle se maujood ho sakta hai, ya signUp ne session nahi di
+      const si = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      session = si.data?.session || null;
+      if (!session) {
+        setBusy(false);
+        if (up.error && /already/i.test(up.error.message))
+          return setErr("This email already has a code set. Use \u2018Forgot code\u2019, " +
+                        "or ask your admin to reset it.");
+        if (up.error) return setErr(up.error.message);
+        return setErr(
+          "Couldn't start your session. In Supabase, Authentication \u2192 Email \u2192 turn off " +
+          "\u2018Confirm email\u2019, delete this half-made user, then try again."
+        );
+      }
     }
-    if (error) setErr(error.message);
-    else await claim();
+    const okNow = await claim();
+    if (okNow) setOk("Code saved.");
     setBusy(false);
   };
 
@@ -648,16 +695,12 @@ function Login() {
               <p className="att-muted">{email}</p>
               <div>
                 <label>Create your 4-digit code</label>
-                <input type="password" inputMode="numeric" value={code} placeholder="••••"
-                  style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
-                  onChange={(e) => setCode(digits(e.target.value))} />
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} autoFocus />
               </div>
               <div>
                 <label>Confirm code</label>
-                <input type="password" inputMode="numeric" value={code2} placeholder="••••"
-                  style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
-                  onChange={(e) => setCode2(digits(e.target.value))}
-                  onKeyDown={(e) => e.key === "Enter" && createCode()} />
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={createCode} />
               </div>
               <Note>{err}</Note>
               <button className="att-btn" onClick={createCode}
@@ -673,10 +716,8 @@ function Login() {
               <p className="att-muted">{email}</p>
               <div>
                 <label>4-digit code</label>
-                <input type="password" inputMode="numeric" value={code} placeholder="••••"
-                  autoFocus style={{ letterSpacing: "0.6em", fontSize: 20, textAlign: "center" }}
-                  onChange={(e) => setCode(digits(e.target.value))}
-                  onKeyDown={(e) => e.key === "Enter" && signIn()} />
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow}
+                  autoFocus onEnter={signIn} />
               </div>
               <Note>{err}</Note>
               <Note kind="ok">{ok}</Note>
