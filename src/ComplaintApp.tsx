@@ -184,21 +184,6 @@ const REGIONS = {
     ],
   },
 };
-/* login / switcher dropdown me heading-wise list */
-const STORE_GROUPS = [
-  { label: 'Punjab', stores: ['Mohali', 'Ludhiana', 'Jalandhar'] },
-  {
-    label: 'Delhi side',
-    stores: [
-      'Janakpuri',
-      'Shastri Nagar',
-      'Gurugram',
-      'Noida',
-      'Jaipur',
-      'Lucknow',
-    ],
-  },
-];
 const isRegionCode = (b) => !!REGIONS[b];
 /* ek branch code ke andar kaunse stores aate hain */
 function storesOf(branch) {
@@ -234,6 +219,9 @@ function sessionFor(branch) {
     authStore: branch,
     isHead,
     isRegion,
+    // Punjab / Delhi wale logins ke paas bhi head jaise poore rights —
+    // band ticket edit kar sakte hain aur entry delete kar sakte hain.
+    isPower: isHead || isRegion,
     // region login apne stores ke beech switch kar sake
     canSwitch: isHead || isRegion,
     switchList: isHead ? STORE_ORDER : isRegion ? REGIONS[branch].stores : [],
@@ -406,8 +394,8 @@ const TXT = {
   yesDelete: { en: 'Yes, delete', hi: 'Haan, delete' },
   keepIt: { en: 'Keep it', hi: 'Rehne dein' },
   deleteNote: {
-    en: 'Only the head can delete. It disappears from view but stays in the database as "Deleted".',
-    hi: 'Sirf head delete kar sakta hai. View se hat jayega par database mein "Deleted" ke saath safe rahega.',
+    en: 'Only head office and region logins can delete. It disappears from view but stays in the database as "Deleted".',
+    hi: 'Sirf head office aur region logins delete kar sakte hain. View se hat jayega par database mein "Deleted" ke saath safe rahega.',
   },
   locked: { en: 'locked', hi: 'locked' },
   lockedTitle: {
@@ -415,12 +403,12 @@ const TXT = {
     hi: 'Ye ticket band ho chuka hai',
   },
   lockedNote: {
-    en: 'The issue was resolved, so the stages can no longer be edited. If a change is needed, ask head office (All stores login).',
-    hi: 'Samasya hal ho chuki hai, isliye stages ab edit nahi ho sakti. Kuch badalna ho to head office (All stores login) se kehna.',
+    en: 'The issue was resolved, so the stages can no longer be edited. If a change is needed, ask head office or your region login.',
+    hi: 'Samasya hal ho chuki hai, isliye stages ab edit nahi ho sakti. Kuch badalna ho to head office ya apne region login se kehna.',
   },
   headCanEdit: {
-    en: 'Head office login — you can still edit this closed ticket.',
-    hi: 'Head office login — aap ye band ticket bhi edit kar sakte hain.',
+    en: 'You have full rights — this closed ticket can still be edited.',
+    hi: 'Aapke paas poore rights hain — ye band ticket bhi edit ho sakta hai.',
   },
   nextStepBadge: { en: 'Next step', hi: 'Agla step' },
   // KV labels
@@ -1365,8 +1353,8 @@ export default function App({
         {active && (
           <Drawer
             d={active}
-            isHead={session.isHead}
-            canDelete={session.isHead}
+            isHead={session.isPower}
+            canDelete={session.isPower}
             onDelete={() => removeEntry(active.ticket_id)}
             onClose={() => setActiveId(null)}
             onAdvance={(toStage) =>
@@ -1508,8 +1496,8 @@ export default function App({
       {active && (
         <Drawer
           d={active}
-          isHead={session.isHead}
-          canDelete={session.isHead}
+          isHead={session.isPower}
+          canDelete={session.isPower}
           onDelete={() => removeEntry(active.ticket_id)}
           onClose={() => setActiveId(null)}
           onAdvance={(toStage) =>
@@ -1780,14 +1768,10 @@ function Dashboard({ tickets, onOpen }) {
             }}
           >
             <option value="ALL">All stores</option>
-            {STORE_GROUPS.map((g) => (
-              <optgroup key={g.label} label={g.label}>
-                {g.stores.map((c) => (
-                  <option key={c} value={c}>
-                    {branchLabel(c)}
-                  </option>
-                ))}
-              </optgroup>
+            {DASH_STORES.map((c) => (
+              <option key={c} value={c}>
+                {branchLabel(c)}
+              </option>
             ))}
           </select>
         </div>
@@ -2284,14 +2268,10 @@ function Login({ onLogin }) {
                   {REGIONS[rk].label}
                 </option>
               ))}
-              {STORE_GROUPS.map((g) => (
-                <optgroup key={g.label} label={g.label}>
-                  {g.stores.map((c) => (
-                    <option key={c} value={c}>
-                      {branchLabel(c)}
-                    </option>
-                  ))}
-                </optgroup>
+              {STORE_ORDER.map((c) => (
+                <option key={c} value={c}>
+                  {branchLabel(c)}
+                </option>
               ))}
             </select>
           </Field>
@@ -2660,14 +2640,10 @@ function Header({
                       {REGIONS[rk].label}
                     </option>
                   ))}
-                  {STORE_GROUPS.map((g) => (
-                    <optgroup key={g.label} label={g.label}>
-                      {g.stores.map((c) => (
-                        <option key={c} value={c}>
-                          {branchLabel(c)}
-                        </option>
-                      ))}
-                    </optgroup>
+                  {STORE_ORDER.map((c) => (
+                    <option key={c} value={c}>
+                      {branchLabel(c)}
+                    </option>
                   ))}
                 </>
               ) : (
@@ -3283,7 +3259,7 @@ function Drawer({
             <div className="sec-title" style={{ marginTop: 16 }}>
               {L('moveToStage')}
             </div>
-            {d.stage === 'resolution' && isHead && (
+            {d.stage === 'resolution' && isHead && (/* isHead = poore rights */
               <div className="head-edit-note">
                 <ShieldCheck size={14} /> {L('headCanEdit')}
               </div>
@@ -4088,21 +4064,17 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
                 </option>
               ))}
             </select>
-            {session && session.isHead && (
+            {session && session.isPower && (
               <select
                 className="dash-inp"
                 value={store}
                 onChange={(e) => setStore(e.target.value)}
               >
                 <option value="ALL">All stores</option>
-                {STORE_GROUPS.map((g) => (
-                  <optgroup key={g.label} label={g.label}>
-                    {g.stores.map((c) => (
-                      <option key={c} value={c}>
-                        {branchLabel(c)}
-                      </option>
-                    ))}
-                  </optgroup>
+                {STORE_ORDER.map((c) => (
+                  <option key={c} value={c}>
+                    {branchLabel(c)}
+                  </option>
                 ))}
               </select>
             )}
@@ -4157,7 +4129,7 @@ function ActivityLog({ tickets, session, onOpen, onClose }) {
                           <span className="act-cust">{d.customer}</span>
                           <span className="act-dot">·</span>
                           <span className="ellip">{d.id}</span>
-                          {session && session.isHead && (
+                          {session && session.isPower && (
                             <>
                               <span className="act-dot">·</span>
                               <span>{branchLabel(d.branch)}</span>
