@@ -370,6 +370,9 @@ const CSS = `
 .hjsatt .att-pcard .dz { font-size: 12.5px; color: #6b7280; }
 .hjsatt .att-pcard a { font-size: 12px; color: #2563eb; word-break: break-all; }
 
+.hjsatt .att-pname { color: #2563eb; cursor: pointer; }
+.hjsatt .att-pname:hover { text-decoration: underline; }
+
 /* ---------- selection bar + detail ---------- */
 .hjsatt .att-selbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   background: #eff4ff; border: 1px solid #b2ccff; border-radius: 10px; padding: 10px 13px; }
@@ -1190,7 +1193,7 @@ function HomeScreen({ me }: any) {
               <div className="att-row">
                 <Avatar name={mgr.full_name} />
                 <div className="grow">
-                  <p><b>{mgr.emp_code}</b> · {mgr.full_name}</p>
+                  <p><PName code={mgr.emp_code}><b>{mgr.emp_code}</b> · {mgr.full_name}</PName></p>
                   <p className="att-muted">{mgr.designation || "—"}</p>
                 </div>
                 <span style={{ fontWeight: 700, fontSize: 13, color: stateColor[mgr.state] }}>
@@ -1209,7 +1212,7 @@ function HomeScreen({ me }: any) {
                 <div className="att-row" key={p.emp_code}>
                   <Avatar name={p.full_name} />
                   <div className="grow">
-                    <p><b>{p.full_name}</b></p>
+                    <p><PName code={p.emp_code}><b>{p.full_name}</b></PName></p>
                     <p className="att-muted">{p.designation || "—"}</p>
                   </div>
                   <span style={{ fontWeight: 700, fontSize: 12.5, color: stateColor[p.state] }}>
@@ -1260,7 +1263,7 @@ function HomeScreen({ me }: any) {
               <div className="att-row" key={p.emp_code}>
                 <Avatar name={p.full_name} />
                 <div className="grow">
-                  <p><b>{p.emp_code}</b> · {p.full_name}</p>
+                  <p><PName code={p.emp_code}><b>{p.emp_code}</b> · {p.full_name}</PName></p>
                   <p className="att-muted">{p.designation || p.team}</p>
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -1766,7 +1769,9 @@ function MatrixTab({ me }: any) {
                 return (
                   <>
                     <tr key={r.code}>
-                      <td className="name">{r.code} · {r.name}</td>
+                      <td className="name">
+                        <PName id={r.id} code={r.code}>{r.code} · {r.name}</PName>
+                      </td>
                       {dates.map((d) => (
                         <td key={d} style={{ textAlign: "center" }}>
                           <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
@@ -1900,7 +1905,7 @@ function PersonCard({ p }: any) {
     <div className="att-pcard">
       <Avatar name={p.full_name} />
       <div style={{ minWidth: 0 }}>
-        <p className="nm">{p.full_name}</p>
+        <p className="nm"><PName code={p.emp_code} id={p.id}>{p.full_name}</PName></p>
         <p className="dz">{p.emp_code} · {p.designation || "—"}</p>
         <p className="dz">{p.team}</p>
         {p.email && <a href={`mailto:${p.email}`}>{p.email}</a>}
@@ -2216,7 +2221,7 @@ function DeptTab() {
                     <div className="att-row" key={p.emp_code} style={{ padding: "8px 0" }}>
                       <Avatar name={p.full_name} />
                       <div className="grow">
-                        <p><b>{p.emp_code}</b> · {p.full_name}</p>
+                        <p><PName id={p.id} code={p.emp_code}><b>{p.emp_code}</b> · {p.full_name}</PName></p>
                         <p className="att-muted">{p.phone || p.email || "—"}</p>
                       </div>
                       <span style={{ fontSize: 12.5, fontWeight: 700, color: stateColor[p.state] }}>
@@ -2240,7 +2245,9 @@ function TreeCard({ p, open, canOpen, onClick, count }: any) {
       onClick={canOpen ? onClick : undefined}>
       <Avatar name={p.name} />
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span className="nm">{p.name}</span>
+        <span className="nm">
+          {p.code ? <PName id={p.pid} code={p.code}>{p.name}</PName> : p.name}
+        </span>
         <span className="dz">{p.sub}</span>
       </span>
       {count > 0 && (
@@ -2253,9 +2260,13 @@ function TreeCard({ p, open, canOpen, onClick, count }: any) {
 }
 
 // Asli org chart: parent se uske apne bachchon tak hi line jaati hai
-function OrgNode({ node, childrenOf, countOf, toCard, depth }: any) {
+function OrgNode({ node, childrenOf, countOf, toCard, depth, openAll }: any) {
   const kids = childrenOf(node);
   const [open, setOpen] = useState(depth < 1);
+  useEffect(() => {
+    if (openAll === undefined) return;
+    setOpen(openAll ? true : depth < 1);
+  }, [openAll]);
   return (
     <div className="att-node">
       <TreeCard p={toCard(node)} count={kids.length} canOpen={kids.length > 0}
@@ -2267,7 +2278,7 @@ function OrgNode({ node, childrenOf, countOf, toCard, depth }: any) {
             {kids.map((k: any) => (
               <div className="att-kid" key={k.id}>
                 <OrgNode node={k} childrenOf={childrenOf} countOf={countOf}
-                  toCard={toCard} depth={depth + 1} />
+                  toCard={toCard} depth={depth + 1} openAll={openAll} />
               </div>
             ))}
           </div>
@@ -2277,14 +2288,14 @@ function OrgNode({ node, childrenOf, countOf, toCard, depth }: any) {
   );
 }
 
-function OrgChart({ roots, childrenOf, countOf, toCard }: any) {
+function OrgChart({ roots, childrenOf, countOf, toCard, openAll }: any) {
   return (
     <div className="att-tw">
       <div className="att-kids">
         {roots.map((r: any) => (
           <div className="att-kid" key={r.id} style={{ paddingBottom: 14 }}>
             <OrgNode node={r} childrenOf={childrenOf} countOf={countOf}
-              toCard={toCard} depth={0} />
+              toCard={toCard} depth={0} openAll={openAll} />
           </div>
         ))}
         {!roots.length && <p className="att-empty">Nothing to show.</p>}
@@ -2297,6 +2308,7 @@ function EmpTreeTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(true);
+  const [all, setAll] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
     (async () => {
@@ -2311,9 +2323,17 @@ function EmpTreeTab() {
   rows.forEach((r) => {
     const k = r.reports_to || "root";
     (kids[k] = kids[k] || []).push(r);
+    // co-manager ke neeche bhi wahi banda dikhega
+    if (r.co_manager_id) {
+      (kids[r.co_manager_id] = kids[r.co_manager_id] || []).push({ ...r, _co: true });
+    }
   });
-  const deep = (id: string): number =>
-    (kids[id] || []).reduce((a, c) => a + 1 + deep(c.id), 0);
+  const deep = (id: string, seen = new Set<string>()): number =>
+    (kids[id] || []).reduce((a, c) => {
+      if (seen.has(c.id)) return a;
+      seen.add(c.id);
+      return a + 1 + deep(c.id, seen);
+    }, 0);
 
   if (q) {
     const hits = rows.filter((r) =>
@@ -2330,15 +2350,29 @@ function EmpTreeTab() {
     );
   }
 
+  const idSet = new Set(rows.map((r) => r.id));
+  // jinka manager list mein nahi hai wo bhi top pe dikhne chahiye
+  const roots = rows.filter((r) => !r.reports_to || !idSet.has(r.reports_to));
+
   return (
     <>
-      <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
-      <p className="att-muted">Click the + on a card to open the people reporting to them</p>
-      <OrgChart
-        roots={kids["root"] || []}
+      <div className="att-flex">
+        <input placeholder="Search anyone" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <button className="att-btn sm line" onClick={() => setAll(true)}>Expand all</button>
+        <button className="att-btn sm line" onClick={() => setAll(false)}>Collapse</button>
+      </div>
+      <p className="att-muted">
+        {rows.length} people · {roots.length} at the top · click + to open a card
+      </p>
+      <OrgChart openAll={all}
+        roots={roots}
         childrenOf={(n: any) => kids[n.id] || []}
         countOf={(n: any) => deep(n.id)}
-        toCard={(n: any) => ({ name: n.full_name, sub: `${n.emp_code} · ${n.designation || "—"}` })}
+        toCard={(n: any) => ({
+          name: n.full_name, code: n.emp_code, pid: n.id,
+          sub: `${n.emp_code} · ${n.designation || "—"}${n._co ? " · also reports here" : ""}`,
+        })}
       />
     </>
   );
@@ -2374,7 +2408,8 @@ function PeopleTab() {
           <div className="att-row" key={r.emp_code}>
             <Avatar name={r.full_name} />
             <div className="grow">
-              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
               <p className="att-muted">{r.designation || "—"} · {r.team}</p>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -2401,7 +2436,8 @@ function PeopleTab() {
           <div className="att-row" key={r.emp_code}>
             <Avatar name={r.full_name} />
             <div className="grow">
-              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
               <p className="att-muted">{r.designation || "—"} · {r.team}</p>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -2578,7 +2614,7 @@ function TeamLeavesTab({ me }: any) {
         <div className="att-row" key={r.id}>
           <Avatar name={emps[r.employee_id]?.full_name} />
           <div className="grow">
-            <p><b>{emps[r.employee_id]?.full_name || "—"}</b></p>
+            <p><PName id={r.employee_id}><b>{emps[r.employee_id]?.full_name || "—"}</b></PName></p>
             <p className="att-muted">
               {r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d
             </p>
@@ -3089,7 +3125,8 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.emp?.emp_code} · {r.emp?.full_name}</b>
+                <p><PName id={r.employee_id} code={r.emp?.emp_code}>
+                    <b>{r.emp?.emp_code} · {r.emp?.full_name}</b></PName>
                   {r.employee_id === me.id && (
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
@@ -3111,7 +3148,8 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
-                <p><b>{r.emp?.emp_code} · {r.emp?.full_name}</b>
+                <p><PName id={r.employee_id} code={r.emp?.emp_code}>
+                    <b>{r.emp?.emp_code} · {r.emp?.full_name}</b></PName>
                   {r.employee_id === me.id && (
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
@@ -3160,7 +3198,8 @@ function JoinersTab() {
           <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
             <Avatar name={r.full_name} />
             <div className="grow" style={{ minWidth: 170 }}>
-              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p><PName id={r.id} code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
               <p className="att-muted">{r.email}{r.phone ? ` · ${r.phone}` : ""}</p>
               <p className="att-muted" style={{ fontSize: 11.5 }}>
                 signed up {r.registered_at ? fmtDate(r.registered_at) : "—"}
@@ -3269,7 +3308,7 @@ function TodayTab() {
               <div className="att-row" key={r.emp_code}>
                 <Avatar name={r.full_name} />
                 <div className="grow">
-                  <p><b>{r.emp_code}</b> · {r.full_name}</p>
+                  <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
                   <p className="att-muted">{r.designation || "—"}</p>
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -3408,7 +3447,7 @@ function StaffTab({ me }: any) {
             onClick={() => me.role === "admin" && setEdit(r)}>
             <Avatar name={r.full_name} />
             <div className="grow">
-              <p><b>{r.emp_code}</b> · {r.full_name}</p>
+              <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
               <p className="att-muted">
                 {r.designation || r.role}
                 {r.teams?.name ? ` · ${r.teams.name}` : ""}
@@ -3437,7 +3476,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const [f, setF] = useState<any>(row || {
     emp_code: "", full_name: "", first_name: "", last_name: "",
     email: "", phone: "", designation: "",
-    branch_id: branches[0]?.id || null, team_id: null, reports_to: null, role: "staff",
+    branch_id: branches[0]?.id || null, team_id: null, reports_to: null,
+    co_manager_id: null, role: "staff",
     shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
     field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
   });
@@ -3479,6 +3519,7 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         branch_id: f.branch_id || null,
         team_id: f.team_id || null,
         reports_to: f.reports_to || null,
+        co_manager_id: f.co_manager_id || null,
         role: f.role,
         shift_start: f.shift_start, shift_end: f.shift_end,
         grace_minutes: Number(f.grace_minutes) || 0,
@@ -3590,6 +3631,16 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
               ))}
             </select>
           </div>
+        </div>
+        <div>
+          <label>Also reports to <span className="att-muted">(second manager, optional)</span></label>
+          <select value={f.co_manager_id || ""}
+            onChange={(e) => setF({ ...f, co_manager_id: e.target.value || null })}>
+            <option value="">— none —</option>
+            {(people || []).filter((x: any) => x.id !== row?.id).map((x: any) => (
+              <option key={x.id} value={x.id}>{x.emp_code} · {x.full_name}</option>
+            ))}
+          </select>
         </div>
         <div className="att-row2">
           <div>
@@ -3809,7 +3860,8 @@ function OrgTab() {
         countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
         toCard={(n: any) => n._kind === "team"
           ? { name: n.name, sub: `${membersOf(n.id).length} people` }
-          : { name: n.full_name, sub: `${n.emp_code} · ${n.designation || "—"}` }}
+          : { name: n.full_name, code: n.emp_code, pid: n.id,
+              sub: `${n.emp_code} · ${n.designation || "—"}` }}
       />
     </>
   );
@@ -3871,7 +3923,7 @@ function ReportsTab() {
               <tbody>
                 {muster.rows.map(([code, v]: any) => (
                   <tr key={code}>
-                    <td className="name">{v.name}</td>
+                    <td className="name"><PName code={code}>{v.name}</PName></td>
                     {muster.dates.map((d) => (
                       <td key={d}><span className={markClass(v.marks[d])}>{v.marks[d] || "·"}</span></td>
                     ))}
@@ -3889,7 +3941,7 @@ function ReportsTab() {
           {data.map((r: any, i: number) => (
             <div className="att-row" key={i}>
               <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
-              <span className="grow">{r.full_name}</span>
+              <span className="grow"><PName code={r.emp_code}>{r.full_name}</PName></span>
               <span className="att-muted">{fmtTime(r.punch_in_at)}</span>
               <span className="att-pill p-Late">{r.late_minutes}m</span>
             </div>
@@ -3904,7 +3956,7 @@ function ReportsTab() {
             <div className="att-row" key={i}>
               <Avatar name={r.full_name} />
               <div className="grow">
-                <p><b>{r.full_name}</b></p>
+                <p><PName code={r.emp_code}><b>{r.full_name}</b></PName></p>
                 <p className="att-muted">{r.branch}</p>
               </div>
               <span className="att-pill p-Late">{r.late_marks} late</span>
@@ -3961,7 +4013,7 @@ function PayrollTab() {
               {g.map((r: any) => (
                 <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
                   <div className="att-between">
-                    <b>{r.emp_code} · {r.full_name}</b>
+                    <b><PName code={r.emp_code}>{r.emp_code} · {r.full_name}</PName></b>
                     <b style={{ color: r.monthly_gross ? "#2563eb" : "#98a2b3" }}>
                       {r.monthly_gross
                         ? `₹ ${Number(r.payable_amount).toLocaleString("en-IN")}`
@@ -4036,6 +4088,53 @@ function MeScreen({ me }: any) {
         To change your 4-digit code, sign out and use "Forgot code?" on the sign-in screen.
       </p>
     </div>
+  );
+}
+
+/* ================= person popup, poore app mein ================= */
+const PersonCtx = React.createContext<any>(null);
+const usePerson = () => React.useContext(PersonCtx);
+
+// Kisi bhi naam ko clickable banata hai
+function PName({ id, code, children, className = "" }: any) {
+  const ctx = usePerson();
+  if (!ctx || (!id && !code)) return <>{children}</>;
+  return (
+    <span className={`att-pname ${className}`}
+      onClick={(e) => { e.stopPropagation(); ctx.open({ id, code }); }}>
+      {children}
+    </span>
+  );
+}
+
+function PersonProvider({ me, children }: any) {
+  const [dir, setDir] = useState<any[]>([]);
+  const [pick, setPick] = useState<any>(null);
+  const canEdit = me?.role === "admin";
+
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    setDir(data || []);
+    return data || [];
+  };
+  useEffect(() => { load(); }, []);
+
+  const open = async ({ id, code }: any) => {
+    const find = (list: any[]) =>
+      list.find((r) => (id && r.id === id) || (code && r.emp_code === code));
+    let row = find(dir);
+    if (!row) row = find(await load());
+    if (row) setPick(row);
+  };
+
+  return (
+    <PersonCtx.Provider value={{ open }}>
+      {children}
+      {pick && (
+        <PersonSheet p={pick} canEdit={canEdit}
+          onClose={() => setPick(null)} onDeleted={load} />
+      )}
+    </PersonCtx.Provider>
   );
 }
 
@@ -4314,7 +4413,7 @@ export default function Attendance() {
   };
 
   return shell(
-    <>
+    <PersonProvider me={me}>
       <nav className="att-rail">
         <div className="att-raillogo">HJS</div>
         {mods.map((m) => (
@@ -4331,8 +4430,8 @@ export default function Attendance() {
         <header className="att-topbar">
           <div style={{ flex: 1, minWidth: 0 }}>
             <b>{curMod.label}</b>
-            <span className="sub" style={{ display: "block" }}>
-              {me.emp_code} · {me.full_name}
+            <span className="sub" style={{ display: "block", cursor: "pointer" }}>
+              <PName code={me.emp_code}>{me.emp_code} · {me.full_name}</PName>
             </span>
           </div>
           <button className="att-signout" onClick={() => supabase.auth.signOut()}>Sign out</button>
@@ -4369,6 +4468,6 @@ export default function Attendance() {
 
         <main className="att-main">{body()}</main>
       </div>
-    </>
+    </PersonProvider>
   );
 }
