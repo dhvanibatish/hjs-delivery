@@ -319,6 +319,15 @@ const CSS = `
 .hjsatt .att-totchips span { font-size: 12px; font-weight: 650; padding: 3px 10px;
   border-radius: 6px; white-space: nowrap; }
 
+/* ---------- collapsible group ---------- */
+.hjsatt .att-grp { width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px; background: #fff; }
+.hjsatt .att-grp:hover { background: #fafbfc; }
+.hjsatt .att-grp .t { font-weight: 700; font-size: 14.5px; }
+.hjsatt .att-grp .chev { color: #98a2b3; font-size: 12px; width: 14px; text-align: center; }
+.hjsatt .att-mini { display: flex; gap: 5px; flex-wrap: wrap; }
+.hjsatt .att-mini span { font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 5px; }
+
 /* ---------- org tree ---------- */
 .hjsatt .att-tree { display: flex; flex-direction: column; gap: 10px; }
 .hjsatt .att-tnode { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
@@ -579,6 +588,24 @@ const downloadCsv = (rows: any[], filename: string) => {
 
 const Note = ({ kind = "err", children }: any) =>
   !children ? null : <div className={`att-note ${kind}`}><span>{children}</span></div>;
+
+function Section({ title, sub, chips, count, children, open: o0 }: any) {
+  const [open, setOpen] = useState(!!o0);
+  return (
+    <div className="att-list">
+      <button className="att-grp" onClick={() => setOpen(!open)}>
+        <span className="chev">{open ? "\u25be" : "\u25b8"}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="t" style={{ display: "block" }}>{title}</span>
+          {sub && <span className="att-muted" style={{ display: "block" }}>{sub}</span>}
+        </span>
+        {chips && <span className="att-mini">{chips}</span>}
+        {count != null && <span className="att-chip">{count}</span>}
+      </button>
+      {open && children}
+    </div>
+  );
+}
 
 const Sheet = ({ title, onClose, children }: any) => (
   <div className="att-sheet" onClick={onClose}>
@@ -1946,6 +1973,7 @@ function TodayTab() {
   const [busy, setBusy] = useState(true);
   const [date, setDate] = useState(istToday());
   const [filter, setFilter] = useState("");
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -1973,7 +2001,14 @@ function TodayTab() {
   const done = rows.filter((r) => r.state === "Out").length;
   const onLeave = rows.filter((r) => r.state === "Leave").length;
   const notIn = rows.filter((r) => r.state === "Yet to check in").length;
-  const shown = filter ? rows.filter((r) => r.state === filter) : rows;
+  const shown = rows
+    .filter((r) => !filter || r.state === filter)
+    .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
+  const teamNames = Object.keys(groups).sort();
 
   return (
     <>
@@ -2004,35 +2039,50 @@ function TodayTab() {
           onClick={() => setFilter(filter === "Yet to check in" ? "" : "Yet to check in")}>
           <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
       </div>
-      {filter && (
-        <p className="att-muted">Showing {filter} ·{" "}
-          <button style={{ color: "#2563eb" }} onClick={() => setFilter("")}>clear</button></p>
-      )}
-      <div className="att-list">
-        {shown.map((r) => (
-          <div className="att-row" key={r.emp_code}>
-            <Avatar name={r.full_name} />
-            <div className="grow">
-              <p><b>{r.emp_code}</b> · {r.full_name}</p>
-              <p className="att-muted">{r.designation || r.branch}</p>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[r.state] }}>{r.state}</p>
-              <p className="att-muted" style={{ fontSize: 11.5 }}>
-                {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
-                {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
-              </p>
-              {r.punch && (
-                <p style={{ marginTop: 3 }}>
-                  <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
-                    dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
-                </p>
-              )}
-            </div>
-          </div>
-        ))}
-        {!shown.length && !busy && <p className="att-empty">Nobody in this list.</p>}
+      <div className="att-flex">
+        <input placeholder="Search name, code, team" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>Clear {filter}</button>}
       </div>
+
+      {teamNames.map((tn) => {
+        const g = groups[tn];
+        const gi = g.filter((x) => x.state === "In").length;
+        const gn = g.filter((x) => x.state === "Yet to check in").length;
+        return (
+          <Section key={tn} title={tn} count={g.length} open={!!q || teamNames.length <= 3}
+            chips={<>
+              <span style={{ background: "#ecfdf3", color: "#067647" }}>{gi} in</span>
+              {gn > 0 && <span style={{ background: "#fef3f2", color: "#b42318" }}>{gn} not in</span>}
+            </>}>
+            {g.map((r) => (
+              <div className="att-row" key={r.emp_code}>
+                <Avatar name={r.full_name} />
+                <div className="grow">
+                  <p><b>{r.emp_code}</b> · {r.full_name}</p>
+                  <p className="att-muted">{r.designation || "—"}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[r.state] }}>{r.state}</p>
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
+                    {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
+                  </p>
+                  {r.punch && (
+                    <p style={{ marginTop: 3 }}>
+                      <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
+                        dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </Section>
+        );
+      })}
+      {!shown.length && !busy && (
+        <div className="att-list"><p className="att-empty">Nobody in this list.</p></div>
+      )}
     </>
   );
 }
@@ -2126,7 +2176,8 @@ function StaffTab({ me }: any) {
 
   if (busy) return <p className="att-muted">Loading…</p>;
   const shown = rows.filter((r) =>
-    !q || `${r.full_name} ${r.emp_code}`.toLowerCase().includes(q.toLowerCase()));
+    !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.teams?.name || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
 
   return (
     <>
@@ -2476,8 +2527,8 @@ function OrgTab({ me }: any) {
 
       <div className="att-tree">
         {shown.map((t) => (
-          <div className="att-tnode" key={t.id}>
-            <div className="att-thead">
+          <details className="att-tnode" key={t.id} open={!!q || shown.length <= 4}>
+            <summary className="att-thead" style={{ cursor: "pointer", listStyle: "none" }}>
               {t.manager ? <Avatar name={t.manager.full_name} /> : <div className="att-av"
                 style={{ background: "#cbd5e1" }}>—</div>}
               <div className="grow" style={{ flex: 1, minWidth: 0 }}>
@@ -2488,7 +2539,7 @@ function OrgTab({ me }: any) {
                 </p>
               </div>
               <span className="att-chip">{t.members.length} member{t.members.length === 1 ? "" : "s"}</span>
-            </div>
+            </summary>
             {t.members.filter(match).map((m: any) => (
               <div className="att-tmem" key={m.id}>
                 <div className="grow" style={{ flex: 1, minWidth: 0 }}>
@@ -2502,7 +2553,7 @@ function OrgTab({ me }: any) {
                 {!m.email && <span className="att-pill p-Absent">no email</span>}
               </div>
             ))}
-          </div>
+          </details>
         ))}
 
         {unassigned.length > 0 && (
@@ -2636,6 +2687,7 @@ function PayrollTab() {
   const [month, setMonth] = useState(istToday().slice(0, 7));
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -2652,32 +2704,51 @@ function PayrollTab() {
         <button className="att-btn sm" disabled={!rows.length}
           onClick={() => downloadCsv(rows, `HJS_payroll_${month}.csv`)}>CSV</button>
       </div>
+      <input placeholder="Search name, code, team" value={q}
+        onChange={(e) => setQ(e.target.value)} />
+
       {busy && <p className="att-muted">Loading…</p>}
-      {!busy && (
-        <div className="att-list">
-          {!rows.length && <p className="att-empty">No data for this month.</p>}
-          {rows.map((r: any) => (
-            <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
-              <div className="att-between">
-                <b>{r.emp_code} · {r.full_name}</b>
-                <b style={{ color: r.monthly_gross ? "#2563eb" : "#98a2b3" }}>
-                  {r.monthly_gross ? `₹ ${Number(r.payable_amount).toLocaleString("en-IN")}` : "salary not set"}
-                </b>
-              </div>
-              <p className="att-muted" style={{ marginTop: 4 }}>
-                Counted {r.counted_days} of {r.month_days} days ·{" "}
-                {r.present_days} present · {r.half_days} half · {r.week_offs} week off ·{" "}
-                {r.holidays} holiday · {r.paid_leaves} paid leave · {r.unpaid_leaves} LOP ·{" "}
-                <span style={{ color: "#b42318" }}>{r.absent_days} absent</span>
-              </p>
-              <p className="att-muted" style={{ marginTop: 2 }}>
-                Payable <b>{r.payable_days}</b> days
-                {r.monthly_gross ? ` × ₹${r.per_day}/day` : ""}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
+      {!busy && (() => {
+        const shown = rows.filter((r: any) => !q ||
+          `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
+        const groups: Record<string, any[]> = {};
+        shown.forEach((r: any) => {
+          const k = r.team || "—";
+          (groups[k] = groups[k] || []).push(r);
+        });
+        const names = Object.keys(groups).sort();
+        if (!shown.length) return <div className="att-list"><p className="att-empty">No data for this month.</p></div>;
+        return names.map((tn) => {
+          const g = groups[tn];
+          const total = g.reduce((a: number, r: any) => a + Number(r.payable_amount || 0), 0);
+          return (
+            <Section key={tn} title={tn} count={g.length} open={!!q || names.length <= 3}
+              sub={total ? `₹ ${total.toLocaleString("en-IN")} payable` : "salary not set"}>
+              {g.map((r: any) => (
+                <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
+                  <div className="att-between">
+                    <b>{r.emp_code} · {r.full_name}</b>
+                    <b style={{ color: r.monthly_gross ? "#2563eb" : "#98a2b3" }}>
+                      {r.monthly_gross
+                        ? `₹ ${Number(r.payable_amount).toLocaleString("en-IN")}`
+                        : "salary not set"}
+                    </b>
+                  </div>
+                  <p className="att-muted" style={{ marginTop: 4 }}>
+                    Counted {r.counted_days} of {r.month_days} days ·{" "}
+                    {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid leave ·{" "}
+                    <span style={{ color: "#b42318" }}>{r.absent_days} absent</span>
+                  </p>
+                  <p className="att-muted" style={{ marginTop: 2 }}>
+                    Payable <b>{r.payable_days}</b> days
+                    {r.monthly_gross ? ` × ₹${r.per_day}/day` : ""}
+                  </p>
+                </div>
+              ))}
+            </Section>
+          );
+        });
+      })()}
     </>
   );
 }
