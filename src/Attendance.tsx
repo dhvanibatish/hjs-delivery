@@ -749,7 +749,9 @@ function CodeInput({ value, onChange, show, setShow, autoFocus, onEnter, placeho
 const codeToPassword = (code: string) => `hjs-${code}-att`;
 
 function Login() {
-  const [stage, setStage] = useState<"email" | "set" | "enter">("email");
+  const [stage, setStage] = useState<"email" | "set" | "enter" | "new">("email");
+  const [name, setName] = useState("");
+  const [empCode, setEmpCode] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [code2, setCode2] = useState("");
@@ -763,8 +765,7 @@ function Login() {
     const e = email.trim().toLowerCase();
     const { data, error } = await supabase.rpc("email_status", { p_email: e });
     if (error) setErr(error.message);
-    else if (data === "not_found")
-      setErr("This email isn't registered. Ask your admin to add you.");
+    else if (data === "not_found") setStage("new");
     else setStage(data === "ready" ? "enter" : "set");
     setBusy(false);
   };
@@ -807,6 +808,38 @@ function Login() {
     setBusy(false);
   };
 
+  // naya banda: account bana ke Pending state mein chala jayega
+  const registerNew = async () => {
+    setErr("");
+    if (!name.trim()) return setErr("Please enter your full name.");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const pw = codeToPassword(code);
+
+    const up = await supabase.auth.signUp({ email: e, password: pw });
+    let session = up.data?.session || null;
+    if (!session) {
+      const si = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      session = si.data?.session || null;
+      if (!session) {
+        setBusy(false);
+        if (up.error && /already/i.test(up.error.message))
+          return setErr("This email already has an account. Go back and sign in.");
+        return setErr(up.error?.message
+          || "Couldn't start your session. Ask your admin to check email settings.");
+      }
+    }
+    const { error } = await supabase.rpc("register_self", {
+      p_full_name: name.trim(),
+      p_emp_code: empCode.trim() || null,
+      p_phone: null,
+    });
+    if (error) { setErr(error.message); await supabase.auth.signOut(); }
+    setBusy(false);
+  };
+
   const signIn = async () => {
     setErr("");
     if (code.length !== 4) return setErr("Enter your 4-digit code.");
@@ -839,6 +872,7 @@ function Login() {
           <p className="att-muted" style={{ marginTop: 3 }}>
             {stage === "email" ? "Sign in with your work email."
               : stage === "set" ? "Set a 4-digit code you'll remember."
+              : stage === "new" ? "New here? Create your account."
               : "Enter your 4-digit code."}
           </p>
         </div>
@@ -858,6 +892,44 @@ function Login() {
                 disabled={busy || !email.includes("@")}>
                 {busy ? "Checking…" : "Continue"}
               </button>
+            </>
+          )}
+
+          {stage === "new" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div className="att-note ok">
+                <span>
+                  This email isn't on our list yet. Create your account and an admin
+                  will approve it — you can't check in until then.
+                </span>
+              </div>
+              <div>
+                <label>Your full name</label>
+                <input value={name} placeholder="Ansh Bansal" autoFocus
+                  onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label>Employee code <span className="att-muted">(if you know it)</span></label>
+                <input value={empCode} placeholder="VGN-E137"
+                  style={{ textTransform: "uppercase" }}
+                  onChange={(e) => setEmpCode(e.target.value)} />
+              </div>
+              <div>
+                <label>Create your 4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={registerNew} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={registerNew}
+                disabled={busy || !name.trim() || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Creating…" : "Create my account"}
+              </button>
+              <button className="att-muted" onClick={back}>Use a different email</button>
             </>
           )}
 
@@ -1830,6 +1902,23 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [confirmDel, setConfirmDel] = useState(false);
+  const [edit, setEdit] = useState<any>(null);
+  const [lists, setLists] = useState<any>(null);
+
+  const openEdit = async () => {
+    setBusy(true);
+    const [emp, b, t, d] = await Promise.all([
+      supabase.from("employees").select("*").eq("id", p.id).single(),
+      supabase.from("branches").select("*").order("name"),
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("designations").select("*").eq("active", true).order("sort_order").order("name"),
+      ]);
+    const people = await supabase.from("employees").select("id, emp_code, full_name").order("full_name");
+    setLists({ branches: b.data || [], teams: t.data || [], desigs: d.data || [],
+               people: people.data || [] });
+    setEdit(emp.data);
+    setBusy(false);
+  };
 
   const rows: [string, any][] = [
     ["Employee ID", p.emp_code],
@@ -1843,6 +1932,7 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Mobile", p.phone],
     ["Employment type", p.employment_type],
     ["Employee status", p.employee_status],
+    ["Account", p.approval_status],
     ["Source of hire", p.source_of_hire],
     ["Date of joining", p.date_of_joining ? fmtDate(p.date_of_joining) : null],
     ["Date of birth", p.date_of_birth ? fmtDate(p.date_of_birth) : null],
@@ -1884,7 +1974,8 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
         <div className="att-card" style={{ marginTop: 12 }}>
           <Note>{msg.err}</Note>
           {!confirmDel ? (
-            <div className="att-flex">
+            <div className="att-flex" style={{ flexWrap: "wrap" }}>
+              <button className="att-btn sm" disabled={busy} onClick={openEdit}>Edit details</button>
               <button className="att-btn sm line" disabled={busy}
                 onClick={() => remove(false)}>Deactivate</button>
               <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
@@ -1902,6 +1993,12 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
           )}
         </div>
       )}
+
+      {edit && lists && (
+        <EmployeeSheet row={edit} branches={lists.branches} teams={lists.teams}
+          desigs={lists.desigs} people={lists.people}
+          onClose={() => { setEdit(null); onDeleted(); }} />
+      )}
     </Sheet>
   );
 }
@@ -1914,7 +2011,7 @@ function DirectoryTab({ me }: any) {
   const [busy, setBusy] = useState(true);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<any>(null);
-  const canEdit = ["admin"].includes(me?.role);
+  const canEdit = me?.role === "admin";
 
   const load = async () => {
     const { data } = await supabase.rpc("directory", {});
@@ -2847,58 +2944,133 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
 }
 
 /* ========================= approvals ========================= */
-function InboxScreen({ me, onCount }: any) {
+function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const [leaves, setLeaves] = useState<any[]>([]);
   const [regs, setRegs] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [status, setStatus] = useState("All");
+  const [range, setRange] = useState({
+    from: addDays(istToday(), -90), to: addDays(istToday(), 90),
+  });
+
+  const history = mode === "history";
 
   const load = async () => {
-    // NOTE: leaves/regularizations ke paas employees se DO foreign key hain
-    // (employee_id aur approved_by), isliye nested select ambiguous ho jata hai.
-    // Employees alag fetch karke map kar rahe hain.
     const [l, r, emps] = await Promise.all([
-      supabase.from("leaves").select("*").eq("status", "Pending").order("from_date"),
-      supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
+      history
+        ? supabase.from("leaves").select("*").order("from_date", { ascending: false }).limit(500)
+        : supabase.from("leaves").select("*").eq("status", "Pending").order("from_date"),
+      history
+        ? supabase.from("regularizations").select("*").order("work_date", { ascending: false }).limit(500)
+        : supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
       supabase.from("employees").select("id, emp_code, full_name, designation"),
     ]);
     if (l.error) setErr(l.error.message);
     const byId: Record<string, any> = {};
     (emps.data || []).forEach((e: any) => { byId[e.id] = e; });
     const attach = (x: any) => ({ ...x, emp: byId[x.employee_id] });
+    // RLS pehle hi scope kar deti hai (manager -> apni team, admin -> sab)
     const keep = (x: any) => me.role === "admin" || x.employee_id !== me.id;
     const L = (l.data || []).filter(keep).map(attach);
     const R = (r.data || []).filter(keep).map(attach);
-    setLeaves(L); setRegs(R); onCount(L.length + R.length);
+    setLeaves(L); setRegs(R);
+    if (!history) onCount(L.length + R.length);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [mode]);
 
-  const decideLeave = async (id: string, status: string) => {
+  const decideLeave = async (id: string, st: string) => {
     setBusy(true);
     await supabase.from("leaves").update({
-      status, approved_by: me.id, approved_at: new Date().toISOString(),
+      status: st, approved_by: me.id, approved_at: new Date().toISOString(),
     }).eq("id", id);
     await load(); setBusy(false);
   };
 
-  const decideReg = async (id: string, status: string) => {
+  const decideReg = async (id: string, st: string) => {
     setBusy(true); setErr("");
-    const { error } = await supabase.rpc("decide_regularization", { p_id: id, p_status: status });
+    const { error } = await supabase.rpc("decide_regularization", { p_id: id, p_status: st });
     if (error) setErr(error.message);
     await load(); setBusy(false);
   };
 
-  const total = leaves.length + regs.length;
+  const inRange = (d: string) => d >= range.from && d <= range.to;
+  const stOk = (x: any) => status === "All" || x.status === status;
+  const shownL = leaves.filter((x) => stOk(x) && inRange(x.from_date));
+  const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date));
+  const total = shownL.length + shownR.length;
+
+  const Actions = ({ r, kind }: any) =>
+    r.status !== "Pending" ? (
+      <div style={{ textAlign: "right" }}>
+        <span className={pillClass(r.status)}>{r.status}</span>
+        {r.approved_at && (
+          <p className="att-muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+            {fmtDate(r.approved_at)}
+          </p>
+        )}
+      </div>
+    ) : (
+      <>
+        <button className="att-btn sm green" disabled={busy}
+          onClick={() => kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved")}>
+          Approve
+        </button>
+        <button className="att-btn sm grey" disabled={busy}
+          onClick={() => kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected")}>
+          Reject
+        </button>
+      </>
+    );
 
   return (
-    <div className="att-wrap att-narrow att-stack">
+    <div className="att-wrap att-stack">
       <Note>{err}</Note>
-      {total === 0 && <div className="att-list"><p className="att-empty">All clear. Nothing pending.</p></div>}
 
-      {leaves.length > 0 && (
+      {history && (
+        <div className="att-range">
+          <div className="qk">
+            {["All", "Pending", "Approved", "Rejected", "Cancelled"].map((k) => (
+              <button key={k} className={status === k ? "on" : ""} onClick={() => setStatus(k)}>{k}</button>
+            ))}
+          </div>
+          <div className="att-flex" style={{ marginLeft: "auto" }}>
+            <input type="date" value={range.from}
+              onChange={(e) => setRange({ ...range, from: e.target.value })} />
+            <span className="att-muted">to</span>
+            <input type="date" value={range.to} min={range.from}
+              onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </div>
+        </div>
+      )}
+
+      {history && (
+        <div className="att-between">
+          <p className="att-muted">{total} requests</p>
+          <button className="att-btn sm line" disabled={!total}
+            onClick={() => downloadCsv([
+              ...shownL.map((r) => ({ Type: "Leave", Employee: r.emp?.full_name,
+                Code: r.emp?.emp_code, Kind: r.leave_type, From: r.from_date, To: r.to_date,
+                Days: r.days, Reason: r.reason, Status: r.status })),
+              ...shownR.map((r) => ({ Type: "Regularization", Employee: r.emp?.full_name,
+                Code: r.emp?.emp_code, Kind: "Missed punch", From: r.work_date, To: r.work_date,
+                Days: "", Reason: r.reason, Status: r.status })),
+            ], `HJS_approvals_${range.from}_${range.to}.csv`)}>CSV</button>
+        </div>
+      )}
+
+      {total === 0 && (
         <div className="att-list">
-          <div className="att-hd"><b>Leave requests</b><span className="att-muted">{leaves.length}</span></div>
-          {leaves.map((r) => (
+          <p className="att-empty">
+            {history ? "Nothing in this range." : "All clear. Nothing pending."}
+          </p>
+        </div>
+      )}
+
+      {shownL.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd"><b>Leave requests</b><span className="att-muted">{shownL.length}</span></div>
+          {shownL.map((r) => (
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
@@ -2906,22 +3078,21 @@ function InboxScreen({ me, onCount }: any) {
                   {r.employee_id === me.id && (
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
-                <p className="att-muted">{r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d</p>
+                <p className="att-muted">
+                  {r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d
+                </p>
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
               </div>
-              <button className="att-btn sm green" disabled={busy}
-                onClick={() => decideLeave(r.id, "Approved")}>Approve</button>
-              <button className="att-btn sm grey" disabled={busy}
-                onClick={() => decideLeave(r.id, "Rejected")}>Reject</button>
+              <Actions r={r} kind="leave" />
             </div>
           ))}
         </div>
       )}
 
-      {regs.length > 0 && (
+      {shownR.length > 0 && (
         <div className="att-list">
-          <div className="att-hd"><b>Missed punch requests</b><span className="att-muted">{regs.length}</span></div>
-          {regs.map((r) => (
+          <div className="att-hd"><b>Missed punch requests</b><span className="att-muted">{shownR.length}</span></div>
+          {shownR.map((r) => (
             <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
               <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
@@ -2934,15 +3105,60 @@ function InboxScreen({ me, onCount }: any) {
                 </p>
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
               </div>
-              <button className="att-btn sm green" disabled={busy}
-                onClick={() => decideReg(r.id, "Approved")}>Approve</button>
-              <button className="att-btn sm grey" disabled={busy}
-                onClick={() => decideReg(r.id, "Rejected")}>Reject</button>
+              <Actions r={r} kind="reg" />
             </div>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function JoinersTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    const { data, error } = await supabase.rpc("pending_registrations");
+    if (error) setErr(error.message);
+    setRows(data || []); setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const decide = async (id: string, ok: boolean) => {
+    setBusy(true);
+    const { error } = await supabase.rpc("decide_registration", { p_emp: id, p_approve: ok });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  return (
+    <>
+      <Note>{err}</Note>
+      <p className="att-muted">
+        Anyone can create an account from the sign-in link. They land here until you approve them.
+      </p>
+      <div className="att-list">
+        {!rows.length && !busy && <p className="att-empty">No one waiting right now.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <Avatar name={r.full_name} />
+            <div className="grow" style={{ minWidth: 170 }}>
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">{r.email}{r.phone ? ` · ${r.phone}` : ""}</p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>
+                signed up {r.registered_at ? fmtDate(r.registered_at) : "—"}
+              </p>
+            </div>
+            <button className="att-btn sm green" disabled={busy}
+              onClick={() => decide(r.id, true)}>Approve</button>
+            <button className="att-btn sm grey" disabled={busy}
+              onClick={() => decide(r.id, false)}>Reject</button>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -3849,7 +4065,11 @@ const MODULES: Module[] = [
   },
   {
     k: "approvals", label: "Approvals", icon: "check", approverOnly: true,
-    scopes: [{ k: "pending", label: "Pending", views: [{ k: "all", label: "All Requests" }]}],
+    scopes: [
+      { k: "pending", label: "Pending", views: [{ k: "all", label: "Awaiting action" }]},
+      { k: "history", label: "History", views: [{ k: "all", label: "All requests" }]},
+      { k: "joiners", label: "New joiners", views: [{ k: "all", label: "Pending sign-ups" }]},
+    ],
   },
   {
     k: "reports", label: "Reports", icon: "users", approverOnly: true,
@@ -3895,8 +4115,10 @@ export default function Attendance() {
         supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
       ]);
+      const j = await supabase.rpc("pending_registrations");
       setPending([...(l.data || []), ...(r.data || [])]
-        .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length);
+        .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length
+        + (j.data || []).length);
     })();
   }, [me, mod]);
 
@@ -3910,6 +4132,37 @@ export default function Attendance() {
     <div className="att-center" style={{ flexDirection: "column", gap: 13, textAlign: "center" }}>
       <p>This login isn't linked to an employee record yet. Ask your admin to link your employee code.</p>
       <button className="att-btn grey sm" onClick={() => supabase.auth.signOut()}>Sign out</button>
+    </div>
+  );
+
+  if (me.approval_status === "Pending") return shell(
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 420, textAlign: "center" }}>
+        <div className="att-flex" style={{ justifyContent: "center", marginBottom: 12 }}>
+          <Avatar name={me.full_name} lg />
+        </div>
+        <h2 className="att-h1">Waiting for approval</h2>
+        <p className="att-muted" style={{ marginTop: 8 }}>
+          Your account ({me.email}) has been created. An admin needs to approve it
+          before you can check in. You'll be able to sign in with the same code once
+          they do.
+        </p>
+        <button className="att-btn grey sm" style={{ marginTop: 16, width: "100%" }}
+          onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </div>
+    </div>
+  );
+
+  if (me.approval_status === "Rejected") return shell(
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 420, textAlign: "center" }}>
+        <h2 className="att-h1">Account not approved</h2>
+        <p className="att-muted" style={{ marginTop: 8 }}>
+          Please speak to your admin or HR.
+        </p>
+        <button className="att-btn grey sm" style={{ marginTop: 16, width: "100%" }}
+          onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </div>
     </div>
   );
 
@@ -3957,7 +4210,10 @@ export default function Attendance() {
       case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
       case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
       // ---- Approvals ----
-      case "approvals/pending/all": return <InboxScreen me={me} onCount={setPending} />;
+      case "approvals/pending/all":  return <InboxScreen me={me} onCount={setPending} mode="pending" />;
+      case "approvals/history/all":  return <InboxScreen me={me} onCount={setPending} mode="history" />;
+      case "approvals/joiners/all":  return <div className="att-wrap att-stack"><JoinersTab /></div>;
+      case "me/me/profile":          return <MeScreen me={me} />;
       // ---- Reports ----
       case "reports/att/muster":    return <div className="att-wrap att-stack"><ReportsTab /></div>;
       case "reports/att/payroll":   return <div className="att-wrap att-stack"><PayrollTab /></div>;
