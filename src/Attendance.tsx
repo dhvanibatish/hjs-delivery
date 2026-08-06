@@ -319,6 +319,38 @@ const CSS = `
 .hjsatt .att-totchips span { font-size: 12px; font-weight: 650; padding: 3px 10px;
   border-radius: 6px; white-space: nowrap; }
 
+/* ---------- calendar ---------- */
+.hjsatt .att-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.hjsatt .att-caldow { font-size: 11px; font-weight: 700; color: #6b7280; text-align: center;
+  padding-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+.hjsatt .att-calday { min-height: 82px; border: 1px solid #e5e7eb; border-radius: 9px;
+  padding: 7px 8px; background: #fff; }
+.hjsatt .att-calday.pad { background: #fafbfc; border-style: dashed; }
+.hjsatt .att-calday.now { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+.hjsatt .att-calday .n { font-size: 13px; font-weight: 700; }
+.hjsatt .att-calday .st { font-size: 11px; font-weight: 700; margin-top: 6px; }
+.hjsatt .att-calday .hr { font-size: 10.5px; color: #6b7280; }
+@media (max-width: 720px) {
+  .hjsatt .att-calday { min-height: 62px; padding: 5px; }
+  .hjsatt .att-calday .st { font-size: 9.5px; }
+  .hjsatt .att-calday .hr { display: none; }
+}
+
+/* ---------- people cards ---------- */
+.hjsatt .att-people { display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.hjsatt .att-pcard { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 14px; display: flex; gap: 11px; align-items: flex-start; }
+.hjsatt .att-pcard .nm { font-weight: 700; font-size: 14px; }
+.hjsatt .att-pcard .dz { font-size: 12.5px; color: #6b7280; }
+.hjsatt .att-pcard a { font-size: 12px; color: #2563eb; word-break: break-all; }
+
+/* ---------- reporting tree ---------- */
+.hjsatt .att-rt { margin-left: 16px; padding-left: 14px; border-left: 1px solid #e5e7eb; }
+.hjsatt .att-rtrow { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+.hjsatt .att-rtrow .cnt2 { font-size: 11px; background: #eff4ff; color: #2563eb;
+  padding: 1px 7px; border-radius: 5px; font-weight: 650; }
+
 /* ---------- collapsible group ---------- */
 .hjsatt .att-grp { width: 100%; display: flex; align-items: center; gap: 10px;
   padding: 13px 14px; background: #fff; }
@@ -825,6 +857,8 @@ function HomeScreen({ me }: any) {
   const [regOpen, setRegOpen] = useState(false);
   const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
   const [drill, setDrill] = useState<any>(null);
+  const [mgr, setMgr] = useState<any>(null);
+  const [peers, setPeers] = useState<any[]>([]);
 
   const load = async () => {
     const back = new Date(); back.setDate(back.getDate() - 40);
@@ -839,6 +873,11 @@ function HomeScreen({ me }: any) {
     setToday((logs.data || []).find((r: any) => r.work_date === istToday()) || null);
     setSessions(sess.data || []);
     setBoard(who.data || []);
+    const [m, pr] = await Promise.all([
+      supabase.rpc("my_manager"), supabase.rpc("my_peers"),
+    ]);
+    setMgr((m.data || [])[0] || null);
+    setPeers(pr.data || []);
   };
   useEffect(() => { load(); }, [me.id, range.from, range.to]);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
@@ -909,6 +948,7 @@ function HomeScreen({ me }: any) {
 
         {/* ---- left ---- */}
         <div className="att-col">
+
           <div className="att-card att-punch">
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 11 }}>
               <Avatar name={me.full_name} lg />
@@ -980,6 +1020,42 @@ function HomeScreen({ me }: any) {
             <div className="att-stat clk" onClick={() => setDrill({ t: "All worked days", r: inRange })}>
               <b style={{ color: "#2563eb" }}>{stats.hrs}</b><span>Hours</span></div>
           </div>
+
+          {mgr && (
+            <div className="att-list">
+              <div className="att-hd"><b>Reporting manager</b></div>
+              <div className="att-row">
+                <Avatar name={mgr.full_name} />
+                <div className="grow">
+                  <p><b>{mgr.emp_code}</b> · {mgr.full_name}</p>
+                  <p className="att-muted">{mgr.designation || "—"}</p>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 13, color: stateColor[mgr.state] }}>
+                  {mgr.state}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {peers.length > 0 && (
+            <div className="att-list">
+              <div className="att-hd">
+                <b>My team</b><span className="att-chip">{peers.length}</span>
+              </div>
+              {peers.slice(0, 8).map((p) => (
+                <div className="att-row" key={p.emp_code}>
+                  <Avatar name={p.full_name} />
+                  <div className="grow">
+                    <p><b>{p.full_name}</b></p>
+                    <p className="att-muted">{p.designation || "—"}</p>
+                  </div>
+                  <span style={{ fontWeight: 700, fontSize: 12.5, color: stateColor[p.state] }}>
+                    {p.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ---- right ---- */}
@@ -1152,6 +1228,7 @@ const hourLabel = (h: number) =>
 
 function AttendanceScreen({ me, tab }: any) {
   if (tab === "matrix") return <div className="att-wrap"><MatrixTab me={me} /></div>;
+  if (tab === "calendar") return <CalendarTab me={me} />;
   return <AttSummary me={me} />;
 }
 
@@ -1562,6 +1639,444 @@ function MatrixTab({ me }: any) {
         </div>
       )}
     </>
+  );
+}
+
+/* ================= calendar ================= */
+function CalendarTab({ me }: any) {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [logs, setLogs] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const from = `${month}-01`, to = lastDayOf(from);
+      const [a, l, h] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []); setBusy(false);
+    })();
+  }, [month, me.id]);
+
+  const first = new Date(`${month}-01T00:00:00`);
+  const pad = (first.getDay() + 6) % 7;           // Monday-first
+  const total = Number(lastDayOf(`${month}-01`).slice(-2));
+  const cells: (string | null)[] = [
+    ...Array(pad).fill(null),
+    ...Array.from({ length: total }, (_, i) => addDays(`${month}-01`, i)),
+  ];
+
+  const info = (key: string) => {
+    const log = logs.find((x: any) => x.work_date === key);
+    const lv = leaves.find((x: any) => key >= x.from_date && key <= x.to_date);
+    const hol = hols.find((x: any) => x.hol_date === key);
+    const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
+    if (log) return { label: log.status, mins: log.worked_minutes,
+      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c" }[log.status as string] || "#475467" };
+    if (lv) return { label: lv.leave_type, color: "#2563eb" };
+    if (hol) return { label: hol.name, color: "#0891b2" };
+    if (off) return { label: "Week off", color: "#98a2b3" };
+    if (key > istToday()) return { label: "", color: "#d0d5dd" };
+    return { label: "Absent", color: "#dc2626" };
+  };
+
+  const tot = logs.reduce((a: number, r: any) => a + (r.worked_minutes || 0), 0);
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-range">
+        <div className="qk">
+          <button onClick={() => setMonth(shiftMonth(month + "-01", -1).slice(0, 7))}>‹ Previous</button>
+          <button className={month === istToday().slice(0, 7) ? "on" : ""}
+            onClick={() => setMonth(istToday().slice(0, 7))}>This month</button>
+          <button disabled={month >= istToday().slice(0, 7)}
+            onClick={() => setMonth(shiftMonth(month + "-01", 1).slice(0, 7))}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <span className="att-muted">{hhmm(tot)} worked</span>
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} />
+        </div>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-card">
+          <div className="att-cal" style={{ marginBottom: 6 }}>
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+              <div className="att-caldow" key={d}>{d}</div>
+            ))}
+          </div>
+          <div className="att-cal">
+            {cells.map((key, i) => {
+              if (!key) return <div className="att-calday pad" key={`p${i}`} />;
+              const v = info(key);
+              return (
+                <div className={`att-calday ${key === istToday() ? "now" : ""}`} key={key}>
+                  <div className="n">{key.slice(-2)}</div>
+                  <div className="st" style={{ color: v.color }}>{v.label}</div>
+                  {v.mins ? <div className="hr">{hhmm(v.mins)}</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= organization ================= */
+function PersonCard({ p }: any) {
+  return (
+    <div className="att-pcard">
+      <Avatar name={p.full_name} />
+      <div style={{ minWidth: 0 }}>
+        <p className="nm">{p.full_name}</p>
+        <p className="dz">{p.emp_code} · {p.designation || "—"}</p>
+        <p className="dz">{p.team}</p>
+        {p.email && <a href={`mailto:${p.email}`}>{p.email}</a>}
+        {p.phone && <p className="dz">{p.phone}</p>}
+        {p.state && (
+          <p style={{ fontSize: 12.5, fontWeight: 700, marginTop: 4, color: stateColor[p.state] }}>
+            {p.state}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DirectoryTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("directory", {});
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team} ${r.email || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team] = groups[r.team] || []).push(r); });
+  const names = Object.keys(groups).sort();
+
+  return (
+    <>
+      <input placeholder="Search name, code, designation, team, email"
+        value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{shown.length} of {rows.length} people</p>
+      {names.map((tn) => (
+        <Section key={tn} title={tn} count={groups[tn].length} open={!!q || names.length <= 3}>
+          <div style={{ padding: 12 }}>
+            <div className="att-people">
+              {groups[tn].map((p) => <PersonCard p={p} key={p.emp_code} />)}
+            </div>
+          </div>
+        </Section>
+      ))}
+      {!shown.length && <div className="att-list"><p className="att-empty">No match found.</p></div>}
+    </>
+  );
+}
+
+function DeptTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("directory", {});
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const teams: Record<string, Record<string, any[]>> = {};
+  shown.forEach((r) => {
+    const t = r.team, d = r.designation || "Unassigned";
+    teams[t] = teams[t] || {};
+    (teams[t][d] = teams[t][d] || []).push(r);
+  });
+
+  return (
+    <>
+      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      {Object.keys(teams).sort().map((tn) => {
+        const byD = teams[tn];
+        const n = Object.values(byD).reduce((a, x) => a + x.length, 0);
+        return (
+          <Section key={tn} title={tn} count={n} open={!!q || Object.keys(teams).length <= 3}>
+            <div style={{ padding: "6px 12px 12px" }}>
+              {Object.keys(byD).sort().map((dg) => (
+                <div key={dg} style={{ marginTop: 10 }}>
+                  <div className="att-between" style={{ marginBottom: 6 }}>
+                    <b style={{ fontSize: 13.5 }}>{dg}</b>
+                    <span className="att-chip">{byD[dg].length}</span>
+                  </div>
+                  {byD[dg].map((p: any) => (
+                    <div className="att-row" key={p.emp_code} style={{ padding: "8px 0" }}>
+                      <Avatar name={p.full_name} />
+                      <div className="grow">
+                        <p><b>{p.emp_code}</b> · {p.full_name}</p>
+                        <p className="att-muted">{p.phone || p.email || "—"}</p>
+                      </div>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: stateColor[p.state] }}>
+                        {p.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </Section>
+        );
+      })}
+    </>
+  );
+}
+
+function EmpTreeTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("directory", {});
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  const kids: Record<string, any[]> = {};
+  rows.forEach((r) => {
+    const k = r.reports_to || "root";
+    (kids[k] = kids[k] || []).push(r);
+  });
+  const countAll = (id: string): number =>
+    (kids[id] || []).reduce((a, c) => a + 1 + countAll(c.id), 0);
+
+  const Node = ({ p, depth }: any) => {
+    const ch = kids[p.id] || [];
+    const [open, setOpen] = useState(depth < 1);
+    const hit = !q || `${p.full_name} ${p.emp_code} ${p.designation || ""}`
+      .toLowerCase().includes(q.toLowerCase());
+    return (
+      <div>
+        <div className="att-rtrow" style={{ opacity: hit ? 1 : 0.45 }}>
+          {ch.length > 0 ? (
+            <button className="att-muted" style={{ width: 16 }} onClick={() => setOpen(!open)}>
+              {open ? "\u25be" : "\u25b8"}
+            </button>
+          ) : <span style={{ width: 16 }} />}
+          <Avatar name={p.full_name} />
+          <div className="grow" style={{ flex: 1, minWidth: 0 }}>
+            <p><b>{p.full_name}</b> <span className="att-muted">{p.emp_code}</span></p>
+            <p className="att-muted">{p.designation || "—"} · {p.team}</p>
+          </div>
+          {ch.length > 0 && <span className="cnt2">{countAll(p.id)}</span>}
+        </div>
+        {open && ch.length > 0 && (
+          <div className="att-rt">
+            {ch.map((c: any) => <Node p={c} depth={depth + 1} key={c.id} />)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="att-card">
+        {(kids["root"] || []).map((p: any) => <Node p={p} depth={0} key={p.id} />)}
+        {!(kids["root"] || []).length && <p className="att-empty">No reporting lines set yet.</p>}
+      </div>
+    </>
+  );
+}
+
+function PeopleTab() {
+  const [bd, setBd] = useState<any[]>([]);
+  const [nh, setNh] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [b, n] = await Promise.all([
+        supabase.rpc("birthdays", { p_days: 45 }),
+        supabase.rpc("new_hires", { p_days: 90 }),
+      ]);
+      setBd(b.data || []); setNh(n.data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  return (
+    <>
+      <div className="att-list">
+        <div className="att-hd"><b>Upcoming birthdays</b><span className="att-muted">next 45 days</span></div>
+        {!bd.length && (
+          <p className="att-empty">
+            Nothing yet — birth dates aren't filled in. Add them in Team → Staff.
+          </p>
+        )}
+        {bd.map((r: any) => (
+          <div className="att-row" key={r.emp_code}>
+            <Avatar name={r.full_name} />
+            <div className="grow">
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">{r.designation || "—"} · {r.team}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontWeight: 700, fontSize: 13 }}>
+                {new Date(r.bday + "T00:00:00").toLocaleDateString("en-GB",
+                  { day: "2-digit", month: "short" })}
+              </p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>
+                {r.days_away === 0 ? "today" : `in ${r.days_away} day${r.days_away === 1 ? "" : "s"}`}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="att-list">
+        <div className="att-hd"><b>New hires</b><span className="att-muted">last 90 days</span></div>
+        {!nh.length && (
+          <p className="att-empty">
+            Nothing yet — joining dates aren't filled in. Add them in Team → Staff.
+          </p>
+        )}
+        {nh.map((r: any) => (
+          <div className="att-row" key={r.emp_code}>
+            <Avatar name={r.full_name} />
+            <div className="grow">
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">{r.designation || "—"} · {r.team}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontWeight: 700, fontSize: 13 }}>{fmtDate(r.joined)}</p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>{r.days_ago} days ago</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function NoticeTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [form, setForm] = useState({ title: "", body: "", pinned: false });
+  const [add, setAdd] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const canPost = ["admin", "manager"].includes(me.role);
+
+  const load = async () => {
+    const { data } = await supabase.rpc("announcement_feed", { p_limit: 40 });
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const post = async () => {
+    const { error } = await supabase.from("announcements")
+      .insert({ ...form, posted_by: me.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Posted." }); setForm({ title: "", body: "", pinned: false }); setAdd(false); load(); }
+  };
+
+  const remove = async (id: string) => {
+    await supabase.from("announcements").update({ active: false }).eq("id", id);
+    load();
+  };
+
+  return (
+    <>
+      {canPost && (
+        <div className="att-between">
+          <p className="att-muted">{rows.length} posts</p>
+          <button className="att-btn sm" onClick={() => setAdd(true)}>+ New post</button>
+        </div>
+      )}
+      <Note>{msg.err}</Note>
+      <Note kind="ok">{msg.ok}</Note>
+
+      {rows.map((r: any) => (
+        <div className="att-card" key={r.id}>
+          <div className="att-between">
+            <b style={{ fontSize: 15.5 }}>
+              {r.pinned && <span className="att-chip" style={{ marginRight: 7 }}>pinned</span>}
+              {r.title}
+            </b>
+            {canPost && <button className="att-muted" onClick={() => remove(r.id)}>Remove</button>}
+          </div>
+          {r.body && <p style={{ marginTop: 7, whiteSpace: "pre-wrap", color: "#344054" }}>{r.body}</p>}
+          <p className="att-muted" style={{ marginTop: 9 }}>
+            {r.author} · {new Date(r.created_at).toLocaleDateString("en-GB",
+              { day: "2-digit", month: "short", year: "numeric" })}
+          </p>
+        </div>
+      ))}
+      {!rows.length && <div className="att-list"><p className="att-empty">Nothing posted yet.</p></div>}
+
+      {add && (
+        <Sheet title="New post" onClose={() => setAdd(false)}>
+          <div className="att-card att-stack">
+            <div>
+              <label>Title</label>
+              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </div>
+            <div>
+              <label>Message</label>
+              <textarea rows={5} value={form.body}
+                onChange={(e) => setForm({ ...form, body: e.target.value })} />
+            </div>
+            <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+              <input type="checkbox" checked={form.pinned}
+                onChange={(e) => setForm({ ...form, pinned: e.target.checked })} />
+              Pin to top
+            </label>
+            <button className="att-btn" onClick={post} disabled={!form.title.trim()}>Post</button>
+          </div>
+        </Sheet>
+      )}
+    </>
+  );
+}
+
+function OrgScreen({ me, tab }: any) {
+  return (
+    <div className="att-wrap att-stack">
+      {tab === "directory" && <DirectoryTab />}
+      {tab === "dept" && <DeptTab />}
+      {tab === "tree" && <EmpTreeTab />}
+      {tab === "people" && <PeopleTab />}
+      {tab === "notice" && <NoticeTab me={me} />}
+    </div>
   );
 }
 
@@ -2256,6 +2771,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         role: f.role,
         shift_start: f.shift_start, shift_end: f.shift_end,
         grace_minutes: Number(f.grace_minutes) || 0,
+        date_of_birth: f.date_of_birth || null,
+        date_of_joining: f.date_of_joining || null,
         field_staff: f.field_staff, active: f.active,
         week_off_days: f.week_off_days,
         monthly_gross: f.monthly_gross === "" || f.monthly_gross == null ? null : Number(f.monthly_gross),
@@ -2379,6 +2896,18 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             <label>Shift end</label>
             <input type="time" value={String(f.shift_end).slice(0, 5)}
               onChange={(e) => setF({ ...f, shift_end: e.target.value })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Date of birth</label>
+            <input type="date" value={f.date_of_birth || ""}
+              onChange={(e) => setF({ ...f, date_of_birth: e.target.value || null })} />
+          </div>
+          <div>
+            <label>Joining date</label>
+            <input type="date" value={f.date_of_joining || ""}
+              onChange={(e) => setF({ ...f, date_of_joining: e.target.value || null })} />
           </div>
         </div>
         <div className="att-row2">
@@ -2828,6 +3357,7 @@ export default function Attendance() {
   const [teamTab, setTeamTab] = useState("today");
   const [leaveTab, setLeaveTab] = useState("summary");
   const [attTab, setAttTab] = useState("summary");
+  const [orgTab, setOrgTab] = useState("directory");
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
@@ -2883,8 +3413,12 @@ export default function Attendance() {
     : [["today", "Today"]];
   const titles: Record<string, string> = {
     home: "My Space", att: "Attendance", leaves: "Leave Tracker",
-    inbox: "Approvals", team: "Team", me: "My Profile",
+    inbox: "Approvals", team: "Team", org: "Organization", me: "My Profile",
   };
+  const orgTabs: [string, string][] = [
+    ["directory", "Employee list"], ["dept", "Departments"], ["tree", "Employee tree"],
+    ["people", "Birthdays & new hires"], ["notice", "Announcements"],
+  ];
   const leaveTabs: [string, string][] = [["summary", "Leave Summary"], ["requests", "Leave Requests"]];
 
   return shell(
@@ -2931,9 +3465,19 @@ export default function Attendance() {
 
         {tab === "att" && (
           <div className="att-subbar">
-            {[["summary", "Attendance Summary"], ["matrix", "Monthly matrix"]].map(([k, l]) => (
+            {[["summary", "Attendance Summary"], ["calendar", "Calendar"],
+              ["matrix", "Monthly matrix"]].map(([k, l]) => (
               <button key={k} className={`att-tab ${attTab === k ? "on" : ""}`}
                 onClick={() => setAttTab(k)}>{l}</button>
+            ))}
+          </div>
+        )}
+
+        {tab === "org" && (
+          <div className="att-subbar">
+            {orgTabs.map(([k, l]) => (
+              <button key={k} className={`att-tab ${orgTab === k ? "on" : ""}`}
+                onClick={() => setOrgTab(k)}>{l}</button>
             ))}
           </div>
         )}
@@ -2950,6 +3494,7 @@ export default function Attendance() {
         <main className="att-main">
           {tab === "home" && <HomeScreen me={me} />}
           {tab === "att" && <AttendanceScreen me={me} tab={attTab} />}
+          {tab === "org" && <OrgScreen me={me} tab={orgTab} />}
           {tab === "leaves" && <LeavesScreen me={me} tab={leaveTab} />}
           {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
           {tab === "team" && <TeamScreen me={me} tab={approver ? teamTab : "today"} />}
