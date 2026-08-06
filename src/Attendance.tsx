@@ -22,7 +22,7 @@ const CSS = `
 .hjsatt, .hjsatt * { box-sizing: border-box; margin: 0; padding: 0; }
 .hjsatt {
   position: fixed; inset: 0; display: flex; overflow: hidden; text-align: left;
-  background: #f0f1f4; color: #1f2328;
+  background: #f0f1f4; color: #1f2328; color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 14.5px; line-height: 1.45; -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -43,6 +43,21 @@ const CSS = `
   background-position: calc(100% - 17px) 19px, calc(100% - 12px) 19px;
   background-size: 5px 5px; background-repeat: no-repeat; }
 .hjsatt input[type=checkbox] { width: 18px; height: 18px; min-height: 0; accent-color: #2563eb; }
+
+/* date / month / time — inhe native picker chahiye, warna icon gayab ho jata hai */
+.hjsatt input[type=date], .hjsatt input[type=month], .hjsatt input[type=time] {
+  -webkit-appearance: none; appearance: none; padding-right: 38px; position: relative;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' \
+fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round'>\
+<rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/></svg>");
+  background-repeat: no-repeat; background-position: calc(100% - 11px) center; cursor: pointer; }
+
+.hjsatt input[type=date]::-webkit-calendar-picker-indicator,
+.hjsatt input[type=month]::-webkit-calendar-picker-indicator,
+.hjsatt input[type=time]::-webkit-calendar-picker-indicator {
+  position: absolute; right: 0; top: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; }
 .hjsatt input::placeholder, .hjsatt textarea::placeholder { color: #9ca3af; }
 .hjsatt input:focus, .hjsatt select:focus, .hjsatt textarea:focus {
   border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
@@ -490,7 +505,9 @@ const CSS = `
   padding: 13px 14px; background: #fff; }
 .hjsatt .att-grp:hover { background: #fafbfc; }
 .hjsatt .att-grp .t { font-weight: 700; font-size: 14.5px; }
-.hjsatt .att-grp .chev { color: #98a2b3; font-size: 12px; width: 14px; text-align: center; }
+.hjsatt .att-grp .chev { color: #475467; font-size: 15px; width: 18px; text-align: center;
+  line-height: 1; transition: transform .15s; }
+.hjsatt .att-grp:hover .chev { color: #2563eb; }
 .hjsatt .att-mini { display: flex; gap: 5px; flex-wrap: wrap; }
 .hjsatt .att-mini span { font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 5px; }
 
