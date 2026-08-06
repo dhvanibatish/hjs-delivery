@@ -374,18 +374,29 @@ const CSS = `
 .hjsatt .att-pname:hover { text-decoration: underline; }
 
 /* ---------- daily verification ---------- */
-.hjsatt .att-vteam { display: flex; align-items: center; gap: 10px; padding: 9px 15px;
-  background: #f9fafb; border-bottom: 1px solid #eaecf0; font-size: 13px; }
-.hjsatt .att-vteam b { font-size: 13px; color: #344054; }
-.hjsatt .att-vwrap { border: 1.5px solid #b2ccff; background: #fff; border-radius: 12px;
+.hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+  padding: 18px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.hjsatt .att-vhero h2 { font-size: 19px; font-weight: 700; }
+.hjsatt .att-vhero .dt { color: #6b7280; font-size: 13.5px; margin-top: 2px; }
+.hjsatt .att-vprog { flex: 1; min-width: 190px; }
+.hjsatt .att-vbar { height: 8px; border-radius: 99px; background: #eef0f3; overflow: hidden;
+  margin-top: 8px; }
+.hjsatt .att-vbar i { display: block; height: 100%; background: #16a34a; border-radius: 99px;
+  transition: width .3s; }
+.hjsatt .att-vteam { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  border-bottom: 1px solid #eaecf0; }
+.hjsatt .att-vteam b { font-size: 14.5px; }
+.hjsatt .att-vwrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
   overflow: hidden; }
-.hjsatt .att-vhd { background: #eff4ff; padding: 13px 15px; display: flex; align-items: center;
-  gap: 10px; flex-wrap: wrap; border-bottom: 1px solid #d6e4ff; }
-.hjsatt .att-vhd b { font-size: 15px; color: #1849a9; }
-.hjsatt .att-vrow { display: flex; align-items: center; gap: 11px; padding: 11px 15px;
-  border-bottom: 1px solid #f1f2f4; }
+.hjsatt .att-vrow { display: flex; align-items: center; gap: 12px; padding: 13px 16px;
+  border-bottom: 1px solid #f4f5f6; }
 .hjsatt .att-vrow:last-child { border-bottom: 0; }
-.hjsatt .att-vrow.done { background: #fbfcfe; }
+.hjsatt .att-vrow.done { background: #fcfdfe; }
+.hjsatt .att-vrow.done .nm { color: #667085; }
+.hjsatt .att-vtime { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 13.5px;
+  color: #344054; white-space: nowrap; }
+.hjsatt .att-vempty { text-align: center; padding: 44px 20px; color: #667085; }
+.hjsatt .att-vempty .big { font-size: 34px; margin-bottom: 8px; }
 .hjsatt .att-menu { position: relative; }
 .hjsatt .att-dots { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
   background: #fff; color: #667085; font-size: 17px; line-height: 1; flex-shrink: 0; }
@@ -1137,8 +1148,6 @@ function HomeScreen({ me }: any) {
 
   return (
     <div className="att-wrap">
-      <VerifyPanel />
-
       <div className="att-cols">
 
         {/* ---- left ---- */}
@@ -4117,48 +4126,54 @@ function MeScreen({ me }: any) {
 }
 
 /* ================= manager ka daily verification ================= */
-function VerifyRow({ r, onSet, busy }: any) {
+function VerifyRow({ r, onSet, busy, date }: any) {
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState<null | "hold" | "cancel">(null);
   const [note, setNote] = useState("");
 
-  const tag = r.status && (
-    <span className="att-vtag" style={{
-      background: r.status === "Approved" ? "#ecfdf3"
-        : r.status === "On hold" ? "#fffaeb" : "#fef3f2",
-      color: r.status === "Approved" ? "#067647"
-        : r.status === "On hold" ? "#b54708" : "#b42318",
-    }}>{r.status}</span>
-  );
+  const tone: any = {
+    Approved: { bg: "#ecfdf3", fg: "#067647" },
+    "On hold": { bg: "#fffaeb", fg: "#b54708" },
+    Cancelled: { bg: "#fef3f2", fg: "#b42318" },
+  };
 
   return (
     <>
       <div className={`att-vrow ${r.status ? "done" : ""}`}>
         <Avatar name={r.full_name} />
+
         <div className="grow" style={{ minWidth: 0 }}>
-          <p><PName id={r.employee_id} code={r.emp_code}>
-            <b>{r.full_name}</b></PName>
-            {r.still_in && <span className="att-pill p-Present" style={{ marginLeft: 7 }}>in now</span>}
+          <p className="nm">
+            <PName id={r.employee_id} code={r.emp_code}><b>{r.full_name}</b></PName>
+            {r.still_in && (
+              <span className="att-pill p-Present" style={{ marginLeft: 7 }}>in now</span>)}
             {r.geo_ok === false && (
               <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>off-site</span>)}
           </p>
           <p className="att-muted">
-            {fmtTime(r.first_in)}
-            {r.last_out ? ` – ${fmtTime(r.last_out)}` : ""}
-            {r.worked_minutes ? ` · ${hhmm(r.worked_minutes)}` : ""}
+            {r.designation || "—"}
             {r.day_status ? ` · ${r.day_status}` : ""}
           </p>
           {r.status && (
-            <p className="att-muted" style={{ fontSize: 11.5 }}>
-              {r.status} by {r.verified_by_name || "—"}
-              {r.note ? ` · ${r.note}` : ""}
+            <p className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {r.status} by {r.verified_by_name || "—"}{r.note ? ` — ${r.note}` : ""}
             </p>
           )}
         </div>
 
-        {tag}
+        <div style={{ textAlign: "right" }}>
+          <p className="att-vtime">
+            {fmtTime(r.first_in)}{r.last_out ? ` – ${fmtTime(r.last_out)}` : ""}
+          </p>
+          {r.worked_minutes ? (
+            <p className="att-muted" style={{ fontSize: 11.5 }}>{hhmm(r.worked_minutes)}</p>
+          ) : null}
+        </div>
 
-        {!r.status && (
+        {r.status ? (
+          <span className="att-vtag" style={{
+            background: tone[r.status]?.bg, color: tone[r.status]?.fg }}>{r.status}</span>
+        ) : (
           <button className="att-btn sm green" disabled={busy}
             onClick={() => onSet(r.employee_id, "Approved")}>Approve</button>
         )}
@@ -4196,10 +4211,9 @@ function VerifyRow({ r, onSet, busy }: any) {
             {confirm === "cancel" ? (
               <div className="att-note err">
                 <span>
-                  This marks <b>{r.full_name}</b> absent for {fmtDate(istToday())} even
-                  though they checked in at {fmtTime(r.first_in)}. Their hours for the
-                  day go to zero and it shows up in payroll. Only do this if they
-                  didn't actually turn up.
+                  This marks <b>{r.full_name}</b> absent for {fmtDate(date)} even though
+                  they checked in at {fmtTime(r.first_in)}. Their hours go to zero and it
+                  shows up in payroll. Only do this if they didn't actually turn up.
                 </span>
               </div>
             ) : (
@@ -4233,112 +4247,139 @@ function VerifyRow({ r, onSet, busy }: any) {
   );
 }
 
-function VerifyPanel() {
+function VerifyPanel({ onCount }: any) {
   const [rows, setRows] = useState<any[]>([]);
-  const [show, setShow] = useState(false);
+  const [date, setDate] = useState(istToday());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [hidden, setHidden] = useState(false);
+  const [filter, setFilter] = useState<"todo" | "all">("todo");
 
-  const load = async () => {
-    const [ok, q] = await Promise.all([
-      supabase.rpc("should_verify"),
-      supabase.rpc("verification_queue", {}),
-    ]);
-    setShow(!!ok.data);
-    setRows(q.data || []);
+  const load = async (d = date) => {
+    const { data, error } = await supabase.rpc("verification_queue", { p_date: d });
+    if (error) setErr(error.message);
+    setRows(data || []);
+    if (onCount) onCount((data || []).filter((r: any) => !r.status).length);
   };
-  useEffect(() => { load(); }, []);
-
-  // 11 baje IST ke baad hi
-  const hour = Number(new Date().toLocaleString("en-GB",
-    { timeZone: TZ, hour: "2-digit", hour12: false }));
-  if (!show || hidden || hour < 11 || !rows.length) return null;
-
-  const pending = rows.filter((r) => !r.status);
+  useEffect(() => { load(date); }, [date]);
 
   const setOne = async (emp: string, status: string, note?: string) => {
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("set_verification", {
-      p_emp: emp, p_status: status, p_date: null, p_note: note || null,
+      p_emp: emp, p_status: status, p_date: date, p_note: note || null,
     });
     if (error) setErr(error.message);
     await load(); setBusy(false);
   };
 
-  const approveTeam = async (g: any[]) => {
+  const approveMany = async (list: any[]) => {
     setBusy(true); setErr("");
-    for (const r of g.filter((x) => !x.status)) {
+    for (const r of list.filter((x) => !x.status)) {
       const { error } = await supabase.rpc("set_verification", {
-        p_emp: r.employee_id, p_status: "Approved", p_date: null, p_note: null,
+        p_emp: r.employee_id, p_status: "Approved", p_date: date, p_note: null,
       });
       if (error) { setErr(error.message); break; }
     }
     await load(); setBusy(false);
   };
 
-  const approveAll = async () => {
-    setBusy(true); setErr("");
-    const { error } = await supabase.rpc("verify_all", { p_date: null });
-    if (error) setErr(error.message);
-    await load(); setBusy(false);
-  };
+  const pending = rows.filter((r) => !r.status);
+  const done = rows.length - pending.length;
+  const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
+  const shown = filter === "todo" ? pending : rows;
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
+  const teams = Object.keys(groups).sort();
 
   return (
-    <div className="att-vwrap">
-      <div className="att-vhd">
-        <div className="grow" style={{ minWidth: 170 }}>
-          <b>Who turned up today · {fmtDate(istToday())}</b>
-          <p className="att-muted" style={{ fontSize: 12.5 }}>
-            {pending.length
-              ? `${pending.length} of ${rows.length} still to check`
-              : `All ${rows.length} checked`}
+    <div className="att-wrap att-stack">
+      <div className="att-vhero">
+        <div>
+          <h2>Who turned up</h2>
+          <p className="dt">
+            {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+              { weekday: "long", day: "2-digit", month: "long" })}
           </p>
         </div>
-        {pending.length > 0 && (
-          <button className="att-btn sm green" disabled={busy} onClick={approveAll}>
-            Approve all ({pending.length})
-          </button>
-        )}
-        {!pending.length && (
-          <button className="att-btn sm line" onClick={() => setHidden(true)}>Done</button>
-        )}
+
+        <div className="att-vprog">
+          <div className="att-between">
+            <span className="att-muted">
+              {rows.length === 0 ? "Nobody has checked in yet"
+                : pending.length === 0 ? `All ${rows.length} checked`
+                : `${done} of ${rows.length} checked`}
+            </span>
+            <b style={{ color: pct === 100 ? "#16a34a" : "#344054" }}>{pct}%</b>
+          </div>
+          <div className="att-vbar"><i style={{ width: `${pct}%` }} /></div>
+        </div>
+
+        <div className="att-flex">
+          <input type="date" value={date} max={istToday()}
+            onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
+          {pending.length > 0 && (
+            <button className="att-btn green" disabled={busy}
+              onClick={() => approveMany(rows)}>
+              Approve all ({pending.length})
+            </button>
+          )}
+        </div>
       </div>
+
       <Note>{err}</Note>
-      {(() => {
-        const groups: Record<string, any[]> = {};
-        rows.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
-        const names = Object.keys(groups).sort();
-        // ek hi team ho to heading ki zaroorat nahi
-        if (names.length <= 1) {
-          return rows.map((r) => (
-            <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} />
-          ));
-        }
-        return names.map((tn) => {
-          const g = groups[tn];
-          const left = g.filter((x) => !x.status).length;
-          return (
-            <div key={tn}>
-              <div className="att-vteam">
-                <b>{tn}</b>
-                <span className="att-muted">
-                  {left ? `${left} to check` : "all checked"}
-                </span>
-                {left > 0 && (
-                  <button className="att-btn sm line" style={{ marginLeft: "auto" }}
-                    disabled={busy} onClick={() => approveTeam(g)}>
-                    Approve {tn}
-                  </button>
-                )}
-              </div>
-              {g.map((r) => (
-                <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} />
-              ))}
+
+      {rows.length > 0 && (
+        <div className="att-seg">
+          <button className={filter === "todo" ? "on" : ""} onClick={() => setFilter("todo")}>
+            Still to check ({pending.length})
+          </button>
+          <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>
+            Everyone ({rows.length})
+          </button>
+        </div>
+      )}
+
+      {rows.length === 0 && (
+        <div className="att-vwrap">
+          <div className="att-vempty">
+            <div className="big">🌤️</div>
+            <p>No check-ins recorded for this day.</p>
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && shown.length === 0 && (
+        <div className="att-vwrap">
+          <div className="att-vempty">
+            <div className="big">✓</div>
+            <p>Everyone's been checked. Nothing left for today.</p>
+          </div>
+        </div>
+      )}
+
+      {teams.map((tn) => {
+        const g = groups[tn];
+        const left = g.filter((x) => !x.status).length;
+        return (
+          <div className="att-vwrap" key={tn}>
+            <div className="att-vteam">
+              <b>{tn}</b>
+              <span className="att-muted">
+                {left ? `${left} to check` : "all checked"}
+              </span>
+              {left > 1 && (
+                <button className="att-btn sm line" style={{ marginLeft: "auto" }}
+                  disabled={busy} onClick={() => approveMany(g)}>
+                  Approve these {left}
+                </button>
+              )}
             </div>
-          );
-        });
-      })()}
+            {g.map((r) => (
+              <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} date={date} />
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4541,6 +4582,8 @@ export default function Attendance() {
   const [scope, setScope] = useState("myspace");
   const [view, setView] = useState("overview");
   const [pending, setPending] = useState(0);
+  const [canVerify, setCanVerify] = useState(false);
+  const [toCheck, setToCheck] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -4554,6 +4597,17 @@ export default function Attendance() {
       .eq("auth_user_id", session.user.id).single()
       .then(({ data }) => setMe(data));
   }, [session]);
+
+  useEffect(() => {
+    if (!me) return;
+    supabase.rpc("should_verify").then(async ({ data }) => {
+      setCanVerify(!!data);
+      if (data) {
+        const q = await supabase.rpc("verification_queue", {});
+        setToCheck((q.data || []).filter((r: any) => !r.status).length);
+      }
+    });
+  }, [me]);
 
   useEffect(() => {
     if (!me || !["manager", "admin"].includes(me.role)) return;
@@ -4611,7 +4665,11 @@ export default function Attendance() {
   const approver = ["manager", "admin"].includes(me.role);
   const mods = MODULES.filter((m) => !m.approverOnly || approver);
   const curMod = mods.find((m) => m.k === mod) || mods[0];
-  const curScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
+  const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
+  // "Daily check" tab sirf un logon ko jinke paas verify karne ko hai
+  const curScope = (curMod.k === "home" && rawScope.k === "myspace" && canVerify)
+    ? { ...rawScope, views: [...rawScope.views, { k: "verify", label: "Daily check" }] }
+    : rawScope;
   const curView = curScope.views.find((v) => v.k === view) || curScope.views[0];
 
   const goMod = (k: string) => {
@@ -4630,6 +4688,7 @@ export default function Attendance() {
       // ---- Home ----
       case "home/myspace/overview": return <HomeScreen me={me} />;
       case "home/myspace/calendar": return <CalendarTab me={me} />;
+      case "home/myspace/verify":   return <VerifyPanel onCount={setToCheck} />;
       case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
       case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
@@ -4713,7 +4772,10 @@ export default function Attendance() {
           <div className="att-subbar">
             {curScope.views.map((v) => (
               <button key={v.k} className={`att-tab ${curView.k === v.k ? "on" : ""}`}
-                onClick={() => setView(v.k)}>{v.label}</button>
+                onClick={() => setView(v.k)}>
+                {v.label}
+                {v.k === "verify" && toCheck > 0 && <span className="cnt">{toCheck}</span>}
+              </button>
             ))}
           </div>
         )}
