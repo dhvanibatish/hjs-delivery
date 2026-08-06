@@ -373,6 +373,33 @@ const CSS = `
 .hjsatt .att-pname { color: #2563eb; cursor: pointer; }
 .hjsatt .att-pname:hover { text-decoration: underline; }
 
+/* ---------- daily verification ---------- */
+.hjsatt .att-vteam { display: flex; align-items: center; gap: 10px; padding: 9px 15px;
+  background: #f9fafb; border-bottom: 1px solid #eaecf0; font-size: 13px; }
+.hjsatt .att-vteam b { font-size: 13px; color: #344054; }
+.hjsatt .att-vwrap { border: 1.5px solid #b2ccff; background: #fff; border-radius: 12px;
+  overflow: hidden; }
+.hjsatt .att-vhd { background: #eff4ff; padding: 13px 15px; display: flex; align-items: center;
+  gap: 10px; flex-wrap: wrap; border-bottom: 1px solid #d6e4ff; }
+.hjsatt .att-vhd b { font-size: 15px; color: #1849a9; }
+.hjsatt .att-vrow { display: flex; align-items: center; gap: 11px; padding: 11px 15px;
+  border-bottom: 1px solid #f1f2f4; }
+.hjsatt .att-vrow:last-child { border-bottom: 0; }
+.hjsatt .att-vrow.done { background: #fbfcfe; }
+.hjsatt .att-menu { position: relative; }
+.hjsatt .att-dots { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #667085; font-size: 17px; line-height: 1; flex-shrink: 0; }
+.hjsatt .att-dots:hover { background: #f5f6f8; }
+.hjsatt .att-pop { position: absolute; right: 0; top: 34px; z-index: 30; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 10px 26px rgba(16,24,40,.14);
+  min-width: 190px; overflow: hidden; }
+.hjsatt .att-pop button { display: block; width: 100%; text-align: left; padding: 10px 13px;
+  font-size: 13.5px; color: #344054; }
+.hjsatt .att-pop button:hover { background: #f5f6f8; }
+.hjsatt .att-pop button.danger { color: #b42318; }
+.hjsatt .att-pop .sep { height: 1px; background: #eaecf0; }
+.hjsatt .att-vtag { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; }
+
 /* ---------- selection bar + detail ---------- */
 .hjsatt .att-selbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   background: #eff4ff; border: 1px solid #b2ccff; border-radius: 10px; padding: 10px 13px; }
@@ -1110,6 +1137,8 @@ function HomeScreen({ me }: any) {
 
   return (
     <div className="att-wrap">
+      <VerifyPanel />
+
       <div className="att-cols">
 
         {/* ---- left ---- */}
@@ -1948,8 +1977,7 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Designation", p.designation],
     ["Department", p.team],
     ["Reporting manager", p.manager_name],
-    ["Work email", p.email],
-    ["Personal email", p.personal_email],
+    ["Email", p.email],
     ["Mobile", p.phone],
     ["Employment type", p.employment_type],
     ["Employee status", p.employee_status],
@@ -2058,8 +2086,7 @@ function DirectoryTab({ me }: any) {
   const teams = Array.from(new Set(rows.map((r) => r.team))).sort();
   const cols: [string, string][] = [
     ["emp_code", "Employee ID"], ["first_name", "First Name"], ["last_name", "Last Name"],
-    ["email", "Email address"],
-    ["personal_email", "Personal Email"], ["phone", "Personal Mobile"], ["team", "Department"],
+    ["email", "Email address"], ["phone", "Mobile"], ["team", "Department"],
     ["designation", "Designation"], ["employment_type", "Employment Type"],
     ["employee_status", "Employee Status"], ["source_of_hire", "Source of Hire"],
     ["date_of_joining", "Date of Joining"], ["manager_name", "Reporting Manager"],
@@ -2147,9 +2174,6 @@ function DirectoryTab({ me }: any) {
                 <td>{r.last_name || "—"}</td>
                 <td>{r.email
                   ? <a href={`mailto:${r.email}`} style={{ color: "#2563eb" }}>{r.email}</a>
-                  : <span className="att-muted">—</span>}</td>
-                <td>{r.personal_email
-                  ? <a href={`mailto:${r.personal_email}`} style={{ color: "#2563eb" }}>{r.personal_email}</a>
                   : <span className="att-muted">—</span>}</td>
                 <td>{r.phone
                   ? <a href={`tel:${r.phone}`} style={{ color: "#2563eb" }}>{r.phone}</a>
@@ -4087,6 +4111,233 @@ function MeScreen({ me }: any) {
       <p className="att-muted">
         To change your 4-digit code, sign out and use "Forgot code?" on the sign-in screen.
       </p>
+    </div>
+  );
+}
+
+/* ================= manager ka daily verification ================= */
+function VerifyRow({ r, onSet, busy }: any) {
+  const [menu, setMenu] = useState(false);
+  const [confirm, setConfirm] = useState<null | "hold" | "cancel">(null);
+  const [note, setNote] = useState("");
+
+  const tag = r.status && (
+    <span className="att-vtag" style={{
+      background: r.status === "Approved" ? "#ecfdf3"
+        : r.status === "On hold" ? "#fffaeb" : "#fef3f2",
+      color: r.status === "Approved" ? "#067647"
+        : r.status === "On hold" ? "#b54708" : "#b42318",
+    }}>{r.status}</span>
+  );
+
+  return (
+    <>
+      <div className={`att-vrow ${r.status ? "done" : ""}`}>
+        <Avatar name={r.full_name} />
+        <div className="grow" style={{ minWidth: 0 }}>
+          <p><PName id={r.employee_id} code={r.emp_code}>
+            <b>{r.full_name}</b></PName>
+            {r.still_in && <span className="att-pill p-Present" style={{ marginLeft: 7 }}>in now</span>}
+            {r.geo_ok === false && (
+              <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>off-site</span>)}
+          </p>
+          <p className="att-muted">
+            {fmtTime(r.first_in)}
+            {r.last_out ? ` – ${fmtTime(r.last_out)}` : ""}
+            {r.worked_minutes ? ` · ${hhmm(r.worked_minutes)}` : ""}
+            {r.day_status ? ` · ${r.day_status}` : ""}
+          </p>
+          {r.status && (
+            <p className="att-muted" style={{ fontSize: 11.5 }}>
+              {r.status} by {r.verified_by_name || "—"}
+              {r.note ? ` · ${r.note}` : ""}
+            </p>
+          )}
+        </div>
+
+        {tag}
+
+        {!r.status && (
+          <button className="att-btn sm green" disabled={busy}
+            onClick={() => onSet(r.employee_id, "Approved")}>Approve</button>
+        )}
+
+        <div className="att-menu">
+          <button className="att-dots" onClick={() => setMenu(!menu)}
+            aria-label="More options">⋯</button>
+          {menu && (
+            <>
+              <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                onClick={() => setMenu(false)} />
+              <div className="att-pop">
+                {r.status && (
+                  <button onClick={() => { setMenu(false); onSet(r.employee_id, "Approved"); }}>
+                    Mark approved
+                  </button>
+                )}
+                <button onClick={() => { setMenu(false); setConfirm("hold"); }}>
+                  Put on hold
+                </button>
+                <div className="sep" />
+                <button className="danger" onClick={() => { setMenu(false); setConfirm("cancel"); }}>
+                  Cancel this attendance
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {confirm && (
+        <Sheet title={confirm === "cancel" ? "Cancel attendance" : "Put on hold"}
+          onClose={() => { setConfirm(null); setNote(""); }}>
+          <div className="att-card att-stack">
+            {confirm === "cancel" ? (
+              <div className="att-note err">
+                <span>
+                  This marks <b>{r.full_name}</b> absent for {fmtDate(istToday())} even
+                  though they checked in at {fmtTime(r.first_in)}. Their hours for the
+                  day go to zero and it shows up in payroll. Only do this if they
+                  didn't actually turn up.
+                </span>
+              </div>
+            ) : (
+              <p className="att-muted">
+                On hold keeps the day as-is but flags it so you can come back to it.
+              </p>
+            )}
+            <div>
+              <label>Reason {confirm === "cancel" ? "(required)" : "(optional)"}</label>
+              <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+                placeholder={confirm === "cancel"
+                  ? "Why is this being cancelled?" : "Anything to note?"} />
+            </div>
+            <div className="att-flex">
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => { setConfirm(null); setNote(""); }}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1,
+                  background: confirm === "cancel" ? "#b42318" : "#d97706" }}
+                disabled={busy || (confirm === "cancel" && !note.trim())}
+                onClick={() => {
+                  onSet(r.employee_id, confirm === "cancel" ? "Cancelled" : "On hold", note);
+                  setConfirm(null); setNote("");
+                }}>
+                {confirm === "cancel" ? "Yes, cancel it" : "Put on hold"}
+              </button>
+            </div>
+          </div>
+        </Sheet>
+      )}
+    </>
+  );
+}
+
+function VerifyPanel() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [hidden, setHidden] = useState(false);
+
+  const load = async () => {
+    const [ok, q] = await Promise.all([
+      supabase.rpc("should_verify"),
+      supabase.rpc("verification_queue", {}),
+    ]);
+    setShow(!!ok.data);
+    setRows(q.data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  // 11 baje IST ke baad hi
+  const hour = Number(new Date().toLocaleString("en-GB",
+    { timeZone: TZ, hour: "2-digit", hour12: false }));
+  if (!show || hidden || hour < 11 || !rows.length) return null;
+
+  const pending = rows.filter((r) => !r.status);
+
+  const setOne = async (emp: string, status: string, note?: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("set_verification", {
+      p_emp: emp, p_status: status, p_date: null, p_note: note || null,
+    });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  const approveTeam = async (g: any[]) => {
+    setBusy(true); setErr("");
+    for (const r of g.filter((x) => !x.status)) {
+      const { error } = await supabase.rpc("set_verification", {
+        p_emp: r.employee_id, p_status: "Approved", p_date: null, p_note: null,
+      });
+      if (error) { setErr(error.message); break; }
+    }
+    await load(); setBusy(false);
+  };
+
+  const approveAll = async () => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("verify_all", { p_date: null });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  return (
+    <div className="att-vwrap">
+      <div className="att-vhd">
+        <div className="grow" style={{ minWidth: 170 }}>
+          <b>Who turned up today · {fmtDate(istToday())}</b>
+          <p className="att-muted" style={{ fontSize: 12.5 }}>
+            {pending.length
+              ? `${pending.length} of ${rows.length} still to check`
+              : `All ${rows.length} checked`}
+          </p>
+        </div>
+        {pending.length > 0 && (
+          <button className="att-btn sm green" disabled={busy} onClick={approveAll}>
+            Approve all ({pending.length})
+          </button>
+        )}
+        {!pending.length && (
+          <button className="att-btn sm line" onClick={() => setHidden(true)}>Done</button>
+        )}
+      </div>
+      <Note>{err}</Note>
+      {(() => {
+        const groups: Record<string, any[]> = {};
+        rows.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
+        const names = Object.keys(groups).sort();
+        // ek hi team ho to heading ki zaroorat nahi
+        if (names.length <= 1) {
+          return rows.map((r) => (
+            <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} />
+          ));
+        }
+        return names.map((tn) => {
+          const g = groups[tn];
+          const left = g.filter((x) => !x.status).length;
+          return (
+            <div key={tn}>
+              <div className="att-vteam">
+                <b>{tn}</b>
+                <span className="att-muted">
+                  {left ? `${left} to check` : "all checked"}
+                </span>
+                {left > 0 && (
+                  <button className="att-btn sm line" style={{ marginLeft: "auto" }}
+                    disabled={busy} onClick={() => approveTeam(g)}>
+                    Approve {tn}
+                  </button>
+                )}
+              </div>
+              {g.map((r) => (
+                <VerifyRow key={r.employee_id} r={r} onSet={setOne} busy={busy} />
+              ))}
+            </div>
+          );
+        });
+      })()}
     </div>
   );
 }
