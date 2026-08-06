@@ -79,6 +79,17 @@ const CSS = `
 .hjsatt .att-signout { border: 1px solid rgba(255,255,255,.28); border-radius: 7px;
   padding: 6px 12px; font-size: 13px; color: #fff; }
 
+.hjsatt .att-scope { flex-shrink: 0; background: #223354; display: flex; gap: 2px;
+  padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
+.hjsatt .att-scope::-webkit-scrollbar { display: none; }
+.hjsatt .att-scopebtn { padding: 12px 14px 13px; font-size: 14.5px; font-weight: 600;
+  color: #9fb0cd; white-space: nowrap; flex-shrink: 0; }
+.hjsatt .att-scopebtn.on { color: #fff; box-shadow: inset 0 -2.5px 0 #fff; }
+.hjsatt .att-scopebtn .cnt { display: inline-block; margin-left: 6px; min-width: 18px; height: 18px;
+  line-height: 18px; border-radius: 99px; background: #dc2626; color: #fff; font-size: 10.5px;
+  font-weight: 700; text-align: center; padding: 0 5px; }
+.hjsatt .att-topbar { height: auto; padding-bottom: 0; }
+
 .hjsatt .att-mtabs { display: none; background: #fff; border-bottom: 1px solid #e5e7eb;
   overflow-x: auto; scrollbar-width: none; }
 .hjsatt .att-mtabs::-webkit-scrollbar { display: none; }
@@ -940,9 +951,8 @@ function HomeScreen({ me }: any) {
     Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
     Absent: "#dc2626", Off: "#98a2b3",
   };
-  const myTeamName = me.teams?.name || null;
-  const myTeam = board.filter((p) =>
-    !myTeamName || p.team === myTeamName || p.emp_code === me.emp_code);
+  const peerCodes = new Set(peers.map((p: any) => p.emp_code));
+  const myTeam = board.filter((p) => peerCodes.has(p.emp_code) || p.emp_code === me.emp_code);
   const inNow = myTeam.filter((p) => p.state === "In").length;
 
   return (
@@ -2070,6 +2080,156 @@ function NoticeTab({ me }: any) {
           </div>
         </Sheet>
       )}
+    </>
+  );
+}
+
+function PeersTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("my_peers");
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.designation || ""}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{shown.length} people</p>
+      <div className="att-people">
+        {shown.map((p) => <PersonCard p={p} key={p.emp_code} />)}
+      </div>
+      {!shown.length && <div className="att-list"><p className="att-empty">Nobody here.</p></div>}
+    </>
+  );
+}
+
+function MyRegsTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const load = async () => {
+    const { data } = await supabase.from("regularizations").select("*")
+      .eq("employee_id", me.id).order("work_date", { ascending: false }).limit(60);
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <>
+      <div className="att-between">
+        <p className="att-muted">{rows.length} requests</p>
+        <button className="att-btn sm" onClick={() => setOpen(true)}>Missed a punch?</button>
+      </div>
+      <div className="att-list">
+        {!rows.length && <p className="att-empty">No requests yet.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
+            <div className="grow">
+              <p>{fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}</p>
+              <p className="att-muted">{r.reason}</p>
+            </div>
+            <span className={pillClass(r.status)}>{r.status}</span>
+          </div>
+        ))}
+      </div>
+      {open && <RegularizeSheet me={me} onClose={() => { setOpen(false); load(); }} />}
+    </>
+  );
+}
+
+function TeamLeavesTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [emps, setEmps] = useState<Record<string, any>>({});
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const [l, e] = await Promise.all([
+        supabase.from("leaves").select("*").order("from_date", { ascending: false }).limit(200),
+        supabase.from("employees").select("id, emp_code, full_name, designation"),
+      ]);
+      const by: Record<string, any> = {};
+      (e.data || []).forEach((x: any) => { by[x.id] = x; });
+      setEmps(by);
+      setRows((l.data || []).filter((x: any) => x.employee_id !== me.id));
+      setBusy(false);
+    })();
+  }, []);
+  if (busy) return <p className="att-muted">Loading…</p>;
+  return (
+    <div className="att-list">
+      <div className="att-hd"><b>Team leaves</b><span className="att-muted">{rows.length}</span></div>
+      {!rows.length && <p className="att-empty">Nothing here.</p>}
+      {rows.map((r) => (
+        <div className="att-row" key={r.id}>
+          <Avatar name={emps[r.employee_id]?.full_name} />
+          <div className="grow">
+            <p><b>{emps[r.employee_id]?.full_name || "—"}</b></p>
+            <p className="att-muted">
+              {r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d
+            </p>
+          </div>
+          <span className={pillClass(r.status)}>{r.status}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HolidaysTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState({ hol_date: istToday(), name: "" });
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const isAdmin = me.role === "admin";
+  const load = async () => {
+    const { data } = await supabase.from("holidays").select("*").order("hol_date");
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    const { error } = await supabase.from("holidays").insert(f);
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Added." }); setF({ ...f, name: "" }); load(); }
+  };
+  const del = async (id: string) => {
+    await supabase.from("holidays").delete().eq("id", id); load();
+  };
+  const year = istToday().slice(0, 4);
+  const shown = rows.filter((r) => String(r.hol_date).startsWith(year));
+  return (
+    <>
+      {isAdmin && (
+        <div className="att-card att-stack">
+          <b>Add a holiday</b>
+          <div className="att-row2">
+            <input type="date" value={f.hol_date}
+              onChange={(e) => setF({ ...f, hol_date: e.target.value })} />
+            <input placeholder="Name" value={f.name}
+              onChange={(e) => setF({ ...f, name: e.target.value })} />
+          </div>
+          <Note>{msg.err}</Note>
+          <Note kind="ok">{msg.ok}</Note>
+          <button className="att-btn sm" onClick={add} disabled={!f.name.trim()}>Add</button>
+        </div>
+      )}
+      <div className="att-list">
+        <div className="att-hd"><b>Holidays {year}</b><span className="att-muted">{shown.length}</span></div>
+        {!shown.length && <p className="att-empty">No holidays added yet.</p>}
+        {shown.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span style={{ width: 100, fontWeight: 700 }}>
+              {new Date(r.hol_date + "T00:00:00").toLocaleDateString("en-GB",
+                { day: "2-digit", month: "short", weekday: "short" })}
+            </span>
+            <span className="grow">{r.name}</span>
+            {isAdmin && <button className="att-muted" onClick={() => del(r.id)}>Remove</button>}
+          </div>
+        ))}
+      </div>
     </>
   );
 }
@@ -3357,14 +3517,86 @@ function MeScreen({ me }: any) {
 }
 
 /* ========================= shell ========================= */
+// Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
+type View = { k: string; label: string };
+type Scope = { k: string; label: string; views: View[] };
+type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
+
+const MODULES: Module[] = [
+  {
+    k: "home", label: "Home", icon: "home",
+    scopes: [
+      { k: "myspace", label: "My Space", views: [
+        { k: "overview", label: "Overview" },
+        { k: "calendar", label: "Calendar" },
+      ]},
+      { k: "team", label: "Team", views: [
+        { k: "space", label: "Team Space" },
+        { k: "dept", label: "Department" },
+        { k: "peers", label: "Peers" },
+      ]},
+      { k: "org", label: "Organization", views: [
+        { k: "list", label: "Employee List" },
+        { k: "emptree", label: "Employee Tree" },
+        { k: "depttree", label: "Department Tree" },
+        { k: "deptdir", label: "Department Directory" },
+        { k: "people", label: "Birthdays & New Hires" },
+        { k: "notice", label: "Announcements" },
+      ]},
+    ],
+  },
+  {
+    k: "att", label: "Attendance", icon: "clock",
+    scopes: [
+      { k: "mydata", label: "My Data", views: [
+        { k: "summary", label: "Attendance Summary" },
+        { k: "calendar", label: "Calendar" },
+        { k: "regs", label: "Regularization" },
+      ]},
+      { k: "team", label: "Team", views: [
+        { k: "today", label: "Today" },
+        { k: "matrix", label: "Monthly Matrix" },
+        { k: "dash", label: "Dashboard" },
+      ]},
+    ],
+  },
+  {
+    k: "leave", label: "Leave Tracker", icon: "cal",
+    scopes: [
+      { k: "mydata", label: "My Data", views: [
+        { k: "summary", label: "Leave Summary" },
+        { k: "requests", label: "Leave Requests" },
+      ]},
+      { k: "team", label: "Team", views: [{ k: "leaves", label: "Team Leaves" }]},
+      { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
+    ],
+  },
+  {
+    k: "approvals", label: "Approvals", icon: "check", approverOnly: true,
+    scopes: [{ k: "pending", label: "Pending", views: [{ k: "all", label: "All Requests" }]}],
+  },
+  {
+    k: "reports", label: "Reports", icon: "users", approverOnly: true,
+    scopes: [
+      { k: "att", label: "Attendance", views: [
+        { k: "muster", label: "Muster Roll" },
+        { k: "payroll", label: "Payroll" },
+      ]},
+      { k: "people", label: "People", views: [{ k: "staff", label: "Staff" }]},
+    ],
+  },
+  {
+    k: "me", label: "Profile", icon: "user",
+    scopes: [{ k: "me", label: "My Profile", views: [{ k: "profile", label: "Profile" }]}],
+  },
+];
+
 export default function Attendance() {
   const [session, setSession] = useState<any>(undefined);
   const [me, setMe] = useState<any>(null);
-  const [tab, setTab] = useState("home");
-  const [teamTab, setTeamTab] = useState("today");
-  const [leaveTab, setLeaveTab] = useState("summary");
-  const [attTab, setAttTab] = useState("summary");
-  const [orgTab, setOrgTab] = useState("directory");
+  const [mod, setMod] = useState("home");
+  const [scope, setScope] = useState("myspace");
+  const [view, setView] = useState("overview");
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
@@ -3390,7 +3622,7 @@ export default function Attendance() {
       setPending([...(l.data || []), ...(r.data || [])]
         .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length);
     })();
-  }, [me, tab]);
+  }, [me, mod]);
 
   const shell = (children: any) => (
     <div className="hjsatt"><style>{CSS}</style>{children}</div>
@@ -3406,37 +3638,68 @@ export default function Attendance() {
   );
 
   const approver = ["manager", "admin"].includes(me.role);
-  const nav: [string, string, string][] = [
-    ["home", "Home", "home"],
-    ["att", "Attendance", "clock"],
-    ["leaves", "Leave Tracker", "cal"],
-  ];
-  if (approver) nav.push(["inbox", "Approvals", "check"]);
-  nav.push(["team", "Team", "users"], ["me", "Profile", "user"]);
+  const mods = MODULES.filter((m) => !m.approverOnly || approver);
+  const curMod = mods.find((m) => m.k === mod) || mods[0];
+  const curScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
+  const curView = curScope.views.find((v) => v.k === view) || curScope.views[0];
 
-  const teamTabs: [string, string][] = approver
-    ? [["today", "Today"], ["dash", "Dashboard"], ["staff", "Staff"],
-       ["reports", "Reports"], ["payroll", "Payroll"]]
-    : [["today", "Today"]];
-  const titles: Record<string, string> = {
-    home: "My Space", att: "Attendance", leaves: "Leave Tracker",
-    inbox: "Approvals", team: "Team", org: "Organization", me: "My Profile",
+  const goMod = (k: string) => {
+    const m = mods.find((x) => x.k === k)!;
+    setMod(k); setScope(m.scopes[0].k); setView(m.scopes[0].views[0].k);
   };
-  const orgTabs: [string, string][] = [
-    ["directory", "Employee list"], ["dept", "Departments"], ["tree", "Employee tree"],
-    ["people", "Birthdays & new hires"], ["notice", "Announcements"],
-  ];
-  const leaveTabs: [string, string][] = [["summary", "Leave Summary"], ["requests", "Leave Requests"]];
+  const goScope = (k: string) => {
+    const sc = curMod.scopes.find((x) => x.k === k)!;
+    setScope(k); setView(sc.views[0].k);
+  };
+
+  const key = `${curMod.k}/${curScope.k}/${curView.k}`;
+
+  const body = () => {
+    switch (key) {
+      // ---- Home ----
+      case "home/myspace/overview": return <HomeScreen me={me} />;
+      case "home/myspace/calendar": return <CalendarTab me={me} />;
+      case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
+      case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
+      case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab /></div>;
+      case "home/org/emptree":      return <div className="att-wrap att-stack"><EmpTreeTab /></div>;
+      case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab me={me} /></div>;
+      case "home/org/deptdir":      return <div className="att-wrap att-stack"><DeptTab /></div>;
+      case "home/org/people":       return <div className="att-wrap att-stack"><PeopleTab /></div>;
+      case "home/org/notice":       return <div className="att-wrap att-stack"><NoticeTab me={me} /></div>;
+      // ---- Attendance ----
+      case "att/mydata/summary":    return <AttSummary me={me} />;
+      case "att/mydata/calendar":   return <CalendarTab me={me} />;
+      case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
+      case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
+      case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
+      // ---- Leave ----
+      case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
+      case "leave/mydata/requests": return <LeavesScreen me={me} tab="requests" />;
+      case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
+      case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
+      // ---- Approvals ----
+      case "approvals/pending/all": return <InboxScreen me={me} onCount={setPending} />;
+      // ---- Reports ----
+      case "reports/att/muster":    return <div className="att-wrap att-stack"><ReportsTab /></div>;
+      case "reports/att/payroll":   return <div className="att-wrap att-stack"><PayrollTab /></div>;
+      case "reports/people/staff":  return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
+      default:                      return <HomeScreen me={me} />;
+    }
+  };
 
   return shell(
     <>
       <nav className="att-rail">
         <div className="att-raillogo">HJS</div>
-        {nav.map(([k, label, ic]) => (
-          <button key={k} className={`att-railbtn ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>
-            <div className="ic"><Icon n={ic} c={tab === k ? "#fff" : "#9fb0cd"} /></div>
-            <span>{label}</span>
-            {k === "inbox" && pending > 0 && <span className="cnt">{pending}</span>}
+        {mods.map((m) => (
+          <button key={m.k} className={`att-railbtn ${mod === m.k ? "on" : ""}`}
+            onClick={() => goMod(m.k)}>
+            <div className="ic"><Icon n={m.icon} c={mod === m.k ? "#fff" : "#9fb0cd"} /></div>
+            <span>{m.label}</span>
+            {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
           </button>
         ))}
       </nav>
@@ -3444,7 +3707,7 @@ export default function Attendance() {
       <div className="att-body">
         <header className="att-topbar">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <b>{titles[tab]}</b>
+            <b>{curMod.label}</b>
             <span className="sub" style={{ display: "block" }}>
               {me.emp_code} · {me.full_name}
             </span>
@@ -3452,61 +3715,36 @@ export default function Attendance() {
           <button className="att-signout" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </header>
 
-        <div className="att-mtabs">
-          {nav.map(([k, label]) => (
-            <button key={k} className={`att-tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>
-              {label}
-              {k === "inbox" && pending > 0 && <span className="cnt">{pending}</span>}
+        <div className="att-scope">
+          {curMod.scopes.map((sc) => (
+            <button key={sc.k} className={`att-scopebtn ${scope === sc.k ? "on" : ""}`}
+              onClick={() => goScope(sc.k)}>
+              {sc.label}
+              {curMod.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
             </button>
           ))}
         </div>
 
-        {tab === "team" && approver && (
+        <div className="att-mtabs">
+          {mods.map((m) => (
+            <button key={m.k} className={`att-tab ${mod === m.k ? "on" : ""}`}
+              onClick={() => goMod(m.k)}>
+              {m.label}
+              {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+            </button>
+          ))}
+        </div>
+
+        {curScope.views.length > 1 && (
           <div className="att-subbar">
-            {teamTabs.map(([k, l]) => (
-              <button key={k} className={`att-tab ${teamTab === k ? "on" : ""}`}
-                onClick={() => setTeamTab(k)}>{l}</button>
+            {curScope.views.map((v) => (
+              <button key={v.k} className={`att-tab ${curView.k === v.k ? "on" : ""}`}
+                onClick={() => setView(v.k)}>{v.label}</button>
             ))}
           </div>
         )}
 
-        {tab === "att" && (
-          <div className="att-subbar">
-            {[["summary", "Attendance Summary"], ["calendar", "Calendar"],
-              ["matrix", "Monthly matrix"]].map(([k, l]) => (
-              <button key={k} className={`att-tab ${attTab === k ? "on" : ""}`}
-                onClick={() => setAttTab(k)}>{l}</button>
-            ))}
-          </div>
-        )}
-
-        {tab === "org" && (
-          <div className="att-subbar">
-            {orgTabs.map(([k, l]) => (
-              <button key={k} className={`att-tab ${orgTab === k ? "on" : ""}`}
-                onClick={() => setOrgTab(k)}>{l}</button>
-            ))}
-          </div>
-        )}
-
-        {tab === "leaves" && (
-          <div className="att-subbar">
-            {leaveTabs.map(([k, l]) => (
-              <button key={k} className={`att-tab ${leaveTab === k ? "on" : ""}`}
-                onClick={() => setLeaveTab(k)}>{l}</button>
-            ))}
-          </div>
-        )}
-
-        <main className="att-main">
-          {tab === "home" && <HomeScreen me={me} />}
-          {tab === "att" && <AttendanceScreen me={me} tab={attTab} />}
-          {tab === "org" && <OrgScreen me={me} tab={orgTab} />}
-          {tab === "leaves" && <LeavesScreen me={me} tab={leaveTab} />}
-          {tab === "inbox" && approver && <InboxScreen me={me} onCount={setPending} />}
-          {tab === "team" && <TeamScreen me={me} tab={approver ? teamTab : "today"} />}
-          {tab === "me" && <MeScreen me={me} />}
-        </main>
+        <main className="att-main">{body()}</main>
       </div>
     </>
   );
