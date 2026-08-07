@@ -153,8 +153,8 @@ const CSS = `
 /* ---------- generic ---------- */
 .hjsatt .att-wrap { max-width: 1240px; margin: 0 auto; padding: 16px 14px 44px; }
 .hjsatt .att-narrow { max-width: 720px; }
-.hjsatt .att-center { min-height: 100%; display: flex; align-items: center;
-  justify-content: center; padding: 24px 16px; }
+.hjsatt .att-center { flex: 1; width: 100%; min-height: 100%; display: flex;
+  align-items: center; justify-content: center; padding: 24px 16px; }
 .hjsatt .att-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
   padding: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
 .hjsatt .att-stack > * + * { margin-top: 12px; }
