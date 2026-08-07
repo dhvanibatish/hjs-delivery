@@ -3149,7 +3149,7 @@ function LeavesScreen({ me, tab }: any) {
               <div className="att-lvic" style={{ background: bg, color: fg }}>{b.leave_type}</div>
               <hr />
               <div className="att-lvrow">
-                <span className="att-muted">Allotted</span><b>{b.allotted}</b>
+                <span className="att-muted">Allotted</span><b>{b.allocated}</b>
               </div>
               <div className="att-lvrow">
                 <span className="att-muted">Available</span>
@@ -4497,7 +4497,7 @@ function MeScreen({ me }: any) {
 }
 
 function BalanceSheet({ b, who, year, onClose }: any) {
-  const [val, setVal] = useState(String(b.allotted ?? 0));
+  const [val, setVal] = useState(String(b.allocated ?? 0));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [scope, setScope] = useState<"one" | "team" | "all">("one");
