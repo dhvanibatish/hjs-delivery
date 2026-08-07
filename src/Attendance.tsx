@@ -401,9 +401,10 @@ const CSS = `
 
 .hjsatt .att-balhd { display: flex; align-items: flex-start; justify-content: space-between;
   gap: 8px; }
-.hjsatt .att-baledit { width: 26px; height: 26px; border-radius: 7px; border: 1px solid #e5e7eb;
-  background: #fff; color: #98a2b3; font-size: 12px; flex-shrink: 0; }
-.hjsatt .att-baledit:hover { color: #2563eb; border-color: #b2ccff; }
+.hjsatt .att-baledit { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #98a2b3; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-baledit:hover { color: #2563eb; border-color: #b2ccff; background: #f5f8ff; }
 
 /* ---------- daily verification ---------- */
 .hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
@@ -429,8 +430,9 @@ const CSS = `
 .hjsatt .att-vrow.cut { background: #fffbfa; box-shadow: inset 3px 0 0 #b42318; }
 .hjsatt .att-vrow.cut .nm { color: #667085; text-decoration: line-through; }
 .hjsatt .att-pencil { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
-  background: #fff; color: #667085; flex-shrink: 0; font-size: 13px; }
-.hjsatt .att-pencil:hover { background: #f5f6f8; color: #2563eb; }
+  background: #fff; color: #667085; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-pencil:hover { background: #f5f8ff; color: #2563eb; border-color: #b2ccff; }
 .hjsatt .att-vtime { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 13.5px;
   color: #344054; white-space: nowrap; }
 .hjsatt .att-vempty { text-align: center; padding: 44px 20px; color: #667085; }
@@ -438,8 +440,9 @@ const CSS = `
 .hjsatt .att-menu { position: relative; }
 .hjsatt .att-pop.up { top: auto; bottom: 34px; }
 .hjsatt .att-dots { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
-  background: #fff; color: #667085; font-size: 17px; line-height: 1; flex-shrink: 0; }
-.hjsatt .att-dots:hover { background: #f5f6f8; }
+  background: #fff; color: #667085; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-dots:hover { background: #f5f6f8; color: #344054; }
 .hjsatt .att-pop { position: absolute; right: 0; top: 34px; z-index: 60; background: #fff;
   border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 10px 26px rgba(16,24,40,.14);
   min-width: 190px; overflow: hidden; }
@@ -696,10 +699,12 @@ const ICONS: Record<string, string> = {
   check: "m4.5 12.5 5 5 10-11",
   users: "M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20M9 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 20v-1.5a4 4 0 0 0-3-3.8M16.5 3.7a4 4 0 0 1 0 6.9",
   user: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+  pencil: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
+  dots: "M5 12h.01M12 12h.01M19 12h.01",
 };
 const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-    strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    strokeWidth={n === "dots" ? 2.6 : 1.9} strokeLinecap="round" strokeLinejoin="round">
     <path d={ICONS[n]} />
   </svg>
 );
@@ -3136,7 +3141,9 @@ function LeavesScreen({ me, tab }: any) {
                 <h4>{b.name}</h4>
                 {isAdmin && (
                   <button className="att-baledit" title="Set allotment"
-                    onClick={() => setEditBal(b)}>✎</button>
+                    onClick={() => setEditBal(b)}>
+                    <Icon n="pencil" c="currentColor" s={14} />
+                  </button>
                 )}
               </div>
               <div className="att-lvic" style={{ background: bg, color: fg }}>{b.leave_type}</div>
@@ -4634,7 +4641,9 @@ function VerifyRow({ r, onSet, onClear, busy, date }: any) {
 
             <div className="att-menu">
               <button className="att-pencil" onClick={openMenu(setEdit, edit)}
-                aria-label="Change this">✎</button>
+                aria-label="Change this">
+                <Icon n="pencil" c="currentColor" s={14} />
+              </button>
               {edit && (
                 <>
                   <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
@@ -4671,7 +4680,9 @@ function VerifyRow({ r, onSet, onClear, busy, date }: any) {
 
             <div className="att-menu">
               <button className="att-dots" onClick={openMenu(setMenu, menu)}
-                aria-label="More options">⋯</button>
+                aria-label="More options">
+                <Icon n="dots" c="currentColor" s={18} />
+              </button>
               {menu && (
                 <>
                   <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
