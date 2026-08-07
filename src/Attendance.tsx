@@ -957,7 +957,6 @@ function Login() {
     }
     const { error } = await supabase.rpc("register_self", {
       p_full_name: name.trim(),
-      p_emp_code: empCode.trim() || null,
       p_phone: null,
     });
     if (error) { setErr(error.message); await supabase.auth.signOut(); }
@@ -1032,12 +1031,6 @@ function Login() {
                 <label>Your full name</label>
                 <input value={name} placeholder="Ansh Bansal" autoFocus
                   onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div>
-                <label>Employee code <span className="att-muted">(if you know it)</span></label>
-                <input value={empCode} placeholder="VGN-E137"
-                  style={{ textTransform: "uppercase" }}
-                  onChange={(e) => setEmpCode(e.target.value)} />
               </div>
               <div>
                 <label>Create your 4-digit code</label>
@@ -5000,63 +4993,71 @@ function PersonProvider({ me, children }: any) {
 /* ================= account linking ================= */
 function LinkAccount({ session, onDone }: any) {
   const email = session?.user?.email || "";
+  const [state, setState] = useState<"checking" | "notfound" | "sent">("checking");
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
+  const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [tried, setTried] = useState(false);
 
-  // pehle chup-chaap link karne ki koshish — email list mein hui to seedha andar
-  const link = async (withName: boolean) => {
+  // Sirf jodne ki koshish — kuch banata NAHI hai
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc("link_self");
+      if (error) { setErr(error.message); setState("notfound"); return; }
+      if (data === "linked") onDone();
+      else setState("notfound");
+    })();
+  }, []);
+
+  const request = async () => {
+    if (!name.trim()) return setErr("Please enter your full name.");
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("register_self", {
-      p_full_name: withName ? name.trim() : (email.split("@")[0] || "New user"),
-      p_emp_code: code.trim() || null,
-      p_phone: null,
+      p_full_name: name.trim(),
+      p_phone: phone.trim() || null,
     });
-    if (error) setErr(error.message);
-    else onDone();
+    if (error) { setErr(error.message); setBusy(false); return; }
     setBusy(false);
-    setTried(true);
+    onDone();
   };
 
-  useEffect(() => { link(false); }, []);
+  if (state === "checking") {
+    return (
+      <div className="att-center">
+        <p className="att-muted">Checking your account…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="att-center">
-      <div className="att-card" style={{ maxWidth: 420 }}>
-        <h2 className="att-h1">Let's finish setting you up</h2>
-        <p className="att-muted" style={{ marginTop: 6 }}>
-          Signed in as <b>{email}</b>
+      <div className="att-card" style={{ maxWidth: 430 }}>
+        <h2 className="att-h1">We don't have this email yet</h2>
+        <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
+          You're signed in as <b>{email}</b>, but that address isn't on the employee
+          list. If you have a different work email, sign out and try that one —
+          you'll go straight in.
         </p>
 
-        {busy && !tried && <p className="att-muted" style={{ marginTop: 12 }}>Linking your account…</p>}
-
-        {tried && (
-          <div className="att-stack" style={{ marginTop: 14 }}>
-            <p className="att-muted">
-              This email isn't on the employee list yet. Enter your name and an admin
-              will approve you.
-            </p>
-            <div>
-              <label>Your full name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
-            </div>
-            <div>
-              <label>Employee code <span className="att-muted">(if you know it)</span></label>
-              <input value={code} onChange={(e) => setCode(e.target.value)}
-                placeholder="VGN-E148" style={{ textTransform: "uppercase" }} />
-            </div>
-            <Note>{err}</Note>
-            <button className="att-btn" disabled={busy || !name.trim()}
-              onClick={() => link(true)}>
-              {busy ? "Sending…" : "Request access"}
-            </button>
+        <div className="att-stack" style={{ marginTop: 16 }}>
+          <div>
+            <label>Your full name</label>
+            <input value={name} autoFocus placeholder="Full name"
+              onChange={(e) => setName(e.target.value)} />
           </div>
-        )}
-
-        <button className="att-btn line sm" style={{ marginTop: 14, width: "100%" }}
-          onClick={() => supabase.auth.signOut()}>Sign out</button>
+          <div>
+            <label>Mobile <span className="att-muted">(optional)</span></label>
+            <input value={phone} placeholder="98765 43210"
+              onChange={(e) => setPhone(e.target.value)} />
+          </div>
+          <Note>{err}</Note>
+          <button className="att-btn" disabled={busy || !name.trim()} onClick={request}>
+            {busy ? "Sending…" : "Ask an admin for access"}
+          </button>
+          <button className="att-btn line" onClick={() => supabase.auth.signOut()}>
+            Sign out and try another email
+          </button>
+        </div>
       </div>
     </div>
   );
