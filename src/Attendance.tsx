@@ -4991,21 +4991,28 @@ function PersonProvider({ me, children }: any) {
 }
 
 /* ================= account linking ================= */
-function LinkAccount({ session, onDone }: any) {
+function LinkAccount({ session, err: outerErr }: any) {
   const email = session?.user?.email || "";
-  const [state, setState] = useState<"checking" | "notfound" | "sent">("checking");
+  const [state, setState] = useState<"checking" | "notfound" | "stuck">("checking");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  // Sirf jodne ki koshish — kuch banata NAHI hai
+  // Sirf jodne ki koshish — kuch banata NAHI hai.
+  // Ek hi baar chalta hai; jud gaya to poora page reload, taaki loop na bane.
   useEffect(() => {
+    const key = `hjs_linked_${session?.user?.id}`;
     (async () => {
       const { data, error } = await supabase.rpc("link_self");
       if (error) { setErr(error.message); setState("notfound"); return; }
-      if (data === "linked") onDone();
-      else setState("notfound");
+      if (data === "linked") {
+        if (sessionStorage.getItem(key)) { setState("stuck"); return; }
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+        return;
+      }
+      setState("notfound");
     })();
   }, []);
 
@@ -5018,13 +5025,31 @@ function LinkAccount({ session, onDone }: any) {
     });
     if (error) { setErr(error.message); setBusy(false); return; }
     setBusy(false);
-    onDone();
+    window.location.reload();
   };
 
   if (state === "checking") {
     return (
       <div className="att-center">
         <p className="att-muted">Checking your account…</p>
+      </div>
+    );
+  }
+
+  // Login juda hua hai par employee record padha nahi ja raha
+  if (state === "stuck") {
+    return (
+      <div className="att-center">
+        <div className="att-card" style={{ maxWidth: 430 }}>
+          <h2 className="att-h1">Almost there</h2>
+          <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
+            Your login ({email}) is linked, but we can't read your employee record.
+            Ask your admin to check that your record is active.
+          </p>
+          {outerErr && <Note>{outerErr}</Note>}
+          <button className="att-btn line" style={{ marginTop: 14, width: "100%" }}
+            onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </div>
       </div>
     );
   }
@@ -5150,6 +5175,7 @@ export default function Attendance() {
   const [view, setView] = useState("overview");
   const [pending, setPending] = useState(0);
   const [canVerify, setCanVerify] = useState(false);
+  const [meErr, setMeErr] = useState("");
   const [toCheck, setToCheck] = useState(0);
 
   useEffect(() => {
@@ -5161,8 +5187,12 @@ export default function Attendance() {
   useEffect(() => {
     if (!session) { setMe(null); return; }
     supabase.from("employees").select("*, branches(name), teams(name)")
-      .eq("auth_user_id", session.user.id).single()
-      .then(({ data }) => setMe(data));
+      .eq("auth_user_id", session.user.id).maybeSingle()
+      .then(({ data, error }) => {
+        if (error) console.error("employee lookup failed:", error);
+        setMe(data || null);
+        setMeErr(error ? error.message : "");
+      });
   }, [session]);
 
   useEffect(() => {
@@ -5196,7 +5226,7 @@ export default function Attendance() {
 
   if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
   if (!session) return shell(<Login />);
-  if (!me) return shell(<LinkAccount session={session} onDone={() => setSession({ ...session })} />);
+  if (!me) return shell(<LinkAccount session={session} err={meErr} />);
 
   if (me.approval_status === "Pending") return shell(
     <div className="att-center">
