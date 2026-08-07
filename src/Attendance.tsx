@@ -42,7 +42,15 @@ const CSS = `
                     linear-gradient(135deg, #6b7280 50%, transparent 50%);
   background-position: calc(100% - 17px) 19px, calc(100% - 12px) 19px;
   background-size: 5px 5px; background-repeat: no-repeat; }
-.hjsatt input[type=checkbox] { width: 18px; height: 18px; min-height: 0; accent-color: #2563eb; }
+/* checkbox pe bhi appearance:none tick uda deta hai — native wapas */
+.hjsatt input[type=checkbox] {
+  -webkit-appearance: checkbox; appearance: checkbox;
+  width: 17px; height: 17px; min-height: 0; padding: 0; margin: 0;
+  accent-color: #2563eb; cursor: pointer; flex-shrink: 0; }
+.hjsatt input[type=radio] {
+  -webkit-appearance: radio; appearance: radio;
+  width: 17px; height: 17px; min-height: 0; padding: 0; margin: 0;
+  accent-color: #2563eb; cursor: pointer; flex-shrink: 0; }
 
 /* date / month / time — native icon wapas, apne rang mein */
 .hjsatt input[type=date], .hjsatt input[type=month], .hjsatt input[type=time] {
@@ -1991,12 +1999,94 @@ function PersonCard({ p }: any) {
   );
 }
 
+function MergeSheet({ keepPerson, onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  useEffect(() => {
+    supabase.rpc("directory", {}).then(({ data }) =>
+      setRows((data || []).filter((r: any) => r.id !== keepPerson.id)));
+  }, []);
+
+  // ek jaisa pehla naam upar
+  const first = String(keepPerson.full_name || "").trim().split(" ")[0].toLowerCase();
+  const likely = rows.filter((r) =>
+    String(r.full_name).trim().split(" ")[0].toLowerCase() === first);
+  const others = rows.filter((r) => !likely.includes(r));
+  const dup = rows.find((r) => r.id === pick);
+
+  const run = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { data, error } = await supabase.rpc("merge_employees", {
+      p_keep: keepPerson.id, p_merge: pick,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: String(data) }); setTimeout(onClose, 1400); }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title="Merge a duplicate record" onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted" style={{ whiteSpace: "normal" }}>
+          Keeping <b>{keepPerson.full_name}</b> ({keepPerson.emp_code}) — their department,
+          manager and employee code stay exactly as they are. The duplicate's login, email
+          and any attendance it collected move across, then the duplicate is deleted.
+        </p>
+
+        <div>
+          <label>Which record is the duplicate?</label>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">— pick the record to remove —</option>
+            {likely.length > 0 && (
+              <optgroup label="Same first name">
+                {likely.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.emp_code} · {r.full_name}{r.email ? ` · ${r.email}` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Everyone else">
+              {others.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.emp_code} · {r.full_name}{r.email ? ` · ${r.email}` : ""}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
+        {dup && (
+          <div className="att-note err">
+            <span>
+              <b>{dup.emp_code} · {dup.full_name}</b> will be deleted.
+              {dup.email ? ` Its email (${dup.email}) and login move to ${keepPerson.full_name}.` : ""}
+              {" "}This can't be undone.
+            </span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={run} disabled={busy || !pick}>
+          {busy ? "Merging…" : "Merge and delete the duplicate"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [confirmDel, setConfirmDel] = useState(false);
   const [edit, setEdit] = useState<any>(null);
   const [lists, setLists] = useState<any>(null);
+
+  const [merge, setMerge] = useState(false);
 
   const openEdit = async () => {
     setBusy(true);
@@ -2069,6 +2159,8 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
             <div className="att-flex" style={{ flexWrap: "wrap" }}>
               <button className="att-btn sm" disabled={busy} onClick={openEdit}>Edit details</button>
               <button className="att-btn sm line" disabled={busy}
+                onClick={() => setMerge(true)}>Merge duplicate</button>
+              <button className="att-btn sm line" disabled={busy}
                 onClick={() => remove(false)}>Deactivate</button>
               <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
                 disabled={busy} onClick={() => setConfirmDel(true)}>Delete permanently</button>
@@ -2091,6 +2183,160 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
           desigs={lists.desigs} people={lists.people}
           onClose={() => { setEdit(null); onDeleted(); }} />
       )}
+
+      {merge && (
+        <MergeSheet keepPerson={p} onClose={() => { setMerge(false); onDeleted(); }} />
+      )}
+    </Sheet>
+  );
+}
+
+function BulkSheet({ ids, names, onClose }: any) {
+  const [field, setField] = useState("field_staff");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [lists, setLists] = useState<any>({ teams: [], branches: [], desigs: [], people: [] });
+  const [boolVal, setBoolVal] = useState(true);
+  const [uuidVal, setUuidVal] = useState("");
+  const [textVal, setTextVal] = useState("");
+  const [timeVal, setTimeVal] = useState("10:00");
+
+  useEffect(() => {
+    (async () => {
+      const [t, b, d, p] = await Promise.all([
+        supabase.from("teams").select("id, name").order("name"),
+        supabase.from("branches").select("id, name").order("name"),
+        supabase.from("designations").select("name").eq("active", true)
+          .order("sort_order").order("name"),
+        supabase.from("employees").select("id, emp_code, full_name")
+          .eq("active", true).order("full_name"),
+      ]);
+      setLists({ teams: t.data || [], branches: b.data || [],
+                 desigs: d.data || [], people: p.data || [] });
+    })();
+  }, []);
+
+  const FIELDS: [string, string, string][] = [
+    ["field_staff",       "Field staff (skip geo-fence)", "bool"],
+    ["team",              "Department",                   "team"],
+    ["branch",            "Branch / location",            "branch"],
+    ["reports_to",        "Reporting manager",            "person"],
+    ["designation",       "Designation",                  "desig"],
+    ["employment_type",   "Employment type",              "text"],
+    ["shift_start",       "Shift start time",             "time"],
+    ["shift_end",         "Shift end time",               "time"],
+    ["show_verify_panel", "Daily check panel",            "bool"],
+    ["active",            "Active / inactive",            "bool"],
+  ];
+  const kind = FIELDS.find((f) => f[0] === field)?.[2] || "text";
+  const label = FIELDS.find((f) => f[0] === field)?.[1] || "";
+
+  const ready = kind === "bool" || kind === "time"
+    || (kind === "text" ? !!textVal.trim() : !!uuidVal || !!textVal);
+
+  const apply = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { data, error } = await supabase.rpc("bulk_update_employees", {
+      p_ids: ids,
+      p_field: field,
+      p_text: (kind === "desig" || kind === "text") ? textVal.trim() : null,
+      p_uuid: ["team", "branch", "person"].includes(kind) ? (uuidVal || null) : null,
+      p_bool: kind === "bool" ? boolVal : null,
+      p_time: kind === "time" ? timeVal : null,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: `${data} people updated.` }); setTimeout(onClose, 800); }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={`Edit ${ids.length} people`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted" style={{ whiteSpace: "normal" }}>
+          {names.slice(0, 6).join(", ")}
+          {names.length > 6 ? ` and ${names.length - 6} more` : ""}
+        </p>
+
+        <div>
+          <label>What do you want to change?</label>
+          <select value={field} onChange={(e) => {
+            setField(e.target.value); setUuidVal(""); setTextVal("");
+          }}>
+            {FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label>{label}</label>
+
+          {kind === "bool" && (
+            <select value={boolVal ? "y" : "n"} onChange={(e) => setBoolVal(e.target.value === "y")}>
+              <option value="y">
+                {field === "active" ? "Active"
+                  : field === "field_staff" ? "Yes — skip the geo-fence"
+                  : "Show the panel"}
+              </option>
+              <option value="n">
+                {field === "active" ? "Inactive"
+                  : field === "field_staff" ? "No — geo-fence applies"
+                  : "Hide the panel"}
+              </option>
+            </select>
+          )}
+
+          {kind === "team" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a department —</option>
+              {lists.teams.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+
+          {kind === "branch" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a branch —</option>
+              {lists.branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+
+          {kind === "person" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a manager —</option>
+              {lists.people.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
+              ))}
+            </select>
+          )}
+
+          {kind === "desig" && (
+            <select value={textVal} onChange={(e) => setTextVal(e.target.value)}>
+              <option value="">— pick a designation —</option>
+              {lists.desigs.map((d: any) => <option key={d.name} value={d.name}>{d.name}</option>)}
+            </select>
+          )}
+
+          {kind === "text" && (
+            <input value={textVal} placeholder="Permanent / Trainee / Intern"
+              onChange={(e) => setTextVal(e.target.value)} />
+          )}
+
+          {kind === "time" && (
+            <input type="time" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} />
+          )}
+        </div>
+
+        {field === "active" && !boolVal && (
+          <div className="att-note err">
+            <span>These {ids.length} people will disappear from every list and won't be
+            able to check in. Their history stays — you can switch them back on later.</span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={apply} disabled={busy || !ready}>
+          {busy ? "Applying…" : `Apply to ${ids.length} people`}
+        </button>
+      </div>
     </Sheet>
   );
 }
@@ -2103,6 +2349,7 @@ function DirectoryTab({ me }: any) {
   const [busy, setBusy] = useState(true);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<any>(null);
+  const [bulk, setBulk] = useState(false);
   const canEdit = me?.role === "admin";
 
   const load = async () => {
@@ -2174,6 +2421,7 @@ function DirectoryTab({ me }: any) {
               }), "HJS_selected.csv")}>Export selected</button>
             {canEdit && (
               <>
+                <button className="att-btn sm" onClick={() => setBulk(true)}>Edit selected</button>
                 <button className="att-btn sm line" onClick={() => bulkRemove(false)}>Deactivate</button>
                 <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
                   onClick={() => { if (confirm(`Delete ${sel.size} people permanently? This wipes their attendance too.`)) bulkRemove(true); }}>
@@ -2241,6 +2489,13 @@ function DirectoryTab({ me }: any) {
 
       {open && <PersonSheet p={open} canEdit={canEdit}
         onClose={() => setOpen(null)} onDeleted={load} />}
+
+      {bulk && (
+        <BulkSheet
+          ids={Array.from(sel)}
+          names={rows.filter((r) => sel.has(r.id)).map((r) => r.full_name)}
+          onClose={() => { setBulk(false); load(); }} />
+      )}
     </>
   );
 }
