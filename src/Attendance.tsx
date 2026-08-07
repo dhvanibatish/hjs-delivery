@@ -1041,7 +1041,7 @@ function Login() {
               </div>
               <div>
                 <label>Your full name</label>
-                <input value={name} placeholder="Ansh Bansal" autoFocus
+                <input value={name} placeholder="Full name" autoFocus
                   onChange={(e) => setName(e.target.value)} />
               </div>
               <div>
@@ -2141,6 +2141,15 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Today", p.state],
   ];
 
+  const resetCode = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("reset_employee_code", { p_emp: p.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else setMsg({ err: "",
+      ok: `Code cleared. ${p.full_name} can set a new one next time they sign in.` });
+    setBusy(false);
+  };
+
   const remove = async (hard: boolean) => {
     setBusy(true);
     const { error } = await supabase.rpc("delete_employee", { p_emp: p.id, p_hard: hard });
@@ -2175,9 +2184,15 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
       {canEdit && (
         <div className="att-card" style={{ marginTop: 12 }}>
           <Note>{msg.err}</Note>
+          <Note>{msg.err}</Note>
+          <Note kind="ok">{msg.ok}</Note>
           {!confirmDel ? (
             <div className="att-flex" style={{ flexWrap: "wrap" }}>
               <button className="att-btn sm" disabled={busy} onClick={openEdit}>Edit details</button>
+              {p.email && (
+                <button className="att-btn sm line" disabled={busy} onClick={resetCode}
+                  title="They forgot their 4-digit code">Reset their code</button>
+              )}
               <button className="att-btn sm line" disabled={busy}
                 onClick={() => setMerge(true)}>Merge duplicate</button>
               <button className="att-btn sm line" disabled={busy}
@@ -5051,9 +5066,25 @@ function LinkAccount({ session, err: outerErr }: any) {
   // Ek hi baar chalta hai; jud gaya to poora page reload, taaki loop na bane.
   useEffect(() => {
     const key = `hjs_linked_${session?.user?.id}`;
+    let done = false;
+
+    // 8 second se zyada atka to aage badho
+    const bail = setTimeout(() => {
+      if (!done) { setErr("Couldn't reach the server. Check your connection."); setState("notfound"); }
+    }, 8000);
+
     (async () => {
       const { data, error } = await supabase.rpc("link_self");
-      if (error) { setErr(error.message); setState("notfound"); return; }
+      done = true; clearTimeout(bail);
+
+      if (error) {
+        // link_self hai hi nahi (SQL nahi chali) -> saaf batao
+        setErr(/function|schema cache/i.test(error.message)
+          ? "The app isn't fully set up yet. Ask your admin to run the latest database update."
+          : error.message);
+        setState("notfound");
+        return;
+      }
       if (data === "linked") {
         if (sessionStorage.getItem(key)) { setState("stuck"); return; }
         sessionStorage.setItem(key, "1");
@@ -5062,6 +5093,8 @@ function LinkAccount({ session, err: outerErr }: any) {
       }
       setState("notfound");
     })();
+
+    return () => clearTimeout(bail);
   }, []);
 
   const request = async () => {
