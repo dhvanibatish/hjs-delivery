@@ -580,6 +580,18 @@ const fmtHM = (t: any) => {
 };
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// "14:30" mein minute jodo -> "15:30"
+const addMins = (hm: string, mins: number) => {
+  const [h, m] = String(hm).split(":").map(Number);
+  const t = (h * 60 + m + mins + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+};
+
+// abhi ka time HH:MM, IST mein
+const nowHM = () =>
+  new Date().toLocaleTimeString("en-GB", {
+    timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false });
+
 const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 const hhmm = (mins: number | null) => {
   const m = Math.max(0, Math.round(mins || 0));
@@ -1395,7 +1407,10 @@ function HomeScreen({ me }: any) {
 /* ================= regularization ================= */
 function RegularizeSheet({ me, onClose }: any) {
   const [form, setForm] = useState({
-    work_date: istToday(), req_punch_in: "", req_punch_out: "", reason: "",
+    work_date: istToday(),
+    req_punch_in: String(me?.shift_start || "10:00").slice(0, 5),
+    req_punch_out: nowHM(),
+    reason: "",
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
@@ -2204,7 +2219,7 @@ function BulkSheet({ ids, names, onClose }: any) {
   const [boolVal, setBoolVal] = useState(true);
   const [uuidVal, setUuidVal] = useState("");
   const [textVal, setTextVal] = useState("");
-  const [timeVal, setTimeVal] = useState("10:00");
+  const [timeVal, setTimeVal] = useState(nowHM());
 
   useEffect(() => {
     (async () => {
@@ -2943,7 +2958,10 @@ function TeamLeavesTab({ me }: any) {
           <div className="grow">
             <p><PName id={r.employee_id}><b>{emps[r.employee_id]?.full_name || "—"}</b></PName></p>
             <p className="att-muted">
-              {r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d
+              {r.leave_type} · {fmtDate(r.from_date)}
+              {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+              {r.from_time ? ` · ${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : ""}
+              {" · "}{r.days}d
             </p>
           </div>
           <span className={pillClass(r.status)}>{r.status}</span>
@@ -3227,13 +3245,22 @@ const LEAVE_RULES: Record<string, {
 function ApplyLeaveSheet({ me, types, onClose }: any) {
   const today = istToday();
   const [form, setForm] = useState<any>({
-    leave_type: types[0]?.code || "CL", from_date: today, to_date: today, reason: "",
+    leave_type: types[0]?.code || "", from_date: today, to_date: today, reason: "",
+    from_time: nowHM(), to_time: addMins(nowHM(), 60),
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
 
+  // types der se aayein to pehla apne aap chun lo
+  useEffect(() => {
+    if (!form.leave_type && types.length) {
+      setForm((f: any) => ({ ...f, leave_type: types[0].code }));
+    }
+  }, [types]);
+
   const rule = LEAVE_RULES[form.leave_type]
     || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: false };
+  const needsTime = ["SHORT", "HALF"].includes(form.leave_type);
   const minDate = addDays(today, -rule.pastDays);
   const maxDate = addDays(today, rule.futureDays);
 
@@ -3278,6 +3305,8 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
     const { error } = await supabase.from("leaves").insert({
       employee_id: me.id, leave_type: form.leave_type,
       from_date: form.from_date, to_date: form.to_date,
+      from_time: needsTime ? form.from_time : null,
+      to_time:   needsTime ? form.to_time   : null,
       half_day: form.leave_type === "HALF", days,
       reason: form.reason.trim(), status: "Pending",
     });
@@ -3292,6 +3321,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
         <div>
           <label>Leave type</label>
           <select value={form.leave_type} onChange={(e) => setType(e.target.value)}>
+            {!types.length && <option value="">No leave types set up yet</option>}
             {types.map((t: any) => (
               <option key={t.code} value={t.code}>{t.name}{t.paid ? "" : " (unpaid)"}</option>
             ))}
@@ -3315,6 +3345,25 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
             </div>
           )}
         </div>
+
+        {needsTime && (
+          <div className="att-row2">
+            <div>
+              <label>From time</label>
+              <input type="time" value={form.from_time}
+                onChange={(e) => setForm({
+                  ...form, from_time: e.target.value,
+                  to_time: e.target.value >= form.to_time
+                    ? addMins(e.target.value, 60) : form.to_time,
+                })} />
+            </div>
+            <div>
+              <label>To time</label>
+              <input type="time" value={form.to_time} min={form.from_time}
+                onChange={(e) => setForm({ ...form, to_time: e.target.value })} />
+            </div>
+          </div>
+        )}
 
         <div>
           <label>Reason {rule.reasonReq && <span style={{ color: "#dc2626" }}>*</span>}</label>
@@ -3477,7 +3526,10 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                     <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
                 </p>
                 <p className="att-muted">
-                  {r.leave_type} · {fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days}d
+                  {r.leave_type} · {fmtDate(r.from_date)}
+                  {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+                  {r.from_time ? ` · ${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : ""}
+                  {" · "}{r.days}d
                 </p>
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
               </div>
@@ -5221,7 +5273,7 @@ export default function Attendance() {
   }, [me, mod]);
 
   const shell = (children: any) => (
-    <div className="hjsatt"><style>{CSS}</style>{children}</div>
+    <div className="hjsatt" lang="en-US"><style>{CSS}</style>{children}</div>
   );
 
   if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
