@@ -406,6 +406,13 @@ const CSS = `
   display: inline-flex; align-items: center; justify-content: center; }
 .hjsatt .att-baledit:hover { color: #2563eb; border-color: #b2ccff; background: #f5f8ff; }
 
+.hjsatt .att-mx th.tot, .hjsatt .att-mx td.tot { min-width: 42px; text-align: center;
+  font-weight: 700; background: #fafbfc; border-left: 1px solid #eaecf0; }
+.hjsatt .att-mx th.tot { font-size: 11px; color: #475467; }
+.hjsatt .att-mx td.tot { font-size: 13px; }
+.hjsatt .att-mx th.pay, .hjsatt .att-mx td.pay { background: #eff4ff; color: #1849a9;
+  min-width: 62px; }
+
 /* ---------- daily verification ---------- */
 .hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
   padding: 18px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
@@ -4296,6 +4303,19 @@ function ReportsTab() {
       byEmp[r.emp_code] = byEmp[r.emp_code] || { name: r.full_name, marks: {} };
       byEmp[r.emp_code].marks[r.d] = r.mark;
     });
+    // har bande ka apna total
+    Object.values(byEmp).forEach((v: any) => {
+      const t: Record<string, number> = {};
+      Object.values(v.marks).forEach((m: any) => {
+        if (!m) return;
+        t[m] = (t[m] || 0) + 1;
+      });
+      v.t = t;
+      // payable = present + late + (half x 0.5) + paid leave
+      v.payable = (t.P || 0) + (t.L || 0) + (t.H || 0) * 0.5
+        + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F"].includes(k))
+            .reduce((a, k) => a + (k === "HALF" ? t[k] * 0.5 : k === "SHORT" ? t[k] * 0.25 : t[k]), 0);
+    });
     return { rows: Object.entries(byEmp), dates: dates.sort() };
   }, [data, kind]);
 
@@ -4309,20 +4329,46 @@ function ReportsTab() {
       <div className="att-flex">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ flex: 1 }} />
         <button className="att-btn sm" disabled={!data.length}
-          onClick={() => downloadCsv(data, `HJS_${kind}_${month}.csv`)}>CSV</button>
+          onClick={() => downloadCsv(
+            kind === "muster" && muster
+              ? muster.rows.map(([code, v]: any) => {
+                  const o: any = { Code: code, Name: v.name };
+                  muster.dates.forEach((d) => { o[new Date(d).getDate()] = v.marks[d] || ""; });
+                  o.Present = v.t.P || 0; o.Late = v.t.L || 0; o.Half = v.t.H || 0;
+                  o.Absent = v.t.A || 0;
+                  o.Leave = Object.keys(v.t)
+                    .filter((k) => !["P","L","H","A","W","F"].includes(k))
+                    .reduce((a: number, k) => a + v.t[k], 0);
+                  o["Week off"] = v.t.W || 0; o.Holiday = v.t.F || 0;
+                  o.Payable = v.payable;
+                  return o;
+                })
+              : data,
+            `HJS_${kind}_${month}.csv`)}>CSV</button>
       </div>
 
       {busy && <p className="att-muted">Loading…</p>}
 
       {!busy && kind === "muster" && muster && (
         <>
-          <p className="att-muted">P present · L late · H half · A absent · W week off · F holiday</p>
+          <p className="att-muted">
+            P present · L late · H half · A absent · W week off · F holiday ·
+            CL/EL/SHORT/HALF leave · Payable = present + late + half×0.5 + paid leave
+          </p>
           <div className="att-scroll">
             <table className="att-table att-mx">
               <thead>
                 <tr>
                   <th className="name">Name</th>
                   {muster.dates.map((d) => <th key={d}>{new Date(d).getDate()}</th>)}
+                  <th className="tot">P</th>
+                  <th className="tot">L</th>
+                  <th className="tot">H</th>
+                  <th className="tot">A</th>
+                  <th className="tot">Leave</th>
+                  <th className="tot">W</th>
+                  <th className="tot">F</th>
+                  <th className="tot pay">Payable</th>
                 </tr>
               </thead>
               <tbody>
@@ -4332,6 +4378,17 @@ function ReportsTab() {
                     {muster.dates.map((d) => (
                       <td key={d}><span className={markClass(v.marks[d])}>{v.marks[d] || "·"}</span></td>
                     ))}
+                    <td className="tot" style={{ color: "#16a34a" }}>{v.t.P || 0}</td>
+                    <td className="tot" style={{ color: "#d97706" }}>{v.t.L || 0}</td>
+                    <td className="tot" style={{ color: "#ea580c" }}>{v.t.H || 0}</td>
+                    <td className="tot" style={{ color: "#dc2626" }}>{v.t.A || 0}</td>
+                    <td className="tot" style={{ color: "#2563eb" }}>
+                      {Object.keys(v.t).filter((k) => !["P","L","H","A","W","F"].includes(k))
+                        .reduce((a, k) => a + v.t[k], 0)}
+                    </td>
+                    <td className="tot att-muted">{v.t.W || 0}</td>
+                    <td className="tot att-muted">{v.t.F || 0}</td>
+                    <td className="tot pay">{v.payable}</td>
                   </tr>
                 ))}
               </tbody>
