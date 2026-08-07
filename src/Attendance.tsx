@@ -885,7 +885,8 @@ function CodeInput({ value, onChange, show, setShow, autoFocus, onEnter, placeho
 const codeToPassword = (code: string) => `hjs-${code}-att`;
 
 function Login() {
-  const [stage, setStage] = useState<"email" | "set" | "enter" | "new">("email");
+  const [stage, setStage] = useState<"email" | "set" | "enter" | "new" | "forgot">("email");
+  const [dob, setDob] = useState("");
   const [name, setName] = useState("");
   const [empCode, setEmpCode] = useState("");
   const [email, setEmail] = useState("");
@@ -988,7 +989,36 @@ function Login() {
     setBusy(false);
   };
 
-  const forgot = async () => {
+  // DOB se verify karke wahin naya code
+  const selfReset = async () => {
+    setErr(""); setOk("");
+    if (!dob) return setErr("Please enter your date of birth.");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+
+    const { data, error } = await supabase.rpc("self_reset_code", {
+      p_email: email.trim().toLowerCase(), p_dob: dob, p_code: code,
+    });
+    setBusy(false);
+
+    if (error) return setErr(error.message);
+    if (data === "no_match")
+      return setErr("That date of birth doesn't match our records. Ask your admin to reset it for you.");
+    if (data === "locked")
+      return setErr("Too many wrong tries. Wait 30 minutes, or ask your admin.");
+    if (data === "no_account")
+      return setErr("You haven't set a code before. Go back and sign in normally.");
+    if (data === "bad_code") return setErr("Code must be exactly 4 digits.");
+
+    // ho gaya -> usi code se andar
+    const { error: e2 } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(), password: codeToPassword(code),
+    });
+    if (e2) { setOk("Code changed. Now sign in with it."); setStage("enter"); setCode(""); setCode2(""); }
+  };
+
+  const forgotByMail = async () => {
     setErr(""); setBusy(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
     if (error) setErr(error.message);
@@ -1008,6 +1038,7 @@ function Login() {
             {stage === "email" ? "Sign in with your work email."
               : stage === "set" ? "Set a 4-digit code you'll remember."
               : stage === "new" ? "New here? Create your account."
+              : stage === "forgot" ? "Let's get you a new code."
               : "Enter your 4-digit code."}
           </p>
         </div>
@@ -1026,6 +1057,39 @@ function Login() {
               <button className="att-btn" onClick={checkEmail}
                 disabled={busy || !email.includes("@")}>
                 {busy ? "Checking…" : "Continue"}
+              </button>
+            </>
+          )}
+
+          {stage === "forgot" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                Confirm your date of birth and pick a new code. If your date of birth
+                isn't on file, ask your admin to reset it instead.
+              </p>
+              <div>
+                <label>Your date of birth</label>
+                <input type="date" value={dob} max={istToday()} autoFocus
+                  onChange={(e) => setDob(e.target.value)} />
+              </div>
+              <div>
+                <label>New 4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={selfReset} />
+              </div>
+              <Note>{err}</Note>
+              <Note kind="ok">{ok}</Note>
+              <button className="att-btn" onClick={selfReset}
+                disabled={busy || !dob || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Checking…" : "Set my new code"}
+              </button>
+              <button className="att-muted" onClick={() => { setStage("enter"); setErr(""); }}>
+                Back
               </button>
             </>
           )}
@@ -1098,7 +1162,9 @@ function Login() {
               </button>
               <div className="att-between">
                 <button className="att-muted" onClick={back}>Different email</button>
-                <button className="att-muted" onClick={forgot} disabled={busy}>Forgot code?</button>
+                <button className="att-muted" disabled={busy}
+                  onClick={() => { setErr(""); setOk(""); setCode(""); setCode2("");
+                                   setStage("forgot"); }}>Forgot code?</button>
               </div>
             </>
           )}
@@ -2141,12 +2207,20 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Today", p.state],
   ];
 
+  const [newCode, setNewCode] = useState("");
+
   const resetCode = async () => {
-    setBusy(true); setMsg({ err: "", ok: "" });
-    const { error } = await supabase.rpc("reset_employee_code", { p_emp: p.id });
+    setBusy(true); setMsg({ err: "", ok: "" }); setNewCode("");
+    const { data, error } = await supabase.rpc("admin_reset_code", {
+      p_emp: p.id, p_code: null,
+    });
     if (error) setMsg({ err: error.message, ok: "" });
-    else setMsg({ err: "",
-      ok: `Code cleared. ${p.full_name} can set a new one next time they sign in.` });
+    else if (data === "no_account") {
+      setMsg({ err: "",
+        ok: `${p.full_name} hasn't signed up yet. They'll set their own code the first time.` });
+    } else {
+      setNewCode(String(data));
+    }
     setBusy(false);
   };
 
@@ -2186,6 +2260,20 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
           <Note>{msg.err}</Note>
           <Note>{msg.err}</Note>
           <Note kind="ok">{msg.ok}</Note>
+
+          {newCode && (
+            <div className="att-note ok" style={{ marginBottom: 12 }}>
+              <span>
+                New code for <b>{p.full_name}</b>:
+                <b style={{ fontSize: 22, letterSpacing: 4, display: "block", margin: "6px 0" }}>
+                  {newCode}
+                </b>
+                Tell them this code. They sign in with {p.email} and this code.
+                Nobody can see it again once you close this.
+              </span>
+            </div>
+          )}
+
           {!confirmDel ? (
             <div className="att-flex" style={{ flexWrap: "wrap" }}>
               <button className="att-btn sm" disabled={busy} onClick={openEdit}>Edit details</button>
