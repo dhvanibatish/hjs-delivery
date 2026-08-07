@@ -3814,11 +3814,13 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
     emp_code: "", full_name: "", first_name: "", last_name: "",
-    email: "", phone: "", designation: "",
+    email: "", phone: "", designation: "", nickname: "",
+    employment_type: "", employee_status: "Active", source_of_hire: "",
     branch_id: branches[0]?.id || null, team_id: null, reports_to: null,
     co_manager_id: null, role: "staff",
     shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
     field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
+    show_verify_panel: true,
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
@@ -3864,7 +3866,12 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         grace_minutes: Number(f.grace_minutes) || 0,
         date_of_birth: f.date_of_birth || null,
         date_of_joining: f.date_of_joining || null,
+        employment_type: f.employment_type || null,
+        employee_status: f.employee_status || null,
+        source_of_hire: f.source_of_hire || null,
+        nickname: f.nickname || null,
         field_staff: f.field_staff, active: f.active,
+        show_verify_panel: f.show_verify_panel !== false,
         week_off_days: f.week_off_days,
         monthly_gross: f.monthly_gross === "" || f.monthly_gross == null ? null : Number(f.monthly_gross),
       };
@@ -4013,6 +4020,53 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         </div>
         <div className="att-row2">
           <div>
+            <label>Employment type</label>
+            <select value={f.employment_type || ""}
+              onChange={(e) => setF({ ...f, employment_type: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Permanent</option>
+              <option>Trainee</option>
+              <option>Intern</option>
+              <option>Probation</option>
+              <option>Contract</option>
+              <option>Consultant</option>
+              <option>Team member</option>
+            </select>
+          </div>
+          <div>
+            <label>Employee status</label>
+            <select value={f.employee_status || ""}
+              onChange={(e) => setF({ ...f, employee_status: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Active</option>
+              <option>Probation</option>
+              <option>Notice period</option>
+              <option>On leave</option>
+              <option>Details pending</option>
+            </select>
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Source of hire</label>
+            <select value={f.source_of_hire || ""}
+              onChange={(e) => setF({ ...f, source_of_hire: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Direct</option>
+              <option>Referral</option>
+              <option>Advertisement</option>
+              <option>Consultancy</option>
+              <option>Campus</option>
+            </select>
+          </div>
+          <div>
+            <label>Nick name</label>
+            <input value={f.nickname || ""}
+              onChange={(e) => setF({ ...f, nickname: e.target.value || null })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
             <label>Date of birth</label>
             <input type="date" value={f.date_of_birth || ""}
               onChange={(e) => setF({ ...f, date_of_birth: e.target.value || null })} />
@@ -4054,7 +4108,12 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
           <input type="checkbox" checked={f.field_staff}
             onChange={(e) => setF({ ...f, field_staff: e.target.checked })} />
-          Field staff (skip geo-fence)
+          Field staff — skip the geo-fence
+        </label>
+        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+          <input type="checkbox" checked={f.show_verify_panel !== false}
+            onChange={(e) => setF({ ...f, show_verify_panel: e.target.checked })} />
+          Show the daily "who turned up" panel on their home screen
         </label>
         {!isNew && (
           <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
