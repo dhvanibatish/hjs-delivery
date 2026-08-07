@@ -931,7 +931,8 @@ function Login() {
       if (!session) {
         setBusy(false);
         if (up.error && /already/i.test(up.error.message))
-          return setErr("This email already has a code set. Use \u2018Forgot code\u2019, " +
+          setStage("forgot");
+          return setErr("This email already has a code. Confirm your date of birth " +
                         "or ask your admin to reset it.");
         if (up.error) return setErr(up.error.message);
         return setErr(
@@ -1143,7 +1144,12 @@ function Login() {
                 disabled={busy || code.length !== 4 || code2.length !== 4}>
                 {busy ? "Saving…" : "Save code and sign in"}
               </button>
-              <button className="att-muted" onClick={back}>Use a different email</button>
+              <div className="att-between">
+                <button className="att-muted" onClick={back}>Use a different email</button>
+                <button className="att-muted" disabled={busy}
+                  onClick={() => { setErr(""); setOk(""); setCode(""); setCode2("");
+                                   setStage("forgot"); }}>Forgot code?</button>
+              </div>
             </>
           )}
 
