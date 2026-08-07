@@ -2742,9 +2742,7 @@ function PeopleTab() {
       <div className="att-list">
         <div className="att-hd"><b>Upcoming birthdays</b><span className="att-muted">next 45 days</span></div>
         {!bd.length && (
-          <p className="att-empty">
-            Nothing yet — birth dates aren't filled in. Add them in Team → Staff.
-          </p>
+          <p className="att-empty">No birthdays in the next 45 days.</p>
         )}
         {bd.map((r: any) => (
           <div className="att-row" key={r.emp_code}>
@@ -2770,9 +2768,7 @@ function PeopleTab() {
       <div className="att-list">
         <div className="att-hd"><b>New hires</b><span className="att-muted">last 90 days</span></div>
         {!nh.length && (
-          <p className="att-empty">
-            Nothing yet — joining dates aren't filled in. Add them in Team → Staff.
-          </p>
+          <p className="att-empty">Nobody joined in the last 90 days.</p>
         )}
         {nh.map((r: any) => (
           <div className="att-row" key={r.emp_code}>
