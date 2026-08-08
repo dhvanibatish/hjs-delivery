@@ -427,7 +427,7 @@ const CSS = `
 
 /* ---------- reports ---------- */
 .hjsatt .att-dayrow { width: 100%; display: grid; align-items: center;
-  grid-template-columns: 52px minmax(46px, auto) 1fr auto; gap: 16px;
+  grid-template-columns: 52px 62px 1fr 78px; gap: 16px;
   padding: 14px 16px; border-bottom: 1px solid #f4f5f6; text-align: left; }
 .hjsatt .att-dayrow:last-child { border-bottom: 0; }
 .hjsatt .att-dayrow:hover { background: #fafbff; }
@@ -446,21 +446,25 @@ const CSS = `
   font-variant-numeric: tabular-nums; white-space: nowrap; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; }
 
-.hjsatt .att-mark.wide { width: auto; min-width: 34px; padding: 4px 10px;
-  border-radius: 7px; font-size: 12px; letter-spacing: .02em; }
+.hjsatt .att-mark.wide { display: block; width: 100%; padding: 5px 4px;
+  border-radius: 7px; font-size: 12px; letter-spacing: .01em;
+  text-align: center; overflow: hidden; }
+/* SHORT / HALF jaise lambe code chhote font mein, par usi jagah mein */
+.hjsatt .att-mark.wide.long { font-size: 9.5px; font-weight: 800; letter-spacing: 0; }
 
 .hjsatt .att-dayrow .hrs { font-size: 14px; font-weight: 700; white-space: nowrap;
-  font-variant-numeric: tabular-nums; color: #344054; }
+  font-variant-numeric: tabular-nums; color: #344054; text-align: right; }
 .hjsatt .att-dayrow .hrs.none { color: #d0d5dd; font-weight: 500; }
 
 @media (max-width: 480px) {
-  .hjsatt .att-dayrow { grid-template-columns: 44px minmax(42px, auto) 1fr auto;
-    gap: 11px; padding: 12px 13px; }
+  .hjsatt .att-dayrow { grid-template-columns: 42px 52px 1fr 66px;
+    gap: 10px; padding: 12px 12px; }
   .hjsatt .att-dayrow .dt b { font-size: 16px; }
   .hjsatt .att-dayrow .mid b { font-size: 13.5px; }
   .hjsatt .att-dayrow .mid span { font-size: 12px; }
   .hjsatt .att-dayrow .hrs { font-size: 13px; }
-  .hjsatt .att-mark.wide { min-width: 30px; padding: 3px 8px; font-size: 11px; }
+  .hjsatt .att-mark.wide { padding: 4px 2px; font-size: 11px; }
+  .hjsatt .att-mark.wide.long { font-size: 8.5px; }
 }
 .hjsatt .att-stat.clk { cursor: pointer; }
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
@@ -5518,7 +5522,9 @@ function MyReportTab({ me }: any) {
                   { weekday: "short" })}</i>
               </span>
 
-              <span className={`${markClass(x.mark)} wide`}>{x.mark}</span>
+              <span className={`${markClass(x.mark)} wide ${x.mark.length > 2 ? "long" : ""}`}>
+                {x.mark}
+              </span>
 
               <span className="mid">
                 <b>{x.label}</b>
