@@ -416,6 +416,10 @@ const CSS = `
 .hjsatt .att-mx th.pay, .hjsatt .att-mx td.pay { background: #eff4ff; color: #1849a9;
   min-width: 62px; }
 
+.hjsatt .att-ltype { flex-shrink: 0; font-size: 11px; font-weight: 700; letter-spacing: .03em;
+  padding: 4px 9px; border-radius: 6px; background: #eff4ff; color: #1849a9;
+  white-space: nowrap; align-self: flex-start; }
+
 /* ---------- reports ---------- */
 .hjsatt .att-dayrow { width: 100%; display: flex; align-items: center; gap: 11px;
   padding: 11px 14px; border-bottom: 1px solid #f4f5f6; text-align: left; }
@@ -3276,11 +3280,20 @@ function LeavesScreen({ me, tab }: any) {
         <div className="att-list">
           {!mine.length && <p className="att-empty">No leave requests yet.</p>}
           {mine.map((r) => (
-            <div className="att-row" key={r.id}>
-              <span style={{ width: 42, fontWeight: 650 }}>{r.leave_type}</span>
-              <div className="grow">
-                <p>{fmtDate(r.from_date)} – {fmtDate(r.to_date)} · {r.days} day(s)</p>
-                <p className="att-muted">{r.reason}</p>
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <span className="att-ltype">{r.leave_type}</span>
+              <div className="grow" style={{ minWidth: 130 }}>
+                <p>
+                  {fmtDate(r.from_date)}
+                  {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+                  <span className="att-muted"> · {r.days}d</span>
+                </p>
+                {r.from_time && (
+                  <p className="att-muted">{fmtHM(r.from_time)} – {fmtHM(r.to_time)}</p>
+                )}
+                {r.reason && (
+                  <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>
+                )}
               </div>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
@@ -3294,9 +3307,13 @@ function LeavesScreen({ me, tab }: any) {
           <div className="att-hd"><b>Regularization requests</b></div>
           {!regs.length && <p className="att-empty">No requests yet.</p>}
           {regs.map((r) => (
-            <div className="att-row" key={r.id}>
-              <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
-              <span className="grow att-muted">{fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}</span>
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <span style={{ width: 58, fontWeight: 650, flexShrink: 0 }}>
+                {fmtDate(r.work_date)}
+              </span>
+              <span className="grow att-muted" style={{ minWidth: 120 }}>
+                {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
+              </span>
               <span className={pillClass(r.status)}>{r.status}</span>
             </div>
           ))}
