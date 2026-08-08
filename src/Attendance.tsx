@@ -361,6 +361,9 @@ const CSS = `
   border: 1px solid #e5e7eb; color: #475467; background: #fff; }
 .hjsatt .att-range .qk button.on { background: #eff4ff; border-color: #b2ccff; color: #2563eb; font-weight: 650; }
 .hjsatt .att-stat.clk { cursor: pointer; }
+.hjsatt .att-row.clk { cursor: pointer; }
+.hjsatt .att-row.clk:hover { background: #fafbff; }
+@media (hover: none) { .hjsatt .att-row.clk:hover { background: transparent; } }
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
 .hjsatt .att-mk { display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 7px; font-weight: 700; font-size: 13px; }
@@ -1263,7 +1266,7 @@ function HomeScreen({ me }: any) {
   const [regOpen, setRegOpen] = useState(false);
   const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
   const [drill, setDrill] = useState<any>(null);
-  const [mgr, setMgr] = useState<any>(null);
+  const [mgr, setMgr] = useState<any[]>([]);
   const [peers, setPeers] = useState<any[]>([]);
 
   const load = async () => {
@@ -1282,7 +1285,7 @@ function HomeScreen({ me }: any) {
     const [m, pr] = await Promise.all([
       supabase.rpc("my_manager"), supabase.rpc("my_peers"),
     ]);
-    setMgr((m.data || [])[0] || null);
+    setMgr(m.data || []);
     setPeers(pr.data || []);
   };
   useEffect(() => { load(); }, [me.id, range.from, range.to]);
@@ -1423,19 +1426,25 @@ function HomeScreen({ me }: any) {
               <b style={{ color: "#2563eb" }}>{stats.hrs}</b><span>Hours</span></div>
           </div>
 
-          {mgr && (
+          {mgr.length > 0 && (
             <div className="att-list">
-              <div className="att-hd"><b>Reporting manager</b></div>
-              <div className="att-row">
-                <Avatar name={mgr.full_name} />
-                <div className="grow">
-                  <p><PName code={mgr.emp_code}><b>{mgr.emp_code}</b> · {mgr.full_name}</PName></p>
-                  <p className="att-muted">{mgr.designation || "—"}</p>
-                </div>
-                <span style={{ fontWeight: 700, fontSize: 13, color: stateColor[mgr.state] }}>
-                  {mgr.state}
-                </span>
+              <div className="att-hd">
+                <b>{mgr.length > 1 ? "Reporting managers" : "Reporting manager"}</b>
               </div>
+              {mgr.map((x: any) => (
+                <div className="att-row" key={x.emp_code}>
+                  <Avatar name={x.full_name} />
+                  <div className="grow">
+                    <p><PName code={x.emp_code}><b>{x.emp_code}</b> · {x.full_name}</PName></p>
+                    <p className="att-muted">
+                      {x.designation || "—"}{x.is_co_manager ? " · also reports here" : ""}
+                    </p>
+                  </div>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: stateColor[x.state] }}>
+                    {x.state}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -3104,6 +3113,7 @@ function MyRegsTab({ me }: any) {
 }
 
 function TeamLeavesTab({ me }: any) {
+  const [pickLeave, setPickLeave] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
   const [emps, setEmps] = useState<Record<string, any>>({});
   const [busy, setBusy] = useState(true);
@@ -3126,7 +3136,8 @@ function TeamLeavesTab({ me }: any) {
       <div className="att-hd"><b>Team leaves</b><span className="att-muted">{rows.length}</span></div>
       {!rows.length && <p className="att-empty">Nothing here.</p>}
       {rows.map((r) => (
-        <div className="att-row" key={r.id}>
+        <div className="att-row clk" key={r.id}
+          onClick={() => setPickLeave({ ...r, emp: emps[r.employee_id] })}>
           <Avatar name={emps[r.employee_id]?.full_name} />
           <div className="grow">
             <p><PName id={r.employee_id}><b>{emps[r.employee_id]?.full_name || "—"}</b></PName></p>
@@ -3140,6 +3151,9 @@ function TeamLeavesTab({ me }: any) {
           <span className={pillClass(r.status)}>{r.status}</span>
         </div>
       ))}
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me} onClose={() => setPickLeave(null)} />
+      )}
     </div>
   );
 }
@@ -3224,6 +3238,7 @@ function LeavesScreen({ me, tab }: any) {
   const [hols, setHols] = useState<any[]>([]);
   const [apply, setApply] = useState(false);
   const [editBal, setEditBal] = useState<any>(null);
+  const [pickLeave, setPickLeave] = useState<any>(null);
   const isAdmin = me.role === "admin";
   const who = me;
 
@@ -3254,14 +3269,16 @@ function LeavesScreen({ me, tab }: any) {
 
   const upcoming = [
     ...mine.filter((r) => r.to_date >= today && r.status !== "Cancelled")
-      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`, status: r.status, type: "leave" })),
+      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+                     status: r.status, type: "leave", leave: r })),
     ...hols.filter((h) => h.hol_date >= today)
       .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
   ].sort((a, b) => a.d.localeCompare(b.d)).slice(0, 8);
 
   const past = [
     ...mine.filter((r) => r.to_date < today)
-      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`, status: r.status, type: "leave" })),
+      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+                     status: r.status, type: "leave", leave: r })),
     ...hols.filter((h) => h.hol_date < today && h.hol_date.startsWith(year))
       .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
   ].sort((a, b) => b.d.localeCompare(a.d)).slice(0, 12);
@@ -3280,7 +3297,8 @@ function LeavesScreen({ me, tab }: any) {
         <div className="att-list">
           {!mine.length && <p className="att-empty">No leave requests yet.</p>}
           {mine.map((r) => (
-            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <div className="att-row clk" key={r.id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave(r)}>
               <span className="att-ltype">{r.leave_type}</span>
               <div className="grow" style={{ minWidth: 130 }}>
                 <p>
@@ -3297,7 +3315,8 @@ function LeavesScreen({ me, tab }: any) {
               </div>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
-                <button className="att-muted" onClick={() => cancel(r.id)}>Cancel</button>
+                <button className="att-muted"
+                  onClick={(e) => { e.stopPropagation(); cancel(r.id); }}>Cancel</button>
               )}
             </div>
           ))}
@@ -3378,11 +3397,17 @@ function LeavesScreen({ me, tab }: any) {
           onClose={() => { setEditBal(null); load(); }} />
       )}
 
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />
+      )}
+
       <div className="att-list">
         <div className="att-hd"><b>Upcoming leaves & holidays</b></div>
         {!upcoming.length && <p className="att-empty">Nothing coming up.</p>}
         {upcoming.map((r, i) => (
-          <div className="att-row" key={i}>
+          <div className={`att-row ${r.leave ? "clk" : ""}`} key={i}
+            onClick={() => r.leave && setPickLeave(r.leave)}>
             <span style={{ width: 175 }}>{dayLine(r.d)}</span>
             <div className="grow">
               <p><b>{r.label}</b> <span className="att-muted">· {r.sub}</span></p>
@@ -3396,7 +3421,8 @@ function LeavesScreen({ me, tab }: any) {
         <div className="att-hd"><b>Past leaves & holidays</b></div>
         {!past.length && <p className="att-empty">Nothing yet.</p>}
         {past.map((r, i) => (
-          <div className="att-row" key={i}>
+          <div className={`att-row ${r.leave ? "clk" : ""}`} key={i}
+            onClick={() => r.leave && setPickLeave(r.leave)}>
             <span style={{ width: 175 }}>{dayLine(r.d)}</span>
             <div className="grow">
               <p><b>{r.label}</b> <span className="att-muted">· {r.sub}</span></p>
@@ -3577,6 +3603,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
 
 /* ========================= approvals ========================= */
 function InboxScreen({ me, onCount, mode = "pending" }: any) {
+  const [pickLeave, setPickLeave] = useState<any>(null);
   const [leaves, setLeaves] = useState<any[]>([]);
   const [regs, setRegs] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
@@ -3645,11 +3672,13 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     ) : (
       <>
         <button className="att-btn sm green" disabled={busy}
-          onClick={() => kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved")}>
+          onClick={(e) => { e.stopPropagation();
+            kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved"); }}>
           Approve
         </button>
         <button className="att-btn sm grey" disabled={busy}
-          onClick={() => kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected")}>
+          onClick={(e) => { e.stopPropagation();
+            kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected"); }}>
           Reject
         </button>
       </>
@@ -3703,7 +3732,8 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
         <div className="att-list">
           <div className="att-hd"><b>Leave requests</b><span className="att-muted">{shownL.length}</span></div>
           {shownL.map((r) => (
-            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <div className="att-row clk" key={r.id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave(r)}>
               <Avatar name={r.emp?.full_name} />
               <div className="grow" style={{ minWidth: 150 }}>
                 <p><PName id={r.employee_id} code={r.emp?.emp_code}>
@@ -3723,6 +3753,11 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             </div>
           ))}
         </div>
+      )}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />
       )}
 
       {shownR.length > 0 && (
@@ -4871,8 +4906,109 @@ function BalanceSheet({ b, who, year, onClose }: any) {
   );
 }
 
+function LeaveSheet({ lv, who, onClose, onChanged }: any) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [emp, setEmp] = useState<any>(null);
+  const [confirm, setConfirm] = useState(false);
+  const ctx = usePerson();
+
+  useEffect(() => {
+    if (!lv.employee_id) return;
+    supabase.from("employees")
+      .select("emp_code, full_name, designation, email, phone")
+      .eq("id", lv.employee_id).maybeSingle()
+      .then(({ data }) => setEmp(data));
+  }, [lv.employee_id]);
+
+  const mine = lv.employee_id === who?.id;
+  const canCancel = mine && lv.status === "Pending";
+
+  const cancel = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.from("leaves")
+      .update({ status: "Cancelled" }).eq("id", lv.id);
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { onChanged && onChanged(); onClose(); }
+    setBusy(false);
+  };
+
+  const one = lv.from_date === lv.to_date;
+
+  return (
+    <Sheet title="Leave details" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-between">
+          <span className="att-ltype" style={{ fontSize: 13, padding: "5px 12px" }}>
+            {lv.leave_name || lv.leave_type}
+          </span>
+          <span className={pillClass(lv.status)}>{lv.status}</span>
+        </div>
+
+        {emp && !mine && (
+          <div className="att-row" style={{ padding: 0, borderBottom: 0 }}>
+            <Avatar name={emp.full_name} />
+            <div className="grow">
+              <p><PName id={lv.employee_id} code={emp.emp_code}>
+                <b>{emp.full_name}</b></PName></p>
+              <p className="att-muted">{emp.emp_code} · {emp.designation || "—"}</p>
+            </div>
+          </div>
+        )}
+
+        <dl className="att-dl">
+          <dt>{one ? "Date" : "From"}</dt>
+          <dd>{fmtDate(lv.from_date)}</dd>
+          {!one && (<><dt>To</dt><dd>{fmtDate(lv.to_date)}</dd></>)}
+          {lv.from_time && (<><dt>Time</dt>
+            <dd>{fmtHM(lv.from_time)} – {fmtHM(lv.to_time)}</dd></>)}
+          <dt>Days counted</dt>
+          <dd>{lv.days}</dd>
+          <dt>Reason</dt>
+          <dd style={{ whiteSpace: "normal" }}>
+            {lv.reason || <span className="att-muted">— none given —</span>}
+          </dd>
+          <dt>Applied on</dt>
+          <dd>{lv.created_at ? fmtDate(lv.created_at) : "—"}</dd>
+          {lv.status !== "Pending" && (
+            <>
+              <dt>{lv.status} by</dt>
+              <dd>{lv.approver_name || "—"}</dd>
+              <dt>{lv.status} on</dt>
+              <dd>{lv.approved_at ? fmtDate(lv.approved_at) : "—"}</dd>
+            </>
+          )}
+          {lv.approver_note && (<><dt>Note</dt>
+            <dd style={{ whiteSpace: "normal" }}>{lv.approver_note}</dd></>)}
+        </dl>
+
+        <Note>{msg.err}</Note>
+
+        {canCancel && !confirm && (
+          <button className="att-btn line" onClick={() => setConfirm(true)}>
+            Cancel this request
+          </button>
+        )}
+
+        {canCancel && confirm && (
+          <div className="att-note err">
+            <span>This withdraws your request. The days go back to your balance.</span>
+            <div className="att-flex" style={{ marginTop: 10 }}>
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => setConfirm(false)}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1, background: "#b42318" }}
+                disabled={busy} onClick={cancel}>Yes, cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
 /* ================= kaun leave pe hai ================= */
 function OnLeaveTab() {
+  const [pickLeave, setPickLeave] = useState<any>(null);
   const [date, setDate] = useState(istToday());
   const [rows, setRows] = useState<any[]>([]);
   const [soon, setSoon] = useState<any[]>([]);
@@ -4952,7 +5088,8 @@ function OnLeaveTab() {
             <b>{tn}</b><span className="att-chip">{groups[tn].length}</span>
           </div>
           {groups[tn].map((r) => (
-            <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
+            <div className="att-row clk" key={r.employee_id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave({ ...r, id: r.leave_id, emp: r })}>
               <Avatar name={r.full_name} />
               <div className="grow" style={{ minWidth: 160 }}>
                 <p>
@@ -4989,6 +5126,11 @@ function OnLeaveTab() {
           ))}
         </div>
       ))}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={null}
+          onClose={() => setPickLeave(null)} />
+      )}
 
       {isToday && soon.length > 0 && (
         <div className="att-list">
