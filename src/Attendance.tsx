@@ -887,6 +887,7 @@ const codeToPassword = (code: string) => `hjs-${code}-att`;
 function Login() {
   const [stage, setStage] = useState<"email" | "set" | "enter" | "new" | "forgot">("email");
   const [dob, setDob] = useState("");
+  const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [empCode, setEmpCode] = useState("");
   const [email, setEmail] = useState("");
@@ -971,10 +972,17 @@ function Login() {
     }
     const { error } = await supabase.rpc("register_self", {
       p_full_name: name.trim(),
-      p_phone: null,
+      p_phone: phone.trim() || null,
     });
-    if (error) { setErr(error.message); await supabase.auth.signOut(); }
-    setBusy(false);
+    if (error) {
+      setErr(error.message);
+      await supabase.auth.signOut();
+      setBusy(false);
+      return;
+    }
+    // record ban gaya — poora reload, warna app purani state pe
+    // atka rehta hai aur dobara naam maangta hai
+    window.location.reload();
   };
 
   const signIn = async () => {
@@ -1108,6 +1116,11 @@ function Login() {
                 <label>Your full name</label>
                 <input value={name} placeholder="Full name" autoFocus
                   onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label>Mobile <span className="att-muted">(optional)</span></label>
+                <input value={phone} placeholder="98765 43210"
+                  onChange={(e) => setPhone(e.target.value)} />
               </div>
               <div>
                 <label>Create your 4-digit code</label>
@@ -4784,6 +4797,203 @@ function BalanceSheet({ b, who, year, onClose }: any) {
   );
 }
 
+/* ================= adhoore records ================= */
+function NeedsSetupTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [open, setOpen] = useState<any>(null);
+  const canEdit = me?.role === "admin";
+
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    const bad = (data || []).filter((r: any) =>
+      String(r.emp_code).startsWith("REG-")
+      || !r.team_id
+      || !r.designation
+      || (!r.reports_to && !r.co_manager_id && r.designation !== "Co-Founder")
+      || !r.email);
+    setRows(bad); setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const gaps = (r: any) => {
+    const g: string[] = [];
+    if (String(r.emp_code).startsWith("REG-")) g.push("employee code");
+    if (!r.team_id) g.push("department");
+    if (!r.designation) g.push("designation");
+    if (!r.reports_to && !r.co_manager_id && r.designation !== "Co-Founder")
+      g.push("reporting manager");
+    if (!r.email) g.push("email");
+    return g;
+  };
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  return (
+    <>
+      <p className="att-muted" style={{ whiteSpace: "normal" }}>
+        These people are in the system but their record is missing something. Until it's
+        filled in they sit outside the org chart, and without an email they can't sign in.
+      </p>
+
+      <div className="att-list">
+        <div className="att-hd">
+          <b>Half-filled records</b><span className="att-muted">{rows.length}</span>
+        </div>
+        {!rows.length && <p className="att-empty">Everyone's record is complete.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <Avatar name={r.full_name} />
+            <div className="grow" style={{ minWidth: 170 }}>
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">
+                {r.team !== "—" ? r.team : "no department"}
+                {r.designation ? ` · ${r.designation}` : ""}
+              </p>
+              <p style={{ fontSize: 12, color: "#b54708", marginTop: 2 }}>
+                Missing: {gaps(r).join(", ")}
+              </p>
+            </div>
+            {canEdit && (
+              <button className="att-btn sm" onClick={() => setOpen(r)}>Fix it</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {open && <PersonSheet p={open} canEdit={canEdit}
+        onClose={() => setOpen(null)} onDeleted={load} />}
+    </>
+  );
+}
+
+/* ================= apni report (sabke liye) ================= */
+function MyReportTab({ me }: any) {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [logs, setLogs] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const from = `${month}-01`, to = lastDayOf(from);
+      const [a, l, h] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to).order("work_date"),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []);
+      setBusy(false);
+    })();
+  }, [month, me.id]);
+
+  const days = useMemo(() => {
+    const from = `${month}-01`;
+    const total = Number(lastDayOf(from).slice(-2));
+    const out: any[] = [];
+    for (let i = 0; i < total; i++) {
+      const d = addDays(from, i);
+      const log = logs.find((x: any) => x.work_date === d);
+      const lv = leaves.find((x: any) => d >= x.from_date && d <= x.to_date);
+      const hol = hols.find((x: any) => x.hol_date === d);
+      const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
+      let mark = "", label = "";
+      if (log) { mark = { Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P";
+                 label = log.status; }
+      else if (lv) { mark = lv.leave_type; label = lv.leave_type; }
+      else if (hol) { mark = "F"; label = hol.name; }
+      else if (off) { mark = "W"; label = "Week off"; }
+      else if (d > istToday()) { mark = ""; label = ""; }
+      else { mark = "A"; label = "Absent"; }
+      out.push({ d, mark, label, log, lv });
+    }
+    return out;
+  }, [logs, leaves, hols, month, me]);
+
+  const t = useMemo(() => {
+    const c: any = { P: 0, L: 0, H: 0, A: 0, W: 0, F: 0, leave: 0, mins: 0 };
+    days.forEach((x) => {
+      if (["P", "L", "H", "A", "W", "F"].includes(x.mark)) c[x.mark]++;
+      else if (x.mark) c.leave++;
+      if (x.log) c.mins += x.log.worked_minutes || 0;
+    });
+    c.payable = c.P + c.L + c.H * 0.5 + c.leave;
+    return c;
+  }, [days]);
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-between">
+        <div>
+          <h2 className="att-h2" style={{ margin: 0 }}>My attendance</h2>
+          <p className="att-muted">{me.emp_code} · {me.full_name}</p>
+        </div>
+        <div className="att-flex">
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} style={{ width: "auto" }} />
+          <button className="att-btn sm line" disabled={!days.length}
+            onClick={() => downloadCsv(days.map((x) => ({
+              Date: x.d, Mark: x.mark, Status: x.label,
+              In: x.log ? fmtTime(x.log.punch_in_at) : "",
+              Out: x.log?.punch_out_at ? fmtTime(x.log.punch_out_at) : "",
+              Hours: x.log ? hhmm(x.log.worked_minutes) : "",
+            })), `${me.emp_code}_${month}.csv`)}>CSV</button>
+        </div>
+      </div>
+
+      <div className="att-stats">
+        <div className="att-stat"><b style={{ color: "#16a34a" }}>{t.P}</b><span>Present</span></div>
+        <div className="att-stat"><b style={{ color: "#d97706" }}>{t.L}</b><span>Late</span></div>
+        <div className="att-stat"><b style={{ color: "#ea580c" }}>{t.H}</b><span>Half</span></div>
+        <div className="att-stat"><b style={{ color: "#dc2626" }}>{t.A}</b><span>Absent</span></div>
+        <div className="att-stat"><b style={{ color: "#2563eb" }}>{t.leave}</b><span>Leave</span></div>
+        <div className="att-stat"><b>{t.W}</b><span>Week off</span></div>
+        <div className="att-stat"><b>{t.F}</b><span>Holiday</span></div>
+        <div className="att-stat"><b style={{ color: "#1849a9" }}>{t.payable}</b><span>Payable</span></div>
+        <div className="att-stat"><b style={{ color: "#2563eb" }}>{hhmm(t.mins)}</b><span>Hours</span></div>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-list">
+          <div className="att-hd"><b>Day by day</b><span className="att-muted">{month}</span></div>
+          {days.filter((x) => x.mark).map((x) => (
+            <div className="att-row" key={x.d}>
+              <span style={{ width: 82, fontWeight: 650 }}>
+                {new Date(x.d + "T00:00:00").toLocaleDateString("en-GB",
+                  { day: "2-digit", month: "short", weekday: "short" })}
+              </span>
+              <span className={markClass(x.mark)} style={{ width: 30, textAlign: "center" }}>
+                {x.mark}
+              </span>
+              <div className="grow">
+                <p>{x.label}</p>
+                {x.log && (
+                  <p className="att-muted">
+                    {fmtTime(x.log.punch_in_at)}
+                    {x.log.punch_out_at ? ` – ${fmtTime(x.log.punch_out_at)}` : " – still in"}
+                  </p>
+                )}
+              </div>
+              {x.log?.worked_minutes ? (
+                <b style={{ fontSize: 13 }}>{hhmm(x.log.worked_minutes)}</b>
+              ) : null}
+            </div>
+          ))}
+          {!days.filter((x) => x.mark).length && (
+            <p className="att-empty">Nothing recorded this month.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= manager ka daily verification ================= */
 function VerifyRow({ r, onSet, onClear, busy, date }: any) {
   const [menu, setMenu] = useState(false);
@@ -5324,11 +5534,15 @@ const MODULES: Module[] = [
       { k: "pending", label: "Pending", views: [{ k: "all", label: "Awaiting action" }]},
       { k: "history", label: "History", views: [{ k: "all", label: "All requests" }]},
       { k: "joiners", label: "New joiners", views: [{ k: "all", label: "Pending sign-ups" }]},
+      { k: "setup", label: "Needs setup", views: [{ k: "all", label: "Half-filled records" }]},
     ],
   },
   {
-    k: "reports", label: "Reports", icon: "users", approverOnly: true,
+    k: "reports", label: "Reports", icon: "users",
     scopes: [
+      { k: "mine", label: "My Reports", views: [
+        { k: "me", label: "My attendance" },
+      ]},
       { k: "att", label: "Attendance", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
@@ -5435,7 +5649,10 @@ export default function Attendance() {
   );
 
   const approver = ["manager", "admin"].includes(me.role);
-  const mods = MODULES.filter((m) => !m.approverOnly || approver);
+  const mods = MODULES.filter((m) => !m.approverOnly || approver)
+    .map((m) => m.k === "reports" && !approver
+      ? { ...m, scopes: m.scopes.filter((sc) => sc.k === "mine") }
+      : m);
   const curMod = mods.find((m) => m.k === mod) || mods[0];
   const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
   // "Daily check" tab sirf un logon ko jinke paas verify karne ko hai
@@ -5486,8 +5703,10 @@ export default function Attendance() {
       case "approvals/pending/all":  return <InboxScreen me={me} onCount={setPending} mode="pending" />;
       case "approvals/history/all":  return <InboxScreen me={me} onCount={setPending} mode="history" />;
       case "approvals/joiners/all":  return <div className="att-wrap att-stack"><JoinersTab /></div>;
+      case "approvals/setup/all":    return <div className="att-wrap att-stack"><NeedsSetupTab me={me} /></div>;
       case "me/me/profile":          return <MeScreen me={me} />;
       // ---- Reports ----
+      case "reports/mine/me":       return <MyReportTab me={me} />;
       case "reports/att/muster":    return <div className="att-wrap att-stack"><ReportsTab /></div>;
       case "reports/att/payroll":   return <div className="att-wrap att-stack"><PayrollTab /></div>;
       case "reports/people/staff":  return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
