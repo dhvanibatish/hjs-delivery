@@ -4829,6 +4829,153 @@ function BalanceSheet({ b, who, year, onClose }: any) {
   );
 }
 
+/* ================= kaun leave pe hai ================= */
+function OnLeaveTab() {
+  const [date, setDate] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [soon, setSoon] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const [a, b] = await Promise.all([
+        supabase.rpc("on_leave", { p_date: date }),
+        supabase.rpc("upcoming_leaves", { p_days: 30 }),
+      ]);
+      setRows(a.data || []); setSoon(b.data || []); setBusy(false);
+    })();
+  }, [date]);
+
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.team} ${r.leave_name}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team] = groups[r.team] || []).push(r); });
+  const teams = Object.keys(groups).sort();
+
+  const isToday = date === istToday();
+
+  return (
+    <>
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>
+            {shown.length} {shown.length === 1 ? "person" : "people"} on leave
+          </b>
+          <p className="att-muted">
+            {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+              { weekday: "long", day: "2-digit", month: "long" })}
+            {isToday ? " · today" : ""}
+          </p>
+        </div>
+        <div className="att-flex">
+          {!isToday && (
+            <button className="att-btn sm line" onClick={() => setDate(istToday())}>Today</button>
+          )}
+          <input type="date" value={date} className="att-repmonth"
+            onChange={(e) => setDate(e.target.value)} />
+          <button className="att-btn sm line" disabled={!shown.length}
+            onClick={() => downloadCsv(shown.map((r) => ({
+              Code: r.emp_code, Name: r.full_name, Department: r.team,
+              Leave: r.leave_name,
+              From: r.from_date, To: r.to_date,
+              Time: r.from_time ? `${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : "",
+              Day: `${r.day_index} of ${r.total_days}`,
+              Days: r.days, Reason: r.reason || "",
+            })), `HJS_on_leave_${date}.csv`)}>CSV</button>
+        </div>
+      </div>
+
+      {rows.length > 6 && (
+        <input placeholder="Search name, department, leave type"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+      )}
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && !shown.length && (
+        <div className="att-list">
+          <p className="att-empty">
+            {rows.length ? "No match found." : "Nobody is on leave this day."}
+          </p>
+        </div>
+      )}
+
+      {teams.map((tn) => (
+        <div className="att-list" key={tn}>
+          <div className="att-hd">
+            <b>{tn}</b><span className="att-chip">{groups[tn].length}</span>
+          </div>
+          {groups[tn].map((r) => (
+            <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
+              <Avatar name={r.full_name} />
+              <div className="grow" style={{ minWidth: 160 }}>
+                <p>
+                  <PName id={r.employee_id} code={r.emp_code}>
+                    <b>{r.emp_code}</b> · {r.full_name}
+                  </PName>
+                </p>
+                <p className="att-muted">{r.designation || "—"}</p>
+                {r.reason && (
+                  <p style={{ fontSize: 12.5, color: "#475467", whiteSpace: "normal" }}>
+                    {r.reason}
+                  </p>
+                )}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span className="att-pill p-Leave">{r.leave_name}</span>
+                <p className="att-muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  {r.from_date === r.to_date
+                    ? fmtDate(r.from_date)
+                    : `${fmtDate(r.from_date)} – ${fmtDate(r.to_date)}`}
+                </p>
+                {r.from_time && (
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    {fmtHM(r.from_time)} – {fmtHM(r.to_time)}
+                  </p>
+                )}
+                {r.total_days > 1 && (
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    day {r.day_index} of {r.total_days}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {isToday && soon.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd">
+            <b>Coming up</b><span className="att-muted">next 30 days</span>
+          </div>
+          {soon.map((r, i) => (
+            <div className="att-row" key={i}>
+              <Avatar name={r.full_name} />
+              <div className="grow">
+                <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                  <span className="att-muted"> · {r.team}</span></p>
+                <p className="att-muted">
+                  {r.leave_name} · {r.from_date === r.to_date
+                    ? fmtDate(r.from_date)
+                    : `${fmtDate(r.from_date)} – ${fmtDate(r.to_date)}`} · {r.days}d
+                </p>
+              </div>
+              <span className="att-muted" style={{ fontSize: 12.5 }}>
+                {r.starts_in === 1 ? "tomorrow" : `in ${r.starts_in} days`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ================= adhoore records ================= */
 function NeedsSetupTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
@@ -5544,6 +5691,7 @@ const MODULES: Module[] = [
       ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Today" },
+        { k: "leave", label: "On Leave" },
         { k: "matrix", label: "Monthly Matrix" },
         { k: "dash", label: "Dashboard" },
       ]},
@@ -5724,6 +5872,7 @@ export default function Attendance() {
       case "att/mydata/calendar":   return <CalendarTab me={me} />;
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "att/team/leave":        return <div className="att-wrap att-stack"><OnLeaveTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
       // ---- Leave ----
