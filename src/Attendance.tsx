@@ -413,6 +413,32 @@ const CSS = `
 .hjsatt .att-mx th.pay, .hjsatt .att-mx td.pay { background: #eff4ff; color: #1849a9;
   min-width: 62px; }
 
+/* ---------- reports ---------- */
+.hjsatt .att-stats { display: grid; gap: 9px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.hjsatt .att-rephd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+.hjsatt .att-repmonth { width: auto; min-width: 160px; }
+.hjsatt .att-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  font-size: 12.5px; color: #475467; padding: 2px 2px 0; }
+.hjsatt .att-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.hjsatt .att-legend i { font-style: normal; font-weight: 700; font-size: 11px;
+  width: 20px; height: 20px; border-radius: 6px; display: inline-flex;
+  align-items: center; justify-content: center; }
+.hjsatt .att-legend .m-P { background: #ecfdf3; color: #067647; }
+.hjsatt .att-legend .m-L { background: #fffaeb; color: #b54708; }
+.hjsatt .att-legend .m-H { background: #fff4ed; color: #c4320a; }
+.hjsatt .att-legend .m-A { background: #fef3f2; color: #b42318; }
+.hjsatt .att-legend .m-W { background: #f2f4f7; color: #667085; }
+.hjsatt .att-legend .m-F { background: #ecfdff; color: #0e7090; }
+
+@media (max-width: 720px) {
+  .hjsatt .att-rephd { flex-direction: column; align-items: stretch; }
+  .hjsatt .att-repmonth { width: 100%; }
+  .hjsatt .att-rephd .att-btn { width: 100%; }
+  .hjsatt .att-legend { gap: 9px; font-size: 11.5px; }
+}
+
 /* ---------- daily verification ---------- */
 .hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
   padding: 18px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
@@ -4484,13 +4510,14 @@ function ReportsTab() {
 
   return (
     <>
-      <div className="att-seg">
-        {[["muster", "Muster roll"], ["late", "Late"], ["absence", "Absence"]].map(([k, l]) => (
-          <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>
-        ))}
-      </div>
-      <div className="att-flex">
-        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ flex: 1 }} />
+      <div className="att-rephd">
+        <div className="att-seg" style={{ flex: 1 }}>
+          {[["muster", "Muster roll"], ["late", "Late"], ["absence", "Absence"]].map(([k, l]) => (
+            <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>
+          ))}
+        </div>
+        <input type="month" value={month} max={istToday().slice(0, 7)}
+          onChange={(e) => setMonth(e.target.value)} className="att-repmonth" />
         <button className="att-btn sm" disabled={!data.length}
           onClick={() => downloadCsv(
             kind === "muster" && muster
@@ -4514,10 +4541,15 @@ function ReportsTab() {
 
       {!busy && kind === "muster" && muster && (
         <>
-          <p className="att-muted">
-            P present · L late · H half · A absent · W week off · F holiday ·
-            CL/EL/SHORT/HALF leave · Payable = present + late + half×0.5 + paid leave
-          </p>
+          <div className="att-legend">
+            <span><i className="m-P">P</i> present</span>
+            <span><i className="m-L">L</i> late</span>
+            <span><i className="m-H">H</i> half</span>
+            <span><i className="m-A">A</i> absent</span>
+            <span><i className="m-W">W</i> week off</span>
+            <span><i className="m-F">F</i> holiday</span>
+            <span className="att-muted">Payable = present + late + half×0.5 + paid leave</span>
+          </div>
           <div className="att-scroll">
             <table className="att-table att-mx">
               <thead>
@@ -4927,14 +4959,14 @@ function MyReportTab({ me }: any) {
 
   return (
     <div className="att-wrap att-stack">
-      <div className="att-between">
-        <div>
-          <h2 className="att-h2" style={{ margin: 0 }}>My attendance</h2>
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>My attendance</b>
           <p className="att-muted">{me.emp_code} · {me.full_name}</p>
         </div>
         <div className="att-flex">
           <input type="month" value={month} max={istToday().slice(0, 7)}
-            onChange={(e) => setMonth(e.target.value)} style={{ width: "auto" }} />
+            onChange={(e) => setMonth(e.target.value)} className="att-repmonth" />
           <button className="att-btn sm line" disabled={!days.length}
             onClick={() => downloadCsv(days.map((x) => ({
               Date: x.d, Mark: x.mark, Status: x.label,
