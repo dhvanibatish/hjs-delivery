@@ -427,35 +427,40 @@ const CSS = `
 
 /* ---------- reports ---------- */
 .hjsatt .att-dayrow { width: 100%; display: grid; align-items: center;
-  grid-template-columns: 44px 30px 1fr auto; gap: 12px;
-  padding: 11px 14px; border-bottom: 1px solid #f4f5f6; text-align: left; }
+  grid-template-columns: 52px minmax(46px, auto) 1fr auto; gap: 16px;
+  padding: 14px 16px; border-bottom: 1px solid #f4f5f6; text-align: left; }
 .hjsatt .att-dayrow:last-child { border-bottom: 0; }
 .hjsatt .att-dayrow:hover { background: #fafbff; }
 .hjsatt .att-dayrow.off { opacity: .55; }
 
 .hjsatt .att-dayrow .dt { text-align: center; }
-.hjsatt .att-dayrow .dt b { display: block; font-size: 17px; line-height: 1.05;
+.hjsatt .att-dayrow .dt b { display: block; font-size: 18px; line-height: 1.1;
   font-variant-numeric: tabular-nums; }
-.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10px;
-  color: #98a2b3; text-transform: uppercase; letter-spacing: .04em; }
+.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10.5px;
+  color: #98a2b3; text-transform: uppercase; letter-spacing: .04em; margin-top: 1px; }
 
 .hjsatt .att-dayrow .mid { min-width: 0; }
-.hjsatt .att-dayrow .mid b { display: block; font-size: 13.5px;
+.hjsatt .att-dayrow .mid b { display: block; font-size: 14px; line-height: 1.35;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hjsatt .att-dayrow .mid span { display: block; font-size: 12px; color: #6b7280;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
+.hjsatt .att-dayrow .mid span { display: block; font-size: 12.5px; color: #6b7280;
+  font-variant-numeric: tabular-nums; white-space: nowrap; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; }
 
-.hjsatt .att-dayrow .hrs { font-size: 13.5px; font-weight: 700; white-space: nowrap;
+.hjsatt .att-mark.wide { width: auto; min-width: 34px; padding: 4px 10px;
+  border-radius: 7px; font-size: 12px; letter-spacing: .02em; }
+
+.hjsatt .att-dayrow .hrs { font-size: 14px; font-weight: 700; white-space: nowrap;
   font-variant-numeric: tabular-nums; color: #344054; }
 .hjsatt .att-dayrow .hrs.none { color: #d0d5dd; font-weight: 500; }
 
 @media (max-width: 480px) {
-  .hjsatt .att-dayrow { grid-template-columns: 38px 26px 1fr auto; gap: 9px;
-    padding: 10px 12px; }
-  .hjsatt .att-dayrow .mid b { font-size: 13px; }
-  .hjsatt .att-dayrow .mid span { font-size: 11.5px; }
-  .hjsatt .att-dayrow .hrs { font-size: 12.5px; }
+  .hjsatt .att-dayrow { grid-template-columns: 44px minmax(42px, auto) 1fr auto;
+    gap: 11px; padding: 12px 13px; }
+  .hjsatt .att-dayrow .dt b { font-size: 16px; }
+  .hjsatt .att-dayrow .mid b { font-size: 13.5px; }
+  .hjsatt .att-dayrow .mid span { font-size: 12px; }
+  .hjsatt .att-dayrow .hrs { font-size: 13px; }
+  .hjsatt .att-mark.wide { min-width: 30px; padding: 3px 8px; font-size: 11px; }
 }
 .hjsatt .att-stat.clk { cursor: pointer; }
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
@@ -5513,9 +5518,7 @@ function MyReportTab({ me }: any) {
                   { weekday: "short" })}</i>
               </span>
 
-              <span className={markClass(x.mark)} style={{ textAlign: "center" }}>
-                {x.mark}
-              </span>
+              <span className={`${markClass(x.mark)} wide`}>{x.mark}</span>
 
               <span className="mid">
                 <b>{x.label}</b>
