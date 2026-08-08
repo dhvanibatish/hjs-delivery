@@ -5739,9 +5739,27 @@ const MODULES: Module[] = [
 export default function Attendance() {
   const [session, setSession] = useState<any>(undefined);
   const [me, setMe] = useState<any>(null);
-  const [mod, setMod] = useState("home");
-  const [scope, setScope] = useState("myspace");
-  const [view, setView] = useState("overview");
+  // Nav ab URL ke hash mein rehta hai: #home/myspace/verify
+  // Isse refresh pe wahi tab khulta hai aur link share kiya ja sakta hai.
+  const readHash = () => {
+    const h = (window.location.hash || "").replace(/^#/, "").split("/");
+    return { m: h[0] || "home", s: h[1] || "", v: h[2] || "" };
+  };
+  const [route, setRoute] = useState(readHash);
+  const mod = route.m, scope = route.s, view = route.v;
+
+  const goto = (m: string, s2: string, v: string) => {
+    const h = `#${m}/${s2}/${v}`;
+    if (window.location.hash !== h) window.location.hash = h;
+    setRoute({ m, s: s2, v });
+  };
+  const setView = (v: string) => goto(mod, scope, v);
+
+  useEffect(() => {
+    const onHash = () => setRoute(readHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const [pending, setPending] = useState(0);
   const [canVerify, setCanVerify] = useState(false);
   const [meErr, setMeErr] = useState("");
@@ -5843,14 +5861,23 @@ export default function Attendance() {
 
   const goMod = (k: string) => {
     const m = mods.find((x) => x.k === k)!;
-    setMod(k); setScope(m.scopes[0].k); setView(m.scopes[0].views[0].k);
+    goto(k, m.scopes[0].k, m.scopes[0].views[0].k);
   };
   const goScope = (k: string) => {
     const sc = curMod.scopes.find((x) => x.k === k)!;
-    setScope(k); setView(sc.views[0].k);
+    goto(mod, k, sc.views[0].k);
   };
 
   const key = `${curMod.k}/${curScope.k}/${curView.k}`;
+
+  // hash adhoora ya galat ho to sahi kar do
+  useEffect(() => {
+    const want = `#${key}`;
+    if (window.location.hash !== want) {
+      window.history.replaceState(null, "", want);
+      setRoute({ m: curMod.k, s: curScope.k, v: curView.k });
+    }
+  }, [key]);
 
   const body = () => {
     switch (key) {
