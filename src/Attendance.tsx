@@ -276,6 +276,9 @@ const CSS = `
 
 .hjsatt .att-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
   background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
+.hjsatt .att-scroll::-webkit-scrollbar { height: 7px; }
+.hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+.hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
 .hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
@@ -414,6 +417,18 @@ const CSS = `
   min-width: 62px; }
 
 /* ---------- reports ---------- */
+.hjsatt .att-dayrow { width: 100%; display: flex; align-items: center; gap: 11px;
+  padding: 11px 14px; border-bottom: 1px solid #f4f5f6; text-align: left; }
+.hjsatt .att-dayrow:last-child { border-bottom: 0; }
+.hjsatt .att-dayrow:hover { background: #fafbff; }
+.hjsatt .att-dayrow .dt { width: 38px; flex-shrink: 0; text-align: center; }
+.hjsatt .att-dayrow .dt b { display: block; font-size: 16px; line-height: 1.1; }
+.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10.5px;
+  color: #98a2b3; text-transform: uppercase; }
+.hjsatt .att-stat.clk { cursor: pointer; }
+.hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
+@media (hover: none) { .hjsatt .att-dayrow:hover { background: #fff; } }
+
 .hjsatt .att-stats { display: grid; gap: 9px;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
 .hjsatt .att-rephd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -456,7 +471,17 @@ const CSS = `
 .hjsatt .att-vwrap > .att-vteam:first-child { border-radius: 12px 12px 0 0; }
 .hjsatt .att-vwrap > .att-vrow:last-child { border-radius: 0 0 12px 12px; }
 .hjsatt .att-vrow { display: flex; align-items: center; gap: 12px; padding: 13px 16px;
-  border-bottom: 1px solid #f4f5f6; }
+  border-bottom: 1px solid #f4f5f6; flex-wrap: wrap; }
+.hjsatt .att-vrow .who { display: flex; align-items: center; gap: 11px;
+  flex: 1 1 190px; min-width: 0; }
+.hjsatt .att-vrow .when { text-align: right; margin-left: auto; }
+@media (max-width: 620px) {
+  .hjsatt .att-vrow { align-items: flex-start; padding: 12px 13px; }
+  .hjsatt .att-vrow .who { flex: 1 1 100%; }
+  .hjsatt .att-vrow .when { text-align: left; margin-left: 43px; }
+  .hjsatt .att-vrow .att-btn,
+  .hjsatt .att-vrow .att-vtag { margin-left: auto; }
+}
 .hjsatt .att-vrow:last-child { border-bottom: 0; }
 .hjsatt .att-vrow.ok { background: #f6fef9; box-shadow: inset 3px 0 0 #16a34a; }
 .hjsatt .att-vrow.hold { background: #fffcf5; box-shadow: inset 3px 0 0 #d97706; }
@@ -5046,9 +5071,98 @@ function NeedsSetupTab({ me }: any) {
   );
 }
 
+function DaySheet({ d, me, onClose }: any) {
+  const [sess, setSess] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    supabase.from("attendance_sessions").select("*")
+      .eq("employee_id", me.id).eq("work_date", d.d).order("in_at")
+      .then(({ data }) => { setSess(data || []); setBusy(false); });
+  }, [d.d]);
+
+  const pretty = new Date(d.d + "T00:00:00").toLocaleDateString("en-GB",
+    { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+  return (
+    <Sheet title={pretty} onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-between">
+          <span className={markClass(d.mark)} style={{ fontSize: 15, padding: "5px 14px" }}>
+            {d.mark}
+          </span>
+          <b style={{ fontSize: 15 }}>{d.label}</b>
+        </div>
+
+        {d.log && (
+          <dl className="att-dl">
+            <dt>First check-in</dt>
+            <dd>{fmtTime(d.log.punch_in_at)}</dd>
+            <dt>Last check-out</dt>
+            <dd>{d.log.punch_out_at ? fmtTime(d.log.punch_out_at)
+              : <span className="att-muted">still checked in</span>}</dd>
+            <dt>Hours worked</dt>
+            <dd>{hhmm(d.log.worked_minutes)}</dd>
+            <dt>Shift</dt>
+            <dd>{fmtHM(me.shift_start)} – {fmtHM(me.shift_end)}</dd>
+            {d.log.late_minutes ? (<><dt>Late by</dt><dd>{d.log.late_minutes} min</dd></>) : null}
+          </dl>
+        )}
+
+        {d.lv && (
+          <dl className="att-dl">
+            <dt>Leave type</dt><dd>{d.lv.leave_type}</dd>
+            <dt>From</dt><dd>{fmtDate(d.lv.from_date)}</dd>
+            <dt>To</dt><dd>{fmtDate(d.lv.to_date)}</dd>
+            {d.lv.from_time && (<><dt>Time</dt>
+              <dd>{fmtHM(d.lv.from_time)} – {fmtHM(d.lv.to_time)}</dd></>)}
+            <dt>Days</dt><dd>{d.lv.days}</dd>
+            {d.lv.reason && (<><dt>Reason</dt><dd>{d.lv.reason}</dd></>)}
+          </dl>
+        )}
+
+        {!d.log && !d.lv && (
+          <p className="att-muted">
+            {d.mark === "A" ? "No check-in recorded for this day."
+              : d.mark === "W" ? "This is your weekly off."
+              : d.mark === "F" ? "Company holiday." : "Nothing recorded."}
+          </p>
+        )}
+      </div>
+
+      {busy && <p className="att-muted">Loading sessions…</p>}
+
+      {!busy && sess.length > 0 && (
+        <div className="att-list" style={{ marginTop: 12 }}>
+          <div className="att-hd">
+            <b>Check-ins that day</b><span className="att-muted">{sess.length}</span>
+          </div>
+          {sess.map((x, i) => (
+            <div className="att-row" key={x.id}>
+              <span style={{ width: 22, fontWeight: 700, color: "#98a2b3" }}>{i + 1}</span>
+              <div className="grow">
+                <p>
+                  {fmtTime(x.in_at)}
+                  {x.out_at ? ` – ${fmtTime(x.out_at)}` : " – still in"}
+                  {x.auto_closed && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>auto closed</span>)}
+                </p>
+                <Pin lat={x.in_lat} lng={x.in_lng} dist={x.in_distance_m} ok={x.in_geo_ok} />
+              </div>
+              <b style={{ fontSize: 13 }}>{x.minutes ? hhmm(x.minutes) : "—"}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 /* ================= apni report (sabke liye) ================= */
 function MyReportTab({ me }: any) {
   const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [filter, setFilter] = useState("all");
+  const [pick, setPick] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [leaves, setLeaves] = useState<any[]>([]);
   const [hols, setHols] = useState<any[]>([]);
@@ -5104,6 +5218,14 @@ function MyReportTab({ me }: any) {
     return c;
   }, [days]);
 
+  const shownDays = days.filter((x) => {
+    if (!x.mark) return false;
+    if (filter === "worked") return ["P", "L", "H"].includes(x.mark);
+    if (filter === "absent") return x.mark === "A";
+    if (filter === "leave") return !["P", "L", "H", "A", "W", "F"].includes(x.mark);
+    return true;
+  });
+
   return (
     <div className="att-wrap att-stack">
       <div className="att-rephd">
@@ -5125,50 +5247,74 @@ function MyReportTab({ me }: any) {
       </div>
 
       <div className="att-stats">
-        <div className="att-stat"><b style={{ color: "#16a34a" }}>{t.P}</b><span>Present</span></div>
-        <div className="att-stat"><b style={{ color: "#d97706" }}>{t.L}</b><span>Late</span></div>
-        <div className="att-stat"><b style={{ color: "#ea580c" }}>{t.H}</b><span>Half</span></div>
-        <div className="att-stat"><b style={{ color: "#dc2626" }}>{t.A}</b><span>Absent</span></div>
-        <div className="att-stat"><b style={{ color: "#2563eb" }}>{t.leave}</b><span>Leave</span></div>
-        <div className="att-stat"><b>{t.W}</b><span>Week off</span></div>
-        <div className="att-stat"><b>{t.F}</b><span>Holiday</span></div>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#16a34a" }}>{t.P}</b><span>Present</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#d97706" }}>{t.L}</b><span>Late</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#ea580c" }}>{t.H}</b><span>Half</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("absent")}>
+          <b style={{ color: "#dc2626" }}>{t.A}</b><span>Absent</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("leave")}>
+          <b style={{ color: "#2563eb" }}>{t.leave}</b><span>Leave</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("all")}>
+          <b>{t.W}</b><span>Week off</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("all")}>
+          <b>{t.F}</b><span>Holiday</span></button>
         <div className="att-stat"><b style={{ color: "#1849a9" }}>{t.payable}</b><span>Payable</span></div>
-        <div className="att-stat"><b style={{ color: "#2563eb" }}>{hhmm(t.mins)}</b><span>Hours</span></div>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#2563eb" }}>{hhmm(t.mins)}</b><span>Hours</span></button>
       </div>
 
       {busy && <p className="att-muted">Loading…</p>}
 
       {!busy && (
         <div className="att-list">
-          <div className="att-hd"><b>Day by day</b><span className="att-muted">{month}</span></div>
-          {days.filter((x) => x.mark).map((x) => (
-            <div className="att-row" key={x.d}>
-              <span style={{ width: 82, fontWeight: 650 }}>
-                {new Date(x.d + "T00:00:00").toLocaleDateString("en-GB",
-                  { day: "2-digit", month: "short", weekday: "short" })}
+          <div className="att-hd">
+            <b>Day by day</b>
+            <span className="att-muted">
+              {filter === "all" ? "every day" : filter} · tap a day for details
+            </span>
+          </div>
+
+          <div className="att-seg" style={{ padding: "10px 14px 4px" }}>
+            {[["all", "All"], ["worked", "Worked"], ["absent", "Absent"],
+              ["leave", "Leave"]].map(([k, l]) => (
+              <button key={k} className={filter === k ? "on" : ""}
+                onClick={() => setFilter(k)}>{l}</button>
+            ))}
+          </div>
+
+          {shownDays.map((x) => (
+            <button className="att-dayrow" key={x.d} onClick={() => setPick(x)}>
+              <span className="dt">
+                <b>{x.d.slice(-2)}</b>
+                <i>{new Date(x.d + "T00:00:00").toLocaleDateString("en-GB",
+                  { weekday: "short" })}</i>
               </span>
-              <span className={markClass(x.mark)} style={{ width: 30, textAlign: "center" }}>
+              <span className={markClass(x.mark)} style={{ width: 28, textAlign: "center" }}>
                 {x.mark}
               </span>
-              <div className="grow">
-                <p>{x.label}</p>
+              <span className="grow" style={{ minWidth: 0 }}>
+                <b style={{ fontSize: 13.5 }}>{x.label}</b>
                 {x.log && (
-                  <p className="att-muted">
+                  <span className="att-muted" style={{ display: "block", fontSize: 12 }}>
                     {fmtTime(x.log.punch_in_at)}
                     {x.log.punch_out_at ? ` – ${fmtTime(x.log.punch_out_at)}` : " – still in"}
-                  </p>
+                  </span>
                 )}
-              </div>
+              </span>
               {x.log?.worked_minutes ? (
-                <b style={{ fontSize: 13 }}>{hhmm(x.log.worked_minutes)}</b>
+                <b style={{ fontSize: 13, whiteSpace: "nowrap" }}>{hhmm(x.log.worked_minutes)}</b>
               ) : null}
-            </div>
+            </button>
           ))}
-          {!days.filter((x) => x.mark).length && (
-            <p className="att-empty">Nothing recorded this month.</p>
-          )}
+
+          {!shownDays.length && <p className="att-empty">Nothing here for this filter.</p>}
         </div>
       )}
+
+      {pick && <DaySheet d={pick} me={me} onClose={() => setPick(null)} />}
     </div>
   );
 }
@@ -5198,6 +5344,7 @@ function VerifyRow({ r, onSet, onClear, busy, date }: any) {
     <>
       <div className={`att-vrow ${r.status === "Approved" ? "ok"
         : r.status === "On hold" ? "hold" : r.status === "Cancelled" ? "cut" : ""}`}>
+        <div className="who">
         <Avatar name={r.full_name} />
 
         <div className="grow" style={{ minWidth: 0 }}>
@@ -5220,8 +5367,9 @@ function VerifyRow({ r, onSet, onClear, busy, date }: any) {
             </p>
           )}
         </div>
+        </div>
 
-        <div style={{ textAlign: "right" }}>
+        <div className="when">
           <p className="att-vtime">
             {fmtTime(r.first_in)}{r.last_out ? ` – ${fmtTime(r.last_out)}` : ""}
           </p>
