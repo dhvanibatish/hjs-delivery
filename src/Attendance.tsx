@@ -1658,12 +1658,12 @@ function RegularizeSheet({ me, onClose }: any) {
         <div className="att-row2">
           <div>
             <label>Check-in</label>
-            <input type="time" value={form.req_punch_in}
+            <input type="time" lang="en-US" value={form.req_punch_in}
               onChange={(e) => setForm({ ...form, req_punch_in: e.target.value })} />
           </div>
           <div>
             <label>Check-out</label>
-            <input type="time" value={form.req_punch_out}
+            <input type="time" lang="en-US" value={form.req_punch_out}
               onChange={(e) => setForm({ ...form, req_punch_out: e.target.value })} />
           </div>
         </div>
@@ -2592,7 +2592,7 @@ function BulkSheet({ ids, names, onClose }: any) {
           )}
 
           {kind === "time" && (
-            <input type="time" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} />
+            <input type="time" lang="en-US" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} />
           )}
         </div>
 
@@ -3513,9 +3513,9 @@ const LEAVE_RULES: Record<string, {
 }> = {
   SL:    { reasonReq: true, pastDays: 30, futureDays: 7,
            note: "Can be applied up to 30 days back. Reason is required." },
-  CL:    { pastDays: 0, futureDays: 365,
+  CL:    { reasonReq: true, pastDays: 0, futureDays: 365,
            note: "Apply in advance — backdated casual leave isn't allowed." },
-  EL:    { pastDays: 0, futureDays: 365,
+  EL:    { reasonReq: true, pastDays: 0, futureDays: 365,
            note: "Apply in advance — backdated earned leave isn't allowed." },
   SHORT: { single: true, fixedDays: 0.25, reasonReq: true, pastDays: 7, futureDays: 30,
            note: "Single day only, counts as a quarter day. Reason is required." },
@@ -3540,7 +3540,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
   }, [types]);
 
   const rule = LEAVE_RULES[form.leave_type]
-    || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: false };
+    || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: true };
   const needsTime = ["SHORT", "HALF"].includes(form.leave_type);
   const minDate = addDays(today, -rule.pastDays);
   const maxDate = addDays(today, rule.futureDays);
@@ -3575,7 +3575,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
       return `For ${form.leave_type}, pick a date between ${fmtDate(minDate)} and ${fmtDate(maxDate)}.`;
     if (rule.single && form.to_date !== form.from_date)
       return "This leave type is for a single day only.";
-    if (rule.reasonReq && !form.reason.trim()) return "Reason is required for this leave type.";
+    if (!form.reason.trim()) return "Please write why you need this leave.";
     if (days > 60) return "One request can't be longer than 60 days.";
     return "";
   }, [form, rule, days, minDate, maxDate]);
@@ -3631,7 +3631,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
           <div className="att-row2">
             <div>
               <label>From time</label>
-              <input type="time" value={form.from_time}
+              <input type="time" lang="en-US" value={form.from_time}
                 onChange={(e) => setForm({
                   ...form, from_time: e.target.value,
                   to_time: e.target.value >= form.to_time
@@ -3640,16 +3640,16 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
             </div>
             <div>
               <label>To time</label>
-              <input type="time" value={form.to_time} min={form.from_time}
+              <input type="time" lang="en-US" value={form.to_time} min={form.from_time}
                 onChange={(e) => setForm({ ...form, to_time: e.target.value })} />
             </div>
           </div>
         )}
 
         <div>
-          <label>Reason {rule.reasonReq && <span style={{ color: "#dc2626" }}>*</span>}</label>
+          <label>Reason <span style={{ color: "#dc2626" }}>*</span></label>
           <textarea rows={2} value={form.reason}
-            placeholder={rule.reasonReq ? "Required" : "Optional"}
+            placeholder="Why do you need this leave?"
             onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         </div>
 
@@ -4358,12 +4358,12 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         <div className="att-row2">
           <div>
             <label>Shift start</label>
-            <input type="time" value={String(f.shift_start).slice(0, 5)}
+            <input type="time" lang="en-US" value={String(f.shift_start).slice(0, 5)}
               onChange={(e) => setF({ ...f, shift_start: e.target.value })} />
           </div>
           <div>
             <label>Shift end</label>
-            <input type="time" value={String(f.shift_end).slice(0, 5)}
+            <input type="time" lang="en-US" value={String(f.shift_end).slice(0, 5)}
               onChange={(e) => setF({ ...f, shift_end: e.target.value })} />
           </div>
         </div>
@@ -6207,7 +6207,7 @@ export default function Attendance() {
   }, [me, mod]);
 
   const shell = (children: any) => (
-    <div className="hjsatt" lang="en-US"><style>{CSS}</style>{children}</div>
+    <div className="hjsatt" lang="en-GB"><style>{CSS}</style>{children}</div>
   );
 
   if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
