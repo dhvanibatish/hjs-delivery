@@ -5741,16 +5741,33 @@ export default function Attendance() {
   const [me, setMe] = useState<any>(null);
   // Nav ab URL ke hash mein rehta hai: #home/myspace/verify
   // Isse refresh pe wahi tab khulta hai aur link share kiya ja sakta hai.
+  // Nav URL ke hash mein bhi rehta hai aur browser ki memory mein bhi.
+  // Iframe ke andar hash kabhi-kabhi udd jata hai (page ?attendance se
+  // dobara load hota hai), isliye localStorage bhi rakha hai — refresh
+  // pe wahi tab wapas khulta hai.
+  const NAV_KEY = "hjs_nav";
+
   const readHash = () => {
     const h = (window.location.hash || "").replace(/^#/, "").split("/");
-    return { m: h[0] || "home", s: h[1] || "", v: h[2] || "" };
+    if (h[0]) return { m: h[0], s: h[1] || "", v: h[2] || "" };
+    try {
+      const saved = (localStorage.getItem(NAV_KEY) || "").split("/");
+      if (saved[0]) return { m: saved[0], s: saved[1] || "", v: saved[2] || "" };
+    } catch {}
+    return { m: "home", s: "", v: "" };
   };
+
   const [route, setRoute] = useState(readHash);
   const mod = route.m, scope = route.s, view = route.v;
+
+  const remember = (m: string, s2: string, v: string) => {
+    try { localStorage.setItem(NAV_KEY, `${m}/${s2}/${v}`); } catch {}
+  };
 
   const goto = (m: string, s2: string, v: string) => {
     const h = `#${m}/${s2}/${v}`;
     if (window.location.hash !== h) window.location.hash = h;
+    remember(m, s2, v);
     setRoute({ m, s: s2, v });
   };
   const setView = (v: string) => goto(mod, scope, v);
@@ -5872,8 +5889,11 @@ export default function Attendance() {
 
   // hash adhoora ya galat ho to chup-chaap sahi kar do.
   // Ye hook NAHI hai — early returns ke baad hook nahi laga sakte.
-  if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
-    window.history.replaceState(null, "", `#${key}`);
+  if (typeof window !== "undefined") {
+    if (window.location.hash !== `#${key}`) {
+      window.history.replaceState(null, "", `#${key}`);
+    }
+    remember(curMod.k, curScope.k, curView.k);
   }
 
   const body = () => {
@@ -5941,7 +5961,10 @@ export default function Attendance() {
               <PName code={me.emp_code}>{me.emp_code} · {me.full_name}</PName>
             </span>
           </div>
-          <button className="att-signout" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          <button className="att-signout" onClick={() => {
+            try { localStorage.removeItem(NAV_KEY); } catch {}
+            supabase.auth.signOut();
+          }}>Sign out</button>
         </header>
 
         <div className="att-scope">
