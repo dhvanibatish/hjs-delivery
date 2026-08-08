@@ -5870,14 +5870,11 @@ export default function Attendance() {
 
   const key = `${curMod.k}/${curScope.k}/${curView.k}`;
 
-  // hash adhoora ya galat ho to sahi kar do
-  useEffect(() => {
-    const want = `#${key}`;
-    if (window.location.hash !== want) {
-      window.history.replaceState(null, "", want);
-      setRoute({ m: curMod.k, s: curScope.k, v: curView.k });
-    }
-  }, [key]);
+  // hash adhoora ya galat ho to chup-chaap sahi kar do.
+  // Ye hook NAHI hai — early returns ke baad hook nahi laga sakte.
+  if (typeof window !== "undefined" && window.location.hash !== `#${key}`) {
+    window.history.replaceState(null, "", `#${key}`);
+  }
 
   const body = () => {
     switch (key) {
