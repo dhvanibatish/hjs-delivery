@@ -362,6 +362,8 @@ const CSS = `
 .hjsatt .att-range .qk button.on { background: #eff4ff; border-color: #b2ccff; color: #2563eb; font-weight: 650; }
 .hjsatt .att-stat.clk { cursor: pointer; }
 .hjsatt .att-row.clk { cursor: pointer; }
+.hjsatt .att-day.clk { cursor: pointer; width: 100%; }
+.hjsatt .att-day.clk:hover { border-color: #b2ccff; background: #fafbff; }
 .hjsatt .att-row.clk:hover { background: #fafbff; }
 @media (hover: none) { .hjsatt .att-row.clk:hover { background: transparent; } }
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
@@ -424,14 +426,37 @@ const CSS = `
   white-space: nowrap; align-self: flex-start; }
 
 /* ---------- reports ---------- */
-.hjsatt .att-dayrow { width: 100%; display: flex; align-items: center; gap: 11px;
+.hjsatt .att-dayrow { width: 100%; display: grid; align-items: center;
+  grid-template-columns: 44px 30px 1fr auto; gap: 12px;
   padding: 11px 14px; border-bottom: 1px solid #f4f5f6; text-align: left; }
 .hjsatt .att-dayrow:last-child { border-bottom: 0; }
 .hjsatt .att-dayrow:hover { background: #fafbff; }
-.hjsatt .att-dayrow .dt { width: 38px; flex-shrink: 0; text-align: center; }
-.hjsatt .att-dayrow .dt b { display: block; font-size: 16px; line-height: 1.1; }
-.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10.5px;
-  color: #98a2b3; text-transform: uppercase; }
+.hjsatt .att-dayrow.off { opacity: .55; }
+
+.hjsatt .att-dayrow .dt { text-align: center; }
+.hjsatt .att-dayrow .dt b { display: block; font-size: 17px; line-height: 1.05;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10px;
+  color: #98a2b3; text-transform: uppercase; letter-spacing: .04em; }
+
+.hjsatt .att-dayrow .mid { min-width: 0; }
+.hjsatt .att-dayrow .mid b { display: block; font-size: 13.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hjsatt .att-dayrow .mid span { display: block; font-size: 12px; color: #6b7280;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+
+.hjsatt .att-dayrow .hrs { font-size: 13.5px; font-weight: 700; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: #344054; }
+.hjsatt .att-dayrow .hrs.none { color: #d0d5dd; font-weight: 500; }
+
+@media (max-width: 480px) {
+  .hjsatt .att-dayrow { grid-template-columns: 38px 26px 1fr auto; gap: 9px;
+    padding: 10px 12px; }
+  .hjsatt .att-dayrow .mid b { font-size: 13px; }
+  .hjsatt .att-dayrow .mid span { font-size: 11.5px; }
+  .hjsatt .att-dayrow .hrs { font-size: 12.5px; }
+}
 .hjsatt .att-stat.clk { cursor: pointer; }
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
 @media (hover: none) { .hjsatt .att-dayrow:hover { background: #fff; } }
@@ -1267,6 +1292,16 @@ function HomeScreen({ me }: any) {
   const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
   const [drill, setDrill] = useState<any>(null);
   const [mgr, setMgr] = useState<any[]>([]);
+  const [pickDay, setPickDay] = useState<any>(null);
+  const [myLeaves, setMyLeaves] = useState<any[]>([]);
+  const [pickLeave, setPickLeave] = useState<any>(null);
+
+  // kisi ke "Leave" pe click -> uski aaj wali leave nikaal ke dikhao
+  const openLeaveFor = async (p: any) => {
+    const { data } = await supabase.rpc("on_leave", { p_date: istToday() });
+    const row = (data || []).find((x: any) => x.emp_code === p.emp_code);
+    if (row) setPickLeave({ ...row, id: row.leave_id, emp: row });
+  };
   const [peers, setPeers] = useState<any[]>([]);
 
   const load = async () => {
@@ -1282,9 +1317,12 @@ function HomeScreen({ me }: any) {
     setToday((logs.data || []).find((r: any) => r.work_date === istToday()) || null);
     setSessions(sess.data || []);
     setBoard(who.data || []);
-    const [m, pr] = await Promise.all([
+    const [m, pr, lvs] = await Promise.all([
       supabase.rpc("my_manager"), supabase.rpc("my_peers"),
+      supabase.from("leaves").select("*").eq("employee_id", me.id)
+        .eq("status", "Approved").gte("to_date", addDays(istToday(), -10)),
     ]);
+    setMyLeaves(lvs.data || []);
     setMgr(m.data || []);
     setPeers(pr.data || []);
   };
@@ -1329,15 +1367,21 @@ function HomeScreen({ me }: any) {
       const d = new Date(mon); d.setDate(mon.getDate() + i);
       const key = ymd(d);
       const log = recent.find((r: any) => r.work_date === key);
+      const lv = myLeaves.find((x: any) => key >= x.from_date && key <= x.to_date);
       const off = (me.week_off_days || []).includes(d.getDay());
+      const status = log?.status
+        || (lv ? lv.leave_type : off ? "Off" : key > istToday() ? "" : "Absent");
       return {
         key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
         isToday: key === istToday(),
-        status: log?.status || (off ? "Off" : key > istToday() ? "" : "Absent"),
+        status,
+        mark: log ? ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P")
+              : lv ? lv.leave_type : off ? "W" : key > istToday() ? "" : "A",
         mins: log?.worked_minutes,
+        log, lv,
       };
     });
-  }, [recent, me]);
+  }, [recent, me, myLeaves]);
 
   const dayColor: Record<string, string> = {
     Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
@@ -1486,14 +1530,15 @@ function HomeScreen({ me }: any) {
             </div>
             <div className="att-week">
               {week.map((d) => (
-                <div className={`att-day ${d.isToday ? "now" : ""}`} key={d.key}>
+                <button className={`att-day clk ${d.isToday ? "now" : ""}`} key={d.key}
+                  onClick={() => setPickDay(d)}>
                   <span className="dn">{d.dow}</span>
                   <b className="dd">{String(d.num).padStart(2, "0")}</b>
                   <span className="ds" style={{ color: dayColor[d.status] || "#d0d5dd" }}>
                     {d.status === "Half Day" ? "Half" : d.status || "—"}
                   </span>
                   <span className="dh">{d.mins ? hhmm(d.mins) : ""}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1505,7 +1550,8 @@ function HomeScreen({ me }: any) {
               <span className="att-pill p-Present">{inNow} in</span>
             </div>
             {myTeam.slice(0, 12).map((p) => (
-              <div className="att-row" key={p.emp_code}>
+              <div className={`att-row ${p.state === "Leave" ? "clk" : ""}`} key={p.emp_code}
+                onClick={() => p.state === "Leave" && openLeaveFor(p)}>
                 <Avatar name={p.full_name} />
                 <div className="grow">
                   <p><PName code={p.emp_code}><b>{p.emp_code}</b> · {p.full_name}</PName></p>
@@ -1549,6 +1595,17 @@ function HomeScreen({ me }: any) {
 
       {regOpen && <RegularizeSheet me={me} onClose={() => setRegOpen(false)} />}
       {drill && <DayListSheet title={drill.t} rows={drill.r} onClose={() => setDrill(null)} />}
+
+      {pickDay && (
+        <DaySheet me={me} onClose={() => setPickDay(null)}
+          d={{ d: pickDay.key, mark: pickDay.mark || "",
+               label: pickDay.status || "Nothing recorded",
+               log: pickDay.log, lv: pickDay.lv }} />
+      )}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me} onClose={() => setPickLeave(null)} />
+      )}
     </div>
   );
 }
@@ -3340,6 +3397,9 @@ function LeavesScreen({ me, tab }: any) {
 
         {apply && <ApplyLeaveSheet me={me} types={types}
           onClose={() => { setApply(false); load(); }} />}
+
+        {pickLeave && <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />}
       </div>
     );
   }
@@ -5445,27 +5505,33 @@ function MyReportTab({ me }: any) {
           </div>
 
           {shownDays.map((x) => (
-            <button className="att-dayrow" key={x.d} onClick={() => setPick(x)}>
+            <button className={`att-dayrow ${["W", "F"].includes(x.mark) ? "off" : ""}`}
+              key={x.d} onClick={() => setPick(x)}>
               <span className="dt">
                 <b>{x.d.slice(-2)}</b>
                 <i>{new Date(x.d + "T00:00:00").toLocaleDateString("en-GB",
                   { weekday: "short" })}</i>
               </span>
-              <span className={markClass(x.mark)} style={{ width: 28, textAlign: "center" }}>
+
+              <span className={markClass(x.mark)} style={{ textAlign: "center" }}>
                 {x.mark}
               </span>
-              <span className="grow" style={{ minWidth: 0 }}>
-                <b style={{ fontSize: 13.5 }}>{x.label}</b>
-                {x.log && (
-                  <span className="att-muted" style={{ display: "block", fontSize: 12 }}>
-                    {fmtTime(x.log.punch_in_at)}
-                    {x.log.punch_out_at ? ` – ${fmtTime(x.log.punch_out_at)}` : " – still in"}
-                  </span>
-                )}
+
+              <span className="mid">
+                <b>{x.label}</b>
+                <span>
+                  {x.log
+                    ? `${fmtTime(x.log.punch_in_at)}${x.log.punch_out_at
+                        ? ` – ${fmtTime(x.log.punch_out_at)}` : " – still in"}`
+                    : x.lv?.from_time
+                      ? `${fmtHM(x.lv.from_time)} – ${fmtHM(x.lv.to_time)}`
+                      : "\u00a0"}
+                </span>
               </span>
-              {x.log?.worked_minutes ? (
-                <b style={{ fontSize: 13, whiteSpace: "nowrap" }}>{hhmm(x.log.worked_minutes)}</b>
-              ) : null}
+
+              <span className={`hrs ${x.log?.worked_minutes ? "" : "none"}`}>
+                {x.log?.worked_minutes ? hhmm(x.log.worked_minutes) : "—"}
+              </span>
             </button>
           ))}
 
