@@ -4614,7 +4614,7 @@ function OrgTab() {
   );
 }
 
-function ReportsTab() {
+function ReportsTab({ isAdmin = false }: any) {
   const [kind, setKind] = useState("muster");
   const [month, setMonth] = useState(istToday().slice(0, 7));
   const [data, setData] = useState<any[]>([]);
@@ -4656,6 +4656,11 @@ function ReportsTab() {
 
   return (
     <>
+      {!isAdmin && (
+        <div className="att-note">
+          <span>This is your own record. Team-wide reports are with HR and the founders.</span>
+        </div>
+      )}
       <div className="att-rephd">
         <div className="att-seg" style={{ flex: 1 }}>
           {[["muster", "Muster roll"], ["late", "Late"], ["absence", "Absence"]].map(([k, l]) => (
@@ -4772,7 +4777,7 @@ function ReportsTab() {
   );
 }
 
-function PayrollTab() {
+function PayrollTab({ isAdmin = false }: any) {
   const [month, setMonth] = useState(istToday().slice(0, 7));
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
@@ -4788,6 +4793,11 @@ function PayrollTab() {
 
   return (
     <>
+      {!isAdmin && (
+        <div className="att-note">
+          <span>This is your own pay record. Everyone else's is private.</span>
+        </div>
+      )}
       <div className="att-flex">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ flex: 1 }} />
         <button className="att-btn sm" disabled={!rows.length}
@@ -5383,6 +5393,99 @@ function DaySheet({ d, me, onClose }: any) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/* ================= apni salary (sirf apni) ================= */
+function MyPayTab({ me }: any) {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [row, setRow] = useState<any>(null);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true); setErr("");
+      const { data, error } = await supabase.rpc("payroll_summary",
+        { p_month: `${month}-01` });
+      if (error) setErr(error.message);
+      // function khud hi sirf apni row deta hai
+      setRow((data || []).find((r: any) => r.emp_code === me.emp_code) || null);
+      setBusy(false);
+    })();
+  }, [month, me.emp_code]);
+
+  const money = (v: any) =>
+    v == null ? "—" : `₹${Number(v).toLocaleString("en-IN",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>My pay</b>
+          <p className="att-muted">{me.emp_code} · {me.full_name}</p>
+        </div>
+        <input type="month" value={month} max={istToday().slice(0, 7)}
+          onChange={(e) => setMonth(e.target.value)} className="att-repmonth" />
+      </div>
+
+      <Note>{err}</Note>
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && !row && (
+        <div className="att-list">
+          <p className="att-empty">Nothing recorded for this month yet.</p>
+        </div>
+      )}
+
+      {!busy && row && (
+        <>
+          {row.monthly_gross == null ? (
+            <div className="att-note">
+              <span>
+                Your monthly salary hasn't been set in the system yet, so the amount
+                below can't be worked out. Your payable days are still correct.
+              </span>
+            </div>
+          ) : (
+            <div className="att-card" style={{ textAlign: "center", padding: "22px 18px" }}>
+              <p className="att-muted">Payable for {new Date(month + "-01T00:00:00")
+                .toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
+              <b style={{ fontSize: 30, display: "block", margin: "6px 0", color: "#1849a9" }}>
+                {money(row.payable_amount)}
+              </b>
+              <p className="att-muted">
+                {row.payable_days} of {row.month_days} days · monthly {money(row.monthly_gross)}
+              </p>
+            </div>
+          )}
+
+          <div className="att-stats">
+            <div className="att-stat"><b style={{ color: "#16a34a" }}>{row.present}</b>
+              <span>Present</span></div>
+            <div className="att-stat"><b style={{ color: "#ea580c" }}>{row.half}</b>
+              <span>Half days</span></div>
+            <div className="att-stat"><b style={{ color: "#2563eb" }}>{row.paid_leave}</b>
+              <span>Paid leave</span></div>
+            <div className="att-stat"><b style={{ color: "#dc2626" }}>{row.absent}</b>
+              <span>Absent</span></div>
+            <div className="att-stat"><b>{row.week_off}</b><span>Week off</span></div>
+            <div className="att-stat"><b>{row.holidays}</b><span>Holidays</span></div>
+            <div className="att-stat"><b style={{ color: "#1849a9" }}>{row.payable_days}</b>
+              <span>Payable days</span></div>
+          </div>
+
+          <div className="att-note">
+            <span>
+              Payable days = present + half days counted as ½ + paid leave.
+              Week offs and holidays aren't paid separately — they're already part of
+              your monthly salary. If something looks wrong, speak to HR.
+            </span>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -6037,7 +6140,7 @@ function LinkAccount({ session, err: outerErr }: any) {
 /* ========================= shell ========================= */
 // Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
 type View = { k: string; label: string };
-type Scope = { k: string; label: string; views: View[] };
+type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean };
 type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
 
 const MODULES: Module[] = [
@@ -6104,12 +6207,14 @@ const MODULES: Module[] = [
     scopes: [
       { k: "mine", label: "My Reports", views: [
         { k: "me", label: "My attendance" },
+        { k: "pay", label: "My pay" },
       ]},
       { k: "att", label: "Attendance", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
       ]},
-      { k: "people", label: "People", views: [{ k: "staff", label: "Staff" }]},
+      { k: "people", label: "People", views: [{ k: "staff", label: "Staff" }],
+        adminOnly: true },
     ],
   },
   {
@@ -6246,10 +6351,12 @@ export default function Attendance() {
   );
 
   const approver = ["manager", "admin"].includes(me.role);
+  // Muster roll aur payroll sabko dikhte hain, par un functions se
+  // non-admin ko sirf apni row milti hai (v44). Isliye tab chhupane
+  // ki zaroorat nahi.
+  const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
   const mods = MODULES.filter((m) => !m.approverOnly || approver)
-    .map((m) => m.k === "reports" && !approver
-      ? { ...m, scopes: m.scopes.filter((sc) => sc.k === "mine") }
-      : m);
+    .map((m) => ({ ...m, scopes: m.scopes.filter((sc) => !sc.adminOnly || topAdmin) }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
   const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
   // "Daily check" tab sirf un logon ko jinke paas verify karne ko hai
@@ -6314,8 +6421,11 @@ export default function Attendance() {
       case "me/me/profile":          return <MeScreen me={me} />;
       // ---- Reports ----
       case "reports/mine/me":       return <MyReportTab me={me} />;
-      case "reports/att/muster":    return <div className="att-wrap att-stack"><ReportsTab /></div>;
-      case "reports/att/payroll":   return <div className="att-wrap att-stack"><PayrollTab /></div>;
+      case "reports/mine/pay":      return <MyPayTab me={me} />;
+      case "reports/att/muster":
+        return <div className="att-wrap att-stack"><ReportsTab isAdmin={topAdmin} /></div>;
+      case "reports/att/payroll":
+        return <div className="att-wrap att-stack"><PayrollTab isAdmin={topAdmin} /></div>;
       case "reports/people/staff":  return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
       default:                      return <HomeScreen me={me} />;
     }
