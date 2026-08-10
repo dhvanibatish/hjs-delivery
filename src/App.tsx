@@ -1263,6 +1263,13 @@ export default function App() {
     return base.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
+  // Dashboard aur SLA store-independent hain — upar jo store select hai usse
+  // farak nahi padta. Sirf deleted entries hata ke poora data (saare stores).
+  const allStoresData = useMemo(
+    () => deliveries.filter((x) => x.stage !== 'deleted'),
+    [deliveries],
+  );
+
   // Activity log ke liye alag scope — deleted entries bhi chahiye (kisne
   // delete ki, wo dikhana hai), isliye ye 'scoped' se alag hai.
   const scopedAll = useMemo(() => {
@@ -1737,13 +1744,13 @@ export default function App() {
             {/* Delivery dashboard + SLA */}
             {isAllStores && page === 'dashboard' && dashKind === 'delivery' && (
               <Dashboard
-                deliveries={scoped}
+                deliveries={allStoresData}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             )}
             {isAllStores && page === 'sla' && (
               <SlaReport
-                deliveries={scoped}
+                deliveries={allStoresData}
                 logsLoaded={logsLoaded}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
