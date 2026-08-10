@@ -1421,6 +1421,23 @@ export default function App({
       patch.app_pickup_person = f.person || null;
       patch.app_vehicle = f.vehicle || null;
       patch.stage2_remarks = f.remarks || null;
+      // MBC — customer khud drop karta hai. Usi form mein final details bhar
+      // ke seedha Picked Up.
+      if (f.mbcDirect) {
+        if (mode === 'move') patch.status = stageToStatus('delivered');
+        patch.app_vehicle = null; // koi gaadi nahi
+        patch.item_inspected = !!f.inspected;
+        patch.pickup_image = f.photoPicked || null;
+        patch.actual_pickup_date = f.pickDate || null;
+        patch.pickup_charges_collected =
+          f.charges === '' || f.charges == null ? null : Number(f.charges);
+        patch.pending_collected =
+          f.pendingCollected === '' || f.pendingCollected == null
+            ? null
+            : Number(f.pendingCollected);
+        patch.pickup_done = !!f.done;
+        patch.stage4_remarks = f.remarks || null;
+      }
     } else if (toStage === 'dispatched') {
       patch.app_eta = f.eta || null;
       patch.stage3_remarks = f.remarks || null;
@@ -1515,7 +1532,14 @@ export default function App({
     }
     const patch = buildPatch(toStage, fields, mode);
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
+    // MBC → ek hi save mein Scheduled + Picked Up dono log ho
+    const mbc = toStage === 'scheduled' && fields.mbcDirect && mode === 'move';
+    patch.app_log = [
+      ...existingLog(cur),
+      makeEvent(toStage, fields, mode),
+      ...(mbc ? [makeEvent('delivered', fields, 'move')] : []),
+    ];
+    const landed = mbc ? 'delivered' : toStage;
     if (!CONFIGURED) {
       ping('Demo mode — save nahi hua');
       return;
@@ -1525,9 +1549,9 @@ export default function App({
       ping(
         mode === 'edit'
           ? 'Updated ✓'
-          : `Saved ✓  ${STAGES[stageIndex(toStage)].label}`,
+          : `Saved ✓  ${STAGES[stageIndex(landed)].label}`,
       );
-      if (mode === 'move') jumpMobile(toStage);
+      if (mode === 'move') jumpMobile(landed);
       applyLocal(invoiceId, patch);
     } catch (e) {
       ping('Save failed: ' + e.message);
@@ -3907,13 +3931,19 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
+  // MBC = customer khud item store pe drop karta hai. Scheduled form mein hi
+  // final pickup details bhar ke entry seedha Picked Up ho jaati hai.
+  const mbc = toStage === 'scheduled' && f.person === 'MBC';
   const canSave =
     toStage === 'talked'
       ? f.flow === 'cancelled' || f.flow === 'resched'
         ? // reschedule / cancel — dono mein reason likhna zaroori hai
           !!String(f.remarks || '').trim()
         : !!(f.date && f.time)
-    : toStage === 'scheduled' ? !!(f.person && f.vehicle)
+    : toStage === 'scheduled'
+      ? mbc
+        ? !!(f.inspected && f.done && f.photoPicked && f.pickDate)
+        : !!(f.person && f.vehicle)
     : toStage === 'dispatched' ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
     : toStage === 'delivered' ? !!(f.inspected && f.done && f.photoPicked && f.pickDate && String(f.charges).trim() !== '')
     : true;
@@ -3982,13 +4012,43 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 {persons.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </Field>
-            <Field label="Transport / vehicle *">
-              <select className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)}>
-                <option value="">Select…</option>
-                {VEHICLES.map((v) => <option key={v} value={v}>{v}</option>)}
-                {f.vehicle && !VEHICLES.includes(f.vehicle) && <option value={f.vehicle}>{f.vehicle}</option>}
-              </select>
-            </Field>
+            {mbc ? (
+              <>
+                <div className="flag-note" style={{ background: T.mint, color: T.green }}>
+                  <b>MBC — Managed By Client.</b> Customer khud item store pe drop
+                  kar raha hai, to gaadi ki zarurat nahi. Neeche final details
+                  bhar do — entry seedha <b>Picked Up</b> ho jayegi.
+                </div>
+                <div className="mbc-divider">Final details · pickup</div>
+                <Check1 checked={f.inspected} onChange={() => set('inspected', !f.inspected)} label="Item inspected" />
+                <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Item picked up" />
+                {f.done && (
+                  <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
+                )}
+                {f.done && !f.photoPicked && (
+                  <div className="req-note">Pickup photo lagana zaroori hai.</div>
+                )}
+                <Field label="Actual pickup date *">
+                  <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
+                </Field>
+                <Field label="Pickup charges collected (₹)">
+                  <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
+                    onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
+                </Field>
+                <Field label="Pending amount collected (₹)">
+                  <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
+                    onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
+                </Field>
+              </>
+            ) : (
+              <Field label="Transport / vehicle *">
+                <select className="inp" value={f.vehicle} onChange={(e) => set('vehicle', e.target.value)}>
+                  <option value="">Select…</option>
+                  {VEHICLES.map((v) => <option key={v} value={v}>{v}</option>)}
+                  {f.vehicle && !VEHICLES.includes(f.vehicle) && <option value={f.vehicle}>{f.vehicle}</option>}
+                </select>
+              </Field>
+            )}
           </>
         )}
         {toStage === 'dispatched' && (
@@ -4072,7 +4132,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!canSave} onClick={() => onSave(f)}>
+        <button className="btn-primary" disabled={!canSave} onClick={() => onSave(mbc ? { ...f, mbcDirect: true } : f)}>
           <ShieldCheck size={16} />{' '}
           {toStage === 'talked' && f.flow === 'resched'
             ? 'Save · Rescheduled'
@@ -4080,7 +4140,9 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
               ? 'Mark as Cancelled'
               : mode === 'edit'
                 ? 'Update'
-                : 'Save & update'}
+                : mbc
+                  ? 'Save · Mark Picked Up'
+                  : 'Save & update'}
         </button>
       </div>
     </>
@@ -5176,13 +5238,37 @@ function TrackResult({ row }) {
   const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
   const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
   const Icon = equipIcon(equipment);
-  const person = row.delivery_partner || null;
+  const person = row.delivery_partner || row.app_pickup_person || null;
   const orderId = row.invoice_number;
+  // MBC = customer khud item store pe drop karta hai. "Out for Pickup" step
+  // dikhana galat hai; wording bhi self-drop waali honi chahiye.
+  const mbc = String(person || '').trim().toUpperCase() === 'MBC';
+  const steps = mbc
+    ? TRACK_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
+        st.id === 'scheduled'
+          ? {
+              ...st,
+              label: 'Ready to Drop',
+              desc: 'Your pickup is confirmed. You will drop the item at the store as arranged.',
+            }
+          : st.id === 'delivered'
+            ? {
+                ...st,
+                label: 'Item Received',
+                desc: 'Your item has been received at the store. Thank you.',
+              }
+            : st,
+      )
+    : TRACK_STEPS;
 
   const banner = cancelled
     ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
     : stage === 'delivered'
-      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
+      ? {
+          text: mbc ? 'Item received successfully 🎉' : 'Picked up successfully 🎉',
+          bg: T.mint,
+          fg: T.green,
+        }
       : stage === 'dispatched'
         ? {
             text: 'Our team is on the way to pick up your item',
@@ -5190,7 +5276,13 @@ function TrackResult({ row }) {
             fg: T.violet,
           }
         : stage === 'scheduled'
-          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
+          ? {
+              text: mbc
+                ? 'Please drop the item at the store'
+                : 'Your pickup is scheduled',
+              bg: T.amberSoft,
+              fg: T.amber,
+            }
           : stage === 'talked'
             ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
             : {
@@ -5230,9 +5322,10 @@ function TrackResult({ row }) {
 
       {/* the timeline */}
       <div className="track-tl">
-        {TRACK_STEPS.map((step, i) => {
-          if (i > flowIdx) return null; // sirf reached stages dikhao
-          const current = !cancelled && i === idx;
+        {steps.map((step) => {
+          const si = stageIndex(step.id);
+          if (si > flowIdx) return null; // sirf reached stages dikhao
+          const current = !cancelled && si === idx;
           // "reached this stage" time — har stage pe green chhota timestamp
           const reachedTs =
             stepTime(log, step.id) ||
@@ -5245,7 +5338,7 @@ function TrackResult({ row }) {
               : null);
           const StepIcon = step.icon;
           // closed hua to aakhri reached stage bhi neeche closed-entry se jude
-          const showLine = i < flowIdx || cancelled;
+          const showLine = si < flowIdx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
               <div className="ttl-left">
@@ -5780,6 +5873,7 @@ function StyleTag() {
       .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 8px 11px; margin-top: -6px; line-height: 1.45; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
+      .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
       .tp12 { display: flex; align-items: center; gap: 7px; }
       .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
       .tp12 .inp:last-child { flex: 0 0 84px; }
