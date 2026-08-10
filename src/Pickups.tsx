@@ -1263,6 +1263,12 @@ export default function App({
     return base.filter((x) => x.branch === br);
   }, [deliveries, session, viewBranch]);
 
+  // Dashboard store-independent — upar jo store select hai usse farak nahi.
+  const allStoresData = useMemo(
+    () => deliveries.filter((x) => x.stage !== 'deleted'),
+    [deliveries],
+  );
+
   // Activity log ke liye alag scope — deleted entries bhi chahiye
   const scopedAll = useMemo(() => {
     if (!session) return [];
@@ -1652,7 +1658,7 @@ export default function App({
         <StyleTag />
         {page === 'dashboard' ? (
           <Dashboard
-            deliveries={scoped}
+            deliveries={allStoresData}
             onOpen={(x) => setActiveId(x.invoice_id)}
           />
         ) : (
@@ -1790,7 +1796,7 @@ export default function App({
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
-                deliveries={scoped}
+                deliveries={allStoresData}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             ) : (
