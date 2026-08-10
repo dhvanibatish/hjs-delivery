@@ -1,7713 +1,6391 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import PickupsModule from './Pickups.tsx';
-import ComplaintsModule from './ComplaintApp.tsx';
-import {
-  Truck,
-  Package,
-  ClipboardCheck,
-  Phone,
-  Clock,
-  MapPin,
-  User,
-  Search,
-  Bell,
-  LayoutDashboard,
-  BarChart3,
-  RotateCcw,
-  AlertTriangle,
-  ChevronRight,
-  X,
-  Check,
-  IndianRupee,
-  ShieldCheck,
-  LogOut,
-  Building2,
-  Car,
-  ArrowRight,
-  ArrowLeft,
-  CheckCircle2,
-  Wind,
-  BedDouble,
-  Accessibility,
-  Stethoscope,
-  MessageSquareWarning,
-  RefreshCw,
-  CloudOff,
-  Pencil,
-  History,
-  UserCog,
-  Copy,
-  Info,
-  Trash2,
-  Camera,
-  Upload,
-} from 'lucide-react';
+// ============================================================
+// HJS Attendance v5 — light theme, Zoho People style layout
+// Desktop: navy icon rail + top bar + sub-tab bar
+// Mobile : top bar + scrollable tab row
+// Multiple check-in / check-out per day (sessions).
+// Chalao: hjs_attendance_v2.sql phir hjs_attendance_v3.sql
+// ============================================================
+import React, { useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-/* ══════════════════════════════════════════════════════════════════════
-   1) CONFIG  ── url + ANON PUBLIC key (SERVICE_ROLE nahi). Khaali = DEMO.
-   ══════════════════════════════════════════════════════════════════════ */
-const CONFIG = {
-  url: 'https://idcmfebqizovivuvsuns.supabase.co',
-  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY21mZWJxaXpvdml2dXZzdW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDgxODgsImV4cCI6MjA5OTMyNDE4OH0.miXziOcl5sEo8S6K1WsrHRhCbtEYRgnnUA4gAISUkmM',
-  table: 'deliveries',
-};
-const CONFIGURED = !!(CONFIG.url && CONFIG.key);
-const HDRS = () => ({
-  apikey: CONFIG.key,
-  Authorization: `Bearer ${CONFIG.key}`,
+const URL_ = import.meta.env.VITE_SUPABASE_URL;
+const KEY_ = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const supabase = createClient(URL_, KEY_, {
+  auth: { persistSession: true, autoRefreshToken: true, storageKey: "hjs-attendance" },
 });
+const IST = "en-IN";
+const TZ = "Asia/Kolkata";
 
-async function sbRpc(fn, body) {
-  const res = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, {
-    method: 'POST',
-    headers: { ...HDRS(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json();
+/* ========================= styles ========================= */
+const CSS = `
+.hjsatt, .hjsatt * { box-sizing: border-box; margin: 0; padding: 0; }
+.hjsatt {
+  position: fixed; inset: 0; display: flex; overflow: hidden; text-align: left;
+  background: #f0f1f4; color: #1f2328; color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14.5px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
-// staff login — DB verifies password, returns [] if wrong
-async function sbLogin(store, pw) {
-  return sbRpc('staff_login', { p_store: store, p_password: pw });
-}
-// staff data — returns rows for the store (or all for ALL). Password checked in DB.
-async function sbList(store, pw, days) {
-  // _lite = app_log ke bina (wo har row mein bada JSON hota hai). Timeline
-  // sirf zarurat pe alag se aata hai — dekho sbLogs().
-  // p_days = window. 0 = sab kuch (Archived "purani entries laao")
-  return sbRpc('staff_list_lite', {
-    p_store: store,
-    p_password: pw,
-    p_days: days == null ? 90 : days,
-  });
-}
-// window se bahar wali entries — server pe search
-async function sbSearch(store, pw, q) {
-  return sbRpc('staff_search', { p_store: store, p_password: pw, p_q: q });
-}
-// sirf app_log — ek invoice ka (drawer khulne pe) ya sabka (Activity / SLA).
-async function sbLogs(store, pw, invoice) {
-  return sbRpc('staff_logs', {
-    p_store: store,
-    p_password: pw,
-    p_invoice: invoice || null,
-  });
-}
-// staff update — stage move/edit. Password + store-scope checked in DB.
-async function sbUpdate(store, pw, invoiceId, patch) {
-  return sbRpc('staff_update', {
-    p_store: store,
-    p_password: pw,
-    p_invoice: invoiceId,
-    p_patch: patch,
-  });
-}
-// public customer tracking — link se invoice + customer ka registered phone
-// NOTE: Supabase track_order RPC ab p_invoice + p_phone (poora number) le
-async function sbTrack(invoice, phone) {
-  return sbRpc('track_order', { p_invoice: invoice, p_phone: phone });
-}
-// customer tracking — usi invoice ka pickup (agar return shuru ho chuka hai).
-// Khaali aaye to matlab abhi koi pickup nahi — page pehle jaisa hi rehta hai.
-async function sbTrackPickup(invoice, phone) {
-  return sbRpc('track_pickup', { p_invoice: invoice, p_phone: phone });
-}
-// sales team — sirf phone se us customer ki saari deliveries (latest→old).
-// p_pin RPC mein verify hota hai — galat PIN pe RPC error deta hai.
-// Sales console: store code se us store ki saari active deliveries (PIN-free)
-// Sales matrix: salesperson × store counts (date range + status)
-async function sbSalesMatrix(from, to, status) {
-  return sbRpc('sales_matrix', {
-    p_from: from,
-    p_to: to,
-    p_status: status || 'all',
-  });
-}
-// Global search: customer / invoice / salesperson
-async function sbSalesSearch(qq) {
-  return sbRpc('sales_search', { p_q: qq });
-}
-// Sales tracker: ek order ka app_log (timeline ke "Updated" timestamps ke liye).
-// Sales list RPCs app_log nahi bhejtin — wo bhaari hai — isliye alag se.
-async function sbSalesLog(invoiceNumber) {
-  // { app_log, photo_delivered, customer_phone }
-  return sbRpc('sales_log', { p_invoice: invoiceNumber });
-}
-// Flexible list: store / salesperson / cell / all (date range + status)
-async function sbSalesList(sales, store, from, to, status) {
-  return sbRpc('sales_list', {
-    p_sales: sales || '',
-    p_store: store || '',
-    p_from: from,
-    p_to: to,
-    p_status: status || 'all',
-  });
-}
-// Ek cell ki deliveries (salesperson + store, date range)
-// photo upload → Supabase Storage bucket 'delivery-photos'.
-// naam: <invoiceNumber ke slashes ko - se>_<kind>_<timestamp>.jpg
-// return: public URL (deliveries table mein save hota hai)
-/* Phone ki photo 3-5 MB ki hoti hai — waise ki waise upload karne se storage
-   aur egress dono udte hain. Upload se pehle canvas pe resize + JPEG compress
-   kar dete hain (lambi side max 1600px). 3 MB → ~250 KB, dikhne mein farak
-   nahi padta. Kuch galat ho jaye to original file hi chali jaati hai. */
-async function shrinkImage(file, maxDim = 1600, quality = 0.7) {
-  try {
-    if (!file || !/^image\//.test(file.type || '')) return file;
-    if (file.size < 300 * 1024) return file; // pehle se chhoti hai
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
-    const w = Math.round(bmp.width * scale);
-    const h = Math.round(bmp.height * scale);
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
-    const blob = await new Promise((res) =>
-      canvas.toBlob(res, 'image/jpeg', quality),
-    );
-    if (!blob || blob.size >= file.size) return file; // faayda nahi to rehne do
-    return blob;
-  } catch (_) {
-    return file;
-  }
-}
-async function sbUploadPhoto(invoiceNumber, kind, file) {
-  const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
-  const small = await shrinkImage(file);
-  const shrunk = small !== file;
-  const ext = shrunk
-    ? 'jpg'
-    : (file.name && file.name.split('.').pop()) || 'jpg';
-  const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
-  const res = await fetch(
-    `${CONFIG.url}/storage/v1/object/delivery-photos/${path}`,
-    {
-      method: 'POST',
-      headers: {
-        ...HDRS(),
-        'Content-Type': shrunk ? 'image/jpeg' : file.type || 'image/jpeg',
-        'x-upsert': 'true',
-      },
-      body: small,
-    },
-  );
-  if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
-  return `${CONFIG.url}/storage/v1/object/public/delivery-photos/${path}`;
+.hjsatt h1, .hjsatt h2, .hjsatt h3, .hjsatt h4, .hjsatt p, .hjsatt b,
+.hjsatt span, .hjsatt div, .hjsatt td, .hjsatt th, .hjsatt li {
+  color: #1f2328; font-weight: inherit; text-align: left; }
+.hjsatt b { font-weight: 650; }
+.hjsatt button { font: inherit; cursor: pointer; border: 0; background: transparent;
+  color: #1f2328; text-align: left; }
+.hjsatt input, .hjsatt select, .hjsatt textarea {
+  font-family: inherit; font-size: 15px; width: 100%; padding: 10px 12px;
+  border: 1px solid #d6d9de; border-radius: 8px; background: #fff; color: #1f2328;
+  outline: none; -webkit-appearance: none; appearance: none; min-height: 42px; }
+.hjsatt select { padding-right: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
+                    linear-gradient(135deg, #6b7280 50%, transparent 50%);
+  background-position: calc(100% - 17px) 19px, calc(100% - 12px) 19px;
+  background-size: 5px 5px; background-repeat: no-repeat; }
+/* checkbox pe bhi appearance:none tick uda deta hai — native wapas */
+.hjsatt input[type=checkbox] {
+  -webkit-appearance: checkbox; appearance: checkbox;
+  width: 17px; height: 17px; min-height: 0; padding: 0; margin: 0;
+  accent-color: #2563eb; cursor: pointer; flex-shrink: 0; }
+.hjsatt input[type=radio] {
+  -webkit-appearance: radio; appearance: radio;
+  width: 17px; height: 17px; min-height: 0; padding: 0; margin: 0;
+  accent-color: #2563eb; cursor: pointer; flex-shrink: 0; }
+
+/* date / month / time — native icon wapas, apne rang mein */
+.hjsatt input[type=date], .hjsatt input[type=month], .hjsatt input[type=time] {
+  -webkit-appearance: none; appearance: none;
+  min-width: 148px; cursor: pointer; }
+.hjsatt input[type=month] { min-width: 128px; }
+.hjsatt input[type=time] { min-width: 108px; }
+
+.hjsatt input[type=date]::-webkit-calendar-picker-indicator,
+.hjsatt input[type=month]::-webkit-calendar-picker-indicator,
+.hjsatt input[type=time]::-webkit-calendar-picker-indicator {
+  margin-left: 8px; padding: 2px; cursor: pointer; opacity: 1;
+  filter: invert(32%) sepia(87%) saturate(2000%) hue-rotate(212deg) brightness(95%); }
+.hjsatt input[type=date]::-webkit-calendar-picker-indicator:hover,
+.hjsatt input[type=month]::-webkit-calendar-picker-indicator:hover,
+.hjsatt input[type=time]::-webkit-calendar-picker-indicator:hover {
+  background: #eff4ff; border-radius: 4px; }
+
+.hjsatt input::placeholder, .hjsatt textarea::placeholder { color: #9ca3af; }
+.hjsatt input:focus, .hjsatt select:focus, .hjsatt textarea:focus {
+  border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+.hjsatt label { display: block; font-size: 12.5px; font-weight: 600; color: #6b7280; margin-bottom: 6px; }
+
+/* ---------- rail ---------- */
+.hjsatt .att-rail { width: 82px; flex-shrink: 0; background: #223354; display: flex;
+  flex-direction: column; align-items: center; gap: 3px; padding: 12px 6px;
+  padding-top: calc(12px + env(safe-area-inset-top)); overflow-y: auto; }
+.hjsatt .att-rail::-webkit-scrollbar { display: none; }
+.hjsatt .att-raillogo { width: 38px; height: 38px; border-radius: 10px; margin-bottom: 10px;
+  background: linear-gradient(140deg, #38bdf8, #2563eb); display: flex; align-items: center;
+  justify-content: center; font-size: 12px; font-weight: 800; color: #fff; }
+.hjsatt .att-railbtn { width: 100%; padding: 9px 2px 7px; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
+.hjsatt .att-railbtn span { font-size: 10.5px; color: #cbd7ea; text-align: center;
+  line-height: 1.25; font-weight: 500; }
+.hjsatt .att-railbtn .ic { width: 34px; height: 30px; border-radius: 9px; display: flex;
+  align-items: center; justify-content: center; }
+.hjsatt .att-railbtn:hover .ic { background: rgba(255,255,255,.08); }
+.hjsatt .att-railbtn.on .ic { background: #2563eb; }
+.hjsatt .att-railbtn.on span { color: #fff; }
+.hjsatt .att-railbtn .cnt { position: absolute; top: 4px; right: 14px; min-width: 17px;
+  height: 17px; line-height: 17px; border-radius: 99px; background: #dc2626; color: #fff;
+  font-size: 10px; font-weight: 700; text-align: center; padding: 0 4px; }
+
+/* ---------- body ---------- */
+.hjsatt .att-body { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.hjsatt .att-main { flex: 1; min-width: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hjsatt .att-topbar { flex-shrink: 0; background: #223354; display: flex; align-items: center;
+  gap: 12px; padding: 0 16px; height: 54px; padding-top: env(safe-area-inset-top);
+  height: calc(54px + env(safe-area-inset-top)); }
+.hjsatt .att-topbar b, .hjsatt .att-topbar span { color: #fff; }
+.hjsatt .att-topbar .sub { color: #9fb0cd; font-size: 12.5px; }
+.hjsatt .att-signout { border: 1px solid rgba(255,255,255,.28); border-radius: 7px;
+  padding: 6px 12px; font-size: 13px; color: #fff; }
+
+.hjsatt .att-scope { flex-shrink: 0; background: #223354; display: flex; gap: 2px;
+  padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
+.hjsatt .att-scope::-webkit-scrollbar { display: none; }
+.hjsatt .att-scopebtn { padding: 12px 14px 13px; font-size: 14.5px; font-weight: 600;
+  color: #cbd7ea; white-space: nowrap; flex-shrink: 0; }
+.hjsatt .att-scopebtn.on { color: #fff; box-shadow: inset 0 -2.5px 0 #fff; }
+.hjsatt .att-scopebtn .cnt { display: inline-block; margin-left: 6px; min-width: 18px; height: 18px;
+  line-height: 18px; border-radius: 99px; background: #dc2626; color: #fff; font-size: 10.5px;
+  font-weight: 700; text-align: center; padding: 0 5px; }
+.hjsatt .att-topbar { height: auto; padding-bottom: 0; }
+
+.hjsatt .att-mtabs { display: none; background: #fff; border-bottom: 1px solid #e5e7eb;
+  overflow-x: auto; scrollbar-width: none; }
+.hjsatt .att-mtabs::-webkit-scrollbar { display: none; }
+.hjsatt .att-subbar { flex-shrink: 0; background: #fff; border-bottom: 1px solid #e5e7eb;
+  display: flex; gap: 2px; padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
+.hjsatt .att-subbar::-webkit-scrollbar { display: none; }
+.hjsatt .att-tab { padding: 12px 14px 11px; font-size: 14px; font-weight: 600; color: #5b6472;
+  white-space: nowrap; flex-shrink: 0; position: relative; }
+.hjsatt .att-tab.on { color: #2563eb; box-shadow: inset 0 -2px 0 #2563eb; }
+.hjsatt .att-tab .cnt { display: inline-block; margin-left: 6px; min-width: 18px; height: 18px;
+  line-height: 18px; border-radius: 99px; background: #dc2626; color: #fff; font-size: 10.5px;
+  font-weight: 700; text-align: center; padding: 0 5px; }
+
+@media (max-width: 899px) {
+  /* iOS: fixed shell + inner scroll atakta hai -> normal page scroll */
+  .hjsatt { position: static; overflow: visible; min-height: 100dvh;
+    display: block; overscroll-behavior-y: contain; }
+  .hjsatt .att-rail { display: none; }
+  .hjsatt .att-body { display: block; overflow: visible; }
+  .hjsatt .att-main { overflow: visible; }
+  .hjsatt .att-mtabs { display: flex; position: sticky; top: 0; z-index: 12; }
+  .hjsatt .att-card, .hjsatt .att-list { box-shadow: none; }
+  .hjsatt .att-tcard { width: 240px; }
 }
 
-/* ══════════════════════════════════════════════════════════════════════ */
-const T = {
-  forest: '#14392B',
-  forestSoft: '#1E5138',
-  green: '#2E7D32',
-  greenBright: '#3D9A42',
-  mint: '#E7F0E8',
-  beige: '#F5F1E8',
-  cream: '#FBF9F4',
-  card: '#FFFFFF',
-  ink: '#1C2620',
-  inkSoft: '#657069',
-  line: '#E7E2D6',
-  amber: '#C77D28',
-  amberSoft: '#FBF0DE',
-  blue: '#3E6B9E',
-  blueSoft: '#E8EFF6',
-  slate: '#64748B',
-  slateSoft: '#EEF1F3',
-  violet: '#6B5B9A',
-  violetSoft: '#EEEAF7',
-  red: '#B4472E',
-  redSoft: '#F7E7E1',
+/* phone pe hover effects band — scroll pe repaint kam */
+@media (hover: none) {
+  .hjsatt .att-etable tr:hover td { background: inherit; }
+  .hjsatt .att-grp:hover { background: #fff; }
+  .hjsatt .att-tcard:hover { border-color: #d0d5dd; }
+  .hjsatt .att-railbtn:hover .ic { background: transparent; }
+}
+
+/* ---------- generic ---------- */
+.hjsatt .att-wrap { max-width: 1240px; margin: 0 auto; padding: 16px 14px 44px; }
+.hjsatt .att-narrow { max-width: 720px; }
+.hjsatt .att-center { flex: 1; width: 100%; min-height: 100%; display: flex;
+  align-items: center; justify-content: center; padding: 24px 16px; }
+.hjsatt .att-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+.hjsatt .att-stack > * + * { margin-top: 12px; }
+.hjsatt .att-muted { color: #6b7280; font-size: 13px; }
+.hjsatt .att-h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
+.hjsatt .att-h2 { font-size: 15px; font-weight: 700; margin-bottom: 9px; }
+.hjsatt .att-flex { display: flex; align-items: center; gap: 9px; }
+.hjsatt .att-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hjsatt .att-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hjsatt .att-cols { display: grid; gap: 13px; align-items: start; }
+@media (min-width: 1000px) { .hjsatt .att-cols { grid-template-columns: 340px 1fr; } }
+.hjsatt .att-col { display: flex; flex-direction: column; gap: 13px; }
+
+.hjsatt .att-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 42px; padding: 11px; border-radius: 8px;
+  background: #2563eb; color: #fff; font-weight: 600; }
+.hjsatt .att-btn:active { transform: scale(.99); }
+.hjsatt .att-btn:disabled { opacity: .45; }
+.hjsatt .att-btn.sm { width: auto; min-height: 36px; padding: 8px 14px; font-size: 13px; }
+.hjsatt .att-btn.grey { background: #eef0f3; color: #374151; }
+.hjsatt .att-btn.line { background: #fff; border: 1px solid #d6d9de; color: #374151; }
+.hjsatt .att-btn.gin { background: #fff; border: 1.5px solid #16a34a; color: #16a34a; }
+.hjsatt .att-btn.gout { background: #fff; border: 1.5px solid #dc2626; color: #dc2626; }
+.hjsatt .att-btn.green { background: #16a34a; color: #fff; }
+.hjsatt .att-btn.big { min-height: 46px; font-size: 15.5px; font-weight: 650; }
+
+.hjsatt .att-note { padding: 10px 12px; border-radius: 8px; font-size: 13.5px; }
+.hjsatt .att-note.err, .hjsatt .att-note.err span { background: #fef2f2; color: #b42318; }
+.hjsatt .att-note.ok, .hjsatt .att-note.ok span { background: #ecfdf3; color: #067647; }
+
+.hjsatt .att-pill { display: inline-block; padding: 3px 9px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+.hjsatt .p-Present, .hjsatt .p-Approved { background: #ecfdf3; color: #067647; }
+.hjsatt .p-Late, .hjsatt .p-Pending { background: #fffaeb; color: #b54708; }
+.hjsatt .p-HalfDay { background: #fff6ed; color: #c4320a; }
+.hjsatt .p-Absent, .hjsatt .p-Rejected { background: #fef3f2; color: #b42318; }
+.hjsatt .p-Leave { background: #eff8ff; color: #175cd3; }
+.hjsatt .p-Off { background: #f2f4f7; color: #475467; }
+
+.hjsatt .att-av { width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; color: #fff; }
+.hjsatt .att-av.lg { width: 82px; height: 82px; font-size: 27px; border-radius: 14px; }
+
+/* ---------- punch card ---------- */
+.hjsatt .att-punch { text-align: center; }
+.hjsatt .att-punch p, .hjsatt .att-punch div, .hjsatt .att-punch span,
+.hjsatt .att-punch b { text-align: center; }
+.hjsatt .att-hms { display: flex; justify-content: center; align-items: center; gap: 6px;
+  margin: 12px 0 4px; }
+.hjsatt .att-hms i { font-style: normal; background: #f2f4f7; border-radius: 8px;
+  min-width: 54px; padding: 7px 6px; font-size: 24px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-hms u { text-decoration: none; color: #98a2b3; font-size: 17px; }
+.hjsatt .att-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: #16a34a; margin-right: 6px; animation: attpulse 1.6s infinite; }
+@keyframes attpulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+.hjsatt .att-sess { display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  font-size: 13px; border-top: 1px dashed #e5e7eb; }
+.hjsatt .att-codewrap { position: relative; }
+.hjsatt .att-codewrap input { letter-spacing: 0.55em; font-size: 20px; text-align: center;
+  padding-right: 46px; }
+.hjsatt .att-eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; }
+.hjsatt .att-eye:hover { background: #f2f4f7; }
+.hjsatt .att-pin { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px;
+  padding: 2px 7px; border-radius: 6px; background: #f2f4f7; color: #475467; }
+.hjsatt .att-pin.ok { background: #ecfdf3; color: #067647; }
+.hjsatt .att-pin.far { background: #fffaeb; color: #b54708; }
+.hjsatt .att-pin.none { background: #fef3f2; color: #b42318; }
+.hjsatt .att-sess span, .hjsatt .att-sess b { text-align: left; }
+
+.hjsatt .att-greet { border-radius: 10px; padding: 18px 20px; border: 1px solid #e5e7eb;
+  background: linear-gradient(105deg, #eef4ff 0%, #ffffff 62%); }
+.hjsatt .att-greet h3 { font-size: 18px; font-weight: 700; }
+.hjsatt .att-greet p { color: #6b7280; font-size: 13.5px; margin-top: 2px; }
+
+.hjsatt .att-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.hjsatt .att-day { border: 1px solid #e5e7eb; border-radius: 9px; padding: 9px 4px; background: #fff; }
+.hjsatt .att-day.now { border-color: #2563eb; background: #f5f8ff; }
+.hjsatt .att-day span, .hjsatt .att-day b { display: block; text-align: center; }
+.hjsatt .att-day .dn { font-size: 10.5px; color: #6b7280; }
+.hjsatt .att-day .dd { font-size: 15px; font-weight: 700; }
+.hjsatt .att-day .ds { font-size: 10px; font-weight: 700; margin-top: 4px; }
+.hjsatt .att-day .dh { font-size: 10px; color: #98a2b3; }
+
+.hjsatt .att-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hjsatt .att-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.hjsatt .att-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 12px 6px; }
+.hjsatt .att-stat b { display: block; font-size: 20px; font-weight: 700; text-align: center; }
+.hjsatt .att-stat span { display: block; font-size: 11px; color: #6b7280; text-align: center; }
+
+.hjsatt .att-bal { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 13px; }
+.hjsatt .att-bal .n { font-size: 23px; font-weight: 700; }
+.hjsatt .att-bal .t { font-size: 12.5px; color: #6b7280; }
+.hjsatt .att-bar { height: 6px; border-radius: 99px; background: #eef0f3; margin-top: 9px; overflow: hidden; }
+.hjsatt .att-bar i { display: block; height: 100%; border-radius: 99px; background: #2563eb; }
+
+.hjsatt .att-list { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+.hjsatt .att-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; font-size: 14px; }
+.hjsatt .att-row + .att-row { border-top: 1px solid #f1f2f4; }
+.hjsatt .att-row .grow { flex: 1; min-width: 0; }
+.hjsatt .att-row .grow p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hjsatt .att-empty { padding: 16px; color: #6b7280; font-size: 14px; }
+.hjsatt .att-hd { display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid #f1f2f4; }
+.hjsatt .att-hd b { font-size: 14.5px; }
+
+.hjsatt .att-seg { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.hjsatt .att-seg::-webkit-scrollbar { display: none; }
+.hjsatt .att-seg button { padding: 8px 14px; border-radius: 7px; font-size: 13px;
+  color: #475467; white-space: nowrap; background: #fff; border: 1px solid #e5e7eb; }
+.hjsatt .att-seg button.on { background: #eff4ff; color: #2563eb;
+  border-color: #b2ccff; font-weight: 650; }
+
+.hjsatt .att-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
+.hjsatt .att-scroll::-webkit-scrollbar { height: 7px; }
+.hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+.hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
+.hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
+  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
+.hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-table td.name, .hjsatt .att-table th.name { position: sticky; left: 0;
+  background: #fff; font-weight: 600; box-shadow: 1px 0 0 #f1f2f4; }
+.hjsatt .att-table th.name { background: #f9fafb; }
+.hjsatt .att-mark { display: inline-block; width: 21px; text-align: center;
+  font-weight: 700; font-size: 12px; }
+.hjsatt .m-P { color: #16a34a; } .hjsatt .m-L { color: #d97706; }
+.hjsatt .m-H { color: #ea580c; } .hjsatt .m-A { color: #dc2626; }
+.hjsatt .m-W, .hjsatt .m-F { color: #b0b7c3; } .hjsatt .m-X { color: #2563eb; }
+
+.hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(16,24,40,.45);
+  display: flex; align-items: flex-end; justify-content: center; }
+.hjsatt .att-sheet > div { width: 100%; max-width: 640px; background: #f7f8fa;
+  border-radius: 14px 14px 0 0; padding: 16px 14px calc(18px + env(safe-area-inset-bottom));
+  max-height: 92%; overflow-y: auto; }
+@media (min-width: 900px) {
+  .hjsatt .att-sheet { align-items: center; }
+  .hjsatt .att-sheet > div { border-radius: 14px; max-height: 88%; }
+}
+
+/* ---------- attendance summary ---------- */
+.hjsatt .att-daterow { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.hjsatt .att-nav2 { display: flex; align-items: center; gap: 4px; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 3px; }
+.hjsatt .att-nav2 button { padding: 5px 11px; border-radius: 6px; color: #475467; font-size: 15px; }
+.hjsatt .att-nav2 button:hover { background: #f2f4f7; }
+.hjsatt .att-shiftbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+.hjsatt .att-checkbtn { margin-left: auto; background: #16a34a; border-radius: 8px;
+  padding: 9px 20px; min-width: 156px; }
+.hjsatt .att-checkbtn.out { background: #dc2626; }
+.hjsatt .att-checkbtn:disabled { opacity: .6; }
+.hjsatt .att-checkbtn span { display: block; color: #fff; font-size: 12.5px; text-align: center; }
+.hjsatt .att-checkbtn b { display: block; color: #fff; font-size: 15px; text-align: center;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-drow { display: flex; align-items: center; gap: 12px; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 15px; margin-bottom: 8px; }
+.hjsatt .att-dlab { width: 54px; flex-shrink: 0; }
+.hjsatt .att-dlab span { display: block; text-align: center; font-size: 12.5px; color: #6b7280; }
+.hjsatt .att-dlab b { display: block; text-align: center; font-size: 16px; }
+.hjsatt .att-dlab .bdg { display: inline-block; background: #2563eb; color: #fff;
+  border-radius: 6px; padding: 0 8px; font-size: 15px; }
+.hjsatt .att-dt { width: 76px; flex-shrink: 0; font-size: 13.5px; color: #344054; }
+.hjsatt .att-dt.r { text-align: right; }
+.hjsatt .att-track { flex: 1; min-width: 60px; height: 14px; position: relative; }
+.hjsatt .att-track .base { position: absolute; left: 0; right: 0; top: 6px; height: 2px;
+  background: #eaecf0; border-radius: 2px; }
+.hjsatt .att-track .wk { position: absolute; left: 0; right: 0; top: 6px; height: 2px; background: #fde68a; }
+.hjsatt .att-track .seg { position: absolute; top: 5px; height: 4px; background: #86cd89; border-radius: 3px; }
+.hjsatt .att-track .din { position: absolute; top: 3px; width: 8px; height: 8px; border-radius: 50%;
+  background: #16a34a; }
+.hjsatt .att-track .dout { position: absolute; top: 3px; width: 8px; height: 8px; border-radius: 50%;
+  background: #dc2626; }
+.hjsatt .att-track .chip { position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+  background: #fff; border: 1px solid #fde68a; color: #b54708; font-size: 11px;
+  padding: 0 8px; border-radius: 5px; }
+.hjsatt .att-hrs { width: 88px; flex-shrink: 0; }
+.hjsatt .att-hrs b { display: block; text-align: right; font-size: 15px; font-variant-numeric: tabular-nums; }
+.hjsatt .att-hrs span { display: block; text-align: right; font-size: 11.5px; color: #6b7280; }
+.hjsatt .att-axis { display: flex; margin: 4px 0 0 0; padding: 0 103px 0 154px; }
+.hjsatt .att-axis span { flex: 1; font-size: 10.5px; color: #98a2b3;
+  border-left: 1px solid #e5e7eb; padding-left: 4px; }
+.hjsatt .att-sum { display: flex; flex-wrap: wrap; background: #fff; border: 1px solid #e5e7eb;
+  border-radius: 10px; padding: 10px 6px; margin-top: 12px; }
+.hjsatt .att-sumitem { padding: 2px 18px; border-left: 3px solid #2563eb; margin: 5px 0; }
+.hjsatt .att-sumitem span { display: block; font-size: 12.5px; color: #475467; }
+.hjsatt .att-sumitem b { display: block; font-size: 15px; }
+
+/* ---------- range filter ---------- */
+.hjsatt .att-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 9px 11px; }
+.hjsatt .att-range input { width: auto; min-height: 36px; padding: 6px 9px; font-size: 13.5px; }
+.hjsatt .att-range .qk { display: flex; gap: 5px; flex-wrap: wrap; }
+.hjsatt .att-range .qk button { padding: 6px 11px; border-radius: 7px; font-size: 12.5px;
+  border: 1px solid #e5e7eb; color: #475467; background: #fff; }
+.hjsatt .att-range .qk button.on { background: #eff4ff; border-color: #b2ccff; color: #2563eb; font-weight: 650; }
+.hjsatt .att-stat.clk { cursor: pointer; }
+.hjsatt .att-row.clk { cursor: pointer; }
+.hjsatt .att-day.clk { cursor: pointer; width: 100%; }
+.hjsatt .att-day.clk:hover { border-color: #b2ccff; background: #fafbff; }
+.hjsatt .att-row.clk:hover { background: #fafbff; }
+@media (hover: none) { .hjsatt .att-row.clk:hover { background: transparent; } }
+.hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
+.hjsatt .att-mk { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; font-weight: 700; font-size: 13px; }
+.hjsatt .att-mx th, .hjsatt .att-mx td { font-size: 14px; padding: 11px 10px; }
+.hjsatt .att-mx th { font-size: 11.5px; }
+.hjsatt .att-mx .att-mark { width: 30px; font-size: 15px; font-weight: 800; }
+.hjsatt .att-mx td.name, .hjsatt .att-mx th.name { min-width: 190px; font-size: 14.5px; }
+.hjsatt .att-mx tr.tot td { border-top: 0; padding: 0 10px 12px; }
+.hjsatt .att-totchips { display: flex; gap: 7px; flex-wrap: wrap; }
+.hjsatt .att-totchips span { font-size: 12px; font-weight: 650; padding: 3px 10px;
+  border-radius: 6px; white-space: nowrap; }
+
+/* ---------- calendar ---------- */
+.hjsatt .att-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.hjsatt .att-caldow { font-size: 11px; font-weight: 700; color: #6b7280; text-align: center;
+  padding-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+.hjsatt .att-calday { min-height: 82px; border: 1px solid #e5e7eb; border-radius: 9px;
+  padding: 7px 8px; background: #fff; }
+.hjsatt .att-calday.pad { background: #fafbfc; border-style: dashed; }
+.hjsatt .att-calday.now { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+.hjsatt .att-calday .n { font-size: 13px; font-weight: 700; }
+.hjsatt .att-calday .st { font-size: 11px; font-weight: 700; margin-top: 6px; }
+.hjsatt .att-calday .hr { font-size: 10.5px; color: #6b7280; }
+@media (max-width: 720px) {
+  .hjsatt .att-calday { min-height: 62px; padding: 5px; }
+  .hjsatt .att-calday .st { font-size: 9.5px; }
+  .hjsatt .att-calday .hr { display: none; }
+}
+
+/* ---------- people cards ---------- */
+.hjsatt .att-people { display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.hjsatt .att-pcard { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 14px; display: flex; gap: 11px; align-items: flex-start; }
+.hjsatt .att-pcard .nm { font-weight: 700; font-size: 14px; }
+.hjsatt .att-pcard .dz { font-size: 12.5px; color: #6b7280; }
+.hjsatt .att-pcard a { font-size: 12px; color: #2563eb; word-break: break-all; }
+
+.hjsatt .att-pname { color: #2563eb; cursor: pointer; }
+.hjsatt .att-pname:hover { text-decoration: underline; }
+
+.hjsatt .att-balhd { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 8px; }
+.hjsatt .att-baledit { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #98a2b3; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-baledit:hover { color: #2563eb; border-color: #b2ccff; background: #f5f8ff; }
+
+.hjsatt .att-mx th.tot, .hjsatt .att-mx td.tot { min-width: 42px; text-align: center;
+  font-weight: 700; background: #fafbfc; border-left: 1px solid #eaecf0; }
+.hjsatt .att-mx th.tot { font-size: 11px; color: #475467; }
+.hjsatt .att-mx td.tot { font-size: 13px; }
+.hjsatt .att-mx th.pay, .hjsatt .att-mx td.pay { background: #eff4ff; color: #1849a9;
+  min-width: 62px; }
+
+.hjsatt .att-ltype { flex-shrink: 0; font-size: 11px; font-weight: 700; letter-spacing: .03em;
+  padding: 4px 9px; border-radius: 6px; background: #eff4ff; color: #1849a9;
+  white-space: nowrap; align-self: flex-start; }
+
+/* ---------- reports ---------- */
+.hjsatt .att-dayrow { width: 100%; display: grid; align-items: center;
+  grid-template-columns: 52px 62px 1fr 78px; gap: 16px;
+  padding: 14px 16px; border-bottom: 1px solid #f4f5f6; text-align: left; }
+.hjsatt .att-dayrow:last-child { border-bottom: 0; }
+.hjsatt .att-dayrow:hover { background: #fafbff; }
+.hjsatt .att-dayrow.off { opacity: .55; }
+
+.hjsatt .att-dayrow .dt { text-align: center; }
+.hjsatt .att-dayrow .dt b { display: block; font-size: 18px; line-height: 1.1;
+  font-variant-numeric: tabular-nums; }
+.hjsatt .att-dayrow .dt i { display: block; font-style: normal; font-size: 10.5px;
+  color: #98a2b3; text-transform: uppercase; letter-spacing: .04em; margin-top: 1px; }
+
+.hjsatt .att-dayrow .mid { min-width: 0; }
+.hjsatt .att-dayrow .mid b { display: block; font-size: 14px; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hjsatt .att-dayrow .mid span { display: block; font-size: 12.5px; color: #6b7280;
+  font-variant-numeric: tabular-nums; white-space: nowrap; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; }
+
+.hjsatt .att-mark.wide { display: block; width: 100%; padding: 5px 4px;
+  border-radius: 7px; font-size: 12px; letter-spacing: .01em;
+  text-align: center; overflow: hidden; }
+/* SHORT / HALF jaise lambe code chhote font mein, par usi jagah mein */
+.hjsatt .att-mark.wide.long { font-size: 9.5px; font-weight: 800; letter-spacing: 0; }
+
+.hjsatt .att-dayrow .hrs { font-size: 14px; font-weight: 700; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: #344054; text-align: right; }
+.hjsatt .att-dayrow .hrs.none { color: #d0d5dd; font-weight: 500; }
+
+@media (max-width: 480px) {
+  .hjsatt .att-dayrow { grid-template-columns: 42px 52px 1fr 66px;
+    gap: 10px; padding: 12px 12px; }
+  .hjsatt .att-dayrow .dt b { font-size: 16px; }
+  .hjsatt .att-dayrow .mid b { font-size: 13.5px; }
+  .hjsatt .att-dayrow .mid span { font-size: 12px; }
+  .hjsatt .att-dayrow .hrs { font-size: 13px; }
+  .hjsatt .att-mark.wide { padding: 4px 2px; font-size: 11px; }
+  .hjsatt .att-mark.wide.long { font-size: 8.5px; }
+}
+.hjsatt .att-stat.clk { cursor: pointer; }
+.hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
+@media (hover: none) { .hjsatt .att-dayrow:hover { background: #fff; } }
+
+.hjsatt .att-stats { display: grid; gap: 9px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.hjsatt .att-rephd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+.hjsatt .att-repmonth { width: auto; min-width: 160px; }
+.hjsatt .att-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  font-size: 12.5px; color: #475467; padding: 2px 2px 0; }
+.hjsatt .att-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.hjsatt .att-legend i { font-style: normal; font-weight: 700; font-size: 11px;
+  width: 20px; height: 20px; border-radius: 6px; display: inline-flex;
+  align-items: center; justify-content: center; }
+.hjsatt .att-legend .m-P { background: #ecfdf3; color: #067647; }
+.hjsatt .att-legend .m-L { background: #fffaeb; color: #b54708; }
+.hjsatt .att-legend .m-H { background: #fff4ed; color: #c4320a; }
+.hjsatt .att-legend .m-A { background: #fef3f2; color: #b42318; }
+.hjsatt .att-legend .m-W { background: #f2f4f7; color: #667085; }
+.hjsatt .att-legend .m-F { background: #ecfdff; color: #0e7090; }
+
+@media (max-width: 720px) {
+  .hjsatt .att-rephd { flex-direction: column; align-items: stretch; }
+  .hjsatt .att-repmonth { width: 100%; }
+  .hjsatt .att-rephd .att-btn { width: 100%; }
+  .hjsatt .att-legend { gap: 9px; font-size: 11.5px; }
+}
+
+/* ---------- daily verification ---------- */
+.hjsatt .att-vhero { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+  padding: 18px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.hjsatt .att-vhero h2 { font-size: 19px; font-weight: 700; }
+.hjsatt .att-vhero .dt { color: #6b7280; font-size: 13.5px; margin-top: 2px; }
+.hjsatt .att-vprog { flex: 1; min-width: 190px; }
+.hjsatt .att-vbar { height: 8px; border-radius: 99px; background: #eef0f3; overflow: hidden;
+  margin-top: 8px; }
+.hjsatt .att-vbar i { display: block; height: 100%; background: #16a34a; border-radius: 99px;
+  transition: width .3s; }
+.hjsatt .att-vteam { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  border-bottom: 1px solid #eaecf0; }
+.hjsatt .att-vteam b { font-size: 14.5px; }
+.hjsatt .att-vwrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
+.hjsatt .att-vwrap > .att-vteam:first-child { border-radius: 12px 12px 0 0; }
+.hjsatt .att-vwrap > .att-vrow:last-child { border-radius: 0 0 12px 12px; }
+.hjsatt .att-vrow { display: flex; align-items: center; gap: 12px; padding: 13px 16px;
+  border-bottom: 1px solid #f4f5f6; flex-wrap: wrap; }
+.hjsatt .att-vrow .who { display: flex; align-items: center; gap: 11px;
+  flex: 1 1 190px; min-width: 0; }
+.hjsatt .att-vrow .when { text-align: right; margin-left: auto; }
+@media (max-width: 620px) {
+  .hjsatt .att-vrow { align-items: flex-start; padding: 12px 13px; }
+  .hjsatt .att-vrow .who { flex: 1 1 100%; }
+  .hjsatt .att-vrow .when { text-align: left; margin-left: 43px; }
+  .hjsatt .att-vrow .att-btn,
+  .hjsatt .att-vrow .att-vtag { margin-left: auto; }
+}
+.hjsatt .att-vrow:last-child { border-bottom: 0; }
+.hjsatt .att-vrow.ok { background: #f6fef9; box-shadow: inset 3px 0 0 #16a34a; }
+.hjsatt .att-vrow.hold { background: #fffcf5; box-shadow: inset 3px 0 0 #d97706; }
+.hjsatt .att-vrow.cut { background: #fffbfa; box-shadow: inset 3px 0 0 #b42318; }
+.hjsatt .att-vrow.cut .nm { color: #667085; text-decoration: line-through; }
+.hjsatt .att-pencil { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #667085; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-pencil:hover { background: #f5f8ff; color: #2563eb; border-color: #b2ccff; }
+.hjsatt .att-vtime { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 13.5px;
+  color: #344054; white-space: nowrap; }
+.hjsatt .att-vempty { text-align: center; padding: 44px 20px; color: #667085; }
+.hjsatt .att-vempty .big { font-size: 34px; margin-bottom: 8px; }
+.hjsatt .att-menu { position: relative; }
+.hjsatt .att-pop.up { top: auto; bottom: 34px; }
+.hjsatt .att-dots { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #667085; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; }
+.hjsatt .att-dots:hover { background: #f5f6f8; color: #344054; }
+.hjsatt .att-pop { position: absolute; right: 0; top: 34px; z-index: 60; background: #fff;
+  border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 10px 26px rgba(16,24,40,.14);
+  min-width: 190px; overflow: hidden; }
+.hjsatt .att-pop button { display: block; width: 100%; text-align: left; padding: 10px 13px;
+  font-size: 13.5px; color: #344054; }
+.hjsatt .att-pop button:hover { background: #f5f6f8; }
+.hjsatt .att-pop button.danger { color: #b42318; }
+.hjsatt .att-pop .sep { height: 1px; background: #eaecf0; }
+.hjsatt .att-vtag { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; }
+
+/* ---------- selection bar + detail ---------- */
+.hjsatt .att-selbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #eff4ff; border: 1px solid #b2ccff; border-radius: 10px; padding: 10px 13px; }
+.hjsatt .att-selbar b { color: #1849a9; }
+.hjsatt .att-etable td.cb, .hjsatt .att-etable th.cb { width: 38px; text-align: center; padding: 8px; }
+.hjsatt .att-etable tr.sel td { background: #f5f8ff; }
+.hjsatt .att-etable td.link { color: #2563eb; font-weight: 650; cursor: pointer; }
+.hjsatt .att-etable td.link:hover { text-decoration: underline; }
+.hjsatt .att-dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 14px; }
+.hjsatt .att-dl dt { color: #6b7280; font-size: 13px; }
+.hjsatt .att-dl dd { font-weight: 600; }
+
+/* ---------- employee list table ---------- */
+.hjsatt .att-etable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.hjsatt .att-etable th { text-align: left; padding: 11px 12px; background: #f9fafb;
+  color: #475467; font-size: 12px; font-weight: 650; white-space: nowrap;
+  border-bottom: 1px solid #e5e7eb; cursor: pointer; }
+.hjsatt .att-etable th:hover { background: #f2f4f7; }
+.hjsatt .att-etable td { padding: 11px 12px; border-bottom: 1px solid #f1f2f4; white-space: nowrap; }
+.hjsatt .att-etable tr:hover td { background: #fafbff; }
+.hjsatt .att-etable td.first, .hjsatt .att-etable th.first { position: sticky; left: 0;
+  background: #fff; font-weight: 650; box-shadow: 1px 0 0 #f1f2f4; }
+.hjsatt .att-etable th.first { background: #f9fafb; }
+.hjsatt .att-arrow2 { color: #98a2b3; font-size: 10px; margin-left: 4px; }
+
+/* ---------- org chart with real connectors ---------- */
+.hjsatt .att-tw { overflow: auto; -webkit-overflow-scrolling: touch; padding: 6px 2px 16px; }
+.hjsatt .att-node { display: flex; align-items: center; }
+.hjsatt .att-tcard { display: flex; gap: 10px; align-items: center; background: #fff;
+  border: 1px solid #d0d5dd; border-radius: 8px; padding: 10px 12px; width: 264px;
+  flex-shrink: 0; text-align: left; }
+.hjsatt .att-tcard.can { cursor: pointer; }
+.hjsatt .att-tcard.can:hover { border-color: #2563eb; }
+.hjsatt .att-tcard.on { border-color: #2563eb; background: #f5f8ff; }
+.hjsatt .att-tcard .nm { font-weight: 650; font-size: 14px; display: block; }
+.hjsatt .att-tcard .dz { font-size: 12.5px; color: #6b7280; display: block; }
+.hjsatt .att-tbadge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700;
+  border-radius: 5px; padding: 2px 7px; flex-shrink: 0; }
+.hjsatt .att-tbadge.grey { background: #eef0f3; color: #475467; }
+
+/* parent -> children connector */
+.hjsatt .att-stub { width: 22px; height: 1px; background: #d0d5dd; flex-shrink: 0; }
+.hjsatt .att-kids { display: flex; flex-direction: column; justify-content: center; }
+.hjsatt .att-kid { display: flex; align-items: center; position: relative; padding: 5px 0; }
+/* vertical spine */
+.hjsatt .att-kid:before { content: ""; position: absolute; left: 0; width: 1px;
+  background: #d0d5dd; top: 0; bottom: 0; }
+.hjsatt .att-kid:first-child:before { top: 50%; }
+.hjsatt .att-kid:last-child:before { bottom: 50%; }
+.hjsatt .att-kid:only-child:before { display: none; }
+/* horizontal stub into each child */
+.hjsatt .att-kid:after { content: ""; position: absolute; left: 0; top: 50%;
+  width: 22px; height: 1px; background: #d0d5dd; }
+.hjsatt .att-kid > * { margin-left: 22px; }
+
+/* ---------- reporting tree ---------- */
+.hjsatt .att-rt { margin-left: 16px; padding-left: 14px; border-left: 1px solid #e5e7eb; }
+.hjsatt .att-rtrow { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+.hjsatt .att-rtrow .cnt2 { font-size: 11px; background: #eff4ff; color: #2563eb;
+  padding: 1px 7px; border-radius: 5px; font-weight: 650; }
+
+/* ---------- collapsible group ---------- */
+.hjsatt .att-grp { width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px; background: #fff; }
+.hjsatt .att-grp:hover { background: #fafbfc; }
+.hjsatt .att-grp .t { font-weight: 700; font-size: 14.5px; }
+.hjsatt .att-grp .chev { color: #475467; font-size: 15px; width: 18px; text-align: center;
+  line-height: 1; transition: transform .15s; }
+.hjsatt .att-grp:hover .chev { color: #2563eb; }
+.hjsatt .att-mini { display: flex; gap: 5px; flex-wrap: wrap; }
+.hjsatt .att-mini span { font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 5px; }
+
+/* ---------- org tree ---------- */
+.hjsatt .att-tree { display: flex; flex-direction: column; gap: 10px; }
+.hjsatt .att-tnode { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
+.hjsatt .att-thead { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid #f1f2f4; }
+.hjsatt .att-thead .nm { font-weight: 700; font-size: 15px; }
+.hjsatt .att-tmem { display: flex; align-items: center; gap: 10px; padding: 9px 14px 9px 26px;
+  border-top: 1px solid #f6f7f8; position: relative; }
+.hjsatt .att-tmem:before { content: ""; position: absolute; left: 14px; top: 0; bottom: 50%;
+  width: 1px; background: #e5e7eb; }
+.hjsatt .att-tmem:after { content: ""; position: absolute; left: 14px; top: 50%;
+  width: 7px; height: 1px; background: #e5e7eb; }
+.hjsatt .att-tmem .dz { font-size: 12px; color: #6b7280; }
+.hjsatt .att-chip { font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 5px;
+  background: #eff4ff; color: #2563eb; }
+
+/* ---------- leave summary ---------- */
+.hjsatt .att-lvgrid { display: grid; gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); }
+.hjsatt .att-lv { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 15px; }
+.hjsatt .att-lv h4 { font-size: 14.5px; font-weight: 650; text-align: center; }
+.hjsatt .att-lvic { width: 52px; height: 52px; border-radius: 12px; margin: 15px auto;
+  display: flex; align-items: center; justify-content: center; font-size: 21px; }
+.hjsatt .att-lv hr { border: 0; border-top: 1px solid #eaecf0; margin: 0 0 9px; }
+.hjsatt .att-lvrow { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; }
+.hjsatt .att-lvrow b { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px) {
+  .hjsatt .att-track, .hjsatt .att-axis { display: none; }
+  .hjsatt .att-dt { width: 72px; }
+  .hjsatt .att-checkbtn { margin-left: 0; width: 100%; }
+}
+`;
+
+/* ========================= helpers ========================= */
+const fmtTime = (ts: any) =>
+  ts ? new Date(ts).toLocaleTimeString(IST, { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }) : "—";
+const fmtDate = (d: any) =>
+  d ? new Date(d).toLocaleDateString(IST, { day: "2-digit", month: "short", timeZone: TZ }) : "—";
+const fmtHM = (t: any) => {
+  if (!t) return "—";
+  const [h, m] = String(t).split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  const hh = h % 12 || 12;
+  return m ? `${hh}:${String(m).padStart(2, "0")} ${ap}` : `${hh}:00 ${ap}`;
 };
-const FONT = "'Plus Jakarta Sans','Inter',system-ui,-apple-system,sans-serif";
-
-const BRANCH_NAMES = {
-  MOH: 'Mohali Showroom',
-  CHD: 'Head Office',
-  GGN: 'Gurgaon',
-  NCR: 'Delhi NCR',
-  NOD: 'Noida Showroom',
-  LDH: 'Ludhiana',
-  JAL: 'Jalandhar',
-  JPR: 'Jaipur',
-  LKO: 'Lucknow',
-  NWD: 'North West Delhi',
-  JKP: 'Janakpuri',
-};
-const branchLabel = (code) => BRANCH_NAMES[code] || code;
-
-/* Store managers (branch → name) */
-const STORE_MANAGERS = {
-  GGN: 'Hemant - 9773641804',
-  CHD: 'Niranjan - 9811069030',
-  NCR: 'Dharmendra Singh - 9315573166',
-  LDH: 'Gursajan - 8360687306',
-  JPR: 'Niraj Kumar - 8340710549',
-  LKO: 'Mohd. Akhlaque - 7080809820',
-  NWD: 'Nitin - 7007413101',
-  NOD: 'Ravi Saini - 9759302924',
-  JAL: 'Bhupinder - 8558892244',
-  MOH: 'Sumita - 7814327703',
-  JKP: 'Rajan - 8595353451',
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// "14:30" mein minute jodo -> "15:30"
+const addMins = (hm: string, mins: number) => {
+  const [h, m] = String(hm).split(":").map(Number);
+  const t = (h * 60 + m + mins + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 };
 
-/* Delivery persons store-wise. MOH shares CHD, NOD shares NCR. */
-const DP = {
-  CHD: [
-    'Ghola Singh - 8360758647',
-    'Sanjay - 6239650644',
-    'Niranjan - 9811069030',
-    'Vikas - 8433051048',
-    'MBC',
-  ],
-  NCR: [
-    'Shiva - 7303916944',
-    'Sonu Sharma - 8447292843',
-    'Dinesh - 9899755760',
-    'Pradeep Kharwar - 9760629197',
-    'Sikandar - 9821646171',
-    'Gauri - 9871648466',
-    'Arvind - 7210669844',
-    'Akhilesh - 7979800642',
-    'Yogendra - 9654210670',
-    'Safiq - 9798464058',
-    'Arvind (Auto) - 9873787803',
-    'MBC',
-  ],
-  GGN: [
-    'Hemant - 9773641804',
-    'Amit - 9934973249',
-    'Arjun - 7042496461',
-    'Gunjan Kumar - 7632972410',
-    'MBC',
-  ],
-  LDH: [
-    'Gursajan - 8360687306',
-    'Jagmeet - 8427278408',
-    'Shubham Soni - 7681918859',
-    'MBC',
-  ],
-  JAL: [
-    'Bhupinder - 8558892244',
-    'Karandeep - 9041285784',
-    'Neeraj - 9056735883',
-    'Jasmeet - 7696709951',
-    'MBC',
-  ],
-  JPR: [
-    'Mandeep - 9216854824',
-    'Brijesh - 7742582403',
-    'Niraj Kumar - 8340710549',
-    'Shubham Sharma - 7891585998',
-    'MBC',
-  ],
-  LKO: [
-    'Aleem - 6306373637',
-    'Sharique - 7525941591',
-    'Junaid - 7905950247',
-    'Mohd. Akhlaque - 7080809820',
-    'MBC',
-  ],
-  NWD: [
-    'Rahul Kumar - 8750245247',
-    'Rahul - 9359521911',
-    'Nitin Singh - 7007413101',
-    'Karan Gupta - 7838465084',
-    'Uday - 8595759588',
-    'MBC',
-  ],
-  JKP: [
-    'Monu - 8766395642',
-    'Nitish - 9911814167',
-    'Rajankumar Jha - 8595353451',
-    'Anil - 8178680581',
-    'MBC',
-  ],
-};
-const DELIVERY_PERSONS = { ...DP, MOH: DP.CHD, NOD: DP.NCR };
-const personsFor = (branch, current) => {
-  const list = (DELIVERY_PERSONS[branch] || ['MBC']).slice();
-  if (current && !list.includes(current)) list.unshift(current);
-  return list;
-};
+// abhi ka time HH:MM, IST mein
+const nowHM = () =>
+  new Date().toLocaleTimeString("en-GB", {
+    timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false });
 
-const VEHICLES = ['Auto-Rikshaw', 'Bike', 'Champion', 'Porter', 'Other'];
-const PAY_OPTIONS = [
-  'Cash',
-  'Cheque',
-  'Nil',
-  'QR',
-  'Through Link',
-  'Cash & Online (Both)',
-];
-
-/* ══════════════════════════════════════════════════════════════════════
-   LOGIN  ── store dropdown se choose karke store-wise password daalo.
-   Head login se saare stores dikhte hain.
-   ══════════════════════════════════════════════════════════════════════ */
-const STORE_ORDER = [
-  'MOH',
-  'CHD',
-  'GGN',
-  'NCR',
-  'NOD',
-  'LDH',
-  'JAL',
-  'JPR',
-  'LKO',
-  'NWD',
-  'JKP',
-];
-/* NOTE: passwords ab client mein NAHI hain — DB (app_staff) mein hain aur
-   Supabase RPC verify karta hai. Ye sirf session object banata hai. */
-function sessionFor(branch) {
-  const isHead = branch === 'ALL';
-  return {
-    branch,
-    authStore: branch,
-    isHead,
-    name: isHead ? 'All stores' : branchLabel(branch),
-    storeName: isHead ? 'All stores' : branchLabel(branch),
+const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+const hhmm = (mins: number | null) => {
+  const m = Math.max(0, Math.round(mins || 0));
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+};
+const hms = (mins: number | null) => {
+  const t = Math.max(0, Math.floor((mins || 0) * 60));
+  return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((n) => String(n).padStart(2, "0"));
+};
+const greetWord = () => {
+  const h = Number(new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: TZ }));
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+};
+const pillClass = (s: string) => {
+  const map: Record<string, string> = {
+    Present: "p-Present", Late: "p-Late", "Half Day": "p-HalfDay", Absent: "p-Absent",
+    Leave: "p-Leave", Holiday: "p-Off", "Week Off": "p-Off",
+    Approved: "p-Approved", Pending: "p-Pending", Rejected: "p-Rejected", Cancelled: "p-Off",
   };
-}
-
-/* ── STAGES ────────────────────────────────────────────────────────────── */
-const STAGES = [
-  {
-    id: 'new',
-    label: 'New Delivery',
-    short: 'New Job',
-    status: 'New Delivery',
-    color: T.slate,
-    soft: T.slateSoft,
-  },
-  {
-    id: 'talked',
-    label: 'Talked to Customer',
-    short: 'Contacted',
-    status: 'Talked To Customer',
-    color: T.blue,
-    soft: T.blueSoft,
-  },
-  {
-    id: 'scheduled',
-    label: 'Delivery Scheduled',
-    short: 'Scheduled',
-    status: 'Delivery Scheduled',
-    color: T.amber,
-    soft: T.amberSoft,
-  },
-  {
-    id: 'dispatched',
-    label: 'Out for Delivery',
-    short: 'Dispatched',
-    status: 'Out For Delivery',
-    color: T.violet,
-    soft: T.violetSoft,
-  },
-  {
-    id: 'delivered',
-    label: 'Item Delivered',
-    short: 'Delivered',
-    status: 'Item Delivered',
-    color: T.green,
-    soft: T.mint,
-  },
-];
-const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
-
-// peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
-const STAGE_COLS = {
-  talked: { confirmed_date: null, confirmed_time: null, stage1_remarks: null },
-  scheduled: {
-    app_delivery_person: null,
-    app_vehicle: null,
-    item_inspected: false,
-    photo_inspected: null,
-    stage3_remarks: null,
-  },
-  dispatched: { app_eta: null },
-  delivered: {
-    item_delivered: false,
-    photo_delivered: null,
-    amount_collected: 0,
-    amount_type: null,
-    security_collected: 0,
-    security_type: null,
-    stage4_remarks: null,
-  },
+  return `att-pill ${map[s] || "p-Off"}`;
 };
-function clearAhead(toStage) {
-  const t = stageIndex(toStage);
-  let patch = {};
-  STAGES.forEach((s, i) => {
-    if (i > t && STAGE_COLS[s.id]) patch = { ...patch, ...STAGE_COLS[s.id] };
-  });
-  return patch;
-}
-
-/* ── Bhasha (EN / हिं) — sirf staff app ke stage naam + action buttons.
-   Tracker hamesha English rehta hai. Choice localStorage mein yaad rehti hai. */
-const HINDI = {
-  new: { label: 'Nayi Delivery', short: 'Nayi Delivery' },
-  talked: { label: 'Customer se baat hui', short: 'Baat hui' },
-  scheduled: { label: 'Ladka aur gaadi arrange hui', short: 'Arrange hui' },
-  dispatched: { label: 'Order raaste mein hai', short: 'Raaste mein' },
-  delivered: { label: 'Hisaab-kitaab ho gaya', short: 'Ho gaya' },
-};
-const HINDI_MOVE = {
-  talked: 'Customer se baat karo',
-  scheduled: 'Ladka aur gaadi arrange karo',
-  dispatched: 'Order ko bhejo',
-  delivered: 'Order ka hisaab lo',
-};
-let HJS_LANG = 'en';
-try {
-  if (typeof localStorage !== 'undefined')
-    HJS_LANG = localStorage.getItem('hjsLang') === 'hi' ? 'hi' : 'en';
-} catch (_) {}
-function setHjsLang(l) {
-  HJS_LANG = l === 'hi' ? 'hi' : 'en';
-  try {
-    if (typeof localStorage !== 'undefined')
-      localStorage.setItem('hjsLang', HJS_LANG);
-  } catch (_) {}
-}
-// stage ka poora naam (Hindi on toggle; closed stages hamesha English)
-function sLabel(id) {
-  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].label : stageMeta(id).label;
-}
-// stage ka chhota naam
-function sShort(id) {
-  return HJS_LANG === 'hi' && HINDI[id] ? HINDI[id].short : stageMeta(id).short;
-}
-// "Move to X" button text
-function moveText(id) {
-  if (HJS_LANG === 'hi' && HINDI_MOVE[id]) return HINDI_MOVE[id];
-  const s = STAGES[stageIndex(id)];
-  return `Move to ${s ? s.short : ''}`;
-}
-// timeline event ki line (Hindi on toggle)
-function eventLine(ev) {
-  if (HJS_LANG !== 'hi') return `${ev.action} ${ev.label}`;
-  const label = HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
-  const verb =
-    ev.action === 'Edited'
-      ? 'edit kiya'
-      : ev.action === 'Marked as'
-        ? 'mark kiya'
-        : 'pe pahuncha';
-  return `${label} ${verb}`;
-}
-const stageToStatus = (id) =>
-  (STAGES.find((s) => s.id === id) || {}).status || 'New Delivery';
-function statusToStage(s) {
-  const t = String(s || '').toLowerCase();
-  if (t.includes('delet')) return 'deleted'; // "Deleted" — 'deliver' se alag
-  if (t.includes('duplicate')) return 'duplicate';
-  if (t.includes('renew')) return 'renewal';
-  if (t.includes('cancel')) return 'cancelled';
-  if (t.includes('new')) return 'new'; // "New Delivery" — 'deliver' se pehle check zaroori
-  // NOTE: "Out For Delivery" mein bhi 'deliver' aata hai — isliye ye pehle
-  if (t.includes('out for') || t.includes('dispatch')) return 'dispatched';
-  if (t.includes('schedul')) return 'scheduled';
-  if (t.includes('inspect')) return 'scheduled'; // inspection ab Scheduled ka part hai
-  if (t.includes('deliver')) return 'delivered';
-  if (t.includes('talk')) return 'talked';
-  return 'new'; // naya / unknown record → New Delivery
-}
-
-/* Pickup ke statuses delivery se alag hain ("Contacted", "Picked Up",
-   "Rescheduled"...), isliye customer tracker ke liye alag mapper. */
-function pickupStage(st) {
-  const t = String(st || '').toLowerCase();
-  if (t.includes('delet')) return 'deleted';
-  if (t.includes('cancel')) return 'cancelled';
-  if (t.includes('reschedul')) return 'new'; // 'schedul' se pehle
-  if (t.includes('picked')) return 'delivered';
-  if (t.includes('out for')) return 'dispatched';
-  if (t.includes('schedul')) return 'scheduled';
-  if (t.includes('contact')) return 'talked';
-  return 'new';
-}
-const isResched = (st) => /reschedul/i.test(String(st || ''));
-
-/* ── CLOSED STATES ──────────────────────────────────────────────────────
-   Cancelled / Duplicate / Renewal — teeno "closed" hain: active pipeline se
-   hat jaati hain, apne color mein dikhti hain, aur drawer khol ke pata lag
-   jaata hai. Status column mein hi likha jaata hai (koi naya column nahi). */
-const CLOSED = {
-  cancelled: {
-    id: 'cancelled',
-    label: 'Cancelled',
-    short: 'Cancelled',
-    color: T.red,
-    soft: T.redSoft,
-    title: 'This order has been cancelled',
-    note: 'Zoho Books se cancel hua hai. Stages edit nahi ho sakti — bas record ke liye dikha rahe hain.',
-    cust: 'This order has been cancelled. Please contact the store for any questions.',
-  },
-  duplicate: {
-    id: 'duplicate',
-    label: 'Duplicate Invoice',
-    short: 'Duplicate',
-    color: T.slate,
-    soft: T.slateSoft,
-    title: 'Marked as duplicate invoice',
-    note: 'Store manager ne isse duplicate invoice mark kiya hai — active delivery list se hata diya gaya hai.',
-    cust: 'This entry has been marked as a duplicate invoice. Please contact the store for any questions.',
-  },
-  renewal: {
-    id: 'renewal',
-    label: 'Renewal Invoice',
-    short: 'Renewal',
-    color: T.blue,
-    soft: T.blueSoft,
-    title: 'Marked as renewal invoice',
-    note: 'Store manager ne isse renewal invoice mark kiya hai — active delivery list se hata diya gaya hai.',
-    cust: 'This is a renewal invoice. Please contact the store for any questions.',
-  },
-  // deleted = soft delete. Row Supabase mein rehti hai (status="Deleted"),
-  // par app ke saare views se hata di jaati hai (scoped filter mein).
-  deleted: {
-    id: 'deleted',
-    label: 'Deleted',
-    short: 'Deleted',
-    color: T.slate,
-    soft: T.slateSoft,
-    title: 'This entry was deleted',
-    note: 'Head ne isse delete kiya hai — Supabase mein record ke liye rakha gaya hai.',
-    cust: 'This order is no longer active. Please contact the store for any questions.',
-  },
-};
-const CLOSED_STATUS = {
-  cancelled: 'Cancelled Invoice',
-  duplicate: 'Duplicate Invoice',
-  renewal: 'Renewal Invoice',
-};
-const isClosedStage = (s) =>
-  s === 'cancelled' || s === 'duplicate' || s === 'renewal' || s === 'deleted';
-/* stage id → meta (STAGES ya CLOSED dono cover). Card/list ke colors ke liye. */
-function stageMeta(id) {
-  const s = STAGES[stageIndex(id)];
-  if (s) return s;
-  if (CLOSED[id]) return CLOSED[id];
-  return STAGES[0];
-}
-const stageColorOf = (id) => stageMeta(id).color;
-
-/* Drawer mein agli stage ke liye simple prompt (next stage id → message) */
-const STAGE_HINT = {
-  new: 'Delivery shuru karo',
-  talked: 'Customer se baat karke Contacted bharo',
-  scheduled: 'Delivery schedule karke details bharo',
-  dispatched: 'Item nikal gaya — estimated time bharo',
-  delivered: 'Item deliver karke amount bharo',
+const markClass = (m: string) =>
+  `att-mark m-${["P", "L", "H", "A", "W", "F"].includes(m) ? m : "X"}`;
+const stateColor: Record<string, string> = {
+  In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
 
-function deriveBranch(r) {
-  if (r.store_code && String(r.store_code).trim() && r.store_code !== 'null')
-    return String(r.store_code).trim().toUpperCase();
-  if (r.branch_code && String(r.branch_code).trim() && r.branch_code !== 'null')
-    return String(r.branch_code).trim().toUpperCase();
-  if (r.invoice_number)
-    return String(r.invoice_number).split('/')[0].trim().toUpperCase();
-  return '—';
-}
-function clean(v) {
-  return v !== null && v !== undefined && v !== 'null' && v !== ''
-    ? String(v)
-        .replace(/\s*\n+\s*/g, ', ')
-        .trim()
-    : '';
-}
-function equipmentText(r) {
-  let li = r.line_items;
-  // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo.
-  // NOTE: naye project mein line_items jsonb hai; track RPC ::text cast karti
-  // hai to wo "Oxymed..." (quotes ke saath) aati hai. '"' waali ko bhi parse
-  // karo taaki quotes hat jaayein.
-  if (typeof li === 'string') {
-    const t = li.trim();
-    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
-      try {
-        li = JSON.parse(t);
-      } catch (_) {}
-    }
-  }
-  if (Array.isArray(li)) {
-    const names = li
-      .map((x) => {
-        if (typeof x === 'string') return x;
-        if (x && x.name) {
-          const q = Number(x.quantity) || 0;
-          return q > 1 ? `${x.name} × ${q}` : x.name;
-        }
-        return '';
-      })
-      .filter(Boolean);
-    if (names.length) return names.join(', ');
-  } else if (typeof li === 'string' && li.trim() && li !== 'null') {
-    return li;
-  }
-  if (r.item_name && r.item_name !== 'null') {
-    const t = String(r.item_name)
-      .split('|')
-      .map((s) => s.split(' x')[0].trim())
-      .filter(Boolean)
-      .join(', ');
-    if (t) return t;
-  }
-  return 'Equipment';
-}
-/* line_items ko array of item-names mein todo (track page ki bullet list) */
-function equipmentList(r) {
-  let li = r.line_items;
-  if (typeof li === 'string') {
-    const t = li.trim();
-    if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
-      try {
-        li = JSON.parse(t);
-      } catch (_) {}
-    }
-  }
-  if (Array.isArray(li)) {
-    const names = li
-      .map((x) => {
-        if (typeof x === 'string') return x;
-        if (x && x.name) {
-          const q = Number(x.quantity) || 0;
-          return q > 1 ? `${x.name} × ${q}` : x.name;
-        }
-        return '';
-      })
-      .filter(Boolean);
-    if (names.length) return names;
-  }
-  if (typeof li === 'string' && li.trim() && li !== 'null') {
-    return li
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-  if (r.item_name && r.item_name !== 'null') {
-    const parts = String(r.item_name)
-      .split('|')
-      .map((s) => s.split(' x')[0].trim())
-      .filter(Boolean);
-    if (parts.length) return parts;
-  }
-  return ['Equipment'];
-}
-function equipIcon(text) {
-  const t = String(text || '').toLowerCase();
-  if (t.includes('oxygen') || t.includes('concentrat')) return Wind;
-  if (t.includes('bed')) return BedDouble;
-  if (t.includes('wheel')) return Accessibility;
-  if (t.includes('cpap') || t.includes('bipap')) return Stethoscope;
-  return Package;
-}
-function fmtDateTime(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d)) return String(iso);
-  return d.toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-const show = (v) =>
-  v !== null && v !== undefined && v !== '' && v !== 'null' ? String(v) : '—';
+const letterOf = (st: string) => ({
+  Present: "P", Late: "L", "Half Day": "H", Absent: "A", "Week Off": "W", Holiday: "F",
+} as Record<string, string>)[st] || (st ? st[0] : "-");
+const MK_TINT: Record<string, [string, string]> = {
+  P: ["#ecfdf3", "#067647"], L: ["#fffaeb", "#b54708"], H: ["#fff6ed", "#c4320a"],
+  A: ["#fef3f2", "#b42318"], W: ["#f2f4f7", "#475467"], F: ["#f2f4f7", "#475467"],
+};
+const monthStart = (iso: string) => iso.slice(0, 8) + "01";
+const shiftMonth = (iso: string, n: number) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setMonth(d.getMonth() + n, 1);
+  return ymd(d);
+};
+const lastDayOf = (iso: string) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setMonth(d.getMonth() + 1, 0);
+  return ymd(d);
+};
 
-/* customer-friendly date/time */
-function niceDate(d) {
-  if (!d || d === 'null') return null;
-  const x = new Date(d);
-  if (isNaN(x)) return String(d);
-  return x.toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-function niceTime(t) {
-  if (!t || t === 'null') return null;
-  const parts = String(t).split(':');
-  if (parts.length < 2) return String(t);
-  let hh = parseInt(parts[0], 10);
-  if (isNaN(hh)) return String(t);
-  const ap = hh >= 12 ? 'PM' : 'AM';
-  hh = hh % 12 || 12;
-  return `${hh}:${parts[1]} ${ap}`;
-}
-
-/* datetime (YYYY-MM-DD HH:MM ya ...THH:MM) → "17 Jul 2026, 3:30 PM" */
-function niceDateTime(v) {
-  if (!v || v === 'null') return null;
-  const t = String(v).replace(' ', 'T');
-  const d = niceDate(t.slice(0, 10));
-  const tm = niceTime(t.slice(11, 16));
-  if (!d && !tm) return String(v);
-  return [d, tm].filter(Boolean).join(', ');
-}
-/* poori date + 12-ghante ka time — "23 Jul 2026, 5:43 PM" */
-function fmtFullDateTime(ts) {
-  if (!ts) return null;
-  const d = new Date(ts);
-  if (isNaN(d)) return String(ts);
-  return d.toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
-/* datetime-local input ke liye value: YYYY-MM-DDTHH:MM */
-function toLocalInput(v) {
-  if (!v || v === 'null') return '';
-  return String(v).replace(' ', 'T').slice(0, 16);
-}
-
-/* app-controlled timeline: each move/edit logs an event with the fields entered */
-function stageFields(toStage, f) {
-  const rmk = f.remarks ? { Remarks: f.remarks } : {};
-  if (toStage === 'new') return {};
-  if (toStage === 'talked')
-    return {
-      Date: f.date ? niceDate(f.date) || f.date : '—',
-      Time: f.time ? niceTime(f.time) || f.time : '—',
-      ...rmk,
-    };
-  if (toStage === 'scheduled')
-    return {
-      'Delivery person': f.person || '—',
-      Vehicle: f.vehicle || '—',
-      Inspected: f.inspected ? 'Yes' : 'No',
-      ...rmk,
-    };
-  if (toStage === 'dispatched')
-    return {
-      'Estimated arrival': f.eta ? niceDateTime(f.eta) || f.eta : '—',
-      ...rmk,
-    };
-  if (toStage === 'delivered')
-    return {
-      Delivered: f.delivered ? 'Yes' : 'No',
-      Amount: `₹${f.amount || 0} · ${f.amountType || '—'}`,
-      Security: `₹${f.security || 0} · ${f.securityType || '—'}`,
-      ...rmk,
-    };
-  return {};
-}
-/* ── Kaun kar raha hai ─────────────────────────────────────────────────
-   Har app_log event ke saath login ka store + us store ka manager stamp
-   hota hai, taaki Activity log mein "kisne kiya" dikh sake. Koi naya
-   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai.
-   NOTE: login store-level hai, isliye actor = store (+ manager ka naam).
-   Person-level chahiye to app_staff mein per-user logins banane padenge. */
-let ACTOR = { by: null, byName: null };
-function setActor(session) {
-  if (!session) {
-    ACTOR = { by: null, byName: null };
-    return;
-  }
-  const code = session.authStore || session.branch;
-  ACTOR = {
-    by: code,
-    byName:
-      code === 'ALL'
-        ? 'Head office'
-        : STORE_MANAGERS[code] || branchLabel(code),
-  };
-}
-function actorStamp() {
-  return { by: ACTOR.by || null, by_name: ACTOR.byName || null };
-}
-/* purani entries mein by/by_name nahi hoga — wahan honest "record nahi" */
-function actorText(ev) {
-  if (!ev) return 'Record nahi';
-  const name = ev.by_name || ev.byName || '';
-  const code = ev.by || '';
-  if (!name && !code) return 'Record nahi (purana update)';
-  if (code === 'ALL') return name || 'Head office';
-  return name ? `${name} · ${branchLabel(code)}` : branchLabel(code);
-}
-
-function makeEvent(toStage, fields, mode) {
-  return {
-    ts: new Date().toISOString(),
-    stage: toStage,
-    label: (STAGES[stageIndex(toStage)] || {}).label || toStage,
-    action: mode === 'edit' ? 'Edited' : 'Moved to',
-    fields: stageFields(toStage, fields || {}),
-    ...actorStamp(),
-  };
-}
-/* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
-function makeClosedEvent(flag, remarks) {
-  return {
-    ts: new Date().toISOString(),
-    stage: flag,
-    label: (CLOSED[flag] || {}).label || flag,
-    action: 'Marked as',
-    fields: remarks ? { Remarks: remarks } : {},
-    ...actorStamp(),
-  };
-}
-const existingLog = (d) =>
-  d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
-
-/* cancelled order: cancel hone se theek pehle jo aakhri (latest) stage set thi.
-   NOTE: max NAHI lete — app_log mein aage-peeche move ho sakta hai, isliye
-   sabse last event hi asli "current" stage hai jab cancel hua. */
-function reachedIdxFromLog(log) {
-  if (Array.isArray(log) && log.length) {
-    for (let i = log.length - 1; i >= 0; i--) {
-      const si = stageIndex(log[i] && log[i].stage);
-      if (si >= 0) return si;
-    }
-  }
-  return 0; // koi log nahi → New
-}
-
-/* ── Today vs Archived ─────────────────────────────────────────────────
-   Today = sirf aaj create hui entries (kisi bhi stage). Archived = sab.   */
-function isToday(ts) {
-  if (!ts) return false;
-  const d = new Date(ts);
-  if (isNaN(d)) return false;
-  const n = new Date();
+function RangeBar({ range, setRange }: any) {
+  const today = istToday();
+  const presets: [string, () => any][] = [
+    ["This month", () => ({ from: monthStart(today), to: today })],
+    ["Last month", () => {
+      const p = shiftMonth(monthStart(today), -1);
+      return { from: p, to: lastDayOf(p) };
+    }],
+    ["Last 7 days", () => {
+      const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() - 6);
+      return { from: ymd(d), to: today };
+    }],
+    ["This year", () => ({ from: today.slice(0, 4) + "-01-01", to: today })],
+  ];
+  const match = (r: any) => presets.find(([, f]) => {
+    const v = f(); return v.from === r.from && v.to === r.to;
+  })?.[0];
+  const active = match(range);
   return (
-    d.getFullYear() === n.getFullYear() &&
-    d.getMonth() === n.getMonth() &&
-    d.getDate() === n.getDate()
+    <div className="att-range">
+      <div className="qk">
+        {presets.map(([label, f]) => (
+          <button key={label} className={active === label ? "on" : ""}
+            onClick={() => setRange(f())}>{label}</button>
+        ))}
+      </div>
+      <div className="att-flex" style={{ marginLeft: "auto" }}>
+        <input type="date" value={range.from} max={range.to}
+          onChange={(e) => setRange({ ...range, from: e.target.value })} />
+        <span className="att-muted">to</span>
+        <input type="date" value={range.to} min={range.from}
+          onChange={(e) => setRange({ ...range, to: e.target.value })} />
+      </div>
+    </div>
   );
 }
-/* Supabase created time — row jab create hui. Agar tumhare table mein column
-   ka naam alag ho (e.g. created_time), ye list usko bhi cover karti hai. */
-function createdTs(x) {
-  const r = (x && x._raw) || {};
+
+function DayListSheet({ title, rows, onClose }: any) {
   return (
-    r.created_at ||
-    r.created_time ||
-    r.inserted_at ||
-    r.synced_at ||
-    x.synced_at ||
-    r.updated_at ||
-    null
+    <Sheet title={title} onClose={onClose}>
+      <div className="att-list">
+        {!rows.length && <p className="att-empty">Nothing in this range.</p>}
+        {rows.map((r: any) => {
+          const L = letterOf(r.status);
+          const [bg, fg] = MK_TINT[L] || ["#eff8ff", "#175cd3"];
+          return (
+            <div className="att-row" key={r.work_date}>
+              <span style={{ width: 92, fontWeight: 650 }}>
+                {new Date(r.work_date + "T00:00:00").toLocaleDateString("en-GB",
+                  { day: "2-digit", month: "short" })}
+              </span>
+              <span className="att-mk" style={{ background: bg, color: fg }}>{L}</span>
+              <span className="grow att-muted">
+                {r.punch_in_at ? `${fmtTime(r.punch_in_at)} – ${fmtTime(r.punch_out_at)}` : "—"}
+              </span>
+              <b>{hhmm(r.worked_minutes)}</b>
+            </div>
+          );
+        })}
+      </div>
+      <p className="att-muted" style={{ marginTop: 10 }}>{rows.length} day(s)</p>
+    </Sheet>
   );
 }
-/* delivery kab hui — app_log ke aakhri 'delivered' event se. Fallback updated_at */
-function deliveredTs(x) {
-  const r = (x && x._raw) || {};
-  const log = Array.isArray(r.app_log) ? r.app_log : [];
-  for (let i = log.length - 1; i >= 0; i--) {
-    if (log[i] && log[i].stage === 'delivered' && log[i].ts) return log[i].ts;
+
+const AV_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
+const Avatar = ({ name, lg }: any) => {
+  const n = String(name || "?");
+  const initials = n.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  let h = 0; for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 997;
+  return <div className={`att-av ${lg ? "lg" : ""}`} style={{ background: AV_COLORS[h % AV_COLORS.length] }}>{initials}</div>;
+};
+
+const ICONS: Record<string, string> = {
+  home: "M3 10.5 12 3l9 7.5M5 9.8V20h14V9.8",
+  clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  cal: "M8 3v3M16 3v3M3.5 9h17M4.5 5.5h15v15h-15z",
+  check: "m4.5 12.5 5 5 10-11",
+  users: "M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20M9 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 20v-1.5a4 4 0 0 0-3-3.8M16.5 3.7a4 4 0 0 1 0 6.9",
+  user: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+  pencil: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
+  dots: "M5 12h.01M12 12h.01M19 12h.01",
+};
+const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
+    strokeWidth={n === "dots" ? 2.6 : 1.9} strokeLinecap="round" strokeLinejoin="round">
+    <path d={ICONS[n]} />
+  </svg>
+);
+
+const mapUrl = (lat: any, lng: any) => `https://www.google.com/maps?q=${lat},${lng}`;
+
+const Pin = ({ lat, lng, dist, ok, label }: any) => {
+  if (lat == null || lng == null)
+    return <span className="att-pin none">no location</span>;
+  return (
+    <a className={`att-pin ${ok === false ? "far" : "ok"}`} href={mapUrl(lat, lng)}
+      target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+      title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}>
+      ◉ {label || (dist == null ? "map" : `${dist} m`)}
+    </a>
+  );
+};
+
+const isMobile = () =>
+  /Android|iPhone|iPad|iPod|Windows Phone|webOS|Mobile/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
+
+const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const once = (opts: PositionOptions): Promise<GeolocationPosition> =>
+  new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, opts));
+
+const GPS_HELP = () => isIOS()
+  ? "Turn on Settings → Privacy & Security → Location Services, and allow location for your browser."
+  : "Pull down the notification shade and turn on Location, then tap Check-in again.";
+
+// Pehle network/wifi wali fast location (GPS band ho tab bhi chalti hai),
+// phir GPS se refine. Isse zyadatar bar pehli hi koshish mein mil jati hai.
+const getPosition = async (): Promise<GeolocationPosition> => {
+  if (!navigator.geolocation) throw new Error("Location isn't supported on this device");
+
+  try {
+    const perm: any = (navigator as any).permissions
+      && await (navigator as any).permissions.query({ name: "geolocation" });
+    if (perm && perm.state === "denied")
+      throw new Error("PERM");
+  } catch (e: any) {
+    if (e?.message === "PERM")
+      throw new Error("Location is blocked for this site. Allow it in your browser settings, then try again.");
   }
-  return r.updated_at || null;
-}
-function inView(x, viewMode, vFrom, vTo) {
-  const st = x.stage;
-  // pending = abhi kaam baaki
-  const pending = st !== 'delivered' && !isClosedStage(st);
-  if (viewMode === 'archived') {
-    // Archived (all time) = ho-chuki entries: Delivered + Cancelled waghera
-    return !pending;
+
+  // 1) fast, low accuracy, thoda purana fix bhi chalega
+  try {
+    return await once({ enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
+  } catch (e: any) {
+    if (e?.code === 1)
+      throw new Error("Location permission is blocked. Allow it for this site, then try again.");
   }
-  if (viewMode === 'today') {
-    // Today (kaam waala view):
-    //   - saari pending (chahe purani ho)
-    //   - jo aaj create hui
-    //   - jo AAJ complete hui (purani entry bhi)
-    return (
-      pending ||
-      isToday(createdTs(x)) ||
-      (st === 'delivered' && isToday(deliveredTs(x)))
-    );
+
+  // 2) GPS se, zyada time dekar
+  try {
+    return await once({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  } catch (e: any) {
+    if (e?.code === 1)
+      throw new Error("Location permission is blocked. Allow it for this site, then try again.");
   }
-  // yesterday / month / custom — date range ke hisaab se: jo us duration mein
-  // aayi ya us duration mein complete hui. Pending purani entries yahan nahi
-  // aatin (wo Today mein dikhti hain).
-  const [s, e] = viewBounds(viewMode, vFrom, vTo);
-  const cd = dayStr(createdTs(x));
-  const dd = st === 'delivered' ? dayStr(deliveredTs(x)) : '';
-  return (cd && cd >= s && cd <= e) || (dd && dd >= s && dd <= e);
-}
-/* view dropdown ke liye [start, end] — dayStr/todayStr neeche define hain
-   par hoisted functions hain, isliye yahan use kar sakte hain. */
-/* dropdown ka chhota label — live chip mein dikhta hai */
-function viewLabel(mode) {
-  if (mode === 'archived') return 'Archived';
-  if (mode === 'yesterday') return 'Yesterday';
-  if (mode === 'month') return 'This month';
-  if (mode === 'custom') return 'Custom';
-  return 'Today';
-}
-function viewBounds(mode, vFrom, vTo) {
-  const t = new Date();
-  t.setHours(0, 0, 0, 0);
-  if (mode === 'yesterday') {
-    const y = new Date(t);
-    y.setDate(y.getDate() - 1);
-    return [dayStr(y), dayStr(y)];
+
+  // 3) aakhri koshish — kuch bhi mil jaye
+  try {
+    return await once({ enableHighAccuracy: false, timeout: 25000, maximumAge: 600000 });
+  } catch {
+    throw new Error("Location is off. " + GPS_HELP());
   }
-  if (mode === 'month') {
-    const s = new Date(t.getFullYear(), t.getMonth(), 1);
-    return [dayStr(s), dayStr(t)];
-  }
-  if (mode === 'custom') return [vFrom || dayStr(t), vTo || dayStr(t)];
-  return [dayStr(t), dayStr(t)];
+};
+
+const downloadCsv = (rows: any[], filename: string) => {
+  if (!rows.length) return;
+  const cols = Object.keys(rows[0]);
+  const csv = [cols.join(","), ...rows.map((r) => cols.map((c) => `"${r[c] ?? ""}"`).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+};
+
+// Har second sirf ye chhota component re-render hota hai, poori screen nahi.
+function LiveClock({ startedAt, baseMinutes = 0, boxes = true }: any) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const t = setInterval(() => tick((x: number) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+
+  const mins = baseMinutes +
+    (startedAt ? (Date.now() - new Date(startedAt).getTime()) / 60000 : 0);
+  const [h, m, sec] = hms(mins);
+  if (!boxes) return <>{h}:{m}:{sec}</>;
+  return <div className="att-hms"><i>{h}</i><u>:</u><i>{m}</i><u>:</u><i>{sec}</i></div>;
 }
 
-/* stat categories jinpe collapsible entries khulti hain.
-   NOTE: "Total Deliveries" ab yahan se hata diya — wo count Header ke
-   "Today/Archived · Total deliveries · N" chip mein dikhta hai. Pending +
-   Delivered + Cancelled se poori picture mil jaati hai.                 */
-const CATS = [
-  {
-    id: 'pending',
-    label: 'Pending',
-    icon: Package,
-    color: T.blue,
-    soft: T.blueSoft,
-    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
-  },
-  {
-    id: 'delivered',
-    label: 'Delivered',
-    icon: CheckCircle2,
-    color: T.forestSoft,
-    soft: T.mint,
-    test: (x) => x.stage === 'delivered',
-  },
-  {
-    id: 'cancelled',
-    label: 'Cancelled',
-    icon: AlertTriangle,
-    color: T.red,
-    soft: T.redSoft,
-    test: (x) => x.stage === 'cancelled',
-  },
-  {
-    id: 'renewal',
-    label: 'Renewal Invoices',
-    icon: RefreshCw,
-    color: T.blue,
-    soft: T.blueSoft,
-    test: (x) => x.stage === 'renewal',
-  },
-  {
-    id: 'duplicate',
-    label: 'Duplicate Invoices',
-    icon: Copy,
-    color: T.slate,
-    soft: T.slateSoft,
-    test: (x) => x.stage === 'duplicate',
-  },
-];
+const Note = ({ kind = "err", children }: any) =>
+  !children ? null : <div className={`att-note ${kind}`}><span>{children}</span></div>;
 
-function rowToDelivery(r) {
-  const branch = deriveBranch(r);
-  return {
-    invoice_id: r.invoice_id,
-    id: r.invoice_number || r.invoice_id,
-    branch,
-    manager: STORE_MANAGERS[branch] || '—',
-    customer: r.customer_name || '—',
-    phone: clean(r.customer_phone) || '—',
-    area: clean(r.city) || clean(r.billing_address) || '—',
-    equipment: equipmentText(r),
-    amount: Number(r.total_amount) || 0,
-    expected: r.due_date && r.due_date !== 'null' ? r.due_date : '—',
-    person: clean(r.app_delivery_person) || clean(r.delivery_person) || null,
-    vehicle: clean(r.app_vehicle) || clean(r.assigned_vehicle) || null,
-    stage: statusToStage(r.status),
-    rawStatus: r.status,
-    synced_at: r.synced_at || r.updated_at,
-    _raw: r,
+function Section({ title, sub, chips, count, children, open: o0 }: any) {
+  const [open, setOpen] = useState(!!o0);
+  return (
+    <div className="att-list">
+      <button className="att-grp" onClick={() => setOpen(!open)}>
+        <span className="chev">{open ? "\u25be" : "\u25b8"}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="t" style={{ display: "block" }}>{title}</span>
+          {sub && <span className="att-muted" style={{ display: "block" }}>{sub}</span>}
+        </span>
+        {chips && <span className="att-mini">{chips}</span>}
+        {count != null && <span className="att-chip">{count}</span>}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
+const Sheet = ({ title, onClose, children }: any) => (
+  <div className="att-sheet" onClick={onClose}>
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="att-between" style={{ marginBottom: 13 }}>
+        <b className="att-h1" style={{ fontSize: 18 }}>{title}</b>
+        <button className="att-muted" onClick={onClose}>Close</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+/* ========================= login ========================= */
+const EyeIcon = ({ off }: any) => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#667085"
+    strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+    {off && <path d="m4 4 16 16" />}
+  </svg>
+);
+
+function CodeInput({ value, onChange, show, setShow, autoFocus, onEnter, placeholder }: any) {
+  return (
+    <div className="att-codewrap">
+      <input
+        type={show ? "text" : "password"}
+        inputMode="numeric" autoComplete="off" autoFocus={autoFocus}
+        value={value} placeholder={placeholder || "••••"}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        onKeyDown={(e) => e.key === "Enter" && onEnter && onEnter()}
+      />
+      <button className="att-eye" type="button" onClick={() => setShow(!show)}
+        aria-label={show ? "Hide code" : "Show code"} title={show ? "Hide code" : "Show code"}>
+        <EyeIcon off={show} />
+      </button>
+    </div>
+  );
+}
+
+// 4-digit code ko Supabase ke minimum password length tak pad karte hain.
+const codeToPassword = (code: string) => `hjs-${code}-att`;
+
+function Login() {
+  const [stage, setStage] = useState<"email" | "set" | "enter" | "new" | "forgot">("email");
+  const [dob, setDob] = useState("");
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
+  const [empCode, setEmpCode] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [code2, setCode2] = useState("");
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
+
+  const checkEmail = async () => {
+    setErr(""); setOk(""); setBusy(true);
+    const e = email.trim().toLowerCase();
+    const { data, error } = await supabase.rpc("email_status", { p_email: e });
+    if (error) setErr(error.message);
+    else if (data === "not_found") setStage("new");
+    else setStage(data === "ready" ? "enter" : "set");
+    setBusy(false);
   };
-}
 
-/* Demo data (jab key khaali ho) */
-const DEMO = [
-  demo(
-    'MOH/25-26/041',
-    'MOH',
-    'Baldev Raj',
-    '+9198150xxxxx',
-    'Mohali',
-    'Oxygen Concentrator',
-    'Talked To Customer',
-    3500,
-    '2026-07-04',
-  ),
-  demo(
-    'CHD/25-26/010',
-    'CHD',
-    'Anil Kapoor',
-    '+9198140xxxxx',
-    'Chandigarh',
-    'CPAP',
-    'Delivery Scheduled',
-    4200,
-    '2026-07-02',
-  ),
-  demo(
-    'GGN/25-26/001',
-    'GGN',
-    'Ravi Menon',
-    '+9198110xxxxx',
-    'Gurgaon',
-    'Hospital Bed',
-    'Item Inspected',
-    6000,
-    '2026-07-05',
-    'Hemant - 9773641804',
-  ),
-  demo(
-    'NCR/25-26/007',
-    'NCR',
-    'Sunita Rao',
-    '+9198220xxxxx',
-    'Noida',
-    'Wheelchair',
-    'Item Delivered',
-    1500,
-    '2026-07-01',
-    'Shiva - 7303916944',
-  ),
-];
-function demo(inv, code, name, phone, city, equip, status, amt, due, person) {
-  return rowToDelivery({
-    invoice_id: inv,
-    invoice_number: inv,
-    store_code: code,
-    customer_name: name,
-    customer_phone: phone,
-    city,
-    line_items: equip,
-    status,
-    total_amount: amt,
-    due_date: due,
-    app_delivery_person: person || null,
-    synced_at: new Date().toISOString(),
-  });
-}
+  const claim = async () => {
+    const { error } = await supabase.rpc("claim_employee");
+    if (error) { setErr(error.message); await supabase.auth.signOut(); return false; }
+    return true;
+  };
 
-/* mobile detection (behavior differs on phone vs laptop) */
-function useIsMobile(bp = 760) {
-  const q = `(max-width:${bp}px)`;
-  const [m, setM] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia(q).matches : false,
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia(q);
-    const on = () => setM(mq.matches);
-    on();
-    mq.addEventListener
-      ? mq.addEventListener('change', on)
-      : mq.addListener(on);
-    return () => {
-      mq.removeEventListener
-        ? mq.removeEventListener('change', on)
-        : mq.removeListener(on);
-    };
-  }, [q]);
-  return m;
-}
+  const createCode = async () => {
+    setErr("");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const pw = codeToPassword(code);
 
-/* iframe ke andar chal raha hai? (Zoho landing page embed) */
-const EMBEDDED =
-  typeof window !== 'undefined' && window.parent && window.parent !== window;
+    const up = await supabase.auth.signUp({ email: e, password: pw });
+    let session = up.data?.session || null;
 
-/* Embed mode: sirf ek class lagti hai (CSS ke liye). Height ab app khud
-   nahi bhejta — iframe ko fixed 100vh di jaati hai aur app usko poora bharta
-   hai, isliye na neeche white space aata hai na cut hota hai. */
-function useEmbedFlag() {
-  useEffect(() => {
-    if (!EMBEDDED) return;
-    document.documentElement.classList.add('hjs-embed');
-  }, []);
-}
-
-/* ════════════════════════════════════════════════════════════════ APP */
-export default function App() {
-  useEmbedFlag();
-  // Tracking routes (Netlify SPA — query params + optional /track path):
-  //   /track                → sales: number se saari deliveries + timeline
-  //   /track?inv=CHD/...     → customer: single invoice (phone verify)
-  //   ?inv=CHD/...           → customer (bina /track ke bhi chalega)
-  const params =
-    typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search)
-      : new URLSearchParams();
-  const path = typeof window !== 'undefined' ? window.location.pathname : '';
-  const isTrackPath = /\/track\/?$/.test(path);
-  const inv = params.get('inv') || '';
-  // ?order  → STATIC customer link (WhatsApp CTA button ke liye). Koi invoice
-  // nahi chahiye — customer apna registered phone daale, uska latest order
-  // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
-  // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
-  if (inv) return <TrackPage invoice={inv} />; // customer — single order
-  if (params.has('order') || params.has('my'))
-    return <TrackPage invoice="" />; // customer — phone se latest order
-  if (params.has('pickupsales')) return <PickupsModule route="sales" />;
-  if (params.has('track') || params.has('sales') || isTrackPath)
-    return <SalesTrackPage />; // sales — phone → list → timeline
-
-  const [session, setSession] = useState(() => {
-    // app switch / reload pe wapas login na maange — session yaad rakho
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const raw = localStorage.getItem('hjsSession');
-        if (raw) return JSON.parse(raw);
+    if (!session) {
+      // user pehle se maujood ho sakta hai, ya signUp ne session nahi di
+      const si = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      session = si.data?.session || null;
+      if (!session) {
+        setBusy(false);
+        if (up.error && /already/i.test(up.error.message))
+          setStage("forgot");
+          return setErr("This email already has a code. Confirm your date of birth " +
+                        "or ask your admin to reset it.");
+        if (up.error) return setErr(up.error.message);
+        return setErr(
+          "Couldn't start your session. In Supabase, Authentication \u2192 Email \u2192 turn off " +
+          "\u2018Confirm email\u2019, delete this half-made user, then try again."
+        );
       }
-    } catch (_) {}
-    return null;
-  });
-  // kaun logged-in hai — har app_log event isi se stamp hota hai
-  setActor(session);
-  // session badle to localStorage mein rakho / hatao (logout pe)
-  useEffect(() => {
-    setActor(session);
-    try {
-      if (typeof localStorage === 'undefined') return;
-      if (session) localStorage.setItem('hjsSession', JSON.stringify(session));
-      else localStorage.removeItem('hjsSession');
-    } catch (_) {}
-  }, [session]);
-  const [deliveries, setDeliveries] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [activeId, setActiveId] = useState(null);
-  const [modal, setModal] = useState(null); // { invoiceId, toStage, mode }
-  const [search, setSearch] = useState('');
-  const [toast, setToast] = useState(null);
-  const [viewMode, setViewMode] = useState('today'); // today|yesterday|month|custom|archived
-  const [vFrom, setVFrom] = useState(() => todayStr());
-  const [vTo, setVTo] = useState(() => todayStr());
-  const [layoutMode, setLayoutMode] = useState('board'); // board | categories
-  const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
-  const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
-  const jumpMobile = (toStage) => setLastMove({ stage: toStage, n: Date.now() });
-  const [page, setPage] = useState('deliveries'); // deliveries | dashboard
-  const [showLog, setShowLog] = useState(false); // overall activity log panel
-  const [dashKind, setDashKind] = useState('delivery'); // dashboard: delivery | pickups
-  // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
-  // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
-  const [reloadTick, setReloadTick] = useState(0);
-  // list ab sirf ek window laati hai — saari pending + pichhle 90 din ki
-  // closed. Archived mein "purani entries laao" dabane pe poora history.
-  const [fullHistory, setFullHistory] = useState(false);
-  // Activity log button — jis module pe ho, usi ka log khule
-  const [logTick, setLogTick] = useState(0);
-  const [pickupRows, setPickupRows] = useState([]); // pickups ke search results
-  const [complaintRows, setComplaintRows] = useState([]); // complaints ke
-  const [modulePick, setModulePick] = useState(null); // dropdown se chuna gaya
-  // head store switch kar le tab bhi wo head hi rehta hai — Dashboard /
-  // SLA / Complaints gayab nahi hone chahiye
-  const isAllStores = session && session.isHead;
-  const showPickups =
-    page === 'pickups' || (page === 'dashboard' && dashKind === 'pickups');
-  const showComplaints =
-    page === 'complaints' || (page === 'dashboard' && dashKind === 'complaints');
-  const inModule = page === 'pickups' || page === 'complaints';
-  const switchLang = (l) => {
-    setHjsLang(l);
-    setLang(HJS_LANG);
+    }
+    const okNow = await claim();
+    if (okNow) setOk("Code saved.");
+    setBusy(false);
   };
-  // har store (aur head) → chosen layout. Default Stages (board), toggle se Categories.
-  const effLayout = layoutMode;
 
-  const ping = (m) => {
-    setToast(m);
-    setTimeout(() => setToast(null), 3000);
+  // naya banda: account bana ke Pending state mein chala jayega
+  const registerNew = async () => {
+    setErr("");
+    if (!name.trim()) return setErr("Please enter your full name.");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const pw = codeToPassword(code);
+
+    const up = await supabase.auth.signUp({ email: e, password: pw });
+    let session = up.data?.session || null;
+    if (!session) {
+      const si = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      session = si.data?.session || null;
+      if (!session) {
+        setBusy(false);
+        if (up.error && /already/i.test(up.error.message))
+          return setErr("This email already has an account. Go back and sign in.");
+        return setErr(up.error?.message
+          || "Couldn't start your session. Ask your admin to check email settings.");
+      }
+    }
+    const { error } = await supabase.rpc("register_self", {
+      p_full_name: name.trim(),
+      p_phone: phone.trim() || null,
+    });
+    if (error) {
+      setErr(error.message);
+      await supabase.auth.signOut();
+      setBusy(false);
+      return;
+    }
+    // record ban gaya — poora reload, warna app purani state pe
+    // atka rehta hai aur dobara naam maangta hai
+    window.location.reload();
   };
+
+  const signIn = async () => {
+    setErr("");
+    if (code.length !== 4) return setErr("Enter your 4-digit code.");
+    setBusy(true);
+    const e = email.trim().toLowerCase();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: e, password: codeToPassword(code),
+    });
+    if (error) setErr("Wrong code. Try again, or use \u2018Forgot code\u2019.");
+    else await claim();
+    setBusy(false);
+  };
+
+  // DOB se verify karke wahin naya code
+  const selfReset = async () => {
+    setErr(""); setOk("");
+    if (!dob) return setErr("Please enter your date of birth.");
+    if (code.length !== 4) return setErr("Code must be exactly 4 digits.");
+    if (code !== code2) return setErr("Both codes don't match.");
+    setBusy(true);
+
+    const { data, error } = await supabase.rpc("self_reset_code", {
+      p_email: email.trim().toLowerCase(), p_dob: dob, p_code: code,
+    });
+    setBusy(false);
+
+    if (error) return setErr(error.message);
+    if (data === "no_match")
+      return setErr("That date of birth doesn't match our records. Ask your admin to reset it for you.");
+    if (data === "locked")
+      return setErr("Too many wrong tries. Wait 30 minutes, or ask your admin.");
+    if (data === "no_account")
+      return setErr("You haven't set a code before. Go back and sign in normally.");
+    if (data === "bad_code") return setErr("Code must be exactly 4 digits.");
+
+    // ho gaya -> usi code se andar
+    const { error: e2 } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(), password: codeToPassword(code),
+    });
+    if (e2) { setOk("Code changed. Now sign in with it."); setStage("enter"); setCode(""); setCode2(""); }
+  };
+
+  const forgotByMail = async () => {
+    setErr(""); setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    if (error) setErr(error.message);
+    else setOk("Reset link sent to your email. Open it, set a new password, then sign in with those 4 digits.");
+    setBusy(false);
+  };
+
+  const back = () => { setStage("email"); setCode(""); setCode2(""); setErr(""); setOk(""); };
+
+  return (
+    <div className="att-center" style={{ width: "100%" }}>
+      <div style={{ width: "100%", maxWidth: 380 }}>
+        <div style={{ marginBottom: 22 }}>
+          <div className="att-raillogo" style={{ marginBottom: 14 }}>HJS</div>
+          <h1 className="att-h1">Attendance</h1>
+          <p className="att-muted" style={{ marginTop: 3 }}>
+            {stage === "email" ? "Sign in with your work email."
+              : stage === "set" ? "Set a 4-digit code you'll remember."
+              : stage === "new" ? "New here? Create your account."
+              : stage === "forgot" ? "Let's get you a new code."
+              : "Enter your 4-digit code."}
+          </p>
+        </div>
+
+        <div className="att-card att-stack">
+          {stage === "email" && (
+            <>
+              <div>
+                <label>Email</label>
+                <input type="email" value={email} inputMode="email" autoCapitalize="none"
+                  autoCorrect="off" placeholder="name@gmail.com"
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && checkEmail()} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={checkEmail}
+                disabled={busy || !email.includes("@")}>
+                {busy ? "Checking…" : "Continue"}
+              </button>
+            </>
+          )}
+
+          {stage === "forgot" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                Confirm your date of birth and pick a new code. If your date of birth
+                isn't on file, ask your admin to reset it instead.
+              </p>
+              <div>
+                <label>Your date of birth</label>
+                <input type="date" value={dob} max={istToday()} autoFocus
+                  onChange={(e) => setDob(e.target.value)} />
+              </div>
+              <div>
+                <label>New 4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={selfReset} />
+              </div>
+              <Note>{err}</Note>
+              <Note kind="ok">{ok}</Note>
+              <button className="att-btn" onClick={selfReset}
+                disabled={busy || !dob || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Checking…" : "Set my new code"}
+              </button>
+              <button className="att-muted" onClick={() => { setStage("enter"); setErr(""); }}>
+                Back
+              </button>
+            </>
+          )}
+
+          {stage === "new" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div className="att-note ok">
+                <span>
+                  This email isn't on our list yet. Create your account and an admin
+                  will approve it — you can't check in until then.
+                </span>
+              </div>
+              <div>
+                <label>Your full name</label>
+                <input value={name} placeholder="Full name" autoFocus
+                  onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label>Mobile <span className="att-muted">(optional)</span></label>
+                <input value={phone} placeholder="98765 43210"
+                  onChange={(e) => setPhone(e.target.value)} />
+              </div>
+              <div>
+                <label>Create your 4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={registerNew} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={registerNew}
+                disabled={busy || !name.trim() || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Creating…" : "Create my account"}
+              </button>
+              <button className="att-muted" onClick={back}>Use a different email</button>
+            </>
+          )}
+
+          {stage === "set" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div>
+                <label>Create your 4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow} autoFocus />
+              </div>
+              <div>
+                <label>Confirm code</label>
+                <CodeInput value={code2} onChange={setCode2} show={show} setShow={setShow}
+                  onEnter={createCode} />
+              </div>
+              <Note>{err}</Note>
+              <button className="att-btn" onClick={createCode}
+                disabled={busy || code.length !== 4 || code2.length !== 4}>
+                {busy ? "Saving…" : "Save code and sign in"}
+              </button>
+              <div className="att-between">
+                <button className="att-muted" onClick={back}>Use a different email</button>
+                <button className="att-muted" disabled={busy}
+                  onClick={() => { setErr(""); setOk(""); setCode(""); setCode2("");
+                                   setStage("forgot"); }}>Forgot code?</button>
+              </div>
+            </>
+          )}
+
+          {stage === "enter" && (
+            <>
+              <p className="att-muted">{email}</p>
+              <div>
+                <label>4-digit code</label>
+                <CodeInput value={code} onChange={setCode} show={show} setShow={setShow}
+                  autoFocus onEnter={signIn} />
+              </div>
+              <Note>{err}</Note>
+              <Note kind="ok">{ok}</Note>
+              <button className="att-btn" onClick={signIn} disabled={busy || code.length !== 4}>
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+              <div className="att-between">
+                <button className="att-muted" onClick={back}>Different email</button>
+                <button className="att-muted" disabled={busy}
+                  onClick={() => { setErr(""); setOk(""); setCode(""); setCode2("");
+                                   setStage("forgot"); }}>Forgot code?</button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <p className="att-muted" style={{ marginTop: 12, textAlign: "center" }}>
+          You stay signed in on this device until you sign out.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= home ========================= */
+function HomeScreen({ me }: any) {
+  const [today, setToday] = useState<any>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [recent, setRecent] = useState<any[]>([]);
+  const [board, setBoard] = useState<any[]>([]);
+  const [err, setErr] = useState(""); const [ok, setOk] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [regOpen, setRegOpen] = useState(false);
+  const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
+  const [drill, setDrill] = useState<any>(null);
+  const [mgr, setMgr] = useState<any[]>([]);
+  const [pickDay, setPickDay] = useState<any>(null);
+  const [myLeaves, setMyLeaves] = useState<any[]>([]);
+  const [pickLeave, setPickLeave] = useState<any>(null);
+
+  // kisi ke "Leave" pe click -> uski aaj wali leave nikaal ke dikhao
+  const openLeaveFor = async (p: any) => {
+    const { data } = await supabase.rpc("on_leave", { p_date: istToday() });
+    const row = (data || []).find((x: any) => x.emp_code === p.emp_code);
+    if (row) setPickLeave({ ...row, id: row.leave_id, emp: row });
+  };
+  const [peers, setPeers] = useState<any[]>([]);
 
   const load = async () => {
-    if (!CONFIGURED) {
-      setDeliveries(DEMO);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      setDeliveries(
-        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 90)).map(
-          rowToDelivery,
-        ),
-      );
-    } catch (e) {
-      setError(e.message || 'Fetch failed');
-    }
-    setLoading(false);
-  };
-  useEffect(() => {
-    if (session) load(); /* eslint-disable-next-line */
-  }, [session, fullHistory]);
-
-  const scoped = useMemo(() => {
-    if (!session) return [];
-    // Deleted (soft-deleted) entries app ke kisi bhi view mein nahi aati —
-    // par Supabase mein status="Deleted" ke saath row bani rehti hai.
-    const base = deliveries.filter((x) => x.stage !== 'deleted');
-    if (session.branch === 'ALL') return base;
-    return base.filter((x) => x.branch === session.branch);
-  }, [deliveries, session]);
-
-  // Activity log ke liye alag scope — deleted entries bhi chahiye (kisne
-  // delete ki, wo dikhana hai), isliye ye 'scoped' se alag hai.
-  const scopedAll = useMemo(() => {
-    if (!session) return [];
-    if (session.branch === 'ALL') return deliveries;
-    return deliveries.filter((x) => x.branch === session.branch);
-  }, [deliveries, session]);
-
-  // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
-  const viewItems = useMemo(
-    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
-    [scoped, viewMode, vFrom, vTo],
-  );
-
-  // Window se bahar wali entries server se — 2+ akshar pe
-  const [remoteRows, setRemoteRows] = useState([]);
-  useEffect(() => {
-    const q = search.trim();
-    if (!CONFIGURED || !session || q.length < 2) {
-      setRemoteRows([]);
-      return;
-    }
-    let alive = true;
-    const t = setTimeout(async () => {
-      try {
-        const res = await sbSearch(session.authStore, session.pw, q);
-        if (alive) setRemoteRows((res || []).map(rowToDelivery));
-      } catch (_) {
-        if (alive) setRemoteRows([]);
-      }
-    }, 350);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line
-  }, [search, session]);
-
-  // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
-  const searchResults = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return [];
-    const local = scoped.filter(
-      (x) =>
-        x.customer.toLowerCase().includes(q) ||
-        String(x.id).toLowerCase().includes(q) ||
-        x.area.toLowerCase().includes(q) ||
-        String(x.phone).toLowerCase().includes(q),
-    );
-    // server se aayi purani entries jodo (jo list ke window mein nahi hain)
-    const have = new Set(local.map((x) => x.invoice_id));
-    const extra = remoteRows.filter((x) => !have.has(x.invoice_id));
-    return [...local, ...extra].slice(0, 10);
-  }, [scoped, search, remoteRows]);
-
-  // Topbar ka dropdown ek hi shape padhta hai — chahe deliveries ho ya module
-  const searchRows = useMemo(
-    () =>
-      searchResults.map((x) => {
-        const closed = isClosedStage(x.stage);
-        const fresh = isToday(createdTs(x));
-        return {
-          key: x.invoice_id,
-          id: x.invoice_id,
-          name: x.customer,
-          sub: `₹${Number(x.amount || 0).toLocaleString('en-IN')} · ${x.equipment}`,
-          tag: closed ? stageMeta(x.stage).short : fresh ? 'Today' : 'Archived',
-          tagKind: closed ? 'cancel' : fresh ? 'today' : 'arch',
-          closed,
-        };
-      }),
-    [searchResults],
-  );
-
-  // Global search — teeno modules ek hi dropdown mein, module ka naam bhi
-  const allSearchRows = useMemo(
-    () => [
-      ...searchRows.map((r) => ({ ...r, mod: 'deliveries', modLabel: 'Delivery' })),
-      ...pickupRows.map((r) => ({ ...r, mod: 'pickups', modLabel: 'Pickup' })),
-      ...complaintRows.map((r) => ({
-        ...r,
-        mod: 'complaints',
-        modLabel: 'Complaint',
-      })),
-    ],
-    [searchRows, pickupRows, complaintRows],
-  );
-
-  const active = deliveries.find((x) => x.invoice_id === activeId) || null;
-
-  // ── Egress bachane ke liye ──────────────────────────────────────────
-  // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
-  // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
-  // par ek save = ek chhoti update call (poora table nahi).
-  // ── Timeline (app_log) on-demand ───────────────────────────────────
-  // List ab bina app_log ke aati hai. Jahan timeline chahiye — drawer,
-  // Activity log, Process & SLA — wahin se ye fetch hota hai.
-  const [logsLoaded, setLogsLoaded] = useState(false);
-  const mergeLogs = (rows) => {
-    const map = {};
-    (rows || []).forEach((r) => {
-      map[r.invoice_id] = r.app_log;
-    });
-    setDeliveries((prev) =>
-      prev.map((x) =>
-        map[x.invoice_id] !== undefined
-          ? rowToDelivery({ ...x._raw, app_log: map[x.invoice_id] })
-          : x,
-      ),
-    );
-  };
-  const loadLogs = async (invoice) => {
-    if (!CONFIGURED || !session) return;
-    try {
-      const rows = await sbLogs(session.authStore, session.pw, invoice || null);
-      mergeLogs(rows);
-      if (!invoice) setLogsLoaded(true);
-    } catch (_) {
-      /* timeline na aaye to baaki app chalta rahe */
-    }
-  };
-  // drawer khulte hi us ek entry ka log
-  useEffect(() => {
-    if (!activeId) return;
-    const row = deliveries.find((x) => x.invoice_id === activeId);
-    if (row && row._raw && row._raw.app_log === undefined) loadLogs(activeId);
-    // eslint-disable-next-line
-  }, [activeId]);
-  // Activity log / SLA — inhe saare logs chahiye, ek hi baar
-  useEffect(() => {
-    if ((showLog || page === 'sla') && !logsLoaded) loadLogs(null);
-    // eslint-disable-next-line
-  }, [showLog, page]);
-
-  const applyLocal = (id, patch) => {
-    setDeliveries((prev) =>
-      prev.map((x) =>
-        x.invoice_id === id ? rowToDelivery({ ...x._raw, ...patch }) : x,
-      ),
-    );
-  };
-
-  const buildPatch = (toStage, f, mode) => {
-    const patch = { updated_at: new Date().toISOString() };
-    if (mode === 'move') patch.status = stageToStatus(toStage);
-    if (toStage === 'talked') {
-      patch.confirmed_date = f.date || null;
-      patch.confirmed_time = f.time || null;
-      patch.stage1_remarks = f.remarks || null;
-    } else if (toStage === 'scheduled') {
-      patch.app_delivery_person = f.person || null;
-      patch.app_vehicle = f.vehicle || null;
-      patch.item_inspected = !!f.inspected;
-      patch.photo_inspected = f.photoInspected || null;
-      patch.stage3_remarks = f.remarks || null;
-      // MBC (Managed By Client) — customer khud le jaata hai. Gaadi/dispatch
-      // ki zarurat nahi: usi form mein final details bhar ke seedha Delivered.
-      if (f.mbcDirect) {
-        if (mode === 'move') patch.status = stageToStatus('delivered');
-        patch.app_vehicle = null; // MBC — koi gaadi nahi lagti
-        patch.item_delivered = !!f.delivered;
-        patch.photo_delivered = f.photoDelivered || null;
-        patch.amount_collected = Number(f.amount) || 0;
-        patch.amount_type = f.amountType || null;
-        patch.security_collected = Number(f.security) || 0;
-        patch.security_type = f.securityType || null;
-        patch.stage4_remarks = f.remarks || null;
-      }
-    } else if (toStage === 'dispatched') {
-      patch.app_eta = f.eta || null;
-    } else if (toStage === 'delivered') {
-      patch.item_delivered = !!f.delivered;
-      patch.photo_delivered = f.photoDelivered || null;
-      patch.amount_collected = Number(f.amount) || 0;
-      patch.amount_type = f.amountType || null;
-      patch.security_collected = Number(f.security) || 0;
-      patch.security_type = f.securityType || null;
-      patch.stage4_remarks = f.remarks || null;
-    }
-    return patch;
-  };
-
-  // closed mark (cancelled/duplicate/renewal) — status column mein likha jaata hai
-  const closeEntry = async (invoiceId, flag, remarks) => {
-    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    const patch = {
-      status: CLOSED_STATUS[flag],
-      updated_at: new Date().toISOString(),
-      app_log: [...existingLog(cur), makeClosedEvent(flag, remarks)],
-    };
-    if (!CONFIGURED) {
-      setDeliveries((prev) =>
-        prev.map((x) =>
-          x.invoice_id === invoiceId
-            ? { ...x, stage: flag, rawStatus: patch.status }
-            : x,
-        ),
-      );
-      ping(`Demo — ${CLOSED[flag].label}`);
-      return;
-    }
-    try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
-      ping(`Marked as ${CLOSED[flag].label}`);
-      applyLocal(invoiceId, patch);
-    } catch (e) {
-      ping('Save failed: ' + e.message);
-    }
-  };
-
-  // core move/edit apply — modal aur inline card dono use karte hain
-  const applyMove = async (invoiceId, toStage, fields, mode) => {
-    if (toStage === 'talked' && fields.invoiceFlag) {
-      return closeEntry(invoiceId, fields.invoiceFlag, fields.remarks);
-    }
-    const patch = buildPatch(toStage, fields, mode);
-    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    // MBC → ek hi save mein Scheduled + Delivered dono log ho
-    const mbc = toStage === 'scheduled' && fields.mbcDirect && mode === 'move';
-    patch.app_log = [
-      ...existingLog(cur),
-      makeEvent(toStage, fields, mode),
-      ...(mbc ? [makeEvent('delivered', fields, 'move')] : []),
-    ];
-    const landed = mbc ? 'delivered' : toStage;
-    if (!CONFIGURED) {
-      ping('Demo mode — save nahi hua');
-      return;
-    }
-    try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
-      ping(
-        mode === 'edit'
-          ? 'Updated ✓'
-          : `Saved ✓  ${STAGES[stageIndex(landed)].label}`,
-      );
-      if (mode === 'move') jumpMobile(landed);
-      applyLocal(invoiceId, patch);
-    } catch (e) {
-      ping('Save failed: ' + e.message);
-    }
-  };
-
-  const commitModal = async (fields) => {
-    const { invoiceId, toStage, mode } = modal;
-    setModal(null);
-    await applyMove(invoiceId, toStage, fields, mode);
-  };
-
-  // direct backward move (no form)
-  const setStage = async (invoiceId, toStage) => {
-    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    const goingBack =
-      cur && stageIndex(toStage) < stageIndex(cur.stage || 'new');
-    if (goingBack) {
-      const ok =
-        typeof window === 'undefined'
-          ? true
-          : window.confirm(
-              `Entry ko "${STAGES[stageIndex(toStage)].label}" pe wapas le jaayein?\n\nAage ki bhari hui details (person, photo, amount waghera) hat jaayengi — baad mein dobara bharni hongi.`,
-            );
-      if (!ok) return;
-    }
-    const patch = {
-      status: stageToStatus(toStage),
-      updated_at: new Date().toISOString(),
-      app_log: [...existingLog(cur), makeEvent(toStage, {}, 'move')],
-    };
-    if (goingBack) Object.assign(patch, clearAhead(toStage));
-    if (!CONFIGURED) {
-      setDeliveries((prev) =>
-        prev.map((x) =>
-          x.invoice_id === invoiceId
-            ? { ...x, stage: toStage, rawStatus: patch.status }
-            : x,
-        ),
-      );
-      ping('Demo mode — save nahi hua');
-      return;
-    }
-    try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
-      ping(`Moved to ${STAGES[stageIndex(toStage)].label}`);
-      jumpMobile(toStage);
-      applyLocal(invoiceId, patch);
-    } catch (e) {
-      ping('Save failed: ' + e.message);
-    }
-  };
-
-  // delete — sirf head. HARD delete NAHI: row Supabase mein rehti hai,
-  // bas status="Deleted" ho jaata hai aur app ke views se hat jaati hai.
-  const removeEntry = async (invoiceId) => {
-    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
-    const patch = {
-      status: 'Deleted',
-      updated_at: new Date().toISOString(),
-      app_log: [
-        ...existingLog(cur),
-        {
-          ts: new Date().toISOString(),
-          stage: 'deleted',
-          label: 'Deleted',
-          action: 'Marked as',
-          fields: {},
-          ...actorStamp(),
-        },
-      ],
-    };
-    if (!CONFIGURED) {
-      setDeliveries((prev) =>
-        prev.map((x) =>
-          x.invoice_id === invoiceId
-            ? { ...x, stage: 'deleted', rawStatus: 'Deleted' }
-            : x,
-        ),
-      );
-      setActiveId(null);
-      ping('Deleted (demo)');
-      return;
-    }
-    try {
-      await sbUpdate(session.authStore, session.pw, invoiceId, patch);
-      setActiveId(null);
-      ping('Deleted — Supabase mein "Deleted" mark ho gaya');
-      applyLocal(invoiceId, patch);
-    } catch (e) {
-      ping('Delete failed: ' + e.message);
-    }
-  };
-
-  if (!session) return <Login onLogin={setSession} />;
-
-  return (
-    <div
-      style={{
-        fontFamily: FONT,
-        background: T.beige,
-        minHeight: '100vh',
-        color: T.ink,
-      }}
-    >
-      <StyleTag />
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar
-          session={session}
-          page={page}
-          onNav={setPage}
-        />
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <Topbar
-            session={session}
-            page={page}
-            onNav={setPage}
-            search={search}
-            setSearch={setSearch}
-            results={allSearchRows}
-            onPick={(x) => {
-              // kisi bhi page se — result jis module ka hai, wahan le jao
-              if (x.mod === 'deliveries') {
-                setPage('deliveries');
-                // window se bahar wali entry — pehle list mein daalo
-                if (!deliveries.some((d) => d.invoice_id === x.id)) {
-                  const extra = remoteRows.find((d) => d.invoice_id === x.id);
-                  if (extra) setDeliveries((prev) => [...prev, extra]);
-                }
-                setActiveId(x.id);
-              } else {
-                setPage(x.mod);
-                setModulePick({ mod: x.mod, id: x.id, n: Date.now() });
-              }
-              setSearch('');
-            }}
-            onReload={() => {
-              setLogsLoaded(false);
-              load();
-              setReloadTick((t) => t + 1);
-            }}
-            loading={loading}
-            onLogout={() => setSession(null)}
-            onActivity={() =>
-              inModule ? setLogTick((t) => t + 1) : setShowLog(true)
-            }
-            lang={lang}
-            onLang={switchLang}
-          />
-          <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {/* Dashboard ka delivery/pickups/complaints switch */}
-            {isAllStores && page === 'dashboard' && (
-              <div className="dash-switch">
-                <div className="layout-toggle">
-                  <button
-                    className={dashKind === 'delivery' ? 'lt-btn active' : 'lt-btn'}
-                    onClick={() => setDashKind('delivery')}
-                  >
-                    <Truck size={14} /> Deliveries
-                  </button>
-                  <button
-                    className={dashKind === 'pickups' ? 'lt-btn active' : 'lt-btn'}
-                    onClick={() => setDashKind('pickups')}
-                  >
-                    <RotateCcw size={14} /> Pickups
-                  </button>
-                  <button
-                    className={dashKind === 'complaints' ? 'lt-btn active' : 'lt-btn'}
-                    onClick={() => setDashKind('complaints')}
-                  >
-                    <MessageSquareWarning size={14} /> Complaints
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Deliveries board */}
-            <div style={{ display: page === 'deliveries' ? 'block' : 'none' }}>
-              <Header
-                session={session}
-                live={CONFIGURED}
-                count={viewItems.length}
-                viewMode={viewMode}
-                onViewMode={setViewMode}
-                vFrom={vFrom}
-                vTo={vTo}
-                onVFrom={setVFrom}
-                onVTo={setVTo}
-                layoutMode={layoutMode}
-                onLayoutMode={setLayoutMode}
-                onSwitchStore={(b) =>
-                  setSession((s) => ({
-                    ...s,
-                    branch: b,
-                    storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
-                  }))
-                }
-              />
-              {error && (
-                <div className="err">
-                  <CloudOff size={18} color={T.red} />
-                  <div>
-                    <b>Supabase se connect nahi hua.</b> {error}
-                    <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
-                      anon key + RLS SELECT policy check karo.
-                    </div>
-                  </div>
-                </div>
-              )}
-              <EntriesView
-                items={viewItems}
-                viewMode={viewMode}
-                layoutMode={effLayout}
-                loading={loading}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-                onMove={(x, toStage) =>
-                  setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                }
-                onCommit={(dd, toStage, fields) =>
-                  applyMove(dd.invoice_id, toStage, fields, 'move')
-                }
-                focus={lastMove}
-                fullHistory={fullHistory}
-                onFullHistory={() => setFullHistory(true)}
-              />
-            </div>
-
-            {/* Delivery dashboard + SLA */}
-            {isAllStores && page === 'dashboard' && dashKind === 'delivery' && (
-              <Dashboard
-                deliveries={scoped}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-              />
-            )}
-            {isAllStores && page === 'sla' && (
-              <SlaReport
-                deliveries={scoped}
-                logsLoaded={logsLoaded}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-              />
-            )}
-
-            {/* Pickups aur Complaints hamesha mounted rehte hain — isse
-                search har page se teeno modules mein chalta hai. Jo active
-                nahi hai wo sirf chhupa hota hai. */}
-            {/* Pickups har store ko dikhta hai */}
-            {(
-              <div style={{ display: showPickups ? 'block' : 'none' }}>
-                <PickupsModule
-                  session={session}
-                  view={page === 'dashboard' ? 'dashboard' : 'board'}
-                  reloadKey={reloadTick}
-                  openLogKey={page === 'pickups' ? logTick : 0}
-                  lang={lang}
-                  search={search}
-                  onResults={setPickupRows}
-                  pickId={modulePick && modulePick.mod === 'pickups' ? modulePick.id : null}
-                  pickKey={modulePick && modulePick.mod === 'pickups' ? modulePick.n : 0}
-                />
-              </div>
-            )}
-            {isAllStores && (
-              <div style={{ display: showComplaints ? 'block' : 'none' }}>
-                <ComplaintsModule
-                  session={session}
-                  view={page === 'dashboard' ? 'dashboard' : 'board'}
-                  reloadKey={reloadTick}
-                  openLogKey={page === 'complaints' ? logTick : 0}
-                  lang={lang}
-                  search={search}
-                  onResults={setComplaintRows}
-                  pickId={modulePick && modulePick.mod === 'complaints' ? modulePick.id : null}
-                  pickKey={modulePick && modulePick.mod === 'complaints' ? modulePick.n : 0}
-                />
-              </div>
-            )}
-          </main>
-        </div>
-      </div>
-
-      {active && (
-        <Drawer
-          d={active}
-          canDelete={session.isHead}
-          onDelete={() => removeEntry(active.invoice_id)}
-          onClose={() => setActiveId(null)}
-          onAdvance={(toStage) =>
-            setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
-          }
-          onSetStage={(toStage) => setStage(active.invoice_id, toStage)}
-          onEditStage={(sid) =>
-            setModal({
-              invoiceId: active.invoice_id,
-              toStage: sid,
-              mode: 'edit',
-            })
-          }
-        />
-      )}
-      {showLog && (
-        <ActivityLog
-          deliveries={scopedAll}
-          session={session}
-          onClose={() => setShowLog(false)}
-          onOpen={(x) => {
-            setShowLog(false);
-            setActiveId(x.invoice_id);
-          }}
-        />
-      )}
-      {modal && (
-        <StageModal
-          delivery={deliveries.find((x) => x.invoice_id === modal.invoiceId)}
-          toStage={modal.toStage}
-          mode={modal.mode}
-          onClose={() => setModal(null)}
-          onSave={commitModal}
-        />
-      )}
-      {toast && <Toast msg={toast} />}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════ ENTRIES VIEW
-   FIX: ye component missing tha isliye login ke baad screen crash ho rahi
-   thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
-   FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
-/* ═══════════════════════════════════════════════════════ DASHBOARD (all stores)
-   Store-wise daily MIS. Cards + table sab clickable → entries neeche table mein. */
-const DASH_STORES = [
-  'MOH',
-  'CHD',
-  'GGN',
-  'NCR',
-  'NOD',
-  'LDH',
-  'JAL',
-  'JPR',
-  'LKO',
-  'NWD',
-  'JKP',
-];
-
-function dayStr(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (isNaN(d)) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function todayStr() {
-  return dayStr(Date.now());
-}
-// item ki "scheduled/planned" date (confirmed_date) — future dated detect karne ko
-function plannedDate(x) {
-  const r = (x && x._raw) || {};
-  const v = r.confirmed_date;
-  return v && v !== 'null' ? String(v).slice(0, 10) : '';
-}
-
-function Dashboard({ deliveries, onOpen }) {
-  const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
-  const [store, setStore] = useState('ALL');
-  const [sel, setSel] = useState(null); // clicked filter
-
-  // date range → [start,end] (created date ke hisaab se base)
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'month') {
-      const s = new Date(t.getFullYear(), t.getMonth(), 1);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'custom') return [from, to];
-    return ['0000-01-01', '9999-12-31']; // all
-  }, [range, from, to]);
-
-  // base = date-range + store filter (created date pe)
-  const base = useMemo(() => {
-    const [s, e] = bounds;
-    return deliveries.filter((x) => {
-      const cd = dayStr(createdTs(x));
-      if (cd < s || cd > e) return false;
-      if (store !== 'ALL' && x.branch !== store) return false;
-      return true;
-    });
-  }, [deliveries, bounds, store]);
-
-  // ek item kis-kis metric mein aata hai
-  const today = todayStr();
-  const isClosed = (x) => isClosedStage(x.stage);
-  const metric = {
-    all: () => true,
-    delivered: (x) => x.stage === 'delivered',
-    pending: (x) => x.stage !== 'delivered' && !isClosed(x),
-    future: (x) =>
-      x.stage !== 'delivered' &&
-      !isClosed(x) &&
-      plannedDate(x) &&
-      plannedDate(x) > today,
-    issues: (x) => isClosed(x),
-    nophoto: (x) =>
-      x.stage === 'delivered' &&
-      !(x._raw && x._raw.photo_delivered && x._raw.photo_delivered !== 'null'),
-  };
-  const stageMetric = {
-    new: (x) => x.stage === 'new',
-    talked: (x) => x.stage === 'talked',
-    scheduled: (x) => x.stage === 'scheduled',
-    dispatched: (x) => x.stage === 'dispatched',
-    delivered: (x) => x.stage === 'delivered',
-  };
-
-  const cards = [
-    { kind: 'all', label: 'Total', color: T.slate, soft: T.slateSoft },
-    { kind: 'delivered', label: 'Delivered', color: T.green, soft: T.mint },
-    { kind: 'pending', label: 'Pending', color: T.blue, soft: T.blueSoft },
-    { kind: 'future', label: 'Future dated', color: T.amber, soft: T.amberSoft },
-    { kind: 'issues', label: 'Cancelled/Dup/Renewal', color: T.red, soft: T.redSoft },
-    { kind: 'nophoto', label: 'Delivered · photo missing', color: T.violet, soft: T.violetSoft },
-  ];
-
-  // clicked subset for the entries table
-  const rows = useMemo(() => {
-    if (!sel) return [];
-    let list = base;
-    if (sel.store) list = list.filter((x) => x.branch === sel.store);
-    const fn =
-      metric[sel.kind] || stageMetric[sel.kind] || (() => true);
-    return list.filter(fn).sort((a, b) => (createdTs(b) || 0) - (createdTs(a) || 0));
-    // eslint-disable-next-line
-  }, [base, sel]);
-
-  const cnt = (fn, list) => list.filter(fn).length;
-  const rangeLabel =
-    range === 'today'
-      ? 'Aaj'
-      : range === 'yesterday'
-        ? 'Kal'
-        : range === '7d'
-          ? 'Pichhle 7 din'
-          : range === 'month'
-            ? 'Is mahine'
-            : range === 'all'
-              ? 'Sabhi'
-              : `${from} → ${to}`;
-
-  // ── Kisi number pe click → poora view badal jaata hai: sirf us subset ki
-  // list, upar Back button. Dobara dashboard pe aane ke liye Back dabao.
-  if (sel) {
-    return (
-      <div>
-        <button className="track-back" onClick={() => setSel(null)}>
-          <ArrowLeft size={16} /> Back to dashboard
-        </button>
-        {/* drill: selected entries */}
-        <div className="dash-block">
-          <div className="dash-block-h">
-            {rows.length} entries
-            {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
-            {cards.find((c) => c.kind === sel.kind)?.label ||
-              sShort(sel.kind) ||
-              'All'}
-          </div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Invoice</th>
-                  <th>Customer</th>
-                  <th>Store</th>
-                  <th>Equipment</th>
-                  <th>Stage</th>
-                  <th>Amount</th>
-                  <th>Created</th>
-                  <th>Planned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="dash-empty">
-                      Koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((x) => {
-                    const st = stageMeta(x.stage);
-                    return (
-                      <tr
-                        key={x.invoice_id}
-                        className="dash-row"
-                        onClick={() => onOpen(x)}
-                      >
-                        <td>{x.id}</td>
-                        <td>{x.customer}</td>
-                        <td>{branchLabel(x.branch)}</td>
-                        <td className="ellip" style={{ maxWidth: 200 }}>
-                          {x.equipment}
-                        </td>
-                        <td>
-                          <span
-                            className="dash-chip"
-                            style={{ background: st.soft, color: st.color }}
-                          >
-                            {st.short}
-                          </span>
-                        </td>
-                        <td>₹{x.amount.toLocaleString('en-IN')}</td>
-                        <td>{dayStr(createdTs(x)) || '—'}</td>
-                        <td>{plannedDate(x) || '—'}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="dash-head">
-        <div>
-          <div className="dash-sub">All stores · MIS</div>
-          <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
-        </div>
-        <div className="dash-filters">
-          <select
-            className="dash-inp"
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-          >
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="month">Is mahine</option>
-            <option value="all">Sabhi</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <>
-              <input
-                className="dash-inp"
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-              <input
-                className="dash-inp"
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </>
-          )}
-          <select
-            className="dash-inp"
-            value={store}
-            onChange={(e) => {
-              setStore(e.target.value);
-              setSel({ kind: 'all', store: null });
-            }}
-          >
-            <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* summary cards */}
-      <div className="dash-cards">
-        {cards.map((c) => {
-          const n = cnt(metric[c.kind], base);
-          const on = !!sel && sel.kind === c.kind && !sel.store;
-          return (
-            <button
-              key={c.kind}
-              className={on ? 'dash-card on' : 'dash-card'}
-              style={on ? { borderColor: c.color } : {}}
-              onClick={() => setSel({ kind: c.kind, store: null })}
-            >
-              <div
-                className="dash-card-ico"
-                style={{ background: c.soft, color: c.color }}
-              >
-                <BarChart3 size={16} />
-              </div>
-              <div className="dash-card-n">{n}</div>
-              <div className="dash-card-l">{c.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* store-wise MIS table */}
-      <div className="dash-block">
-        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>Store</th>
-                <th>Total</th>
-                <th>New</th>
-                <th>Contacted</th>
-                <th>Scheduled</th>
-                <th>Out for Del</th>
-                <th>Delivered</th>
-                <th>Pending</th>
-                <th>Future</th>
-                <th>Issues</th>
-              </tr>
-            </thead>
-            <tbody>
-              {DASH_STORES.filter(
-                (st) => store === 'ALL' || store === st,
-              ).map((st) => {
-                const list = base.filter((x) => x.branch === st);
-                if (list.length === 0) return null;
-                const cell = (kind, fn) => (
-                  <td
-                    className={fn(list) ? 'dash-td-click' : 'dash-td-zero'}
-                    onClick={() =>
-                      fn(list) && setSel({ kind, store: st })
-                    }
-                  >
-                    {cnt(
-                      metric[kind] || stageMetric[kind],
-                      list,
-                    )}
-                  </td>
-                );
-                const has = (kind) =>
-                  cnt(metric[kind] || stageMetric[kind], list) > 0;
-                return (
-                  <tr key={st}>
-                    <td className="dash-store">{branchLabel(st)}</td>
-                    <td
-                      className="dash-td-click"
-                      onClick={() => setSel({ kind: 'all', store: st })}
-                    >
-                      {list.length}
-                    </td>
-                    {['new', 'talked', 'scheduled', 'dispatched', 'delivered'].map(
-                      (k) => (
-                        <td
-                          key={k}
-                          className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
-                          onClick={() => has(k) && setSel({ kind: k, store: st })}
-                        >
-                          {cnt(stageMetric[k], list)}
-                        </td>
-                      ),
-                    )}
-                    {['pending', 'future', 'issues'].map((k) => (
-                      <td
-                        key={k}
-                        className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
-                        onClick={() => has(k) && setSel({ kind: k, store: st })}
-                      >
-                        {cnt(metric[k], list)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════ PROCESS & SLA (all stores)
-   Do SLA:
-   1. RESPONSE  — order aane ke 30 min (business hours 10AM–8PM) mein
-                  "Talked to Customer" pe move hona chahiye
-   2. DELIVERY  — jo confirmed date+time customer ko diya, us tak
-                  "Item Delivered" ho jaana chahiye (exact wall clock)
-   Dashboard ke hi dash-* classes use karta hai — koi naya CSS nahi.        */
-
-const SLA_BIZ_START = 10; // 10 AM
-const SLA_BIZ_END = 20; // 8 PM
-const SLA_RESPONSE_MIN = 30; // business minutes
-
-/* 30-min SLA duration hai isliye business-hours clock pe chalta hai.
-   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
-   normal wall clock. */
-function slaBizAdd(from, mins) {
-  const shift = (x) => {
-    const y = new Date(x);
-    const h = y.getHours() + y.getMinutes() / 60;
-    if (h < SLA_BIZ_START) y.setHours(SLA_BIZ_START, 0, 0, 0);
-    else if (h >= SLA_BIZ_END) {
-      y.setDate(y.getDate() + 1);
-      y.setHours(SLA_BIZ_START, 0, 0, 0);
-    }
-    return y;
-  };
-  let d = shift(new Date(from));
-  let left = mins;
-  for (let g = 0; g < 400 && left > 0; g++) {
-    const end = new Date(d);
-    end.setHours(SLA_BIZ_END, 0, 0, 0);
-    const avail = (end - d) / 60000;
-    if (left <= avail) return new Date(d.getTime() + left * 60000);
-    left -= avail;
-    d = shift(new Date(end.getTime() + 60000));
-  }
-  return d;
-}
-
-/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi).
-   Mgr/Del/Avg time isse nikalte hain, warna raat ke ghante jud kar store
-   bekaar mein kharab dikhta hai. */
-function slaBizMins(a, b) {
-  if (!a || !b || b <= a) return 0;
-  let total = 0;
-  let cur = new Date(a);
-  for (let g = 0; g < 400 && cur < b; g++) {
-    const s0 = new Date(cur);
-    s0.setHours(SLA_BIZ_START, 0, 0, 0);
-    const e0 = new Date(cur);
-    e0.setHours(SLA_BIZ_END, 0, 0, 0);
-    const s = cur < s0 ? s0 : cur;
-    const e = b < e0 ? b : e0;
-    if (e > s) total += (e - s) / 60000;
-    const nx = new Date(cur);
-    nx.setDate(nx.getDate() + 1);
-    nx.setHours(0, 0, 0, 0);
-    cur = nx;
-  }
-  return total;
-}
-
-const slaLog = (x) => {
-  const r = (x && x._raw) || {};
-  return Array.isArray(r.app_log) ? r.app_log : [];
-};
-
-/* Current cycle = aakhri baar "New Delivery" pe wapas jaane ke baad ka hissa.
-   Iske bina re-opened orders galti se "stage skipped" dikhte hain.
-   "Edited" stage move nahi hai, isliye chhod dete hain. */
-function slaCycle(x) {
-  const mv = slaLog(x)
-    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
-    .slice()
-    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-  let start = 0;
-  for (let i = mv.length - 1; i >= 0; i--)
-    if (mv[i].stage === 'new') {
-      start = i;
-      break;
-    }
-  return mv.slice(start);
-}
-function slaFirst(cycle, stage) {
-  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
-  return null;
-}
-/* MBC = customer khud le jaata hai — Scheduled se seedha Delivered.
-   Ispe "Out for Delivery skip hua" count nahi hona chahiye. */
-function slaIsMbc(x, cycle) {
-  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
-  return cycle.some((e) =>
-    String((e.fields && e.fields['Delivery person']) || '').toUpperCase().includes('MBC'),
-  );
-}
-/* Promise = confirmed_date + confirmed_time (buildPatch inhe hamesha likhta hai) */
-function slaPromise(x) {
-  const r = (x && x._raw) || {};
-  const d = r.confirmed_date;
-  if (!d || d === 'null') return null;
-  let t = r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time) : '20:00:00';
-  if (t.length === 5) t += ':00';
-  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
-  return isNaN(dt) ? null : dt;
-}
-
-/* ETA = app_eta column ("YYYY-MM-DDTHH:MM" ya "YYYY-MM-DD HH:MM"),
-   Out for Delivery stage pe bhara jaata hai */
-function slaEta(x) {
-  const r = (x && x._raw) || {};
-  const v = r.app_eta;
-  if (!v || v === 'null') return null;
-  const dt = new Date(String(v).replace(' ', 'T'));
-  return isNaN(dt) ? null : dt;
-}
-
-const slaHrs = (h) =>
-  h == null ? '—' : h < 1 ? Math.round(h * 60) + 'm' : h < 48 ? Math.round(h) + 'h' : (h / 24).toFixed(1) + 'd';
-const slaMins = (m) => {
-  if (m == null) return '—';
-  const a = Math.abs(m);
-  if (a < 60) return Math.round(a) + 'm';
-  if (a < 2880) return Math.round(a / 60) + 'h';
-  return (a / 1440).toFixed(1) + 'd';
-};
-
-/* ── ek order ka poora SLA picture ── */
-function slaAnalyze(x) {
-  const cycle = slaCycle(x);
-  const mbc = slaIsMbc(x, cycle);
-  const now = new Date();
-  const created = new Date(createdTs(x));
-  const okStart = !isNaN(created);
-  // saare duration business hours mein — deadline logic ke saath consistent
-  const span = (a, b) => (a && b && b >= a ? slaBizMins(a, b) / 60 : null);
-
-  const delivered = x.stage === 'delivered';
-  const delAt = delivered ? new Date(deliveredTs(x)) : null;
-
-  /* SLA 1 — Response */
-  const talkedAt = slaFirst(cycle, 'talked');
-  const respDeadline = okStart ? slaBizAdd(created, SLA_RESPONSE_MIN) : null;
-  const respEnd = talkedAt || now;
-  const respBreach = !!(respDeadline && respEnd > respDeadline);
-  const respOpen = !talkedAt;
-  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
-
-  const promise = slaPromise(x);
-  const dispAt = slaFirst(cycle, 'dispatched');
-  const eta = slaEta(x);
-
-  /* SLA 2 — ETA fill: jo delivery time customer ko diya tha, us tak order
-     "Out for Delivery" hokar estimated arrival bhar jani chahiye. */
-  const etaApplies = !!promise;
-  const etaEnd = dispAt || now;
-  const etaBreach = !!(etaApplies && etaEnd > promise);
-  const etaOpen = !dispAt;
-  const etaLateBy = etaBreach ? (etaEnd - promise) / 60000 : 0;
-
-  /* SLA 3 — Delivery: jo estimated arrival bhara, us tak delivery ho jani chahiye */
-  const delDeadline = eta;
-  const delEnd = delAt || now;
-  const delBreach = !!(delDeadline && delEnd > delDeadline);
-  const delLateBy = delBreach ? (delEnd - delDeadline) / 60000 : 0;
-
-  /* stage skip */
-  const need = ['talked', 'scheduled', 'dispatched'];
-  const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
-
-  /* Manager response — entry aane se agli stage (Talked to Customer) tak.
-     Jo order abhi Talked pe pahuncha hi nahi, uska respHrs null (average
-     mein count nahi hoga — wo Response Breach column mein pakda jaata hai). */
-  const respHrs = okStart && talkedAt ? span(created, talkedAt) : null;
-
-  /* Delivery person ka hissa — Out for Delivery se Delivered tak */
-  let delHrs = null;
-  if (delAt && !isNaN(delAt) && dispAt) delHrs = span(dispAt, delAt);
-
-  const graded = (respDeadline ? 1 : 0) + (etaApplies ? 1 : 0) + (delDeadline ? 1 : 0);
-  const breaches = (respBreach ? 1 : 0) + (etaBreach ? 1 : 0) + (delBreach ? 1 : 0);
-
-  return {
-    x,
-    branch: x.branch,
-    delivered,
-    mbc,
-    respBreach,
-    respOpen,
-    respLateBy,
-    respDeadline,
-    talkedAt,
-    promise,
-    eta,
-    dispAt,
-    etaApplies,
-    etaBreach,
-    etaOpen,
-    etaLateBy,
-    delDeadline,
-    delBreach,
-    delLateBy,
-    delAt,
-    skipped: delivered && missing.length > 0,
-    missing,
-    graded,
-    breaches,
-    /* abhi action chahiye: pending order jiski koi bhi SLA nikal chuki hai */
-    overdue: !delivered && ((respOpen && respBreach) || (etaOpen && etaBreach) || delBreach),
-    totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
-    openHrs: okStart && !delivered ? span(created, now) : null,
-    respHrs,
-    delHrs,
-  };
-}
-
-/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka chhota box.
-   position:fixed use karte hain kyunki dash-block mein overflow:hidden hai —
-   warna kam rows hone pe tooltip cut ho jaata. */
-function SlaTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
-  const [pos, setPos] = useState(null);
-  const ref = React.useRef(null);
-  /* nowrap hata dete hain taaki lambi heading 2 line mein aa jaye aur
-     table horizontally scroll na karni pade */
-  const thStyle = {
-    whiteSpace: 'normal',
-    verticalAlign: 'bottom',
-    width: w || 'auto',
-    textAlign: center || group ? 'center' : 'left',
-    ...(group
-      ? { color: T.forestSoft, borderBottom: '1px solid ' + T.line, paddingBottom: 6 }
-      : {}),
-    /* group ke shuru mein vertical line — kaunsa column kis group ka hai saaf rahe */
-    ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-  };
-  const span = { colSpan, rowSpan };
-  if (!info) return <th style={thStyle} {...span}>{label}</th>;
-
-  const show = () => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const w = 250;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 12)),
-      top: r.bottom + 6,
-      w,
-    });
-  };
-
-  return (
-    <th style={thStyle} {...span}>
-      <span
-        ref={ref}
-        style={{ cursor: 'help' }}
-        onMouseEnter={show}
-        onMouseLeave={() => setPos(null)}
-        onClick={() => (pos ? setPos(null) : show())}
-      >
-        {label}{' '}
-        <Info size={12} color="#B3AFA4" style={{ verticalAlign: '-1px' }} />
-      </span>
-      {pos && (
-        <div
-          style={{
-            position: 'fixed',
-            left: pos.left,
-            top: pos.top,
-            width: pos.w,
-            zIndex: 90,
-            background: T.forest,
-            color: '#fff',
-            borderRadius: 10,
-            padding: '10px 12px',
-            fontSize: 11.5,
-            fontWeight: 500,
-            lineHeight: 1.55,
-            letterSpacing: 0,
-            textTransform: 'none',
-            whiteSpace: 'normal',
-            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
-            pointerEvents: 'none',
-          }}
-        >
-          {info}
-        </div>
-      )}
-    </th>
-  );
-}
-
-function SlaReport({ deliveries, onOpen, logsLoaded }) {
-  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
-  const [store, setStore] = useState('ALL');
-  const [view, setView] = useState('stores'); // stores | boys
-  const [sel, setSel] = useState(null); // null = drill band
-  const [alertOn, setAlertOn] = useState(null);
-
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    return [from, to];
-  }, [range, from, to]);
-
-  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati.
-     Jin rows ka timeline abhi load nahi hua unhe bhi chhod dete hain — warna
-     "koi stage move hua hi nahi" maankar sab breach dikhne lagti hain. */
-  const live = useMemo(
-    () =>
-      deliveries.filter(
-        (d) =>
-          !isClosedStage(d.stage) &&
-          d._raw &&
-          Array.isArray(d._raw.app_log),
-      ),
-    [deliveries],
-  );
-
-  const inRange = useMemo(() => {
-    const [s, e] = bounds;
-    return live.filter((d) => {
-      const cd = dayStr(createdTs(d));
-      if (cd < s || cd > e) return false;
-      if (store !== 'ALL' && d.branch !== store) return false;
-      return true;
-    });
-  }, [live, bounds, store]);
-
-  /* MBC = customer khud le jaata hai — store ki SLA uspe lagti hi nahi,
-     isliye poori report se bahar (Total mein bhi nahi). */
-  const rows = useMemo(() => inRange.map(slaAnalyze).filter((a) => !a.mbc), [inRange]);
-
-  /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
-     order "Aaj" filter mein chhup jaata to report jhooth bolti. */
-  const overdueAll = useMemo(
-    () =>
-      live
-        .filter((d) => d.stage !== 'delivered')
-        .map(slaAnalyze)
-        .filter((a) => a.overdue && !a.mbc && (store === 'ALL' || a.branch === store)),
-    [live, store],
-  );
-
-  const pick = {
-    all: () => true,
-    delivered: (a) => a.delivered,
-    pending: (a) => !a.delivered,
-    resp: (a) => a.respBreach,
-    eta: (a) => a.etaBreach,
-    del: (a) => a.delBreach,
-  };
-
-  const statOf = (list, ov) => {
-    const dl = list.filter((a) => a.delivered);
-
-    const avg = (k) => {
-      const v = dl.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-    /* response time delivered hone ka intezaar nahi karta — pending bhi count */
-    const avgAll = (k) => {
-      const v = list.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-
-    return {
-      total: list.length,
-      delivered: dl.length,
-      pending: list.length - dl.length,
-      respBreach: list.filter((a) => a.respBreach).length,
-      etaBreach: list.filter((a) => a.etaBreach).length,
-      delBreach: list.filter((a) => a.delBreach).length,
-      /* sirf breach hue orders ka average — deadline se kitna upar nikle */
-      avgRespLate: (() => {
-        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
-        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-      })(),
-      overdue: ov.length,
-      avgCycle: avg('totalHrs'),
-      avgResp: avgAll('respHrs'),
-      avgDel: avg('delHrs'),
-    };
-  };
-
-  const overall = statOf(rows, overdueAll);
-
-  const cards = [
-    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
-    { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
-    { kind: 'eta', label: 'ETA breach', n: overall.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
-    { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
-  ];
-
-  /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
-  const personOf = (a) => {
-    const p = String(a.x.person || '').trim();
-    if (!p || p === 'null') return 'Not assigned';
-    return p;
-  };
-
-  const drill = useMemo(() => {
-    if (!sel) return [];
-    let list = sel.kind === 'overdue' ? overdueAll : rows;
-    if (sel.store) list = list.filter((a) => a.branch === sel.store);
-    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
-    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
-    return list
-      .filter(fn)
-      .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
-    // eslint-disable-next-line
-  }, [rows, overdueAll, sel]);
-
-  /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
-  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
-    .map((st) => ({
-      st,
-      s: statOf(
-        rows.filter((a) => a.branch === st),
-        overdueAll.filter((a) => a.branch === st),
-      ),
-    }))
-    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
-
-  /* delivery boy wise — person + store ke hisaab se group */
-  const boyStats = useMemo(() => {
-    // bina-assign wale orders kisi bande ki performance nahi hain
-    const skip = (a) => personOf(a) === 'Not assigned';
-    const keys = new Set();
-    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    return [...keys]
-      .map((k) => {
-        const [person, br] = k.split('|');
-        return {
-          person,
-          br,
-          st: br,
-          s: statOf(
-            rows.filter((a) => personOf(a) === person && a.branch === br),
-            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
-          ),
-        };
-      })
-      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-      .sort((a, b) => a.person.localeCompare(b.person));
-    // eslint-disable-next-line
-  }, [rows, overdueAll]);
-
-  const rangeLabel =
-    range === 'today'
-      ? 'Aaj'
-      : range === 'yesterday'
-        ? 'Kal'
-        : range === '7d'
-          ? 'Pichhle 7 din'
-          : `${from} → ${to}`;
-
-  /* dobara wahi click = band (dropdown jaisa) */
-  const toggleSel = (next) =>
-    setSel((cur) =>
-      cur && cur.kind === next.kind && cur.store === next.store && cur.person === next.person
-        ? null
-        : next,
-    );
-
-  const cellFor = (target) => (kind, n, color, div) => (
-    <td
-      className={n ? 'dash-td-click' : 'dash-td-zero'}
-      style={{
-        textAlign: 'center',
-        ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-        ...(n ? { color } : {}),
-      }}
-      onClick={() => n && toggleSel({ kind, store: null, person: null, ...target })}
-    >
-      {n}
-    </td>
-  );
-
-  /* Kisi number pe click → poora view badal jaata hai: sirf us subset ki list
-     dikhti hai, cards aur upar wali table chhup jaati hai. Back se wapas. */
-  if (sel) {
-    const selLabel = cards.find((c) => c.kind === sel.kind)?.label || 'All';
-    return (
-      <div>
-        <button className="track-back" onClick={() => setSel(null)}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="dash-head">
-          <div>
-            <div className="dash-sub">
-              {selLabel}
-              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
-              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
-            </div>
-            <h2 style={{ margin: '2px 0 0' }}>
-              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
-            </h2>
-          </div>
-        </div>
-      <div className="dash-block">
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <SlaTh label="Invoice" />
-                <SlaTh label="Customer" />
-                <SlaTh label="Store" />
-                <SlaTh label="Stage" />
-                <SlaTh
-                  label="Response"
-                  info={`Entry aane se "Talked to Customer" tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
-                />
-                <SlaTh
-                  label="Promise"
-                  info="Jo date aur time customer ko diya gaya tha — Talked stage pe bhara hua confirmed slot. Is time tak ETA bhar jani chahiye."
-                />
-                <SlaTh
-                  label="ETA"
-                  info="Out for Delivery stage pe bhara hua Estimated arrival. Is time tak delivery ho jani chahiye."
-                />
-                <SlaTh label="Delivered" />
-                <SlaTh label="Late by" info="Jo SLA breach hui hai, us deadline se kitna time nikal gaya." />
-                <SlaTh label="Delivery boy" />
-              </tr>
-            </thead>
-            <tbody>
-              {drill.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="dash-empty">
-                    Koi entry nahi
-                  </td>
-                </tr>
-              ) : (
-                drill.map((a) => {
-                  const stg = stageMeta(a.x.stage);
-                  return (
-                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
-                      <td>{a.x.id}</td>
-                      <td>{a.x.customer}</td>
-                      <td>{branchLabel(a.branch)}</td>
-                      <td>
-                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
-                          {stg.short}
-                        </span>
-                      </td>
-                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
-                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
-                      </td>
-                      <td style={{ color: a.etaBreach ? T.red : T.ink, fontWeight: a.etaBreach ? 700 : 500 }}>
-                        {a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}
-                      </td>
-                      <td>
-                        {a.eta ? (
-                          fmtDateTime(a.eta.toISOString())
-                        ) : (
-                          <span style={{ color: a.etaBreach ? T.red : T.inkSoft, fontWeight: a.etaBreach ? 700 : 500 }}>
-                            {a.etaBreach ? 'bhari nahi' : '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {a.delAt && !isNaN(a.delAt) ? (
-                          fmtDateTime(a.delAt.toISOString())
-                        ) : (
-                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
-                            {a.delBreach ? 'nahi hui' : '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          color: a.delBreach || a.etaBreach ? T.red : T.inkSoft,
-                          fontWeight: a.delBreach || a.etaBreach ? 700 : 500,
-                        }}
-                      >
-                        {a.delBreach
-                          ? slaMins(a.delLateBy)
-                          : a.etaBreach
-                            ? slaMins(a.etaLateBy)
-                            : '—'}
-                      </td>
-                      <td>{personOf(a)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </div>
-    );
-  }
-
-  if (!logsLoaded)
-    return (
-      <div className="loading">
-        Timeline load ho raha hai… SLA usi se banti hai.
-      </div>
-    );
-
-  return (
-    <div>
-      <div className="dash-head">
-        <div>
-          <div className="dash-sub">All stores · Process &amp; SLA</div>
-          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
-        </div>
-        <div className="dash-filters">
-          <div className="layout-toggle">
-            <button
-              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('stores');
-                setSel(null);
-              }}
-            >
-              <Building2 size={14} /> Stores
-            </button>
-            <button
-              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('boys');
-                setSel(null);
-              }}
-            >
-              <User size={14} /> Delivery boys
-            </button>
-          </div>
-          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <>
-              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
-            </>
-          )}
-          <select
-            className="dash-inp"
-            value={store}
-            onChange={(e) => {
-              setStore(e.target.value);
-              setSel(null);
-            }}
-          >
-            <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="dash-cards">
-        {cards.map((c) => {
-          const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
-          return (
-            <button
-              key={c.label}
-              className={on ? 'dash-card on' : 'dash-card'}
-              style={{
-                ...(on ? { borderColor: c.color } : {}),
-                ...(c.n ? {} : { cursor: 'default' }),
-              }}
-              onClick={() => c.n && toggleSel({ kind: c.kind, store: null, person: null })}
-            >
-              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
-                <c.icon size={16} />
-              </div>
-              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
-                {c.n}
-              </div>
-              <div className="dash-card-l">{c.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {view === 'stores' ? (
-        <div className="dash-block">
-          <div className="dash-block-h">
-            Store-wise · {rangeLabel}
-          </div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <SlaTh label="Store" rowSpan={2} />
-                  <SlaTh label="Orders" colSpan={2} group div />
-                  <SlaTh label="Response" colSpan={3} group div />
-                  <SlaTh label="Delivery" colSpan={3} group div />
-                  <SlaTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info={`Pending orders jinki koi bhi SLA nikal chuki hai — ${SLA_RESPONSE_MIN} min ka response, ETA fill, ya ETA tak delivery. Inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta, purane atke orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai.`}
-                  />
-                  <SlaTh label="Alert" rowSpan={2} center w={70} div />
-                </tr>
-                <tr>
-                  <SlaTh
-                    label="Total"
-                    center
-                    div
-                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin — un pe store ki SLA lagti hi nahi."
-                  />
-                  <SlaTh label="Delivered" center />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    div
-                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
-                  />
-                  <SlaTh
-                    label="Breach"
-                    center
-                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar "Talked to Customer" pe move nahi hue. Ye store manager ki zimmedari hai.`}
-                  />
-                  <SlaTh
-                    label="Avg Breach Time"
-                    center
-                    info={`Jo orders ${SLA_RESPONSE_MIN} min ki deadline paar kar gaye, unka average kitna upar nikle.`}
-                  />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    div
-                    info="Entry aane se Item Delivered tak ka poora average. Sirf delivered orders ka."
-                  />
-                  <SlaTh
-                    label="ETA Breach"
-                    center
-                    info="Jo delivery time customer ko diya tha, us tak order Out for Delivery hokar Estimated arrival bhar jani chahiye thi — nahi hui."
-                  />
-                  <SlaTh
-                    label="Del Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak delivery nahi hui (ya abhi tak hui hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {storeStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  storeStats.map(({ st, s }) => {
-                    const cell = cellFor({ store: st, person: null });
-                    return (
-                      <tr key={st}>
-                        <td className="dash-store">{branchLabel(st)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('delivered', s.delivered, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgResp)}
-                        </td>
-                        {cell('resp', s.respBreach, T.red)}
-                        <td
-                          style={{
-                            textAlign: 'center',
-                            color: s.avgRespLate == null ? '#C9C7BE' : T.red,
-                          }}
-                        >
-                          {s.avgRespLate == null ? '—' : '+' + slaMins(s.avgRespLate)}
-                        </td>
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgCycle)}
-                        </td>
-                        {cell('eta', s.etaBreach, T.red)}
-                        {cell('del', s.delBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          <button
-                            className="mini-edit"
-                            style={
-                              s.overdue || s.respBreach || s.delBreach
-                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
-                                : {}
-                            }
-                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
-                          >
-                            <Bell size={12} /> Alert
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="dash-block">
-          <div className="dash-block-h">
-            Delivery boy wise · {rangeLabel}
-          </div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <SlaTh
-                    label="Delivery boy"
-                    rowSpan={2}
-                    info="Bina-assign wale orders is view mein nahi aate, isliye yahan ke totals Stores view se thode kam ho sakte hain."
-                  />
-                  <SlaTh label="Store" rowSpan={2} />
-                  <SlaTh label="Orders" colSpan={2} group div />
-                  <SlaTh label="Delivery" colSpan={3} group div />
-                  <SlaTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info="Pending orders jinki koi bhi SLA nikal chuki hai. Ye column date filter follow nahi karta."
-                  />
-                </tr>
-                <tr>
-                  <SlaTh label="Total" center div />
-                  <SlaTh label="Delivered" center />
-                  <SlaTh
-                    label="Del Time"
-                    center
-                    div
-                    info="Out for Delivery se Delivered tak ka average — sirf delivery boy ka hissa."
-                  />
-                  <SlaTh
-                    label="Avg Time"
-                    center
-                    info="Entry aane se Item Delivered tak ka poora average, jisme manager ka time bhi shaamil hai."
-                  />
-                  <SlaTh
-                    label="Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak delivery nahi hui (ya abhi tak hui hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {boyStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  boyStats.map(({ person, br, s }) => {
-                    const cell = cellFor({ person, store: null });
-                    return (
-                      <tr key={person + br}>
-                        <td className="dash-store">{person}</td>
-                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('delivered', s.delivered, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {slaHrs(s.avgDel)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>{slaHrs(s.avgCycle)}</td>
-                        {cell('del', s.delBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-
-      {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
-    </div>
-  );
-}
-
-/* ── Alert modal — abhi sirf UI, backend baad mein ── */
-function SlaAlert({ title, s, onClose }) {
-  const problems = [];
-  if (s.overdue)
-    problems.push([
-      'Overdue orders',
-      `${s.overdue} order ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
+    const back = new Date(); back.setDate(back.getDate() - 40);
+    const lo = [range.from, ymd(back)].sort()[0];
+    const [logs, sess, who] = await Promise.all([
+      supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+        .gte("work_date", lo).order("work_date", { ascending: false }),
+      supabase.rpc("my_sessions", {}),
+      supabase.rpc("whos_in", {}),
     ]);
-  if (s.respBreach)
-    problems.push([
-      'Response late',
-      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
-        (s.avgRespLate ? ` — average ${slaMins(s.avgRespLate)} deadline se upar.` : '.'),
+    setRecent(logs.data || []);
+    setToday((logs.data || []).find((r: any) => r.work_date === istToday()) || null);
+    setSessions(sess.data || []);
+    setBoard(who.data || []);
+    const [m, pr, lvs] = await Promise.all([
+      supabase.rpc("my_manager"), supabase.rpc("my_peers"),
+      supabase.from("leaves").select("*").eq("employee_id", me.id)
+        .eq("status", "Approved").gte("to_date", addDays(istToday(), -10)),
     ]);
-  if (s.etaBreach)
-    problems.push([
-      'ETA bhari nahi gayi',
-      `${s.etaBreach} order diye hue delivery time tak Out for Delivery nahi hue — estimated arrival hi nahi bhari.`,
-    ]);
-  if (s.delBreach)
-    problems.push(['Delivery breach', `${s.delBreach} order apni estimated arrival se late gaye.`]);
-
-  return (
-    <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="kv-grid">
-            <KV label="Overdue" value={s.overdue} />
-            <KV label="Avg response time" value={slaHrs(s.avgResp)} />
-            <KV label="Avg delivery time" value={slaHrs(s.avgCycle)} />
-            <KV label="Response breach" value={s.respBreach} />
-            <KV label="ETA breach" value={s.etaBreach} />
-          </div>
-
-          <div className="sec-title" style={{ margin: '4px 0 0' }}>
-            Main problems
-          </div>
-          {problems.length === 0 ? (
-            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
-          ) : (
-            problems.slice(0, 2).map(([t, d], i) => (
-              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-                <b>{t}</b>
-                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Close
-          </button>
-          <button className="btn-primary" disabled>
-            <Bell size={15} /> Send alert
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EntriesView({
-  items,
-  viewMode,
-  layoutMode,
-  loading,
-  onOpen,
-  onMove,
-  onCommit,
-  focus,
-  fullHistory,
-  onFullHistory,
-}) {
-  const isMobile = useIsMobile();
-  const [drill, setDrill] = useState(null); // null | total|pending|delivered|cancelled
-
-  // layout ya view badalte hi drill reset
-  useEffect(() => {
-    setDrill(null);
-  }, [layoutMode, viewMode]);
-
-  // drill khulne pe ek history entry push karo — phone/browser ka back button
-  // drill band karega (logout NAHI karega).
-  useEffect(() => {
-    if (!drill || typeof window === 'undefined') return;
-    window.history.pushState({ hjsDrill: drill }, '');
-    const onPop = () => setDrill(null);
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [drill]);
-
-  const back = () => {
-    if (
-      typeof window !== 'undefined' &&
-      window.history.state &&
-      window.history.state.hjsDrill
-    ) {
-      window.history.back(); // popstate → setDrill(null)
-    } else {
-      setDrill(null);
-    }
+    setMyLeaves(lvs.data || []);
+    setMgr(m.data || []);
+    setPeers(pr.data || []);
   };
+  useEffect(() => { load(); }, [me.id, range.from, range.to]);
+  const open = sessions.find((s) => !s.out_at);
+  const closedMinutes = useMemo(
+    () => sessions.filter((s) => s.out_at).reduce((a, s) => a + (s.minutes || 0), 0),
+    [sessions]);
 
-  // Categories layout → collapsible stat categories
-  if (layoutMode === 'categories') {
-    return (
-      <CategoriesView
-        items={items}
-        loading={loading}
-        onOpen={onOpen}
-        onMove={onMove}
-        onCommit={onCommit}
-      />
-    );
-  }
-
-  // Kisi stat card pe click → us category ki entries + Back button
-  if (drill) {
-    return (
-      <DrillView
-        cat={drill}
-        items={items}
-        viewMode={viewMode}
-        onBack={back}
-        onOpen={onOpen}
-        onMove={onMove}
-        onCommit={onCommit}
-      />
-    );
-  }
-
-  // Board layout → stage-wise kanban. Archived mein sirf Delivered list.
-  return (
-    <>
-      {!isMobile && (
-        <Stats items={items} viewMode={viewMode} onDrill={setDrill} />
-      )}
-      {viewMode === 'archived' ? (
-        <ArchivedList
-          items={items}
-          onOpen={onOpen}
-          onMove={onMove}
-          onCommit={onCommit}
-          fullHistory={fullHistory}
-          onFullHistory={onFullHistory}
-        />
-      ) : isMobile ? (
-        <MobileBoard
-          items={items}
-          loading={loading}
-          onOpen={onOpen}
-          onMove={onMove}
-          onCommit={onCommit}
-          focus={focus}
-        />
-      ) : (
-        <Board
-          items={items}
-          loading={loading}
-          onOpen={onOpen}
-          onMove={onMove}
-          onCommit={onCommit}
-        />
-      )}
-      {viewMode !== 'archived' && <FooterTotal items={items} />}
-    </>
-  );
-}
-
-/* stat card → kaunsi entries dikhani hain */
-const STAT_CATS = {
-  total: {
-    label: 'Total Deliveries',
-    color: T.green,
-    soft: T.mint,
-    test: (x) => !isClosedStage(x.stage),
-  },
-  pending: {
-    label: 'Pending',
-    color: T.blue,
-    soft: T.blueSoft,
-    test: (x) => !isClosedStage(x.stage) && x.stage !== 'delivered',
-  },
-  delivered: {
-    label: 'Delivered',
-    color: T.forestSoft,
-    soft: T.mint,
-    test: (x) => x.stage === 'delivered',
-  },
-  cancelled: {
-    label: 'Cancelled',
-    color: T.amber,
-    soft: T.amberSoft,
-    test: (x) => x.stage === 'cancelled',
-  },
-};
-
-/* Stat card click → us category ki entries grid + Back to stages */
-function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
-  const meta = STAT_CATS[cat] || STAT_CATS.total;
-  // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
-  const allArchived = cat === 'total' && viewMode === 'archived';
-  const rows = items.filter(allArchived ? () => true : meta.test);
-  const label = allArchived ? 'All archived' : meta.label;
-  return (
-    <div>
-      <button className="track-back" onClick={onBack}>
-        <ArrowLeft size={16} /> Back to stages
-      </button>
-      <div className="drill-head">
-        <span
-          className="col-pip"
-          style={{ background: meta.color, width: 10, height: 10 }}
-        />
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{label}</h3>
-        <span
-          className="col-count"
-          style={{ background: meta.soft, color: meta.color }}
-        >
-          {rows.length}
-        </span>
-      </div>
-      {rows.length === 0 ? (
-        <div className="empty">Koi entry nahi</div>
-      ) : (
-        <div className="cat-grid">
-          {rows.map((x) => (
-            <Card
-              key={x.invoice_id}
-              d={x}
-              stage={stageMeta(x.stage)}
-              onOpen={() => onOpen(x)}
-              onMove={onMove}
-              onCommit={onCommit}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
-   color bhi badalta hai (green = delivered, red = cancelled). */
-function ArchivedList({ items, onOpen, onMove, onCommit, fullHistory, onFullHistory }) {
-  const [mode, setMode] = useState('delivered');
-  const meta =
-    mode === 'cancelled'
-      ? {
-          label: 'Cancelled',
-          color: T.red,
-          soft: T.redSoft,
-          test: (x) => x.stage === 'cancelled',
-        }
-      : {
-          label: 'Delivered',
-          color: T.green,
-          soft: T.mint,
-          test: (x) => x.stage === 'delivered',
-        };
-  const rows = items.filter(meta.test);
-  return (
-    <div>
-      <div className="drill-head">
-        <span
-          className="col-pip"
-          style={{ background: meta.color, width: 10, height: 10 }}
-        />
-        <select
-          className="arch-select"
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-        >
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <span
-          className="col-count"
-          style={{ background: meta.soft, color: meta.color }}
-        >
-          {rows.length}
-        </span>
-      </div>
-      {onFullHistory && !fullHistory && (
-        <button className="load-old" onClick={onFullHistory}>
-          <History size={14} /> Purani entries laao (90 din se pehle ki)
-        </button>
-      )}
-      {rows.length === 0 ? (
-        <div className="empty">Koi {meta.label.toLowerCase()} entry nahi</div>
-      ) : (
-        <div className="cat-grid">
-          {rows.map((x) => (
-            <Card
-              key={x.invoice_id}
-              d={x}
-              stage={stageMeta(x.stage)}
-              onOpen={() => onOpen(x)}
-              onMove={onMove}
-              onCommit={onCommit}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
-   Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
-   har card clickable + collapsible. Click karo to us category ki entries
-   khulti hain. Ismein koi stage-wise board NAHI hota.                    */
-function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
-  const [open, setOpen] = useState('pending'); // default: Pending khula
-  if (loading && items.length === 0)
-    return <div className="loading">Deliveries load ho rahi hain…</div>;
-  return (
-    <div className="cat-list">
-      {CATS.map((c) => {
-        const rows = items.filter(c.test);
-        const isOpen = open === c.id;
-        return (
-          <section
-            key={c.id}
-            className="cat-sec"
-            style={{ borderTopColor: c.color }}
-          >
-            <button
-              className="cat-head"
-              onClick={() => setOpen(isOpen ? null : c.id)}
-            >
-              <div className="cat-ico" style={{ background: c.soft }}>
-                <c.icon size={20} color={c.color} />
-              </div>
-              <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{c.label}</div>
-                <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 1 }}>
-                  {rows.length} {rows.length === 1 ? 'entry' : 'entries'}
-                </div>
-              </div>
-              <span
-                className="col-count"
-                style={{ background: c.soft, color: c.color }}
-              >
-                {rows.length}
-              </span>
-              <ChevronRight
-                size={18}
-                color={T.inkSoft}
-                style={{
-                  transform: isOpen ? 'rotate(90deg)' : 'none',
-                  transition: 'transform .15s',
-                }}
-              />
-            </button>
-            {isOpen && (
-              <div className="cat-body">
-                {rows.length === 0 ? (
-                  <div className="empty">Koi entry nahi</div>
-                ) : (
-                  <div className="cat-grid">
-                    {rows.map((x) => {
-                      const stg = stageMeta(x.stage);
-                      return (
-                        <Card
-                          key={x.invoice_id}
-                          d={x}
-                          stage={stg}
-                          onOpen={() => onOpen(x)}
-                          onMove={onMove}
-                          onCommit={onCommit}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════ LOGIN */
-function Login({ onLogin }) {
-  const [branch, setBranch] = useState('');
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const go = async () => {
-    if (!branch) {
-      setErr('Pehle store choose karo.');
-      return;
-    }
-    if (!pw) {
-      setErr('Password daalo.');
-      return;
-    }
-    if (!CONFIGURED) {
-      onLogin({ ...sessionFor(branch), pw });
-      return;
-    }
-    setBusy(true);
-    setErr('');
+  const punch = async (dir: "in" | "out") => {
+    setErr(""); setOk(""); setBusy(true);
     try {
-      const rows = await sbLogin(branch, pw);
-      if (!rows || rows.length === 0) {
-        setErr('Galat password.');
-        setBusy(false);
-        return;
+      // Check-in par location zaroori hai, check-out par nahi.
+      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
+      if (dir === "in") {
+        const pos = await getPosition();
+        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+                 p_accuracy: Math.round(pos.coords.accuracy) };
       }
-      onLogin({ ...sessionFor(branch), pw });
-    } catch (e) {
-      setErr('Login error: ' + (e.message || 'unknown'));
-      setBusy(false);
-    }
+      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
+      if (error) throw new Error(error.message);
+      setOk(dir === "in" ? "Checked in." : "Checked out. You can check in again anytime.");
+      await load();
+    } catch (e: any) { setErr(e.message); }
+    setBusy(false);
   };
-  return (
-    <div style={{ fontFamily: FONT }} className="login-wrap">
-      <StyleTag />
-      <div className="login-hero">
-        <div className="hero-glow" />
-        <div style={{ position: 'relative', zIndex: 2 }}>
-          <div className="brand">
-            <div className="brand-badge">
-              <Truck size={22} color="#fff" />
-            </div>
-            <div>
-              <div
-                style={{ fontWeight: 800, fontSize: 19, letterSpacing: -0.3 }}
-              >
-                Healthy Jeena Sikho
-              </div>
-              <div style={{ fontSize: 12.5, opacity: 0.75 }}>
-                Delivery Control
-              </div>
-            </div>
-          </div>
-          <h1 className="hero-h1">
-            Har delivery,
-            <br />
-            ek hi jagah.
-          </h1>
-          <p className="hero-p">
-            Zoho Books se aane wali har delivery — customer se baat se lekar
-            item handover tak, store-wise, live from Supabase.
-          </p>
-          <div className="hero-chips">
-            {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map(
-              (c) => (
-                <span key={c} className="hero-chip">
-                  {c}
-                </span>
-              ),
-            )}
-          </div>
-          <div className="hero-flow">
-            {STAGES.map((s, i) => (
-              <React.Fragment key={s.id}>
-                <div className="flow-dot">
-                  <span style={{ background: s.color }} className="flow-pip" />
-                  {s.short}
-                </div>
-                {i < STAGES.length - 1 && (
-                  <ChevronRight size={15} opacity={0.5} />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="login-form">
-        <div className="glass-card">
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
-              Store login
-            </div>
-            <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>
-              Apna store choose karke password daalo.
-            </div>
-          </div>
-          <Field label="Store">
-            <select
-              className="inp"
-              value={branch}
-              onChange={(e) => {
-                setBranch(e.target.value);
-                setErr('');
-              }}
-            >
-              <option value="">Select store…</option>
-              <option value="ALL">All stores</option>
-              {STORE_ORDER.map((c) => (
-                <option key={c} value={c}>
-                  {branchLabel(c)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Password">
-            <input
-              className="inp"
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="••••"
-              value={pw}
-              onChange={(e) => {
-                setPw(e.target.value.replace(/\D/g, '').slice(0, 4));
-                setErr('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && go()}
-            />
-          </Field>
-          {err && <div className="login-err">{err}</div>}
-          <button
-            className="btn-primary"
-            style={{ width: '100%', marginTop: 4 }}
-            disabled={!branch || !pw || busy}
-            onClick={go}
-          >
-            {busy ? (
-              'Checking…'
-            ) : (
-              <>
-                Sign in <ArrowRight size={17} />
-              </>
-            )}
-          </button>
-          <div
-            style={{
-              textAlign: 'center',
-              fontSize: 11.5,
-              color: T.inkSoft,
-              marginTop: 12,
-              lineHeight: 1.6,
-            }}
-          >
-            {CONFIGURED
-              ? 'Live · Supabase connected'
-              : 'Demo mode · CONFIG.key khaali hai'}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-/* ═════════════════════════════════════════════════════════════ SIDEBAR */
-function Sidebar({ session, page, onNav }) {
-  const isAll = session.isHead;
-  const nav = [
-    { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
-    // Pickups har store ke liye khula hai (RPC ab store-scoped hai)
-    { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-    ...(isAll
-      ? [
-          { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
-          { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
-          { id: 'sla', icon: Clock, label: 'Process & SLA' },
-        ]
-      : []),
-  ];
-  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
-  return (
-    <aside className="sidebar">
-      <div className="brand" style={{ padding: '22px 20px 18px' }}>
-        <div className="brand-badge">
-          <Truck size={20} color="#fff" />
-        </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 15.5, color: '#fff' }}>
-            HJS Delivery
-          </div>
-          <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.6)' }}>
-            Control Panel
-          </div>
-        </div>
-      </div>
-      <nav style={{ padding: '8px 12px', flex: 1 }}>
-        {nav.map((n) => (
-          <div
-            key={n.label}
-            className="nav-item"
-            onClick={() => !n.soon && onNav && onNav(n.id)}
-            style={{
-              background: page === n.id ? 'rgba(255,255,255,.12)' : 'transparent',
-              color: page === n.id ? '#fff' : 'rgba(255,255,255,.62)',
-              cursor: n.soon ? 'default' : 'pointer',
-            }}
-          >
-            <n.icon size={18} />
-            <span style={{ flex: 1 }}>{n.label}</span>
-            {n.soon && <span className="soon">soon</span>}
-          </div>
-        ))}
-      </nav>
-      <div className="store-tag">
-        <Building2 size={15} color={T.greenBright} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>
-            {session.branch === 'ALL'
-              ? 'All stores'
-              : branchLabel(session.branch)}
-          </div>
-          <div
-            className="ellip"
-            style={{ fontSize: 10.5, color: 'rgba(255,255,255,.6)' }}
-          >
-            {mgr ? `Mgr: ${mgr}` : 'All stores'}
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+  const inRange = useMemo(
+    () => recent.filter((r) => r.work_date >= range.from && r.work_date <= range.to),
+    [recent, range]);
+  const stats = useMemo(() => ({
+    present: inRange.filter((r) => ["Present", "Late"].includes(r.status)),
+    late: inRange.filter((r) => r.status === "Late"),
+    half: inRange.filter((r) => r.status === "Half Day"),
+    hrs: Math.round(inRange.reduce((s, r) => s + (r.worked_minutes || 0), 0) / 60),
+  }), [inRange]);
 
-/* ══════════════════════════════════════════════════════════════ TOPBAR */
-function Topbar({
-  session,
-  page,
-  onNav,
-  search,
-  setSearch,
-  results,
-  onPick,
-  onReload,
-  onActivity,
-  loading,
-  onLogout,
-  lang,
-  onLang,
-}) {
-  return (
-    <header className="topbar">
-      <div className="tb-brand">
-        <div
-          className="brand-badge"
-          style={{ width: 32, height: 32, borderRadius: 10 }}
-        >
-          <Truck size={17} color="#fff" />
-        </div>
-        <span>Healthy Jeena Sikho</span>
-      </div>
-      <div className="tb-search">
-        <Search
-          size={16}
-          color={T.inkSoft}
-          style={{ position: 'absolute', left: 14, top: 12 }}
-        />
-        <input
-          className="topbar-search"
-          placeholder="Search by customer, invoice, phone…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {search.trim() && (
-          <div className="search-dd">
-            {!results || results.length === 0 ? (
-              <div className="search-empty">Koi match nahi mila</div>
-            ) : (
-              results.map((x) => (
-                <button
-                  key={x.key}
-                  className={x.closed ? 'search-row is-cancelled' : 'search-row'}
-                  onClick={() => onPick(x)}
-                >
-                  <div className="search-row-main">
-                    <span className="ellip search-name">{x.name}</span>
-                    <span className={`search-tag ${x.tagKind}`}>{x.tag}</span>
-                  </div>
-                  <div className="ellip search-sub">
-                    <span className="search-mod">{x.modLabel}</span> · {x.sub}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-      <select
-        className="page-switch"
-        value={page}
-        onChange={(e) => onNav && onNav(e.target.value)}
-      >
-        <option value="deliveries">Deliveries</option>
-        <option value="pickups">Pickups</option>
-        {session.isHead && <option value="complaints">Complaints</option>}
-        {session.isHead && <option value="dashboard">Dashboard</option>}
-        {session.isHead && <option value="sla">Process &amp; SLA</option>}
-      </select>
-      <div className="tb-actions">
-        <div className="lang-toggle">
-          <button
-            className={lang === 'en' ? 'lang-btn active' : 'lang-btn'}
-            onClick={() => onLang && onLang('en')}
-          >
-            EN
-          </button>
-          <button
-            className={lang === 'hi' ? 'lang-btn active' : 'lang-btn'}
-            onClick={() => onLang && onLang('hi')}
-          >
-            Hing
-          </button>
-        </div>
-        <button
-          className="icon-btn"
-          onClick={onActivity}
-          title="Activity log — kisne kya update kiya"
-        >
-          <History size={17} color={T.ink} />
-        </button>
-        <button className="icon-btn" onClick={onReload} title="Reload">
-          <RefreshCw
-            size={17}
-            color={T.ink}
-            className={loading ? 'spin' : ''}
-          />
-        </button>
-        <button className="icon-btn">
-          <Bell size={18} color={T.ink} />
-          <span className="dot" />
-        </button>
-        <div className="tb-user">
-          <div className="avatar">
-            {(session.name || 'M').slice(0, 1).toUpperCase()}
-          </div>
-          <div className="tb-user-text" style={{ lineHeight: 1.2 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-            <div style={{ fontSize: 11, color: T.inkSoft }}>
-              {session.storeName}
-            </div>
-          </div>
-        </div>
-        <button className="icon-btn" onClick={onLogout} title="Logout">
-          <LogOut size={17} color={T.ink} />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-function Header({
-  session,
-  live,
-  count,
-  viewMode,
-  onViewMode,
-  vFrom,
-  vTo,
-  onVFrom,
-  onVTo,
-  layoutMode,
-  onLayoutMode,
-  onSwitchStore,
-}) {
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-  const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
-  return (
-    <div
-      style={{
-        marginBottom: 22,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-end',
-        flexWrap: 'wrap',
-        gap: 12,
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>
-          {today}
-        </div>
-        <h2
-          style={{
-            fontSize: 25,
-            fontWeight: 800,
-            letterSpacing: -0.5,
-            margin: '3px 0 0',
-            color: T.ink,
-          }}
-        >
-          {session.branch === 'ALL'
-            ? 'All stores'
-            : branchLabel(session.branch)}{' '}
-          deliveries
-        </h2>
-        {mgr && (
-          <div
-            style={{
-              fontSize: 12.5,
-              color: T.inkSoft,
-              marginTop: 4,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-            }}
-          >
-            <UserCog size={13} /> Store manager:{' '}
-            <b style={{ color: T.ink, fontWeight: 700 }}>{mgr}</b>
-          </div>
-        )}
-      </div>
-      <div
-        className="hdr-controls"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ position: 'relative' }}>
-          <Clock
-            size={15}
-            color={T.inkSoft}
-            style={{ position: 'absolute', left: 12, top: 11 }}
-          />
-          <select
-            className="store-switch"
-            value={viewMode}
-            onChange={(e) => onViewMode(e.target.value)}
-          >
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="month">This month</option>
-            <option value="custom">Custom range</option>
-            <option value="archived">Archived (all time)</option>
-          </select>
-        </div>
-        {viewMode === 'custom' && (
-          <div className="view-range">
-            <input
-              className="dash-inp"
-              type="date"
-              value={vFrom}
-              max={vTo}
-              onChange={(e) => onVFrom && onVFrom(e.target.value)}
-            />
-            <span className="mx-arrow">–</span>
-            <input
-              className="dash-inp"
-              type="date"
-              value={vTo}
-              min={vFrom}
-              onChange={(e) => onVTo && onVTo(e.target.value)}
-            />
-          </div>
-        )}
-        <div className="layout-toggle">
-          <button
-            className={layoutMode === 'board' ? 'lt-btn active' : 'lt-btn'}
-            onClick={() => onLayoutMode('board')}
-          >
-            <LayoutDashboard size={14} /> Stages
-          </button>
-          <button
-            className={
-              layoutMode === 'categories' ? 'lt-btn active' : 'lt-btn'
-            }
-            onClick={() => onLayoutMode('categories')}
-          >
-            <Package size={14} /> Categories
-          </button>
-        </div>
-        {session.isHead && (
-          <div style={{ position: 'relative' }}>
-            <Building2
-              size={15}
-              color={T.inkSoft}
-              style={{ position: 'absolute', left: 12, top: 11 }}
-            />
-            <select
-              className="store-switch"
-              value={session.branch}
-              onChange={(e) => onSwitchStore(e.target.value)}
-            >
-              <option value="ALL">All stores</option>
-              {Object.keys(BRANCH_NAMES).map((c) => (
-                <option key={c} value={c}>
-                  {branchLabel(c)} ({c})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <span
-          className="live-chip"
-          style={{
-            background: live ? T.mint : T.amberSoft,
-            color: live ? T.green : T.amber,
-          }}
-        >
-          <span
-            className="col-pip"
-            style={{ background: live ? T.greenBright : T.amber }}
-          />
-          {live
-            ? `${viewLabel(viewMode)} · Total Deliveries · ${count}`
-            : 'Demo data'}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════ STATS */
-function Stats({ items, viewMode, onDrill }) {
-  const board = items.filter((x) => !isClosedStage(x.stage));
-  const pending = board.filter((x) => x.stage !== 'delivered').length;
-  const done = board.filter((x) => x.stage === 'delivered').length;
-  const cancelled = items.filter((x) => x.stage === 'cancelled').length;
-  const archived = viewMode === 'archived';
-  const cards = archived
-    ? [
-        {
-          id: 'total',
-          label: 'Total Archived',
-          value: items.length,
-          icon: Truck,
-          color: T.green,
-          soft: T.mint,
-        },
-        {
-          id: 'delivered',
-          label: 'Delivered',
-          value: done,
-          icon: CheckCircle2,
-          color: T.forestSoft,
-          soft: T.mint,
-        },
-        {
-          id: 'cancelled',
-          label: 'Cancelled',
-          value: cancelled,
-          icon: AlertTriangle,
-          color: T.amber,
-          soft: T.amberSoft,
-        },
-      ]
-    : [
-        {
-          id: 'total',
-          label: 'Total Deliveries',
-          value: board.length,
-          icon: Truck,
-          color: T.green,
-          soft: T.mint,
-        },
-        {
-          id: 'pending',
-          label: 'Pending',
-          value: pending,
-          icon: Package,
-          color: T.blue,
-          soft: T.blueSoft,
-        },
-        {
-          id: 'delivered',
-          label: 'Delivered',
-          value: done,
-          icon: CheckCircle2,
-          color: T.forestSoft,
-          soft: T.mint,
-        },
-        {
-          id: 'cancelled',
-          label: 'Cancelled',
-          value: cancelled,
-          icon: AlertTriangle,
-          color: T.amber,
-          soft: T.amberSoft,
-        },
-      ];
-  return (
-    <div className={archived ? 'stat-grid three' : 'stat-grid'}>
-      {cards.map((c) => (
-        <button
-          key={c.label}
-          className="stat-card"
-          onClick={() => onDrill && onDrill(c.id)}
-        >
-          <div className="stat-ico" style={{ background: c.soft }}>
-            <c.icon size={20} color={c.color} />
-          </div>
-          <div>
-            <div
-              style={{
-                fontSize: 28,
-                fontWeight: 800,
-                letterSpacing: -0.6,
-                lineHeight: 1,
-              }}
-            >
-              {c.value}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                color: T.inkSoft,
-                marginTop: 5,
-                fontWeight: 600,
-              }}
-            >
-              {c.label}
-            </div>
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════ BOARD */
-function Board({ items, loading, onOpen, onMove, onCommit }) {
-  if (loading && items.length === 0)
-    return (
-      <div className="loading">Supabase se deliveries load ho rahi hain…</div>
-    );
-  return (
-    <div className="board">
-      {STAGES.map((stage) => {
-        const cards = items.filter((x) => x.stage === stage.id);
-        return (
-          <section key={stage.id} className="column">
-            <div className="col-head">
-              <span className="col-pip" style={{ background: stage.color }} />
-              <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-                {sLabel(stage.id)}
-              </span>
-              <span
-                className="col-count"
-                style={{ background: stage.soft, color: stage.color }}
-              >
-                {cards.length}
-              </span>
-            </div>
-            <div className="col-body">
-              {cards.length === 0 && (
-                <div className="empty">Koi delivery nahi</div>
-              )}
-              {cards.map((x) => (
-                <Card
-                  key={x.invoice_id}
-                  d={x}
-                  stage={stage}
-                  onOpen={() => onOpen(x)}
-                  onMove={onMove}
-                  onCommit={onCommit}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-/* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
-function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
-  // Phone: sirf entry-waale stages dikhao. Accordion single-open.
-  const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
-  const activeIds = active.map((s) => s.id);
-  const sig = activeIds.join(',');
-  const [open, setOpen] = useState(activeIds[0] || null);
-  const consumed = React.useRef(0);
-  useEffect(() => {
-    setOpen((prev) => {
-      // abhi-abhi move hua → us DESTINATION stage ko kholo (chahe purane stage
-      // mein aur entries bachi ho). Har move ek hi baar consume hota hai.
-      if (
-        focus &&
-        focus.n !== consumed.current &&
-        activeIds.includes(focus.stage)
-      ) {
-        consumed.current = focus.n;
-        return focus.stage;
-      }
-      // khula stage mein abhi bhi entry hai → wahi rehne do
-      if (prev && activeIds.includes(prev)) return prev;
-      // warna aage ka pehla active stage
-      const prevIdx = prev ? stageIndex(prev) : -1;
-      const forward = active.find((s) => stageIndex(s.id) > prevIdx);
-      return forward ? forward.id : activeIds[0] || null;
+  const week = useMemo(() => {
+    const t = new Date(istToday() + "T00:00:00");
+    const mon = new Date(t); mon.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(mon); d.setDate(mon.getDate() + i);
+      const key = ymd(d);
+      const log = recent.find((r: any) => r.work_date === key);
+      const lv = myLeaves.find((x: any) => key >= x.from_date && key <= x.to_date);
+      const off = (me.week_off_days || []).includes(d.getDay());
+      const status = log?.status
+        || (lv ? lv.leave_type : off ? "Off" : key > istToday() ? "" : "Absent");
+      return {
+        key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
+        isToday: key === istToday(),
+        status,
+        mark: log ? ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P")
+              : lv ? lv.leave_type : off ? "W" : key > istToday() ? "" : "A",
+        mins: log?.worked_minutes,
+        log, lv,
+      };
     });
-    // eslint-disable-next-line
-  }, [sig, focus && focus.n]);
+  }, [recent, me, myLeaves]);
 
-  if (loading && items.length === 0)
-    return <div className="loading">Deliveries load ho rahi hain…</div>;
-  if (active.length === 0)
-    return (
-      <div className="empty" style={{ padding: '44px 0' }}>
-        Koi delivery nahi
-      </div>
-    );
+  const dayColor: Record<string, string> = {
+    Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
+    Absent: "#dc2626", Off: "#98a2b3",
+  };
+  const peerCodes = new Set(peers.map((p: any) => p.emp_code));
+  const myTeam = board.filter((p) => peerCodes.has(p.emp_code) || p.emp_code === me.emp_code);
+  const inNow = myTeam.filter((p) => p.state === "In").length;
 
   return (
-    <div className="m-board">
-      {active.map((stage) => {
-        const cards = items.filter((x) => x.stage === stage.id);
-        const isOpen = open === stage.id;
-        return (
-          <section
-            key={stage.id}
-            className="m-sec"
-            style={{ borderTopColor: stage.color }}
-          >
-            <button
-              className="m-sec-head"
-              onClick={() => setOpen(isOpen ? null : stage.id)}
-            >
-              <span className="col-pip" style={{ background: stage.color }} />
-              <span style={{ fontWeight: 700, fontSize: 14.5 }}>
-                {sLabel(stage.id)}
-              </span>
-              <span
-                className="col-count"
-                style={{
-                  background: stage.soft,
-                  color: stage.color,
-                  marginLeft: 'auto',
-                }}
-              >
-                {cards.length}
-              </span>
-              <ChevronRight
-                size={17}
-                color={T.inkSoft}
-                style={{
-                  transform: isOpen ? 'rotate(90deg)' : 'none',
-                  transition: 'transform .15s',
-                }}
-              />
+    <div className="att-wrap">
+      <div className="att-cols">
+
+        {/* ---- left ---- */}
+        <div className="att-col">
+
+          <div className="att-card att-punch">
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 11 }}>
+              <Avatar name={me.full_name} lg />
+            </div>
+            <p><b>{me.emp_code}</b> · {me.full_name}</p>
+            <p className="att-muted">{me.designation || me.role}</p>
+            <p style={{ marginTop: 9, fontWeight: 700, color: open ? "#16a34a" : "#dc2626" }}>
+              {open && <i className="att-live" />}{open ? "In" : "Out"}
+            </p>
+
+            <LiveClock startedAt={open?.in_at} baseMinutes={closedMinutes} />
+
+            {open && (
+              <p style={{ marginTop: 6 }}>
+                <Pin lat={open.in_lat} lng={open.in_lng} ok={open.in_geo_ok}
+                  label={open.in_distance_m != null
+                    ? `${open.in_distance_m} m from branch`
+                    : "location saved · open map"} />
+              </p>
+            )}
+
+            <button className={`att-btn big ${open ? "gout" : "gin"}`} style={{ marginTop: 12 }}
+              onClick={() => punch(open ? "out" : "in")}
+              disabled={busy || (!open && !isMobile())}>
+              {busy ? (open ? "Checking out…" : "Getting location…") : open ? "Check-out" : "Check-in"}
             </button>
-            {isOpen && (
-              <div className="m-sec-body">
-                {cards.map((x) => (
-                  <Card
-                    key={x.invoice_id}
-                    d={x}
-                    stage={stage}
-                    onOpen={() => onOpen(x)}
-                    onMove={onMove}
-                    onCommit={onCommit}
-                  />
+            <p className="att-muted" style={{ marginTop: 9, fontSize: 12 }}>
+              {!open && !isMobile()
+                ? "Check-in works only on your phone. Check-out can be done from anywhere."
+                : "Location is recorded with every punch"}
+            </p>
+
+            {sessions.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {sessions.map((s, i) => (
+                  <div className="att-sess" key={s.id}>
+                    <span className="att-muted" style={{ width: 18 }}>{i + 1}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      {fmtTime(s.in_at)} → {s.out_at ? fmtTime(s.out_at) : "running"}
+                    </span>
+                    <Pin lat={s.in_lat} lng={s.in_lng} dist={s.in_distance_m} ok={s.in_geo_ok} />
+                    <b style={{ width: 56, textAlign: "right" }}>{s.out_at ? hhmm(s.minutes) : "—"}</b>
+                  </div>
                 ))}
               </div>
             )}
-          </section>
-        );
-      })}
+          </div>
+
+          {err && (
+            <div className="att-note err">
+              <span>{err}</span>
+              <button className="att-btn sm line" style={{ marginTop: 9 }}
+                onClick={() => punch(open ? "out" : "in")} disabled={busy}>
+                Try again
+              </button>
+            </div>
+          )}
+          <Note kind="ok">{ok}</Note>
+
+          <RangeBar range={range} setRange={setRange} />
+
+          <div className="att-grid4">
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Present days", r: stats.present })}>
+              <b style={{ color: "#16a34a" }}>{stats.present.length}</b><span>Present</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Late days", r: stats.late })}>
+              <b style={{ color: "#d97706" }}>{stats.late.length}</b><span>Late</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "Half days", r: stats.half })}>
+              <b style={{ color: "#ea580c" }}>{stats.half.length}</b><span>Half</span></div>
+            <div className="att-stat clk" onClick={() => setDrill({ t: "All worked days", r: inRange })}>
+              <b style={{ color: "#2563eb" }}>{stats.hrs}</b><span>Hours</span></div>
+          </div>
+
+          {mgr.length > 0 && (
+            <div className="att-list">
+              <div className="att-hd">
+                <b>{mgr.length > 1 ? "Reporting managers" : "Reporting manager"}</b>
+              </div>
+              {mgr.map((x: any) => (
+                <div className="att-row" key={x.emp_code}>
+                  <Avatar name={x.full_name} />
+                  <div className="grow">
+                    <p><PName code={x.emp_code}><b>{x.emp_code}</b> · {x.full_name}</PName></p>
+                    <p className="att-muted">
+                      {x.designation || "—"}{x.is_co_manager ? " · also reports here" : ""}
+                    </p>
+                  </div>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: stateColor[x.state] }}>
+                    {x.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {peers.length > 0 && (
+            <div className="att-list">
+              <div className="att-hd">
+                <b>My team</b><span className="att-chip">{peers.length}</span>
+              </div>
+              {peers.slice(0, 8).map((p) => (
+                <div className="att-row" key={p.emp_code}>
+                  <Avatar name={p.full_name} />
+                  <div className="grow">
+                    <p><PName code={p.emp_code}><b>{p.full_name}</b></PName></p>
+                    <p className="att-muted">{p.designation || "—"}</p>
+                  </div>
+                  <span style={{ fontWeight: 700, fontSize: 12.5, color: stateColor[p.state] }}>
+                    {p.state}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ---- right ---- */}
+        <div className="att-col">
+          <div className="att-greet">
+            <h3>{greetWord()}, {String(me.full_name).split(" ")[0]}</h3>
+            <p>
+              {new Date().toLocaleDateString(IST, { weekday: "long", day: "numeric", month: "long", timeZone: TZ })}
+              {" · Shift "}{fmtHM(me.shift_start)} – {fmtHM(me.shift_end)}
+            </p>
+          </div>
+
+          <div className="att-card">
+            <div className="att-between" style={{ marginBottom: 11 }}>
+              <b>Work schedule</b>
+              <span className="att-muted">{hhmm(week.reduce((s, d) => s + (d.mins || 0), 0))} this week</span>
+            </div>
+            <div className="att-week">
+              {week.map((d) => (
+                <button className={`att-day clk ${d.isToday ? "now" : ""}`} key={d.key}
+                  onClick={() => setPickDay(d)}>
+                  <span className="dn">{d.dow}</span>
+                  <b className="dd">{String(d.num).padStart(2, "0")}</b>
+                  <span className="ds" style={{ color: dayColor[d.status] || "#d0d5dd" }}>
+                    {d.status === "Half Day" ? "Half" : d.status || "—"}
+                  </span>
+                  <span className="dh">{d.mins ? hhmm(d.mins) : ""}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* who's in — sirf apni team, poora board Team tab mein */}
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Who's in right now</b>
+              <span className="att-pill p-Present">{inNow} in</span>
+            </div>
+            {myTeam.slice(0, 12).map((p) => (
+              <div className={`att-row ${p.state === "Leave" ? "clk" : ""}`} key={p.emp_code}
+                onClick={() => p.state === "Leave" && openLeaveFor(p)}>
+                <Avatar name={p.full_name} />
+                <div className="grow">
+                  <p><PName code={p.emp_code}><b>{p.emp_code}</b> · {p.full_name}</PName></p>
+                  <p className="att-muted">{p.designation || p.team}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[p.state] }}>{p.state}</p>
+                  {p.first_in && (
+                    <p className="att-muted" style={{ fontSize: 11.5 }}>
+                      {fmtTime(p.first_in)}{p.state === "Out" ? ` – ${fmtTime(p.last_out)}` : ""}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+            {!myTeam.length && <p className="att-empty">No teammates to show.</p>}
+            {myTeam.length > 12 && (
+              <p className="att-empty">+{myTeam.length - 12} more · open Team for the full board</p>
+            )}
+          </div>
+
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Attendance log</b>
+              <button className="att-btn sm line" onClick={() => setRegOpen(true)}>Missed a punch?</button>
+            </div>
+            {inRange.length === 0 && (
+              <p className="att-empty">Nothing in this range yet.</p>
+            )}
+            {inRange.map((r) => (
+              <div className="att-row" key={r.id}>
+                <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
+                <span className="grow att-muted">{fmtTime(r.punch_in_at)} – {fmtTime(r.punch_out_at)}</span>
+                <span style={{ width: 58, textAlign: "right", color: "#475467" }}>{hhmm(r.worked_minutes)}</span>
+                <span className={pillClass(r.status)}>{r.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {regOpen && <RegularizeSheet me={me} onClose={() => setRegOpen(false)} />}
+      {drill && <DayListSheet title={drill.t} rows={drill.r} onClose={() => setDrill(null)} />}
+
+      {pickDay && (
+        <DaySheet me={me} onClose={() => setPickDay(null)}
+          d={{ d: pickDay.key, mark: pickDay.mark || "",
+               label: pickDay.status || "Nothing recorded",
+               log: pickDay.log, lv: pickDay.lv }} />
+      )}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me} onClose={() => setPickLeave(null)} />
+      )}
     </div>
   );
 }
 
-function Card({ d, stage, onOpen, onMove, onCommit }) {
-  const Icon = equipIcon(d.equipment);
-  const closed = isClosedStage(d.stage);
-  const cancelled = d.stage === 'cancelled';
-  const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
-  const [expand, setExpand] = useState(false);
-  const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
+/* ================= regularization ================= */
+function RegularizeSheet({ me, onClose }: any) {
+  const [form, setForm] = useState({
+    work_date: istToday(),
+    req_punch_in: String(me?.shift_start || "10:00").slice(0, 5),
+    req_punch_out: nowHM(),
+    reason: "",
+  });
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.from("regularizations").insert({
+      employee_id: me.id, work_date: form.work_date,
+      req_punch_in: form.req_punch_in || null,
+      req_punch_out: form.req_punch_out || null,
+      reason: form.reason, status: "Pending",
+    });
+    if (error) setMsg({ err: "Couldn't send: " + error.message, ok: "" });
+    else setMsg({ err: "", ok: "Sent to your manager." });
+    setBusy(false);
+  };
+
   return (
-    <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
-      onClick={onOpen}
-    >
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <div className="eq-ico" style={{ background: stage.soft }}>
-          <Icon size={17} color={stage.color} />
+    <Sheet title="Missed a punch?" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div>
+          <label>Date</label>
+          <input type="date" max={istToday()} min={addDays(istToday(), -15)}
+            value={form.work_date}
+            onChange={(e) => setForm({ ...form, work_date: e.target.value })} />
+          <p className="att-muted" style={{ marginTop: 6 }}>
+            Only the last 15 days can be regularized.
+          </p>
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="card-name">{d.customer}</div>
-          <div className="ellip card-id">{d.id}</div>
+        <div className="att-row2">
+          <div>
+            <label>Check-in</label>
+            <input type="time" lang="en-US" value={form.req_punch_in}
+              onChange={(e) => setForm({ ...form, req_punch_in: e.target.value })} />
+          </div>
+          <div>
+            <label>Check-out</label>
+            <input type="time" lang="en-US" value={form.req_punch_out}
+              onChange={(e) => setForm({ ...form, req_punch_out: e.target.value })} />
+          </div>
+        </div>
+        <div>
+          <label>What happened</label>
+          <textarea rows={2} placeholder="A short reason" value={form.reason}
+            onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+        </div>
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        {form.req_punch_in && form.req_punch_out && form.req_punch_out <= form.req_punch_in && (
+          <Note>Check-out time must be after check-in time.</Note>
+        )}
+        <button className="att-btn" onClick={submit}
+          disabled={busy || !form.reason.trim() || (!form.req_punch_in && !form.req_punch_out)
+            || (!!form.req_punch_in && !!form.req_punch_out && form.req_punch_out <= form.req_punch_in)}>
+          {busy ? "Sending…" : "Send request"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ================= attendance summary ================= */
+const mondayOf = (iso: string) => {
+  const t = new Date(iso + "T00:00:00");
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+  return ymd(t);
+};
+const addDays = (iso: string, n: number) => {
+  const t = new Date(iso + "T00:00:00"); t.setDate(t.getDate() + n);
+  return ymd(t);
+};
+const dmy = (iso: string) =>
+  new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+    .replace(/ /g, "-");
+const minsOfDay = (ts: any) => {
+  const d = new Date(ts);
+  const p = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
+  const [h, m] = p.split(":").map(Number);
+  return h * 60 + m;
+};
+const hourLabel = (h: number) =>
+  `${String(h % 12 || 12).padStart(2, "0")}${h >= 12 ? "PM" : "AM"}`;
+
+function AttendanceScreen({ me, tab }: any) {
+  if (tab === "matrix") return <div className="att-wrap"><MatrixTab me={me} /></div>;
+  if (tab === "calendar") return <CalendarTab me={me} />;
+  return <AttSummary me={me} />;
+}
+
+function AttSummary({ me }: any) {
+  const [wk, setWk] = useState(mondayOf(istToday()));
+  const [sess, setSess] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [span, setSpan] = useState(7);
+  const [custom, setCustom] = useState<any>(null);
+
+  const wkEnd = custom ? custom.to : addDays(wk, span - 1);
+  const wkFrom = custom ? custom.from : wk;
+  const dayCount = Math.max(1, Math.min(62,
+    Math.round((new Date(wkEnd).getTime() - new Date(wkFrom).getTime()) / 86400000) + 1));
+
+  const load = async () => {
+    const [a, b, c, d] = await Promise.all([
+      supabase.from("attendance_sessions").select("*").eq("employee_id", me.id)
+        .gte("work_date", wkFrom).lte("work_date", wkEnd).order("in_at"),
+      supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+        .gte("work_date", wkFrom).lte("work_date", wkEnd),
+      supabase.from("leaves").select("*").eq("employee_id", me.id).eq("status", "Approved")
+        .lte("from_date", wkEnd).gte("to_date", wkFrom),
+      supabase.from("holidays").select("*").gte("hol_date", wkFrom).lte("hol_date", wkEnd),
+    ]);
+    setSess(a.data || []); setLogs(b.data || []); setLeaves(c.data || []); setHols(d.data || []);
+  };
+  useEffect(() => { load(); }, [wk, span, custom, me.id]);
+  const openSess = sess.find((x) => !x.out_at && x.work_date === istToday());
+  const todayClosed = useMemo(
+    () => sess.filter((x) => x.work_date === istToday() && x.out_at)
+              .reduce((a, x) => a + (x.minutes || 0), 0),
+    [sess]);
+
+  const punch = async (dir: "in" | "out") => {
+    setErr(""); setBusy(true);
+    try {
+      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
+      if (dir === "in") {
+        const pos = await getPosition();
+        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+                 p_accuracy: Math.round(pos.coords.accuracy) };
+      }
+      const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
+      if (error) throw new Error(error.message);
+      await load();
+    } catch (e: any) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  // axis bounds
+  const [ax0, ax1] = useMemo(() => {
+    const sh = Number(String(me.shift_start).slice(0, 2));
+    const eh = Number(String(me.shift_end).slice(0, 2));
+    let lo = sh, hi = eh;
+    sess.forEach((x) => {
+      lo = Math.min(lo, Math.floor(minsOfDay(x.in_at) / 60));
+      const o = x.out_at ? minsOfDay(x.out_at) : minsOfDay(new Date().toISOString());
+      hi = Math.max(hi, Math.ceil(o / 60));
+    });
+    return [Math.max(0, lo), Math.min(24, Math.max(hi, lo + 4))];
+  }, [sess, me]);
+
+  const days = useMemo(() => Array.from({ length: dayCount }, (_, i) => {
+    const key = addDays(wkFrom, i);
+    const d = new Date(key + "T00:00:00");
+    const list = sess.filter((x) => x.work_date === key);
+    const log = logs.find((x: any) => x.work_date === key);
+    const lv = leaves.find((l: any) => key >= l.from_date && key <= l.to_date);
+    const hol = hols.find((h: any) => h.hol_date === key);
+    const off = (me.week_off_days || []).includes(d.getDay());
+    const live = list.some((x) => !x.out_at) && key === istToday();
+    const mins = list.reduce((a, x) => a + (x.minutes || 0), 0)
+      + (live && openSess ? (Date.now() - new Date(openSess.in_at).getTime()) / 60000 : 0);
+    return {
+      key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
+      isToday: key === istToday(), list, log, lv, hol, off, mins,
+      first: list[0]?.in_at, last: list.filter((x) => x.out_at).slice(-1)[0]?.out_at,
+    };
+  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess]);
+
+  const pos = (t: any) => {
+    const m = minsOfDay(t);
+    return Math.max(0, Math.min(100, ((m - ax0 * 60) / ((ax1 - ax0) * 60)) * 100));
+  };
+
+  const summary = useMemo(() => {
+    const present = days.filter((d) => ["Present", "Late"].includes(d.log?.status)).length;
+    const half = days.filter((d) => d.log?.status === "Half Day").length;
+    const weekend = days.filter((d) => d.off && !d.log).length;
+    const holiday = days.filter((d) => d.hol && !d.off && !d.log).length;
+    const paid = days.filter((d) => d.lv && !d.log).length;
+    return { present, half, weekend, holiday, paid,
+      payable: present + half * 0.5 + weekend + holiday + paid,
+      hours: days.reduce((a, d) => a + d.mins, 0) };
+  }, [days]);
+
+  return (
+    <div className="att-wrap">
+      <div className="att-daterow">
+        <div className="att-nav2">
+          <button onClick={() => { setCustom(null); setWk(addDays(wk, -span)); }}>‹</button>
+          <button style={{ fontSize: 13 }}
+            onClick={() => { setCustom(null); setWk(mondayOf(istToday())); }}>Today</button>
+          <button onClick={() => { setCustom(null); setWk(addDays(wk, span)); }}>›</button>
+        </div>
+        <b style={{ fontSize: 15 }}>{dmy(wkFrom)} — {dmy(wkEnd)}</b>
+        <span className="att-muted">{hhmm(summary.hours)} worked</span>
+      </div>
+
+      <div className="att-range" style={{ marginBottom: 12 }}>
+        <div className="qk">
+          <button className={!custom && span === 7 ? "on" : ""}
+            onClick={() => { setCustom(null); setSpan(7); setWk(mondayOf(istToday())); }}>Week</button>
+          <button className={!custom && span === 14 ? "on" : ""}
+            onClick={() => { setCustom(null); setSpan(14); setWk(mondayOf(istToday())); }}>Fortnight</button>
+          <button className={custom && custom.from === monthStart(istToday()) ? "on" : ""}
+            onClick={() => setCustom({ from: monthStart(istToday()), to: lastDayOf(istToday()) })}>
+            This month</button>
+          <button className={custom && custom.from === shiftMonth(monthStart(istToday()), -1) ? "on" : ""}
+            onClick={() => {
+              const pm = shiftMonth(monthStart(istToday()), -1);
+              setCustom({ from: pm, to: lastDayOf(pm) });
+            }}>Last month</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="date" value={wkFrom}
+            onChange={(e) => setCustom({ from: e.target.value, to: wkEnd })} />
+          <span className="att-muted">to</span>
+          <input type="date" value={wkEnd} min={wkFrom}
+            onChange={(e) => setCustom({ from: wkFrom, to: e.target.value })} />
         </div>
       </div>
-      <div className="card-equip">{d.equipment}</div>
-      <div className="card-meta">
-        <span style={{ color: T.green, fontWeight: 800 }}>
-          <IndianRupee size={12} /> {d.amount.toLocaleString('en-IN')}
-        </span>
-        <span className="ellip" style={{ maxWidth: 130 }}>
-          <MapPin size={12} /> {d.area}
-        </span>
-      </div>
-      <div className="card-meta">
-        <span>
-          <Clock size={12} /> {d.expected}
-        </span>
-      </div>
-      {(d.person || d.manager) && (
-        <div className="card-meta">
-          <span className="ellip" style={{ maxWidth: '100%' }}>
-            <User size={12} /> {d.person || d.manager}
+
+      <div className="att-shiftbar">
+        <div>
+          <b>General</b>
+          <span className="att-muted" style={{ marginLeft: 8 }}>
+            [ {fmtHM(me.shift_start)} – {fmtHM(me.shift_end)} ]
           </span>
         </div>
-      )}
-      {closed ? (
-        <div
-          className="card-done"
-          style={{ color: stage.color, background: stage.soft }}
-        >
-          {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
-          {stage.short}
-        </div>
-      ) : next ? (
-        <>
-          <button
-            className={expand ? 'card-next is-open' : 'card-next'}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (canInline) setExpand((v) => !v);
-              else onMove(d, next.id);
-            }}
-          >
-            {moveText(next.id)}{' '}
-            {canInline ? (
-              <ChevronRight
-                size={14}
-                style={{
-                  transform: expand ? 'rotate(90deg)' : 'none',
-                  transition: 'transform .15s',
-                }}
-              />
-            ) : (
-              <ArrowRight size={13} />
-            )}
-          </button>
-          {canInline && expand && (
-            <div onClick={(e) => e.stopPropagation()}>
-              <StageModal
-                delivery={d}
-                toStage={next.id}
-                mode="move"
-                embedded
-                onClose={() => setExpand(false)}
-                onSave={(fields) => {
-                  setExpand(false);
-                  onCommit(d, next.id, fields);
-                }}
-              />
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="card-done">
-          <Check size={13} /> Completed
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FooterTotal({ items }) {
-  const board = items.filter((x) => !isClosedStage(x.stage));
-  const per = STAGES.map(
-    (s) => `${s.short} ${items.filter((x) => x.stage === s.id).length}`,
-  ).join(' · ');
-  const can = items.filter((x) => x.stage === 'cancelled').length;
-  const dup = items.filter((x) => x.stage === 'duplicate').length;
-  const ren = items.filter((x) => x.stage === 'renewal').length;
-  const extra = [
-    can && `Cancelled ${can}`,
-    ren && `Renewal ${ren}`,
-    dup && `Duplicate ${dup}`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  return (
-    <div className="foot-total">
-      Total {board.length} deliveries &nbsp;•&nbsp; {per}
-      {extra ? ` \u2022 ${extra}` : ''}
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
-  const [confirmDel, setConfirmDel] = useState(false);
-  const Icon = equipIcon(d.equipment);
-  const closedMeta = CLOSED[d.stage] || null;
-  const cancelled = !!closedMeta; // "closed" = cancelled / duplicate / renewal
-  const idx = stageIndex(d.stage);
-  const stage = cancelled
-    ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
-    : STAGES[idx] || STAGES[0];
-  const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
-  // closed: yahan tak pahunchi thi (greyed dikhane ke liye)
-  const reachedIdx = cancelled ? reachedIdxFromLog(d._raw && d._raw.app_log) : idx;
-  const r = d._raw || {};
-  // app_log is the timeline source now (table is locked; no direct fetch)
-  const tl = [];
-
-  // per-stage field blocks (previous + current editable, future locked)
-  const blocks = [
-    {
-      id: 'talked',
-      i: 1,
-      rows: [
-        ['Date', niceDate(r.confirmed_date) || '—'],
-        ['Time', niceTime(r.confirmed_time) || '—'],
-        ['Remarks', show(r.stage1_remarks)],
-      ],
-    },
-    {
-      id: 'scheduled',
-      i: 2,
-      rows: [
-        ['Delivery person', d.person || '—'],
-        ['Vehicle', d.vehicle || '—'],
-        ['Inspected', r.item_inspected ? 'Yes' : 'No'],
-        ['Remarks', show(r.stage3_remarks)],
-      ],
-      photo: r.photo_inspected,
-    },
-    {
-      id: 'dispatched',
-      i: 3,
-      rows: [['Estimated arrival', niceDateTime(r.app_eta) || '—']],
-    },
-    {
-      id: 'delivered',
-      i: 4,
-      rows: [
-        ['Delivered', r.item_delivered ? 'Yes' : 'No'],
-        [
-          'Amount',
-          r.amount_collected
-            ? `₹${Number(r.amount_collected).toLocaleString('en-IN')} · ${show(r.amount_type)}`
-            : '—',
-        ],
-        [
-          'Security',
-          r.security_collected
-            ? `₹${Number(r.security_collected).toLocaleString('en-IN')} · ${show(r.security_type)}`
-            : '—',
-        ],
-        ['Remarks', show(r.stage4_remarks)],
-      ],
-      photo: r.photo_delivered,
-    },
-  ];
-
-  const appLog = Array.isArray(r.app_log) ? r.app_log : [];
-  const hasClosedLog = appLog.some((e) => e && CLOSED[e.stage]);
-
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-head">
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              minWidth: 0,
-            }}
-          >
-            <div
-              className="eq-ico"
-              style={{ width: 42, height: 42, background: stage.soft }}
-            >
-              <Icon size={21} color={stage.color} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>{d.customer}</div>
-              <div
-                className="ellip"
-                style={{ fontSize: 12.5, color: T.inkSoft }}
-              >
-                {d.id}
-              </div>
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
-
-        <span
-          className="stage-badge"
-          style={{ background: stage.soft, color: stage.color }}
-        >
-          <span className="col-pip" style={{ background: stage.color }} />{' '}
-          {cancelled ? stage.label : sLabel(d.stage)}
-        </span>
-
-        {cancelled ? (
-          <>
-            <div
-              className="cancel-note"
-              style={{
-                background: closedMeta.soft,
-                color: closedMeta.color,
-                borderColor: closedMeta.soft,
-              }}
-            >
-              {d.stage === 'cancelled' ? (
-                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-              ) : (
-                <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-              )}
-              <div>
-                <div style={{ fontWeight: 800 }}>{closedMeta.title}</div>
-                <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                  {closedMeta.note}
-                </div>
-              </div>
-            </div>
-            <div className="sec-title" style={{ marginTop: 16 }}>
-              Is se pehle ki stages
-            </div>
-            <div className="stage-picker">
-              {STAGES.map((s, i) => {
-                if (i > reachedIdx) return null; // jahan tak pahunchi thi
-                return (
-                  <button
-                    key={s.id}
-                    className="stage-pick-btn"
-                    disabled
-                    style={{
-                      background: '#EDEBE4',
-                      color: T.inkSoft,
-                      borderColor: T.line,
-                      cursor: 'default',
-                    }}
-                  >
-                    <Check
-                      size={12}
-                      style={{ marginRight: 4, verticalAlign: -1 }}
-                    />
-                    {sShort(s.id)}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          <>
-            {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
-            <div className="sec-title" style={{ marginTop: 16 }}>
-              Move to stage
-            </div>
-            {next ? (
-              <div className="next-hint">
-                <span className="col-pip" style={{ background: next.color }} />
-                <span>
-                  Agla step: <b>{STAGE_HINT[next.id] || next.label}</b>
-                </span>
-              </div>
-            ) : (
-              <div className="next-hint done">
-                <Check size={14} /> Saari stages complete — delivery done
-              </div>
-            )}
-            <div className="stage-picker">
-              {STAGES.map((s, i) => {
-                if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
-                const filled = i <= idx; // bhar chuki → solid color
-                const isNext = i === idx + 1; // agli actionable stage → soft tint
-                return (
-                  <button
-                    key={s.id}
-                    className={
-                      isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'
-                    }
-                    style={{
-                      background: filled ? s.color : isNext ? s.soft : '#fff',
-                      color: filled ? '#fff' : s.color,
-                      borderColor: s.color,
-                    }}
-                    onClick={() => {
-                      if (i === idx) return;
-                      i > idx ? onAdvance(s.id) : onSetStage(s.id);
-                    }}
-                  >
-                    {filled && (
-                      <Check
-                        size={12}
-                        style={{ marginRight: 4, verticalAlign: -1 }}
-                      />
-                    )}
-                    {sShort(s.id)}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-              Bhari hui stages colored hain · agli stage bharne pe wo colored
-              hogi aur uske baad wali khulegi.
-            </div>
-          </>
+        <button className={`att-checkbtn ${openSess ? "out" : ""}`}
+          disabled={busy || (!openSess && !isMobile())}
+          title={!openSess && !isMobile() ? "Check-in works only on a phone" : ""}
+          onClick={() => punch(openSess ? "out" : "in")}>
+          <span>{busy ? (openSess ? "Checking out…" : "Getting location…") : openSess ? "Check-out" : "Check-in"}</span>
+          <b><LiveClock startedAt={openSess?.in_at} baseMinutes={todayClosed} boxes={false} /> Hrs</b>
+        </button>
+        {!openSess && !isMobile() && (
+          <span className="att-muted" style={{ width: "100%" }}>
+            Check-in works only on your phone. Check-out can be done from anywhere.
+          </span>
         )}
+      </div>
 
-        <div className="kv-grid" style={{ marginTop: 18 }}>
-          <KV label="Phone" value={d.phone} />
-          <KV label="Area" value={d.area} />
-          <KV label="Equipment" value={d.equipment} full />
-          <KV label="Amount" value={`₹${d.amount.toLocaleString('en-IN')}`} />
-          <KV label="Due date" value={d.expected} />
-          <KV label="Store manager" value={d.manager} full />
-        </div>
+      <Note>{err}</Note>
 
-        {/* stage-wise fields — normal: progressive; cancelled: reached blocks read-only */}
-        {blocks.map((b) => {
-          const limit = cancelled ? reachedIdx : idx + 1;
-          if (b.i > limit) return null;
-          const st = STAGES[b.i];
-          const filled = cancelled ? b.i <= reachedIdx : b.i <= idx;
-          const editable = filled && !cancelled;
-          return (
-            <div key={b.id} style={cancelled ? { opacity: 0.75 } : null}>
-              <div
-                className="sec-title stage-block-title"
-                style={{ justifyContent: 'space-between' }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span className="col-pip" style={{ background: st.color }} />{' '}
-                  {sLabel(st.id)}
-                </span>
-                {editable ? (
-                  <button
-                    className="mini-edit"
-                    onClick={() => onEditStage(b.id)}
-                  >
-                    <Pencil size={13} /> Edit
-                  </button>
-                ) : cancelled ? (
-                  <span
-                    className="next-badge"
-                    style={{ color: T.inkSoft, background: T.slateSoft }}
-                  >
-                    locked
-                  </span>
-                ) : (
-                  <span
-                    className="next-badge"
-                    style={{ color: st.color, background: st.soft }}
-                  >
-                    Agla step
-                  </span>
-                )}
-              </div>
-              {filled ? (
-                <div className="kv-grid">
-                  {b.rows.map(([k, v]) => (
-                    <KV key={k} label={k} value={v} full={k === 'Remarks'} />
-                  ))}
-                  {b.photo &&
-                    b.photo !== 'null' &&
-                    String(b.photo)
-                      .split('|')
-                      .filter(Boolean)
-                      .map((ph, i) => (
-                        <a
-                          key={ph + i}
-                          className="kv-photo"
-                          href={ph}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <img src={ph} alt={`photo ${i + 1}`} />
-                        </a>
-                      ))}
-                </div>
+      <div style={{ marginTop: 12 }}>
+        {days.map((d) => (
+          <div className="att-drow" key={d.key}>
+            <div className="att-dlab">
+              <span>{d.isToday ? "Today" : d.dow}</span>
+              {d.isToday ? <b><span className="bdg">{String(d.num).padStart(2, "0")}</span></b>
+                         : <b>{String(d.num).padStart(2, "0")}</b>}
+            </div>
+            <div className="att-dt">{d.first ? fmtTime(d.first) : ""}</div>
+            <div className="att-track">
+              {(d.off || d.hol) && !d.list.length ? (
+                <>
+                  <div className="wk" />
+                  <div className="chip">{d.hol ? d.hol.name : "Weekend"}</div>
+                </>
+              ) : d.lv && !d.list.length ? (
+                <>
+                  <div className="base" />
+                  <div className="chip" style={{ borderColor: "#b2ccff", color: "#175cd3" }}>
+                    {d.lv.leave_type}
+                  </div>
+                </>
               ) : (
-                <div className="block-next-note">
-                  Ye stage bharne ke liye upar <b>{st.short}</b> button dabao.
-                </div>
+                <>
+                  <div className="base" />
+                  {d.list.map((x: any) => {
+                    const a = pos(x.in_at);
+                    const b = pos(x.out_at || new Date().toISOString());
+                    return (
+                      <span key={x.id}>
+                        <div className="seg" style={{ left: `${a}%`, width: `${Math.max(1, b - a)}%` }} />
+                        <div className="din" style={{ left: `calc(${a}% - 4px)` }} />
+                        {x.out_at && <div className="dout" style={{ left: `calc(${b}% - 4px)` }} />}
+                      </span>
+                    );
+                  })}
+                </>
               )}
             </div>
-          );
-        })}
-
-        <div className="sec-title" style={{ marginTop: 22 }}>
-          <History size={14} /> Timeline / history
-        </div>
-        {cancelled && !hasClosedLog && (
-          <div className="timeline">
-            <div className="tl-row">
-              <div className="tl-marker">
-                <span
-                  className="tl-dot"
-                  style={{ background: closedMeta.color }}
-                />
-                {appLog.length > 0 && (
-                  <span className="tl-line" style={{ background: T.line }} />
-                )}
-              </div>
-              <div style={{ paddingBottom: 16 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 800,
-                    color: closedMeta.color,
-                  }}
-                >
-                  {closedMeta.label}
-                </div>
-                <div className="tl-note">{closedMeta.title}</div>
-              </div>
+            <div className="att-dt r">{d.last ? fmtTime(d.last) : ""}</div>
+            <div className="att-hrs">
+              <b>{hhmm(d.mins).replace("h ", ":").replace("m", "")}</b>
+              <span>Hrs worked</span>
             </div>
           </div>
-        )}
-        {appLog.length > 0 ? (
-          <div className="timeline">
-            {appLog.map((ev, i) => {
-              const c = stageColorOf(ev.stage);
-              return (
-                <div key={i} className="tl-row">
-                  <div className="tl-marker">
-                    <span className="tl-dot" style={{ background: c }} />
-                    {i < appLog.length - 1 && (
-                      <span
-                        className="tl-line"
-                        style={{ background: T.line }}
-                      />
-                    )}
-                  </div>
-                  <div style={{ paddingBottom: 16 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>
-                      {eventLine(ev)}
-                    </div>
-                    <div className="tl-note">{fmtDateTime(ev.ts)}</div>
-                    {ev.fields &&
-                      Object.entries(ev.fields).map(([k, v]) => (
-                        <div key={k} className="tl-field">
-                          <b>{k}:</b> {String(v)}
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : tl && tl.length > 0 ? (
-          <div className="timeline">
-            {sortTimeline(tl).map((row, i, arr) => {
-              const { ts, status, note } = tlParse(row);
-              return (
-                <div key={i} className="tl-row">
-                  <div className="tl-marker">
-                    <span
-                      className="tl-dot"
-                      style={{
-                        background:
-                          STAGES[stageIndex(statusToStage(status))]?.color ||
-                          T.green,
-                      }}
-                    />
-                    {i < arr.length - 1 && (
-                      <span
-                        className="tl-line"
-                        style={{ background: T.line }}
-                      />
-                    )}
-                  </div>
-                  <div style={{ paddingBottom: 16 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>
-                      {status || 'Updated'}
-                    </div>
-                    <div className="tl-note">{fmtDateTime(ts)}</div>
-                    {note && <div className="tl-field">{note}</div>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: T.inkSoft }}>
-            Abhi koi history nahi. Jaise hi koi stage move/edit hoga, yahan
-            continuous log banega.
-          </div>
-        )}
+        ))}
+      </div>
 
-        {canDelete && (
-          <div className="danger-zone">
-            {confirmDel ? (
-              <div className="danger-confirm">
-                <span
-                  style={{ fontSize: 13, fontWeight: 700, color: T.red }}
-                >
-                  Pakka delete karna hai?
-                </span>
-                <button className="btn-danger" onClick={onDelete}>
-                  <Trash2 size={15} /> Haan, delete
-                </button>
-                <button
-                  className="btn-ghost"
-                  onClick={() => setConfirmDel(false)}
-                >
-                  Rehne do
-                </button>
-              </div>
-            ) : (
-              <button
-                className="btn-danger"
-                onClick={() => setConfirmDel(true)}
-              >
-                <Trash2 size={15} /> Delete this entry
-              </button>
-            )}
-            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
-              Sirf head delete kar sakta hai · view se hat jayega par Supabase
-              mein <b>status = "Deleted"</b> ke saath record safe rahega.
-            </div>
-          </div>
-        )}
+      <div className="att-axis">
+        {Array.from({ length: ax1 - ax0 }, (_, i) => (
+          <span key={i}>{hourLabel(ax0 + i)}</span>
+        ))}
+      </div>
 
-        {/* sabse neeche — ye entry app mein kab aayi (sirf yahin dikhta hai) */}
-        <div className="created-note">
-          Entry app mein aayi: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
-        </div>
+      <div className="att-sum">
+        {[
+          ["Payable Days", `${summary.payable} Days`, "#2563eb"],
+          ["Present", `${summary.present} Days`, "#16a34a"],
+          ["Half Day", `${summary.half} Day`, "#ea580c"],
+          ["Paid leave", `${summary.paid} Day`, "#7c3aed"],
+          ["Holidays", `${summary.holiday} Day`, "#0891b2"],
+          ["Weekend", `${summary.weekend} Day`, "#d97706"],
+          ["Hours", hhmm(summary.hours), "#475467"],
+        ].map(([k, v, c]) => (
+          <div className="att-sumitem" key={k} style={{ borderLeftColor: c }}>
+            <span>{k}</span><b>{v}</b>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function KV({ label, value, full }) {
+/* ================= monthly matrix ================= */
+function MatrixTab({ me }: any) {
+  const approver = ["manager", "admin"].includes(me.role);
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [rows, setRows] = useState<any[]>([]);
+  const [dates, setDates] = useState<string[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  const load = async () => {
+    setBusy(true);
+    const from = `${month}-01`;
+    const to = lastDayOf(from);
+    const all = Array.from(
+      { length: Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1 },
+      (_, i) => addDays(from, i));
+    setDates(all);
+
+    if (approver) {
+      const { data } = await supabase.rpc("muster_roll", { p_month: from });
+      const byEmp: Record<string, any> = {};
+      (data || []).forEach((r: any) => {
+        byEmp[r.emp_code] = byEmp[r.emp_code] || { code: r.emp_code, name: r.full_name, marks: {} };
+        byEmp[r.emp_code].marks[r.d] = r.mark;
+      });
+      setRows(Object.values(byEmp));
+    } else {
+      const [lg, lv, hl] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      const marks: Record<string, string> = {};
+      all.forEach((d) => {
+        const log = (lg.data || []).find((x: any) => x.work_date === d);
+        const leave = (lv.data || []).find((x: any) => d >= x.from_date && d <= x.to_date);
+        const hol = (hl.data || []).find((x: any) => x.hol_date === d);
+        const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
+        marks[d] = log ? letterOf(log.status)
+          : leave ? leave.leave_type
+          : hol ? "F"
+          : off ? "W"
+          : d > istToday() ? "" : "A";
+      });
+      setRows([{ code: me.emp_code, name: me.full_name, marks }]);
+    }
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, [month, me.id]);
+
+  const shown = rows.filter((r) =>
+    !q || `${r.name} ${r.code}`.toLowerCase().includes(q.toLowerCase()));
+
+  const tally = (m: Record<string, string>) => {
+    const v = Object.values(m);
+    const n = (x: string) => v.filter((y) => y === x).length;
+    return {
+      p: n("P") + n("L"), present: n("P"), late: n("L"), half: n("H"),
+      a: n("A"), w: n("W"), f: n("F"),
+      l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x)).length,
+      byLeave: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x))
+        .reduce((o: Record<string, number>, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {}),
+    };
+  };
+
+  const exportCsv = () => downloadCsv(
+    shown.map((r) => {
+      const o: any = { Code: r.code, Name: r.name };
+      dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
+      const t = tally(r.marks);
+      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l;
+      return o;
+    }), `HJS_matrix_${month}.csv`);
+
   return (
-    <div className="kv" style={full ? { gridColumn: '1 / -1' } : null}>
-      <div className="kv-label">{label}</div>
-      <div className="kv-val">{value}</div>
-    </div>
-  );
-}
-
-function sortTimeline(rows) {
-  const ts = (r) => tlParse(r).ts || '';
-  return [...rows].sort((a, b) => String(ts(b)).localeCompare(String(ts(a))));
-}
-function tlParse(r) {
-  const tsKeys = [
-    'created_at',
-    'inserted_at',
-    'logged_at',
-    'changed_at',
-    'timestamp',
-    'updated_at',
-    'time',
-    'at',
-  ];
-  const stKeys = [
-    'status',
-    'new_status',
-    'to_status',
-    'stage',
-    'new_stage',
-    'event',
-    'action',
-    'label',
-  ];
-  const noteKeys = [
-    'note',
-    'notes',
-    'remark',
-    'remarks',
-    'message',
-    'description',
-    'changed_fields',
-    'field',
-    'detail',
-    'details',
-  ];
-  const pick = (keys) => {
-    for (const k of keys)
-      if (r[k] !== undefined && r[k] !== null && r[k] !== '') return r[k];
-    return '';
-  };
-  return {
-    ts: pick(tsKeys),
-    status: String(pick(stKeys) || ''),
-    note: String(pick(noteKeys) || ''),
-  };
-}
-
-/* ═══════════════════════════════════════════════════════════ STAGE MODAL */
-function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
-  const stage = STAGES[stageIndex(toStage)];
-  const r = (delivery && delivery._raw) || {};
-  const persons = personsFor(delivery.branch, delivery.person || '');
-  // abhi ka date / time / datetime — default value ke liye
-  const _now = new Date();
-  const _pad = (n) => String(n).padStart(2, '0');
-  const nowDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
-  const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
-  const nowDT = `${nowDate}T${nowTime}`;
-  const [f, setF] = useState({
-    invoiceFlag: '',
-    // EDIT → jo bhara hai wahi. MOVE → abhi ka date/time/ETA pehle se bhara.
-    date:
-      mode === 'edit' && r.confirmed_date && r.confirmed_date !== 'null'
-        ? r.confirmed_date
-        : nowDate,
-    time:
-      mode === 'edit' && r.confirmed_time && r.confirmed_time !== 'null'
-        ? String(r.confirmed_time).slice(0, 5)
-        : nowTime,
-    remarks:
-      (toStage === 'delivered'
-        ? r.stage4_remarks
-        : toStage === 'scheduled'
-          ? r.stage3_remarks
-          : r.stage1_remarks) || '',
-    person: delivery.person || '',
-    vehicle: delivery.vehicle || 'Auto-Rikshaw',
-    eta:
-      mode === 'edit' && r.app_eta && r.app_eta !== 'null'
-        ? toLocalInput(r.app_eta)
-        : nowDT,
-    inspected: !!r.item_inspected,
-    photoInspected:
-      r.photo_inspected && r.photo_inspected !== 'null'
-        ? r.photo_inspected
-        : '',
-    photoDelivered:
-      r.photo_delivered && r.photo_delivered !== 'null'
-        ? r.photo_delivered
-        : '',
-    delivered: !!r.item_delivered,
-    amount:
-      r.amount_collected != null && r.amount_collected !== 0
-        ? r.amount_collected
-        : delivery.amount,
-    amountType:
-      r.amount_type && r.amount_type !== 'null' ? r.amount_type : 'Cash',
-    security:
-      r.security_collected != null && r.security_collected !== 0
-        ? r.security_collected
-        : '',
-    securityType:
-      r.security_type && r.security_type !== 'null' ? r.security_type : 'Cash',
-  });
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  // Chrome mein date/time input pe click se picker khud nahi khulta —
-  // showPicker() chahiye. Cross-origin iframe (Zoho) mein ye throw karta hai,
-  // wahan user calendar icon se khol lega — isliye try/catch.
-  const openPicker = (e) => {
-    try {
-      e.currentTarget.showPicker();
-    } catch (_) {}
-  };
-  // NOTE: showPicker() cross-origin iframe (Zoho embed) mein block hota hai —
-  // isliye ab call nahi karte. Native date/time input ka apna picker chalega.
-  const flagSel = toStage === 'talked' && !!f.invoiceFlag;
-  // MBC = Managed By Client — customer khud le jaata hai. Scheduled form mein
-  // hi final details bhar ke entry seedha Item Delivered ho jaati hai.
-  const mbc = toStage === 'scheduled' && f.person === 'MBC';
-  const canSave = flagSel
-    ? true
-    : toStage === 'talked'
-      ? !!(f.date && f.time) // baat hui → date + time
-      : toStage === 'scheduled'
-        ? mbc
-          ? !!(
-              f.person &&
-              f.inspected &&
-              f.delivered &&
-              f.photoDelivered &&
-              String(f.amount).trim() !== '' &&
-              f.amountType &&
-              String(f.security).trim() !== '' &&
-              f.securityType
-            )
-          : !!(f.person && f.vehicle && f.inspected && f.photoInspected)
-        : toStage === 'dispatched'
-          ? !!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16))
-          : toStage === 'delivered'
-            ? !!(
-                f.delivered &&
-                f.photoDelivered &&
-                String(f.amount).trim() !== '' &&
-                f.amountType &&
-                String(f.security).trim() !== '' &&
-                f.securityType
-              )
-            : true;
-
-  const inner = (
     <>
-      {!embedded && (
-        <div className="modal-head">
-          <div>
-            <span
-              className="stage-badge"
-              style={{
-                background: flagSel ? CLOSED[f.invoiceFlag].soft : stage.soft,
-                color: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
-                marginBottom: 8,
-              }}
-            >
-              <span
-                className="col-pip"
-                style={{
-                  background: flagSel ? CLOSED[f.invoiceFlag].color : stage.color,
-                }}
-              />{' '}
-              {flagSel
-                ? CLOSED[f.invoiceFlag].label
-                : mode === 'edit'
-                  ? `Edit · ${sLabel(toStage)}`
-                  : sLabel(toStage)}
-            </span>
-            <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>
-              {delivery.customer} · {delivery.id}
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
+      <div className="att-range">
+        <div className="qk">
+          <button onClick={() => setMonth(shiftMonth(month + "-01", -1).slice(0, 7))}>‹ Previous</button>
+          <button className={month === istToday().slice(0, 7) ? "on" : ""}
+            onClick={() => setMonth(istToday().slice(0, 7))}>This month</button>
+          <button disabled={month >= istToday().slice(0, 7)}
+            onClick={() => setMonth(shiftMonth(month + "-01", 1).slice(0, 7))}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} />
+          <button className="att-btn sm" disabled={!shown.length} onClick={exportCsv}>CSV</button>
+        </div>
+      </div>
+
+      {approver && (
+        <input placeholder="Search by name or code" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ marginTop: 10 }} />
+      )}
+
+      <p className="att-muted" style={{ marginTop: 10 }}>
+        P present · L late · H half day · A absent · W week off · F holiday · CL/SL/EL = leave
+      </p>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-scroll" style={{ marginTop: 8 }}>
+          <table className="att-table att-mx">
+            <thead>
+              <tr>
+                <th className="name">Employee</th>
+                {dates.map((d) => (
+                  <th key={d} style={{ textAlign: "center",
+                    color: d === istToday() ? "#2563eb" : undefined }}>
+                    {String(new Date(d + "T00:00:00").getDate()).padStart(2, "0")}
+                  </th>
+                ))}
+                <th style={{ textAlign: "center" }}>P</th>
+                <th style={{ textAlign: "center" }}>A</th>
+                <th style={{ textAlign: "center" }}>Lv</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => {
+                const t = tally(r.marks);
+                const chips: [string, number, string, string][] = [
+                  ["Present", t.present, "#ecfdf3", "#067647"],
+                  ["Late", t.late, "#fffaeb", "#b54708"],
+                  ["Half day", t.half, "#fff6ed", "#c4320a"],
+                  ["Absent", t.a, "#fef3f2", "#b42318"],
+                  ["Week off", t.w, "#f2f4f7", "#475467"],
+                  ["Holiday", t.f, "#f2f4f7", "#475467"],
+                  ...Object.entries(t.byLeave).map(
+                    ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
+                ];
+                return (
+                  <>
+                    <tr key={r.code}>
+                      <td className="name">
+                        <PName id={r.id} code={r.code}>{r.code} · {r.name}</PName>
+                      </td>
+                      {dates.map((d) => (
+                        <td key={d} style={{ textAlign: "center" }}>
+                          <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
+                    </tr>
+                    <tr className="tot" key={r.code + "-t"}>
+                      <td className="name" colSpan={dates.length + 4}>
+                        <div className="att-totchips">
+                          {chips.filter(([, v]) => v > 0).map(([k, v, bg, fg]) => (
+                            <span key={k} style={{ background: bg, color: fg }}>{k} {v}</span>
+                          ))}
+                          {!chips.some(([, v]) => v > 0) && (
+                            <span style={{ background: "#f2f4f7", color: "#667085" }}>No marks yet</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </>
+                );
+              })}
+              {!shown.length && (
+                <tr><td className="name" colSpan={dates.length + 4}>No data for this month.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
-      <div className="modal-body">
-          {toStage === 'talked' && (
-            <>
-              <Field label="Invoice status">
-                <select
-                  className="inp"
-                  value={f.invoiceFlag}
-                  onChange={(e) => set('invoiceFlag', e.target.value)}
-                >
-                  <option value="">Customer se baat hui</option>
-                  <option value="renewal">Renewal invoice</option>
-                  <option value="duplicate">Duplicate invoice</option>
-                  <option value="cancelled">Cancelled invoice</option>
-                </select>
-              </Field>
-              {flagSel ? (
-                <div
-                  className="flag-note"
-                  style={{
-                    background: CLOSED[f.invoiceFlag].soft,
-                    color: CLOSED[f.invoiceFlag].color,
-                  }}
-                >
-                  Ye entry <b>{CLOSED[f.invoiceFlag].label}</b> mark hokar active
-                  list se hat jayegi — date/time bharne ki zarurat nahi. Neeche
-                  save dabao.
-                </div>
-              ) : (
-                <>
-                  <Field label="Confirmed Date *">
-                    <input
-                      className="inp"
-                      type="date"
-                      value={f.date}
-                      min="2024-01-01"
-                      max="2099-12-31"
-                      onClick={openPicker}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        // Chrome year 275760 tak deta hai — 4 digit tak hi rakho
-                        if (v && Number(v.slice(0, 4)) > 2099) return;
-                        set('date', v);
-                      }}
-                    />
-                  </Field>
-                  <Field label="Confirmed Time *">
-                    <TimePick12
-                      value={f.time}
-                      onChange={(v) => set('time', v)}
-                    />
-                  </Field>
-                  {!(f.date && f.time) && (
-                    <div className="req-note">
-                      Date aur Time dono bharna zaroori hai.
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {toStage === 'scheduled' && (
-            <>
-              <Field label="Delivery person *">
-                <select
-                  className="inp"
-                  value={f.person}
-                  onChange={(e) => set('person', e.target.value)}
-                >
-                  <option value="">Select…</option>
-                  {persons.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {mbc ? (
-                <div className="flag-note" style={{ background: T.mint, color: T.green }}>
-                  <b>MBC — Managed By Client.</b> Customer khud le ja raha hai, to
-                  gaadi/dispatch ki zarurat nahi. Neeche final details bhar do —
-                  entry seedha <b>Item Delivered</b> ho jayegi.
-                </div>
-              ) : (
-                <Field label="Vehicle *">
-                  <select
-                    className="inp"
-                    value={f.vehicle}
-                    onChange={(e) => set('vehicle', e.target.value)}
-                  >
-                    <option value="">Select…</option>
-                    {VEHICLES.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                    {f.vehicle && !VEHICLES.includes(f.vehicle) && (
-                      <option value={f.vehicle}>{f.vehicle}</option>
-                    )}
-                  </select>
-                </Field>
-              )}
-              <Check1
-                checked={f.inspected}
-                onChange={() => set('inspected', !f.inspected)}
-                label="Item inspected & ready"
-              />
-              {!mbc && f.inspected && (
-                <PhotoUpload
-                  label="Inspection photo *"
-                  invoiceNumber={delivery.id}
-                  kind="inspected"
-                  value={f.photoInspected}
-                  onChange={(url) => set('photoInspected', url)}
-                />
-              )}
-              {!mbc && f.inspected && !f.photoInspected && (
-                <div className="req-note">Inspection photo lagana zaroori hai.</div>
-              )}
-
-              {/* MBC → yahin final details (photo + amount + security) */}
-              {mbc && (
-                <>
-                  <div className="mbc-divider">Final details · handover</div>
-                  <Check1
-                    checked={f.delivered}
-                    onChange={() => set('delivered', !f.delivered)}
-                    label="Item customer ko de diya"
-                  />
-                  {f.delivered && (
-                    <PhotoUpload
-                      label="Handover photo *"
-                      invoiceNumber={delivery.id}
-                      kind="delivered"
-                      value={f.photoDelivered}
-                      onChange={(url) => set('photoDelivered', url)}
-                    />
-                  )}
-                  {f.delivered && !f.photoDelivered && (
-                    <div className="req-note">Handover photo lagana zaroori hai.</div>
-                  )}
-                  <div className="two-col">
-                    <Field label="Amount collected *">
-                      <input
-                        className="inp"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={f.amount}
-                        onChange={(e) =>
-                          set('amount', e.target.value.replace(/[^0-9]/g, ''))
-                        }
-                      />
-                    </Field>
-                    <Field label="Amount type *">
-                      <select
-                        className="inp"
-                        value={f.amountType}
-                        onChange={(e) => set('amountType', e.target.value)}
-                      >
-                        {PAY_OPTIONS.map((p) => (
-                          <option key={p}>{p}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                  <div className="two-col">
-                    <Field label="Security collected *">
-                      <input
-                        className="inp"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={f.security}
-                        onChange={(e) =>
-                          set('security', e.target.value.replace(/[^0-9]/g, ''))
-                        }
-                      />
-                    </Field>
-                    <Field label="Security type *">
-                      <select
-                        className="inp"
-                        value={f.securityType}
-                        onChange={(e) => set('securityType', e.target.value)}
-                      >
-                        {PAY_OPTIONS.map((p) => (
-                          <option key={p}>{p}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {toStage === 'dispatched' && (
-            <>
-              <Field label="Estimated arrival date *">
-                <input
-                  className="inp"
-                  type="date"
-                  value={(f.eta || '').slice(0, 10)}
-                  min="2024-01-01"
-                  max="2099-12-31"
-                  onClick={openPicker}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v && Number(v.slice(0, 4)) > 2099) return;
-                    set('eta', v ? `${v}T${(f.eta || '').slice(11, 16) || '00:00'}` : '');
-                  }}
-                />
-              </Field>
-              <Field label="Estimated arrival time *">
-                <TimePick12
-                  value={(f.eta || '').slice(11, 16)}
-                  onChange={(t) =>
-                    set(
-                      'eta',
-                      `${(f.eta || '').slice(0, 10) || nowDate}T${t}`,
-                    )
-                  }
-                />
-                {f.eta && (f.eta || '').slice(11, 16) && (
-                  <span className="tp-preview">🕐 {niceDateTime(f.eta)}</span>
-                )}
-              </Field>
-              {!(f.eta && f.eta.slice(0, 10) && f.eta.slice(11, 16)) && (
-                <div className="req-note">
-                  Customer ko yahi date &amp; time message mein jaayega — dono
-                  bharna zaroori hai.
-                </div>
-              )}
-            </>
-          )}
-
-          {toStage === 'delivered' && (
-            <>
-              <Check1
-                checked={f.delivered}
-                onChange={() => set('delivered', !f.delivered)}
-                label="Item delivered to customer"
-              />
-              {f.delivered && (
-                <PhotoUpload
-                  label="Delivery photo *"
-                  invoiceNumber={delivery.id}
-                  kind="delivered"
-                  value={f.photoDelivered}
-                  onChange={(url) => set('photoDelivered', url)}
-                />
-              )}
-              {f.delivered && !f.photoDelivered && (
-                <div className="req-note">Delivery photo lagana zaroori hai.</div>
-              )}
-              <div className="two-col">
-                <Field label="Amount collected *">
-                  <input
-                    className="inp"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={f.amount}
-                    onChange={(e) =>
-                      set('amount', e.target.value.replace(/[^0-9]/g, ''))
-                    }
-                  />
-                </Field>
-                <Field label="Amount type *">
-                  <select
-                    className="inp"
-                    value={f.amountType}
-                    onChange={(e) => set('amountType', e.target.value)}
-                  >
-                    {PAY_OPTIONS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-              <div className="two-col">
-                <Field label="Security collected *">
-                  <input
-                    className="inp"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={f.security}
-                    onChange={(e) =>
-                      set('security', e.target.value.replace(/[^0-9]/g, ''))
-                    }
-                  />
-                </Field>
-                <Field label="Security type *">
-                  <select
-                    className="inp"
-                    value={f.securityType}
-                    onChange={(e) => set('securityType', e.target.value)}
-                  >
-                    {PAY_OPTIONS.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-            </>
-          )}
-
-          <Field label="Remarks">
-            <textarea
-              className="inp"
-              rows={2}
-              placeholder="Optional notes…"
-              value={f.remarks}
-              onChange={(e) => set('remarks', e.target.value)}
-            />
-          </Field>
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn-primary"
-            disabled={!canSave}
-            onClick={() => onSave(mbc ? { ...f, mbcDirect: true } : f)}
-          >
-            <ShieldCheck size={16} />{' '}
-            {flagSel
-              ? `Mark as ${CLOSED[f.invoiceFlag].short}`
-              : mode === 'edit'
-                ? 'Update'
-                : mbc
-                  ? 'Save · Mark Delivered'
-                  : 'Save & update'}
-          </button>
-        </div>
     </>
   );
-  if (embedded) return <div className="inline-move">{inner}</div>;
+}
+
+/* ================= calendar ================= */
+function CalendarTab({ me }: any) {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [logs, setLogs] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const from = `${month}-01`, to = lastDayOf(from);
+      const [a, l, h] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []); setBusy(false);
+    })();
+  }, [month, me.id]);
+
+  const first = new Date(`${month}-01T00:00:00`);
+  const pad = (first.getDay() + 6) % 7;           // Monday-first
+  const total = Number(lastDayOf(`${month}-01`).slice(-2));
+  const cells: (string | null)[] = [
+    ...Array(pad).fill(null),
+    ...Array.from({ length: total }, (_, i) => addDays(`${month}-01`, i)),
+  ];
+
+  const info = (key: string) => {
+    const log = logs.find((x: any) => x.work_date === key);
+    const lv = leaves.find((x: any) => key >= x.from_date && key <= x.to_date);
+    const hol = hols.find((x: any) => x.hol_date === key);
+    const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
+    if (log) return { label: log.status, mins: log.worked_minutes,
+      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c" }[log.status as string] || "#475467" };
+    if (lv) return { label: lv.leave_type, color: "#2563eb" };
+    if (hol) return { label: hol.name, color: "#0891b2" };
+    if (off) return { label: "Week off", color: "#98a2b3" };
+    if (key > istToday()) return { label: "", color: "#d0d5dd" };
+    return { label: "Absent", color: "#dc2626" };
+  };
+
+  const tot = logs.reduce((a: number, r: any) => a + (r.worked_minutes || 0), 0);
+
   return (
-    <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {inner}
+    <div className="att-wrap att-stack">
+      <div className="att-range">
+        <div className="qk">
+          <button onClick={() => setMonth(shiftMonth(month + "-01", -1).slice(0, 7))}>‹ Previous</button>
+          <button className={month === istToday().slice(0, 7) ? "on" : ""}
+            onClick={() => setMonth(istToday().slice(0, 7))}>This month</button>
+          <button disabled={month >= istToday().slice(0, 7)}
+            onClick={() => setMonth(shiftMonth(month + "-01", 1).slice(0, 7))}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <span className="att-muted">{hhmm(tot)} worked</span>
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} />
+        </div>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-card">
+          <div className="att-cal" style={{ marginBottom: 6 }}>
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+              <div className="att-caldow" key={d}>{d}</div>
+            ))}
+          </div>
+          <div className="att-cal">
+            {cells.map((key, i) => {
+              if (!key) return <div className="att-calday pad" key={`p${i}`} />;
+              const v = info(key);
+              return (
+                <div className={`att-calday ${key === istToday() ? "now" : ""}`} key={key}>
+                  <div className="n">{key.slice(-2)}</div>
+                  <div className="st" style={{ color: v.color }}>{v.label}</div>
+                  {v.mins ? <div className="hr">{hhmm(v.mins)}</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= organization ================= */
+function PersonCard({ p }: any) {
+  return (
+    <div className="att-pcard">
+      <Avatar name={p.full_name} />
+      <div style={{ minWidth: 0 }}>
+        <p className="nm"><PName code={p.emp_code} id={p.id}>{p.full_name}</PName></p>
+        <p className="dz">{p.emp_code} · {p.designation || "—"}</p>
+        <p className="dz">{p.team}</p>
+        {p.email && <a href={`mailto:${p.email}`}>{p.email}</a>}
+        {p.phone && <p className="dz">{p.phone}</p>}
+        {p.state && (
+          <p style={{ fontSize: 12.5, fontWeight: 700, marginTop: 4, color: stateColor[p.state] }}>
+            {p.state}
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
-/* ═════════════════════════════════════════════════════════════ SMALL UI */
-function Field({ label, children }) {
-  // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
-  // jisse picker khulke turant band ho jaata tha (laptop pe).
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      {children}
-    </div>
-  );
-}
-/* 12-ghante ka time picker — hour (1-12) + minute + AM/PM.
-   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta),
-   isliye apna control: value andar "HH:MM" (24h) hi rehti hai. */
-function TimePick12({ value, onChange }) {
-  const [hh, mm] = String(value || '')
-    .split(':')
-    .map((x) => parseInt(x, 10));
-  const h24 = isNaN(hh) ? null : hh;
-  const ap = h24 == null ? 'AM' : h24 >= 12 ? 'PM' : 'AM';
-  const h12 = h24 == null ? '' : h24 % 12 || 12;
-  const min = isNaN(mm) ? '' : String(mm).padStart(2, '0');
+function MergeSheet({ keepPerson, onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
 
-  const push = (nh12, nmin, nap) => {
-    if (!nh12 || nmin === '' || !nap) return;
-    let h = Number(nh12) % 12;
-    if (nap === 'PM') h += 12;
-    onChange(`${String(h).padStart(2, '0')}:${nmin}`);
+  useEffect(() => {
+    supabase.rpc("directory", {}).then(({ data }) =>
+      setRows((data || []).filter((r: any) => r.id !== keepPerson.id)));
+  }, []);
+
+  // ek jaisa pehla naam upar
+  const first = String(keepPerson.full_name || "").trim().split(" ")[0].toLowerCase();
+  const likely = rows.filter((r) =>
+    String(r.full_name).trim().split(" ")[0].toLowerCase() === first);
+  const others = rows.filter((r) => !likely.includes(r));
+  const dup = rows.find((r) => r.id === pick);
+
+  const run = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { data, error } = await supabase.rpc("merge_employees", {
+      p_keep: keepPerson.id, p_merge: pick,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: String(data) }); setTimeout(onClose, 1400); }
+    setBusy(false);
   };
 
   return (
-    <div className="tp12">
-      <select
-        className="inp"
-        value={h12}
-        onChange={(e) => push(e.target.value, min || '00', ap)}
-      >
-        <option value="">Hr</option>
-        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-          <option key={h} value={h}>
-            {h}
-          </option>
-        ))}
-      </select>
-      <span className="tp12-sep">:</span>
-      <select
-        className="inp"
-        value={min}
-        onChange={(e) => push(h12 || 12, e.target.value, ap)}
-      >
-        <option value="">Min</option>
-        {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(
-          (m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ),
+    <Sheet title="Merge a duplicate record" onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted" style={{ whiteSpace: "normal" }}>
+          Keeping <b>{keepPerson.full_name}</b> ({keepPerson.emp_code}) — their department,
+          manager and employee code stay exactly as they are. The duplicate's login, email
+          and any attendance it collected move across, then the duplicate is deleted.
+        </p>
+
+        <div>
+          <label>Which record is the duplicate?</label>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">— pick the record to remove —</option>
+            {likely.length > 0 && (
+              <optgroup label="Same first name">
+                {likely.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.emp_code} · {r.full_name}{r.email ? ` · ${r.email}` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Everyone else">
+              {others.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.emp_code} · {r.full_name}{r.email ? ` · ${r.email}` : ""}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
+        {dup && (
+          <div className="att-note err">
+            <span>
+              <b>{dup.emp_code} · {dup.full_name}</b> will be deleted.
+              {dup.email ? ` Its email (${dup.email}) and login move to ${keepPerson.full_name}.` : ""}
+              {" "}This can't be undone.
+            </span>
+          </div>
         )}
-      </select>
-      <select
-        className="inp"
-        value={ap}
-        onChange={(e) => push(h12 || 12, min || '00', e.target.value)}
-      >
-        <option value="AM">AM</option>
-        <option value="PM">PM</option>
-      </select>
-    </div>
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={run} disabled={busy || !pick}>
+          {busy ? "Merging…" : "Merge and delete the duplicate"}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 
-function Check1({ checked, onChange, label }) {
+function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [edit, setEdit] = useState<any>(null);
+  const [lists, setLists] = useState<any>(null);
+
+  const [merge, setMerge] = useState(false);
+
+  const openEdit = async () => {
+    setBusy(true);
+    const [emp, b, t, d] = await Promise.all([
+      supabase.from("employees").select("*").eq("id", p.id).single(),
+      supabase.from("branches").select("*").order("name"),
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("designations").select("*").eq("active", true).order("sort_order").order("name"),
+      ]);
+    const people = await supabase.from("employees").select("id, emp_code, full_name").order("full_name");
+    setLists({ branches: b.data || [], teams: t.data || [], desigs: d.data || [],
+               people: people.data || [] });
+    setEdit(emp.data);
+    setBusy(false);
+  };
+
+  const rows: [string, any][] = [
+    ["Employee ID", p.emp_code],
+    ["Full name", p.full_name],
+    ["Designation", p.designation],
+    ["Department", p.team],
+    ["Reporting manager", p.manager_name],
+    ["Also reports to", p.co_manager_name],
+    ["Email", p.email],
+    ["Mobile", p.phone],
+    ["Employment type", p.employment_type],
+    ["Employee status", p.employee_status],
+    ["Account", p.approval_status],
+    ["Source of hire", p.source_of_hire],
+    ["Date of joining", p.date_of_joining ? fmtDate(p.date_of_joining) : null],
+    ["Date of birth", p.date_of_birth ? fmtDate(p.date_of_birth) : null],
+    ["Today", p.state],
+  ];
+
+  const [newCode, setNewCode] = useState("");
+
+  const resetCode = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" }); setNewCode("");
+    const { data, error } = await supabase.rpc("admin_reset_code", {
+      p_emp: p.id, p_code: null,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else if (data === "no_account") {
+      setMsg({ err: "",
+        ok: `${p.full_name} hasn't signed up yet. They'll set their own code the first time.` });
+    } else {
+      setNewCode(String(data));
+    }
+    setBusy(false);
+  };
+
+  const remove = async (hard: boolean) => {
+    setBusy(true);
+    const { error } = await supabase.rpc("delete_employee", { p_emp: p.id, p_hard: hard });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { onDeleted(); onClose(); }
+    setBusy(false);
+  };
+
   return (
-    <button
-      className="check1"
-      onClick={onChange}
-      style={{ borderColor: checked ? T.green : T.line }}
-    >
-      <span
-        className="check-box"
-        style={{
-          background: checked ? T.green : '#fff',
-          borderColor: checked ? T.green : T.line,
-        }}
-      >
-        {checked && <Check size={13} color="#fff" />}
+    <Sheet title={p.full_name} onClose={onClose}>
+      <div className="att-card">
+        <div className="att-flex" style={{ marginBottom: 14 }}>
+          <Avatar name={p.full_name} lg />
+          <div>
+            <p style={{ fontSize: 17, fontWeight: 700 }}>{p.full_name}</p>
+            <p className="att-muted">{p.emp_code} · {p.designation || "—"}</p>
+            <p style={{ fontWeight: 700, fontSize: 13, marginTop: 4, color: stateColor[p.state] }}>
+              {p.state}
+            </p>
+          </div>
+        </div>
+        <dl className="att-dl">
+          {rows.map(([k, v]) => (
+            <React.Fragment key={k}>
+              <dt>{k}</dt>
+              <dd>{v || <span className="att-muted">—</span>}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      </div>
+
+      {canEdit && (
+        <div className="att-card" style={{ marginTop: 12 }}>
+          <Note>{msg.err}</Note>
+          <Note>{msg.err}</Note>
+          <Note kind="ok">{msg.ok}</Note>
+
+          {newCode && (
+            <div className="att-note ok" style={{ marginBottom: 12 }}>
+              <span>
+                New code for <b>{p.full_name}</b>:
+                <b style={{ fontSize: 22, letterSpacing: 4, display: "block", margin: "6px 0" }}>
+                  {newCode}
+                </b>
+                Tell them this code. They sign in with {p.email} and this code.
+                Nobody can see it again once you close this.
+              </span>
+            </div>
+          )}
+
+          {!confirmDel ? (
+            <div className="att-flex" style={{ flexWrap: "wrap" }}>
+              <button className="att-btn sm" disabled={busy} onClick={openEdit}>Edit details</button>
+              {p.email && (
+                <button className="att-btn sm line" disabled={busy} onClick={resetCode}
+                  title="They forgot their 4-digit code">Reset their code</button>
+              )}
+              <button className="att-btn sm line" disabled={busy}
+                onClick={() => setMerge(true)}>Merge duplicate</button>
+              <button className="att-btn sm line" disabled={busy}
+                onClick={() => remove(false)}>Deactivate</button>
+              <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                disabled={busy} onClick={() => setConfirmDel(true)}>Delete permanently</button>
+            </div>
+          ) : (
+            <div className="att-note err">
+              <span>This wipes {p.full_name}'s attendance and leave history too.</span>
+              <div className="att-flex" style={{ marginTop: 10 }}>
+                <button className="att-btn sm" style={{ background: "#b42318" }}
+                  disabled={busy} onClick={() => remove(true)}>Yes, delete</button>
+                <button className="att-btn sm grey" onClick={() => setConfirmDel(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {edit && lists && (
+        <EmployeeSheet row={edit} branches={lists.branches} teams={lists.teams}
+          desigs={lists.desigs} people={lists.people}
+          onClose={() => { setEdit(null); onDeleted(); }} />
+      )}
+
+      {merge && (
+        <MergeSheet keepPerson={p} onClose={() => { setMerge(false); onDeleted(); }} />
+      )}
+    </Sheet>
+  );
+}
+
+function BulkSheet({ ids, names, onClose }: any) {
+  const [field, setField] = useState("field_staff");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [lists, setLists] = useState<any>({ teams: [], branches: [], desigs: [], people: [] });
+  const [boolVal, setBoolVal] = useState(true);
+  const [uuidVal, setUuidVal] = useState("");
+  const [textVal, setTextVal] = useState("");
+  const [timeVal, setTimeVal] = useState(nowHM());
+
+  useEffect(() => {
+    (async () => {
+      const [t, b, d, p] = await Promise.all([
+        supabase.from("teams").select("id, name").order("name"),
+        supabase.from("branches").select("id, name").order("name"),
+        supabase.from("designations").select("name").eq("active", true)
+          .order("sort_order").order("name"),
+        supabase.from("employees").select("id, emp_code, full_name")
+          .eq("active", true).order("full_name"),
+      ]);
+      setLists({ teams: t.data || [], branches: b.data || [],
+                 desigs: d.data || [], people: p.data || [] });
+    })();
+  }, []);
+
+  const FIELDS: [string, string, string][] = [
+    ["field_staff",       "Field staff (skip geo-fence)", "bool"],
+    ["team",              "Department",                   "team"],
+    ["branch",            "Branch / location",            "branch"],
+    ["reports_to",        "Reporting manager",            "person"],
+    ["designation",       "Designation",                  "desig"],
+    ["employment_type",   "Employment type",              "text"],
+    ["shift_start",       "Shift start time",             "time"],
+    ["shift_end",         "Shift end time",               "time"],
+    ["show_verify_panel", "Daily check panel",            "bool"],
+    ["active",            "Active / inactive",            "bool"],
+  ];
+  const kind = FIELDS.find((f) => f[0] === field)?.[2] || "text";
+  const label = FIELDS.find((f) => f[0] === field)?.[1] || "";
+
+  const ready = kind === "bool" || kind === "time"
+    || (kind === "text" ? !!textVal.trim() : !!uuidVal || !!textVal);
+
+  const apply = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { data, error } = await supabase.rpc("bulk_update_employees", {
+      p_ids: ids,
+      p_field: field,
+      p_text: (kind === "desig" || kind === "text") ? textVal.trim() : null,
+      p_uuid: ["team", "branch", "person"].includes(kind) ? (uuidVal || null) : null,
+      p_bool: kind === "bool" ? boolVal : null,
+      p_time: kind === "time" ? timeVal : null,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: `${data} people updated.` }); setTimeout(onClose, 800); }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={`Edit ${ids.length} people`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted" style={{ whiteSpace: "normal" }}>
+          {names.slice(0, 6).join(", ")}
+          {names.length > 6 ? ` and ${names.length - 6} more` : ""}
+        </p>
+
+        <div>
+          <label>What do you want to change?</label>
+          <select value={field} onChange={(e) => {
+            setField(e.target.value); setUuidVal(""); setTextVal("");
+          }}>
+            {FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label>{label}</label>
+
+          {kind === "bool" && (
+            <select value={boolVal ? "y" : "n"} onChange={(e) => setBoolVal(e.target.value === "y")}>
+              <option value="y">
+                {field === "active" ? "Active"
+                  : field === "field_staff" ? "Yes — skip the geo-fence"
+                  : "Show the panel"}
+              </option>
+              <option value="n">
+                {field === "active" ? "Inactive"
+                  : field === "field_staff" ? "No — geo-fence applies"
+                  : "Hide the panel"}
+              </option>
+            </select>
+          )}
+
+          {kind === "team" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a department —</option>
+              {lists.teams.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+
+          {kind === "branch" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a branch —</option>
+              {lists.branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+
+          {kind === "person" && (
+            <select value={uuidVal} onChange={(e) => setUuidVal(e.target.value)}>
+              <option value="">— pick a manager —</option>
+              {lists.people.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
+              ))}
+            </select>
+          )}
+
+          {kind === "desig" && (
+            <select value={textVal} onChange={(e) => setTextVal(e.target.value)}>
+              <option value="">— pick a designation —</option>
+              {lists.desigs.map((d: any) => <option key={d.name} value={d.name}>{d.name}</option>)}
+            </select>
+          )}
+
+          {kind === "text" && (
+            <input value={textVal} placeholder="Permanent / Trainee / Intern"
+              onChange={(e) => setTextVal(e.target.value)} />
+          )}
+
+          {kind === "time" && (
+            <input type="time" lang="en-US" value={timeVal} onChange={(e) => setTimeVal(e.target.value)} />
+          )}
+        </div>
+
+        {field === "active" && !boolVal && (
+          <div className="att-note err">
+            <span>These {ids.length} people will disappear from every list and won't be
+            able to check in. Their history stays — you can switch them back on later.</span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={apply} disabled={busy || !ready}>
+          {busy ? "Applying…" : `Apply to ${ids.length} people`}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+function DirectoryTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [team, setTeam] = useState("");
+  const [sort, setSort] = useState<{ k: string; asc: boolean }>({ k: "emp_code", asc: true });
+  const [busy, setBusy] = useState(true);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<any>(null);
+  const [bulk, setBulk] = useState(false);
+  const canEdit = me?.role === "admin";
+
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    setRows(data || []); setBusy(false); setSel(new Set());
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = (id: string) => {
+    const n = new Set(sel);
+    n.has(id) ? n.delete(id) : n.add(id);
+    setSel(n);
+  };
+
+  const bulkRemove = async (hard: boolean) => {
+    for (const id of Array.from(sel)) {
+      await supabase.rpc("delete_employee", { p_emp: id, p_hard: hard });
+    }
+    load();
+  };
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  const teams = Array.from(new Set(rows.map((r) => r.team))).sort();
+  const cols: [string, string][] = [
+    ["emp_code", "Employee ID"], ["first_name", "First Name"], ["last_name", "Last Name"],
+    ["email", "Email address"], ["phone", "Mobile"], ["team", "Department"],
+    ["designation", "Designation"], ["employment_type", "Employment Type"],
+    ["employee_status", "Employee Status"], ["source_of_hire", "Source of Hire"],
+    ["date_of_joining", "Date of Joining"], ["manager_name", "Reporting Manager"],
+    ["date_of_birth", "Date of Birth"], ["state", "Today"],
+  ];
+
+  const shown = rows
+    .filter((r) => !team || r.team === team)
+    .filter((r) => !q || cols.some(([k]) =>
+      String(r[k] || "").toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => {
+      const x = String(a[sort.k] || ""), y = String(b[sort.k] || "");
+      return (sort.asc ? 1 : -1) * x.localeCompare(y, undefined, { numeric: true });
+    });
+
+  const flip = (k: string) =>
+    setSort(sort.k === k ? { k, asc: !sort.asc } : { k, asc: true });
+
+  return (
+    <>
+      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+        <input placeholder="Search anything" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+        <select value={team} onChange={(e) => setTeam(e.target.value)} style={{ width: "auto" }}>
+          <option value="">All departments</option>
+          {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button className="att-btn sm" disabled={!shown.length}
+          onClick={() => downloadCsv(shown.map((r) => {
+            const o: any = {}; cols.forEach(([k, l]) => { o[l] = r[k] ?? ""; }); return o;
+          }), "HJS_employees.csv")}>CSV</button>
+      </div>
+
+      {sel.size > 0 && (
+        <div className="att-selbar">
+          <b>{sel.size} selected</b>
+          <button className="att-btn sm line" onClick={() => setSel(new Set())}>Clear</button>
+          <div style={{ marginLeft: "auto" }} className="att-flex">
+            <button className="att-btn sm line" onClick={() => downloadCsv(
+              shown.filter((r) => sel.has(r.id)).map((r) => {
+                const o: any = {}; cols.forEach(([k, l]) => { o[l] = r[k] ?? ""; }); return o;
+              }), "HJS_selected.csv")}>Export selected</button>
+            {canEdit && (
+              <>
+                <button className="att-btn sm" onClick={() => setBulk(true)}>Edit selected</button>
+                <button className="att-btn sm line" onClick={() => bulkRemove(false)}>Deactivate</button>
+                <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                  onClick={() => { if (confirm(`Delete ${sel.size} people permanently? This wipes their attendance too.`)) bulkRemove(true); }}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <p className="att-muted">Total record count: {shown.length}</p>
+
+      <div className="att-scroll">
+        <table className="att-etable">
+          <thead>
+            <tr>
+              <th className="cb">
+                <input type="checkbox"
+                  checked={shown.length > 0 && shown.every((r) => sel.has(r.id))}
+                  onChange={(e) => setSel(e.target.checked
+                    ? new Set(shown.map((r) => r.id)) : new Set())} />
+              </th>
+              {cols.map(([k, label], i) => (
+                <th key={k} className={i === 0 ? "first" : ""} onClick={() => flip(k)}>
+                  {label}
+                  {sort.k === k && <span className="att-arrow2">{sort.asc ? "\u25b2" : "\u25bc"}</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => (
+              <tr key={r.emp_code} className={sel.has(r.id) ? "sel" : ""}>
+                <td className="cb">
+                  <input type="checkbox" checked={sel.has(r.id)}
+                    onChange={() => toggle(r.id)} />
+                </td>
+                <td className="first link" onClick={() => setOpen(r)}>{r.emp_code}</td>
+                <td className="link" onClick={() => setOpen(r)}>{r.first_name || r.full_name}</td>
+                <td>{r.last_name || "—"}</td>
+                <td>{r.email
+                  ? <a href={`mailto:${r.email}`} style={{ color: "#2563eb" }}>{r.email}</a>
+                  : <span className="att-muted">—</span>}</td>
+                <td>{r.phone
+                  ? <a href={`tel:${r.phone}`} style={{ color: "#2563eb" }}>{r.phone}</a>
+                  : <span className="att-muted">—</span>}</td>
+                <td>{r.team}</td>
+                <td>{r.designation || "—"}</td>
+                <td>{r.employment_type || "—"}</td>
+                <td>{r.employee_status || "—"}</td>
+                <td>{r.source_of_hire || "—"}</td>
+                <td>{r.date_of_joining ? fmtDate(r.date_of_joining) : "—"}</td>
+                <td>{r.manager_name || "—"}</td>
+                <td>{r.date_of_birth ? fmtDate(r.date_of_birth) : "—"}</td>
+                <td><span style={{ fontWeight: 650, color: stateColor[r.state] }}>{r.state}</span></td>
+              </tr>
+            ))}
+            {!shown.length && (
+              <tr><td className="first" colSpan={cols.length + 1}>No match found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {open && <PersonSheet p={open} canEdit={canEdit}
+        onClose={() => setOpen(null)} onDeleted={load} />}
+
+      {bulk && (
+        <BulkSheet
+          ids={Array.from(sel)}
+          names={rows.filter((r) => sel.has(r.id)).map((r) => r.full_name)}
+          onClose={() => { setBulk(false); load(); }} />
+      )}
+    </>
+  );
+}
+
+function DeptTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("directory", {});
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const teams: Record<string, Record<string, any[]>> = {};
+  shown.forEach((r) => {
+    const t = r.team, d = r.designation || "Unassigned";
+    teams[t] = teams[t] || {};
+    (teams[t][d] = teams[t][d] || []).push(r);
+  });
+
+  return (
+    <>
+      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      {Object.keys(teams).sort().map((tn) => {
+        const byD = teams[tn];
+        const n = Object.values(byD).reduce((a, x) => a + x.length, 0);
+        return (
+          <Section key={tn} title={tn} count={n} open={!!q || Object.keys(teams).length <= 3}>
+            <div style={{ padding: "6px 12px 12px" }}>
+              {Object.keys(byD).sort().map((dg) => (
+                <div key={dg} style={{ marginTop: 10 }}>
+                  <div className="att-between" style={{ marginBottom: 6 }}>
+                    <b style={{ fontSize: 13.5 }}>{dg}</b>
+                    <span className="att-chip">{byD[dg].length}</span>
+                  </div>
+                  {byD[dg].map((p: any) => (
+                    <div className="att-row" key={p.emp_code} style={{ padding: "8px 0" }}>
+                      <Avatar name={p.full_name} />
+                      <div className="grow">
+                        <p><PName id={p.id} code={p.emp_code}><b>{p.emp_code}</b> · {p.full_name}</PName></p>
+                        <p className="att-muted">{p.phone || p.email || "—"}</p>
+                      </div>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: stateColor[p.state] }}>
+                        {p.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </Section>
+        );
+      })}
+    </>
+  );
+}
+
+function TreeCard({ p, open, canOpen, onClick, count }: any) {
+  return (
+    <button className={`att-tcard ${canOpen ? "can" : ""} ${open ? "on" : ""}`}
+      onClick={canOpen ? onClick : undefined}>
+      <Avatar name={p.name} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="nm">
+          {p.code ? <PName id={p.pid} code={p.code}>{p.name}</PName> : p.name}
+        </span>
+        <span className="dz">{p.sub}</span>
       </span>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: T.ink }}>
-        {label}
-      </span>
+      {count > 0 && (
+        <span className={`att-tbadge ${open ? "" : "grey"}`}>
+          {open ? "\u2212" : "+"} {count}
+        </span>
+      )}
     </button>
   );
 }
 
-/* Photo upload — camera se click ya device se choose. Supabase Storage pe
-   upload hoke URL onChange se milta hai. */
-function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const camRef = React.useRef(null);
-  const fileRef = React.useRef(null);
-  // value = pipe-joined URLs (multiple photos)
-  const urls = value ? String(value).split('|').filter(Boolean) : [];
-
-  const handle = async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (!files.length) return;
-    setErr('');
-    setBusy(true);
-    const added = [];
-    for (const file of files) {
-      try {
-        const url = await sbUploadPhoto(invoiceNumber, kind, file);
-        added.push(url);
-      } catch (er) {
-        setErr('Kuch photos upload nahi hue, dobara try karo');
-      }
-    }
-    if (added.length) onChange([...urls, ...added].join('|'));
-    setBusy(false);
-  };
-
-  const removeAt = (i) => {
-    const next = urls.filter((_, idx) => idx !== i);
-    onChange(next.join('|'));
-  };
-
+// Asli org chart: parent se uske apne bachchon tak hi line jaati hai
+function OrgNode({ node, childrenOf, countOf, toCard, depth, openAll }: any) {
+  const kids = childrenOf(node);
+  const [open, setOpen] = useState(depth < 1);
+  useEffect(() => {
+    if (openAll === undefined) return;
+    setOpen(openAll ? true : depth < 1);
+  }, [openAll]);
   return (
-    <div className="photo-up">
-      <div className="photo-up-label">
-        {label}
-        {urls.length > 0 && (
-          <span className="photo-count"> · {urls.length}</span>
-        )}
-      </div>
-      {urls.length > 0 && (
-        <div className="photo-grid">
-          {urls.map((u, i) => (
-            <div className="photo-thumb" key={u + i}>
-              <img src={u} alt={`${label} ${i + 1}`} />
-              <button
-                className="photo-x"
-                onClick={() => removeAt(i)}
-                type="button"
-                title="Hatao"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
+    <div className="att-node">
+      <TreeCard p={toCard(node)} count={kids.length} canOpen={kids.length > 0}
+        open={open && kids.length > 0} onClick={() => setOpen(!open)} />
+      {open && kids.length > 0 && (
+        <>
+          <span className="att-stub" />
+          <div className="att-kids">
+            {kids.map((k: any) => (
+              <div className="att-kid" key={k.id}>
+                <OrgNode node={k} childrenOf={childrenOf} countOf={countOf}
+                  toCard={toCard} depth={depth + 1} openAll={openAll} />
+              </div>
+            ))}
+          </div>
+        </>
       )}
-      <div className="photo-btns">
-        <button
-          type="button"
-          className="photo-btn"
-          onClick={() => camRef.current && camRef.current.click()}
-          disabled={busy}
-        >
-          <Camera size={15} />{' '}
-          {busy ? 'Upload ho raha…' : urls.length ? 'Aur photo' : 'Camera'}
-        </button>
-        <button
-          type="button"
-          className="photo-btn alt"
-          onClick={() => fileRef.current && fileRef.current.click()}
-          disabled={busy}
-        >
-          <Upload size={15} /> Device se
-        </button>
-      </div>
-      <input
-        ref={camRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        style={{ display: 'none' }}
-        onChange={handle}
-      />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        multiple
-        style={{ display: 'none' }}
-        onChange={handle}
-      />
-      {err && <div className="req-note">{err}</div>}
     </div>
   );
 }
-function Toast({ msg }) {
+
+function OrgChart({ roots, childrenOf, countOf, toCard, openAll }: any) {
   return (
-    <div className="toast">
-      <CheckCircle2 size={17} color={T.greenBright} /> {msg}
+    <div className="att-tw">
+      <div className="att-kids">
+        {roots.map((r: any) => (
+          <div className="att-kid" key={r.id} style={{ paddingBottom: 14 }}>
+            <OrgNode node={r} childrenOf={childrenOf} countOf={countOf}
+              toCard={toCard} depth={0} openAll={openAll} />
+          </div>
+        ))}
+        {!roots.length && <p className="att-empty">Nothing to show.</p>}
+      </div>
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════ CUSTOMER TRACK PAGE */
-const TRACK_STEPS = [
-  {
-    id: 'new',
-    label: 'Order Registered',
-    desc: 'Your order has been registered. Our team will call you shortly to confirm the delivery date and time.',
-    icon: Package,
-  },
-  {
-    id: 'talked',
-    label: 'Confirmed With You',
-    desc: 'Our team has contacted you and your delivery date and time has been confirmed.',
-    icon: Phone,
-  },
-  {
-    id: 'scheduled',
-    label: 'Delivery Scheduled',
-    desc: 'Your item has passed the quality check and the delivery has been scheduled.',
-    icon: ClipboardCheck,
-  },
-  {
-    id: 'dispatched',
-    label: 'Out for Delivery',
-    desc: 'Your order has been dispatched and is on its way to your location.',
-    icon: Truck,
-  },
-  {
-    id: 'delivered',
-    label: 'Delivered',
-    desc: 'Your order has been delivered successfully. Thank you for choosing Healthy Jeena Sikho.',
-    icon: CheckCircle2,
-  },
-];
-/* Return / pickup ke steps — customer ki bhasha mein */
-const PICKUP_STEPS = [
-  {
-    id: 'new',
-    label: 'Return Requested',
-    desc: 'We have received the return request. Our team will call you to confirm the pickup date and time.',
-    icon: RotateCcw,
-  },
-  {
-    id: 'talked',
-    label: 'Confirmed With You',
-    desc: 'Our team has contacted you and the pickup date and time has been confirmed.',
-    icon: Phone,
-  },
-  {
-    id: 'scheduled',
-    label: 'Pickup Scheduled',
-    desc: 'Your pickup has been scheduled. Our team will arrive to collect the item.',
-    icon: ClipboardCheck,
-  },
-  {
-    id: 'dispatched',
-    label: 'Out for Pickup',
-    desc: 'Our team is on the way to your location to collect the item.',
-    icon: Truck,
-  },
-  {
-    id: 'delivered',
-    label: 'Picked Up',
-    desc: 'The item has been picked up successfully. Thank you for choosing Healthy Jeena Sikho.',
-    icon: CheckCircle2,
-  },
-];
-
-/* customer country-code dropdown — default +91 */
-const COUNTRY_CODES = ['+91', '+1', '+44', '+971', '+977', '+880', '+61'];
-function stepTime(log, stageId) {
-  if (!Array.isArray(log)) return null;
-  const evs = log.filter((e) => e && e.stage === stageId);
-  return evs.length ? evs[evs.length - 1].ts : null;
-}
-
-/* ── SALES TRACK PAGE ──────────────────────────────────────────────────
-   /track → sales team ek customer ka number daale, us number ki saari
-   deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
-   timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
-function SalesTrackPage() {
-  // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
-  const [range, setRange] = useState('today');
-  const [from, setFrom] = useState(dayStr(Date.now()));
-  const [to, setTo] = useState(dayStr(Date.now()));
-  const [storeFilter, setStoreFilter] = useState(''); // '' = all stores
-  const [statusFilter, setStatusFilter] = useState('all'); // all|pending|delivered
-  const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
-  const [mState, setMState] = useState('loading'); // loading|done|error
-  const [mErr, setMErr] = useState('');
-  const [cell, setCell] = useState(null); // {sales, store}
-  const [rows, setRows] = useState([]);
-  const [cState, setCState] = useState('idle');
-  const [q, setQ] = useState(''); // global search (customer/invoice/salesperson)
-  const [sRows, setSRows] = useState([]);
-  const [sState, setSState] = useState('idle'); // idle|loading|done
-  const [lq, setLq] = useState(''); // list search (cell view)
-  const [selected, setSelected] = useState(null);
-  // order chunte hi uska timeline (app_log) le aao — customer link jaisa
-  // "Updated: ..." har stage pe dikhe
-  const pickOrder = async (r) => {
-    setSelected(r);
-    if (!r || !r.invoice_number || r.app_log) return;
-    try {
-      const det = (await sbSalesLog(r.invoice_number)) || {};
-      setSelected((cur) =>
-        cur && cur.invoice_number === r.invoice_number
-          ? {
-              ...cur,
-              app_log: det.app_log,
-              photo_delivered: det.photo_delivered,
-              customer_phone: det.customer_phone || cur.customer_phone,
-            }
-          : cur,
-      );
-    } catch (_) {
-      /* log na aaye to baaki detail phir bhi dikhti rahe */
-    }
-  };
-
-  // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      setSState('idle');
-      setSRows([]);
-      return;
-    }
-    let alive = true;
-    setSState('loading');
-    const t = setTimeout(async () => {
-      try {
-        const res = await sbSalesSearch(term);
-        if (alive) {
-          setSRows(res || []);
-          setSState('done');
-        }
-      } catch (_) {
-        if (alive) setSState('done');
-      }
-    }, 300);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [q]);
-
-  const bounds = () => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'month') {
-      const s = new Date(t.getFullYear(), t.getMonth(), 1);
-      return [mk(s), mk(t)];
-    }
-    if (range === 'custom') return [from, to];
-    return ['2000-01-01', '2999-12-31'];
-  };
-
-  const loadMatrix = async () => {
-    setMState('loading');
-    setCell(null);
-    setSelected(null);
-    const [f, t] = bounds();
-    try {
-      const res = await sbSalesMatrix(f, t, statusFilter);
-      setMatrix(res || []);
-      setMState('done');
-    } catch (e) {
-      setMErr(e.message || 'error');
-      setMState('error');
-    }
-  };
+function EmpTreeTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+  const [all, setAll] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
-    loadMatrix();
-    // eslint-disable-next-line
-  }, [range, from, to, statusFilter]);
+    (async () => {
+      const { data } = await supabase.rpc("directory", {});
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
 
-  const openCell = async (sales, store) => {
-    setCell({
-      sales,
-      store,
-      title:
-        sales && store
-          ? `${sales} · ${branchLabel(store)}`
-          : sales
-            ? sales
-            : store
-              ? branchLabel(store)
-              : 'All',
-    });
-    setSelected(null);
-    setLq('');
-    setCState('loading');
-    const [f, t] = bounds();
-    try {
-      const res = await sbSalesList(sales, store, f, t, statusFilter);
-      setRows(res || []);
-      setCState('done');
-    } catch (e) {
-      setCState('error');
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  const kids: Record<string, any[]> = {};
+  rows.forEach((r) => {
+    const k = r.reports_to || "root";
+    (kids[k] = kids[k] || []).push(r);
+    // co-manager ke neeche bhi wahi banda dikhega
+    if (r.co_manager_id) {
+      (kids[r.co_manager_id] = kids[r.co_manager_id] || []).push({ ...r, _co: true });
     }
-  };
-
-  // matrix ko pivot karo: salespeople (rows) × stores (cols jinme data hai)
-  const stores = [];
-  const people = [];
-  const map = {}; // sales|store -> cnt
-  const rowTotal = {};
-  const colTotal = {};
-  matrix.forEach((m) => {
-    if (!stores.includes(m.store)) stores.push(m.store);
-    if (!people.includes(m.salesperson)) people.push(m.salesperson);
-    map[`${m.salesperson}|${m.store}`] = Number(m.cnt);
-    rowTotal[m.salesperson] = (rowTotal[m.salesperson] || 0) + Number(m.cnt);
-    colTotal[m.store] = (colTotal[m.store] || 0) + Number(m.cnt);
   });
-  // store order fixed rakho jaha possible
-  const STORE_ORDER = [
-    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
-  ];
-  stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
-  const shownStores = stores;
-  // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
-  const hasNum = (p) => /\d{6,}/.test(String(p || ''));
-  people.sort((a, b) => {
-    const na = hasNum(a) ? 1 : 0;
-    const nb = hasNum(b) ? 1 : 0;
-    if (na !== nb) return nb - na; // number waale pehle
-    return (rowTotal[b] || 0) - (rowTotal[a] || 0);
-  });
-  const shownPeople = people.filter(
-    (p) => !q.trim() || p.toLowerCase().includes(q.trim().toLowerCase()),
-  );
+  const deep = (id: string, seen = new Set<string>()): number =>
+    (kids[id] || []).reduce((a, c) => {
+      if (seen.has(c.id)) return a;
+      seen.add(c.id);
+      return a + 1 + deep(c.id, seen);
+    }, 0);
 
-  const shownRows = rows.filter((r) => {
-    if (!lq.trim()) return true;
-    const hay = `${r.customer_name || ''} ${r.invoice_number || ''} ${equipmentText(
-      { line_items: r.line_items, item_name: r.item_name },
-    )}`.toLowerCase();
-    return hay.includes(lq.trim().toLowerCase());
-  });
-
-  const rangeLabel =
-    range === 'today' ? 'Aaj'
-    : range === 'yesterday' ? 'Kal'
-    : range === '7d' ? 'Pichhle 7 din'
-    : range === 'month' ? 'Is mahine'
-    : range === 'all' ? 'Sabhi'
-    : `${from} → ${to}`;
-
-  return (
-    <div className="track-wrap" style={{ fontFamily: FONT }}>
-      <StyleTag />
-      <div className="track-topbar">
-        <div className="brand">
-          <div className="brand-badge">
-            <Truck size={20} color="#fff" />
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
-              Healthy Jeena Sikho
-            </div>
-            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Delivery tracker · Sales
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className={cell || selected ? 'track-body' : 'track-body track-wide'}>
-        {/* DETAIL VIEW */}
-        {selected ? (
-          <>
-            <button className="track-back" onClick={() => setSelected(null)}>
-              <ArrowLeft size={16} /> Back to list
-            </button>
-            <SalesOrderCard row={selected} />
-            <TrackResult row={selected} showPhotos />
-          </>
-        ) : cell ? (
-          /* CELL LIST VIEW */
-          <>
-            <button
-              className="track-back"
-              onClick={() => {
-                setCell(null);
-                setStoreFilter('');
-              }}
-            >
-              <ArrowLeft size={16} /> Back to overview
-            </button>
-            <div className="sales-listbar">
-              <div className="sales-list-head">
-                {cell.title} · {shownRows.length}
-              </div>
-              <div className="sales-search">
-                <Search size={15} color={T.inkSoft} />
-                <input
-                  placeholder="Search name, invoice, product…"
-                  value={lq}
-                  onChange={(e) => setLq(e.target.value)}
-                />
-              </div>
-            </div>
-            {cState === 'loading' ? (
-              <div className="track-msg">Loading…</div>
-            ) : shownRows.length === 0 ? (
-              <div className="track-msg">Koi delivery nahi mili.</div>
-            ) : (
-              <SalesGroupedList rows={shownRows} onPick={pickOrder} />
-            )}
-          </>
-        ) : (
-          /* MATRIX OVERVIEW */
-          <>
-            <div className="mx-toolbar">
-              <div className="mx-search">
-                <Search size={16} color={T.inkSoft} />
-                <input
-                  placeholder="Search customer, invoice, salesperson…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </div>
-              <div className="mx-daterow">
-                <select
-                  className="mx-select"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="delivered">Delivered</option>
-                </select>
-                <select
-                  className="mx-select"
-                  value={storeFilter}
-                  onChange={(e) => {
-                    const s = e.target.value;
-                    setStoreFilter(s);
-                    if (s) openCell('', s);
-                    else setCell(null);
-                  }}
-                >
-                  <option value="">All stores</option>
-                  {[
-                    'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL',
-                    'LDH', 'CHD', 'NCR',
-                  ].map((s) => (
-                    <option key={s} value={s}>
-                      {branchLabel(s)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="mx-select"
-                  value={range}
-                  onChange={(e) => setRange(e.target.value)}
-                >
-                  <option value="today">Today</option>
-                  <option value="yesterday">Yesterday</option>
-                  <option value="7d">Last 7 days</option>
-                  <option value="month">This month</option>
-                  <option value="all">All time</option>
-                  <option value="custom">Custom range</option>
-                </select>
-                {range === 'custom' && (
-                  <div className="mx-range">
-                    <input
-                      className="mx-date"
-                      type="date"
-                      value={from}
-                      max={to}
-                      onChange={(e) => setFrom(e.target.value)}
-                    />
-                    <span className="mx-arrow">–</span>
-                    <input
-                      className="mx-date"
-                      type="date"
-                      value={to}
-                      min={from}
-                      onChange={(e) => setTo(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="mx-caption">
-              {sState === 'idle' &&
-                `Deliveries by salesperson & store · ${rangeLabel}${statusFilter !== 'all' ? ' · ' + statusFilter[0].toUpperCase() + statusFilter.slice(1) : ''}`}
-            </div>
-
-            {sState !== 'idle' ? (
-              /* GLOBAL SEARCH RESULTS — matrix ki jagah */
-              <>
-                <div className="mx-caption">
-                  {sState === 'loading'
-                    ? 'Searching…'
-                    : `${sRows.length} result${sRows.length === 1 ? '' : 's'} for "${q.trim()}"`}
-                </div>
-                {sState === 'done' && sRows.length === 0 ? (
-                  <div className="track-msg">Kuch nahi mila.</div>
-                ) : (
-                  <SalesGroupedList rows={sRows} onPick={pickOrder} />
-                )}
-              </>
-            ) : mState === 'loading' ? (
-              <div className="track-msg">Loading…</div>
-            ) : mState === 'error' ? (
-              <div className="track-msg">Unable to load. {mErr}</div>
-            ) : shownPeople.length === 0 ? (
-              <div className="track-msg">Is duration mein koi delivery nahi.</div>
-            ) : (
-              <div className="matrix-wrap">
-                <table className="matrix">
-                  <thead>
-                    <tr>
-                      <th className="mx-sticky">Salesperson</th>
-                      {shownStores.map((s) => (
-                        <th
-                          key={s}
-                          className="mx-store mx-hclick"
-                          title={`${branchLabel(s)} — click for all`}
-                          onClick={() => colTotal[s] && openCell('', s)}
-                        >
-                          {s}
-                        </th>
-                      ))}
-                      <th className="mx-total">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownPeople.map((person) => {
-                      const rt = rowTotal[person] || 0;
-                      return (
-                        <tr key={person}>
-                          <td
-                            className="mx-sticky mx-name mx-nclick"
-                            onClick={() => openCell(person, '')}
-                            title="Click for all deliveries"
-                          >
-                            {person}
-                          </td>
-                          {shownStores.map((s) => {
-                            const n = map[`${person}|${s}`] || 0;
-                            return (
-                              <td
-                                key={s}
-                                className={
-                                  n ? 'mx-cell mx-click' : 'mx-cell mx-zero'
-                                }
-                                onClick={() => n && openCell(person, s)}
-                              >
-                                {n || '·'}
-                              </td>
-                            );
-                          })}
-                          <td
-                            className={rt ? 'mx-total mx-tclick' : 'mx-total'}
-                            onClick={() => rt && openCell(person, '')}
-                          >
-                            {rt}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    <tr className="mx-footer">
-                      <td className="mx-sticky">Total</td>
-                      {shownStores.map((s) => (
-                        <td
-                          key={s}
-                          className={
-                            colTotal[s] ? 'mx-total mx-tclick' : 'mx-total'
-                          }
-                          onClick={() => colTotal[s] && openCell('', s)}
-                        >
-                          {colTotal[s] || 0}
-                        </td>
-                      ))}
-                      <td className="mx-total">
-                        {matrix.reduce((a, m) => a + Number(m.cnt), 0)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="track-foot">
-          Healthy Jeena Sikho · Internal delivery tracker
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TrackPage({ invoice }) {
-  const [phone, setPhone] = useState('');
-  const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
-  const [rows, setRows] = useState([]);
-  const [row, setRow] = useState(null);
-  const [pickup, setPickup] = useState(null); // usi order ka return, agar shuru hua ho
-  const [pickups, setPickups] = useState([]); // phone ke saare pickups
-  const [err, setErr] = useState('');
-
-  // order chunte hi uska return/pickup bhi jodo (list mein already aa chuka hai)
-  useEffect(() => {
-    if (!row || !row.invoice_number) {
-      setPickup(null);
-      return;
-    }
-    setPickup(
-      pickups.find((x) => x.invoice_number === row.invoice_number) || null,
-    );
-    // eslint-disable-next-line
-  }, [row, pickups]);
-
-  const track = async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 10) {
-      setErr('Please enter your full registered mobile number.');
-      return;
-    }
-    setErr('');
-    setState('loading');
-    setRow(null);
-    try {
-      const [all, pks] = await Promise.all([
-        sbTrack(invoice || '', `+91${digits}`),
-        // pickups alag se — kuch purane invoices delivery app se pehle ke hain,
-        // unki delivery row hoti hi nahi. Wo pickup bhi dikhna chahiye.
-        sbTrackPickup(invoice || '', `+91${digits}`).catch(() => []),
-      ]);
-      const pickList = (pks || []).filter(
-        (x) => pickupStage(x.status) !== 'deleted',
-      );
-      setPickups(pickList);
-      // Renewal / Duplicate / Deleted = internal cheezein — customer ko na dikhe.
-      // Cancelled dikhta hai (customer ko pata hona chahiye).
-      const res = (all || []).filter((r) => {
-        const st = statusToStage(r.status);
-        return st !== 'renewal' && st !== 'duplicate' && st !== 'deleted';
-      });
-      // jin pickups ki delivery row hai hi nahi — unhe apni entry bana do
-      const have = new Set(res.map((r) => r.invoice_number));
-      const orphan = pickList
-        .filter((x) => !have.has(x.invoice_number))
-        .map((x) => ({ ...x, _pickupOnly: true }));
-      const merged = [...res, ...orphan];
-      if (merged.length === 0) {
-        setState('notfound');
-        setRows([]);
-        return;
-      }
-      setRows(merged);
-      // Ek hi order → seedha timeline. Ek se zyada (jaise oxygen + cannula
-      // alag invoices) → list dikhao, customer apna order chun le.
-      if (merged.length === 1) setRow(merged[0]);
-      setState('done');
-    } catch (e) {
-      setErr(e.message || 'Something went wrong');
-      setState('error');
-    }
-  };
-
-  return (
-    <div className="track-wrap" style={{ fontFamily: FONT }}>
-      <StyleTag />
-      <div className="track-topbar">
-        <div className="brand">
-          <div className="brand-badge">
-            <Truck size={20} color="#fff" />
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>
-              Healthy Jeena Sikho
-            </div>
-            <div style={{ fontSize: 11.5, color: T.inkSoft }}>
-              Track your delivery
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="track-body">
-        <div className="track-card">
-          <h1 className="track-h1">Track your delivery</h1>
-          <p className="track-sub">
-            Welcome! Please enter your registered mobile number to see your
-            order status.
-          </p>
-          {invoice && (
-            <div className="track-inv">
-              Order&nbsp;<b>{invoice}</b>
-            </div>
-          )}
-          <Field label="Registered mobile number">
-            <div className="phone-row">
-              <span className="code-fixed">+91</span>
-              <input
-                className="inp phone-input"
-                inputMode="numeric"
-                placeholder="Enter mobile number"
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value.replace(/\D/g, ''));
-                  setErr('');
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && track()}
-              />
-            </div>
-          </Field>
-          {err && <div className="login-err">{err}</div>}
-          <button
-            className="btn-primary"
-            style={{ width: '100%', marginTop: 4 }}
-            disabled={state === 'loading'}
-            onClick={track}
-          >
-            {state === 'loading' ? (
-              'Searching…'
-            ) : (
-              <>
-                Track order <ArrowRight size={17} />
-              </>
-            )}
-          </button>
-
-          {state === 'notfound' && (
-            <div className="track-msg">
-              No order found for this number. Please check and try again.
-            </div>
-          )}
-          {state === 'error' && (
-            <div className="track-msg">
-              Unable to track right now. Please try again in a bit.
-            </div>
-          )}
-        </div>
-
-        {/* 1 se zyada order → customer apna order chune */}
-        {state === 'done' && !row && rows.length > 1 && (
-          <div className="sales-list">
-            <div className="sales-list-head">
-              {rows.length} orders found · choose one
-            </div>
-            {rows.map((r) => {
-              const st = r._pickupOnly
-                ? pickupStage(r.status)
-                : statusToStage(r.status);
-              const stg = stageMeta(st);
-              const equip = equipmentText({
-                line_items: r.line_items,
-                item_name: r.item_name,
-              });
-              const Icon = equipIcon(equip);
-              return (
-                <button
-                  key={r.invoice_number}
-                  className="sales-row"
-                  onClick={() => setRow(r)}
-                >
-                  <div className="eq-ico" style={{ background: stg.soft }}>
-                    <Icon size={17} color={stg.color} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="sales-row-top">
-                      <span
-                        className="ellip"
-                        style={{ fontWeight: 800, fontSize: 14 }}
-                      >
-                        {equip}
-                      </span>
-                      <span
-                        className="sales-chip"
-                        style={{ background: stg.soft, color: stg.color }}
-                      >
-                        {r._pickupOnly ? 'Return' : stg.short}
-                      </span>
-                    </div>
-                    <div className="sales-meta">
-                      <span className="ellip">#{r.invoice_number}</span>
-                      {niceDate(r.created_at) && (
-                        <span>{niceDate(r.created_at)}</span>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight size={18} color={T.inkSoft} />
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {state === 'done' && row && (
-          <>
-            {rows.length > 1 && (
-              <button
-                className="track-back"
-                style={{ marginTop: 16 }}
-                onClick={() => setRow(null)}
-              >
-                <ArrowLeft size={16} /> Back to my orders
-              </button>
-            )}
-            {row._pickupOnly ? (
-              <PickupOnlyResult pickup={row} />
-            ) : (
-              <TrackResult row={row} pickup={pickup} />
-            )}
-          </>
-        )}
-
-        <div className="track-foot">
-          Healthy Jeena Sikho · Medical equipment rentals
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* Sales list ko group karke dikhao: pehle Pending (stage order mein),
-   phir Delivered, phir Cancelled. Har group ka heading + count. */
-function SalesGroupedList({ rows, onPick }) {
-  const order = ['new', 'talked', 'scheduled', 'dispatched']; // pending stages
-  const rank = (r) => {
-    const st = statusToStage(r.status);
-    const i = order.indexOf(st);
-    return i === -1 ? 99 : i;
-  };
-  const pending = rows
-    .filter((r) => order.includes(statusToStage(r.status)))
-    .sort((a, b) => rank(a) - rank(b));
-  const delivered = rows.filter((r) => statusToStage(r.status) === 'delivered');
-  const cancelled = rows.filter((r) => statusToStage(r.status) === 'cancelled');
-
-  const Row = (r) => {
-    const st = statusToStage(r.status);
-    const cancel = st === 'cancelled';
-    const stg = stageMeta(st);
-    const equip = equipmentText({
-      line_items: r.line_items,
-      item_name: r.item_name,
-    });
-    const Icon = equipIcon(equip);
+  if (q) {
+    const hits = rows.filter((r) =>
+      `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+        .toLowerCase().includes(q.toLowerCase()));
     return (
-      <button
-        key={r.invoice_number}
-        className={cancel ? 'sales-row is-cancelled' : 'sales-row'}
-        onClick={() => onPick(r)}
-      >
-        <div className="eq-ico" style={{ background: stg.soft }}>
-          <Icon size={17} color={stg.color} />
+      <>
+        <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
+        <p className="att-muted">{hits.length} found · clear the search to see the tree</p>
+        <div className="att-people">
+          {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="sales-row-top">
-            <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>
-              {r.customer_name || 'Customer'}
-            </span>
-            <span
-              className="sales-chip"
-              style={{ background: stg.soft, color: stg.color }}
-            >
-              {stg.short}
-            </span>
-          </div>
-          <div className="ellip sales-sub">{equip}</div>
-          <div className="sales-meta">
-            <span className="ellip">#{r.invoice_number}</span>
-            <span>
-              ₹{Number(r.total_amount || 0).toLocaleString('en-IN')}
-            </span>
-            {niceDate(r.created_at) && <span>{niceDate(r.created_at)}</span>}
-          </div>
-        </div>
-        <ChevronRight size={18} color={T.inkSoft} />
-      </button>
+      </>
     );
-  };
+  }
 
-  const Group = (title, list, color) =>
-    list.length === 0 ? null : (
-      <div className="sgroup">
-        <div className="sgroup-head">
-          <span className="sgroup-dot" style={{ background: color }} />
-          {title}
-          <span className="sgroup-count">{list.length}</span>
-        </div>
-        <div className="sales-list">{list.map(Row)}</div>
-      </div>
-    );
+  const idSet = new Set(rows.map((r) => r.id));
+  // jinka manager list mein nahi hai wo bhi top pe dikhne chahiye
+  const roots = rows.filter((r) => !r.reports_to || !idSet.has(r.reports_to));
 
   return (
     <>
-      {Group('Pending', pending, T.blue)}
-      {Group('Delivered', delivered, T.green)}
-      {Group('Cancelled', cancelled, T.red)}
+      <div className="att-flex">
+        <input placeholder="Search anyone" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <button className="att-btn sm line" onClick={() => setAll(true)}>Expand all</button>
+        <button className="att-btn sm line" onClick={() => setAll(false)}>Collapse</button>
+      </div>
+      <p className="att-muted">
+        {rows.length} people · {roots.length} at the top · click + to open a card
+      </p>
+      <OrgChart openAll={all}
+        roots={roots}
+        childrenOf={(n: any) => kids[n.id] || []}
+        countOf={(n: any) => deep(n.id)}
+        toCard={(n: any) => ({
+          name: n.full_name, code: n.emp_code, pid: n.id,
+          sub: `${n.emp_code} · ${n.designation || "—"}${n._co ? " · also reports here" : ""}`,
+        })}
+      />
     </>
   );
 }
 
-/* Sales-only detail card — sab zaroori info ek jagah, systematically */
-function SalesOrderCard({ row }) {
-  const store = deriveBranch(row);
-  const manager = STORE_MANAGERS[store] || '—';
-  const stage = statusToStage(row.status);
-  const stg = stageMeta(stage);
-  const val = (x) => (x && x !== 'null' ? x : null);
-  const money = (n) =>
-    n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : null;
+function PeopleTab() {
+  const [bd, setBd] = useState<any[]>([]);
+  const [nh, setNh] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
 
-  const rows = [
-    ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
-    ['Salesperson', val(row.salesperson) || '—'],
-    ['Customer phone', val(row.customer_phone) || '—'],
-    ['Store', branchLabel(store)],
-    ['Store manager', manager],
-    ['Delivery slot given',
-      val(row.confirmed_date)
-        ? `${niceDate(row.confirmed_date)}${val(row.confirmed_time) ? ', ' + niceTime(row.confirmed_time) : ''}`
-        : '—'],
-    ['Delivery person', val(row.app_delivery_person) || '—'],
-    ['Mode of transport', val(row.app_vehicle) || '—'],
-    ['Estimated arrival', niceDateTime(row.app_eta) || '—'],
-    ['Amount collected',
-      money(row.amount_collected)
-        ? `${money(row.amount_collected)}${val(row.amount_type) ? ' · ' + row.amount_type : ''}`
-        : '—'],
-    ['Security collected',
-      money(row.security_collected)
-        ? `${money(row.security_collected)}${val(row.security_type) ? ' · ' + row.security_type : ''}`
-        : '—'],
-    ['Invoice total', money(row.total_amount) || '—'],
+  useEffect(() => {
+    (async () => {
+      const [b, n] = await Promise.all([
+        supabase.rpc("birthdays", { p_days: 45 }),
+        supabase.rpc("new_hires", { p_days: 90 }),
+      ]);
+      setBd(b.data || []); setNh(n.data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  return (
+    <>
+      <div className="att-list">
+        <div className="att-hd"><b>Upcoming birthdays</b><span className="att-muted">next 45 days</span></div>
+        {!bd.length && (
+          <p className="att-empty">No birthdays in the next 45 days.</p>
+        )}
+        {bd.map((r: any) => (
+          <div className="att-row" key={r.emp_code}>
+            <Avatar name={r.full_name} />
+            <div className="grow">
+              <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
+              <p className="att-muted">{r.designation || "—"} · {r.team}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontWeight: 700, fontSize: 13 }}>
+                {new Date(r.bday + "T00:00:00").toLocaleDateString("en-GB",
+                  { day: "2-digit", month: "short" })}
+              </p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>
+                {r.days_away === 0 ? "today" : `in ${r.days_away} day${r.days_away === 1 ? "" : "s"}`}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="att-list">
+        <div className="att-hd"><b>New hires</b><span className="att-muted">last 90 days</span></div>
+        {!nh.length && (
+          <p className="att-empty">Nobody joined in the last 90 days.</p>
+        )}
+        {nh.map((r: any) => (
+          <div className="att-row" key={r.emp_code}>
+            <Avatar name={r.full_name} />
+            <div className="grow">
+              <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
+              <p className="att-muted">{r.designation || "—"} · {r.team}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontWeight: 700, fontSize: 13 }}>{fmtDate(r.joined)}</p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>{r.days_ago} days ago</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function NoticeTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [form, setForm] = useState({ title: "", body: "", pinned: false });
+  const [add, setAdd] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const canPost = ["admin", "manager"].includes(me.role);
+
+  const load = async () => {
+    const { data } = await supabase.rpc("announcement_feed", { p_limit: 40 });
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const post = async () => {
+    const { error } = await supabase.from("announcements")
+      .insert({ ...form, posted_by: me.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Posted." }); setForm({ title: "", body: "", pinned: false }); setAdd(false); load(); }
+  };
+
+  const remove = async (id: string) => {
+    await supabase.from("announcements").update({ active: false }).eq("id", id);
+    load();
+  };
+
+  return (
+    <>
+      {canPost && (
+        <div className="att-between">
+          <p className="att-muted">{rows.length} posts</p>
+          <button className="att-btn sm" onClick={() => setAdd(true)}>+ New post</button>
+        </div>
+      )}
+      <Note>{msg.err}</Note>
+      <Note kind="ok">{msg.ok}</Note>
+
+      {rows.map((r: any) => (
+        <div className="att-card" key={r.id}>
+          <div className="att-between">
+            <b style={{ fontSize: 15.5 }}>
+              {r.pinned && <span className="att-chip" style={{ marginRight: 7 }}>pinned</span>}
+              {r.title}
+            </b>
+            {canPost && <button className="att-muted" onClick={() => remove(r.id)}>Remove</button>}
+          </div>
+          {r.body && <p style={{ marginTop: 7, whiteSpace: "pre-wrap", color: "#344054" }}>{r.body}</p>}
+          <p className="att-muted" style={{ marginTop: 9 }}>
+            {r.author} · {new Date(r.created_at).toLocaleDateString("en-GB",
+              { day: "2-digit", month: "short", year: "numeric" })}
+          </p>
+        </div>
+      ))}
+      {!rows.length && <div className="att-list"><p className="att-empty">Nothing posted yet.</p></div>}
+
+      {add && (
+        <Sheet title="New post" onClose={() => setAdd(false)}>
+          <div className="att-card att-stack">
+            <div>
+              <label>Title</label>
+              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </div>
+            <div>
+              <label>Message</label>
+              <textarea rows={5} value={form.body}
+                onChange={(e) => setForm({ ...form, body: e.target.value })} />
+            </div>
+            <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+              <input type="checkbox" checked={form.pinned}
+                onChange={(e) => setForm({ ...form, pinned: e.target.checked })} />
+              Pin to top
+            </label>
+            <button className="att-btn" onClick={post} disabled={!form.title.trim()}>Post</button>
+          </div>
+        </Sheet>
+      )}
+    </>
+  );
+}
+
+function PeersTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("my_peers");
+      setRows(data || []); setBusy(false);
+    })();
+  }, []);
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.designation || ""}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{shown.length} people</p>
+      <div className="att-people">
+        {shown.map((p) => <PersonCard p={p} key={p.emp_code} />)}
+      </div>
+      {!shown.length && <div className="att-list"><p className="att-empty">Nobody here.</p></div>}
+    </>
+  );
+}
+
+function MyRegsTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const load = async () => {
+    const { data } = await supabase.from("regularizations").select("*")
+      .eq("employee_id", me.id).order("work_date", { ascending: false }).limit(60);
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <>
+      <div className="att-between">
+        <p className="att-muted">{rows.length} requests</p>
+        <button className="att-btn sm" onClick={() => setOpen(true)}>Missed a punch?</button>
+      </div>
+      <div className="att-list">
+        {!rows.length && <p className="att-empty">No requests yet.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
+            <div className="grow">
+              <p>{fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}</p>
+              <p className="att-muted">{r.reason}</p>
+            </div>
+            <span className={pillClass(r.status)}>{r.status}</span>
+          </div>
+        ))}
+      </div>
+      {open && <RegularizeSheet me={me} onClose={() => { setOpen(false); load(); }} />}
+    </>
+  );
+}
+
+function TeamLeavesTab({ me }: any) {
+  const [pickLeave, setPickLeave] = useState<any>(null);
+  const [rows, setRows] = useState<any[]>([]);
+  const [emps, setEmps] = useState<Record<string, any>>({});
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const [l, e] = await Promise.all([
+        supabase.from("leaves").select("*").order("from_date", { ascending: false }).limit(200),
+        supabase.from("employees").select("id, emp_code, full_name, designation"),
+      ]);
+      const by: Record<string, any> = {};
+      (e.data || []).forEach((x: any) => { by[x.id] = x; });
+      setEmps(by);
+      setRows((l.data || []).filter((x: any) => x.employee_id !== me.id));
+      setBusy(false);
+    })();
+  }, []);
+  if (busy) return <p className="att-muted">Loading…</p>;
+  return (
+    <div className="att-list">
+      <div className="att-hd"><b>Team leaves</b><span className="att-muted">{rows.length}</span></div>
+      {!rows.length && <p className="att-empty">Nothing here.</p>}
+      {rows.map((r) => (
+        <div className="att-row clk" key={r.id}
+          onClick={() => setPickLeave({ ...r, emp: emps[r.employee_id] })}>
+          <Avatar name={emps[r.employee_id]?.full_name} />
+          <div className="grow">
+            <p><PName id={r.employee_id}><b>{emps[r.employee_id]?.full_name || "—"}</b></PName></p>
+            <p className="att-muted">
+              {r.leave_type} · {fmtDate(r.from_date)}
+              {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+              {r.from_time ? ` · ${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : ""}
+              {" · "}{r.days}d
+            </p>
+          </div>
+          <span className={pillClass(r.status)}>{r.status}</span>
+        </div>
+      ))}
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me} onClose={() => setPickLeave(null)} />
+      )}
+    </div>
+  );
+}
+
+function HolidaysTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState({ hol_date: istToday(), name: "" });
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const isAdmin = me.role === "admin";
+  const load = async () => {
+    const { data } = await supabase.from("holidays").select("*").order("hol_date");
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    const { error } = await supabase.from("holidays").insert(f);
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Added." }); setF({ ...f, name: "" }); load(); }
+  };
+  const del = async (id: string) => {
+    await supabase.from("holidays").delete().eq("id", id); load();
+  };
+  const year = istToday().slice(0, 4);
+  const shown = rows.filter((r) => String(r.hol_date).startsWith(year));
+  return (
+    <>
+      {isAdmin && (
+        <div className="att-card att-stack">
+          <b>Add a holiday</b>
+          <div className="att-row2">
+            <input type="date" value={f.hol_date}
+              onChange={(e) => setF({ ...f, hol_date: e.target.value })} />
+            <input placeholder="Name" value={f.name}
+              onChange={(e) => setF({ ...f, name: e.target.value })} />
+          </div>
+          <Note>{msg.err}</Note>
+          <Note kind="ok">{msg.ok}</Note>
+          <button className="att-btn sm" onClick={add} disabled={!f.name.trim()}>Add</button>
+        </div>
+      )}
+      <div className="att-list">
+        <div className="att-hd"><b>Holidays {year}</b><span className="att-muted">{shown.length}</span></div>
+        {!shown.length && <p className="att-empty">No holidays added yet.</p>}
+        {shown.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span style={{ width: 100, fontWeight: 700 }}>
+              {new Date(r.hol_date + "T00:00:00").toLocaleDateString("en-GB",
+                { day: "2-digit", month: "short", weekday: "short" })}
+            </span>
+            <span className="grow">{r.name}</span>
+            {isAdmin && <button className="att-muted" onClick={() => del(r.id)}>Remove</button>}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function OrgScreen({ me, tab }: any) {
+  return (
+    <div className="att-wrap att-stack">
+      {tab === "directory" && <DirectoryTab me={me} />}
+      {tab === "dept" && <DeptTab />}
+      {tab === "tree" && <EmpTreeTab />}
+      {tab === "people" && <PeopleTab />}
+      {tab === "notice" && <NoticeTab me={me} />}
+    </div>
+  );
+}
+
+/* ========================= leave ========================= */
+const LV_TINT: Record<string, [string, string]> = {
+  CL: ["#eafaf0", "#16a34a"], SL: ["#eaf4ff", "#2563eb"], EL: ["#fdf2e9", "#c2410c"],
+  COMP: ["#f3f0ff", "#7c3aed"], LOP: ["#fdecec", "#dc2626"],
+};
+
+function LeavesScreen({ me, tab }: any) {
+  const [types, setTypes] = useState<any[]>([]);
+  const [bal, setBal] = useState<any[]>([]);
+  const [mine, setMine] = useState<any[]>([]);
+  const [regs, setRegs] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [apply, setApply] = useState(false);
+  const [editBal, setEditBal] = useState<any>(null);
+  const [pickLeave, setPickLeave] = useState<any>(null);
+  const isAdmin = me.role === "admin";
+  const who = me;
+
+  const load = async () => {
+    const [t, b, l, r, h] = await Promise.all([
+      supabase.from("leave_types").select("*"),
+      supabase.rpc("leave_balance", {}),
+      supabase.from("leaves").select("*").eq("employee_id", me.id)
+        .order("from_date", { ascending: false }).limit(80),
+      supabase.from("regularizations").select("*").eq("employee_id", me.id)
+        .order("work_date", { ascending: false }).limit(20),
+      supabase.from("holidays").select("*").order("hol_date"),
+    ]);
+    setTypes(t.data || []); setBal(b.data || []); setMine(l.data || []);
+    setRegs(r.data || []); setHols(h.data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const cancel = async (id: string) => {
+    await supabase.from("leaves").update({ status: "Cancelled" }).eq("id", id);
+    load();
+  };
+
+  const today = istToday();
+  const year = today.slice(0, 4);
+  const booked = mine.filter((r) => r.status === "Approved" && r.from_date.startsWith(year))
+    .reduce((a, r) => a + Number(r.days), 0);
+
+  const upcoming = [
+    ...mine.filter((r) => r.to_date >= today && r.status !== "Cancelled")
+      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+                     status: r.status, type: "leave", leave: r })),
+    ...hols.filter((h) => h.hol_date >= today)
+      .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
+  ].sort((a, b) => a.d.localeCompare(b.d)).slice(0, 8);
+
+  const past = [
+    ...mine.filter((r) => r.to_date < today)
+      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+                     status: r.status, type: "leave", leave: r })),
+    ...hols.filter((h) => h.hol_date < today && h.hol_date.startsWith(year))
+      .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
+  ].sort((a, b) => b.d.localeCompare(a.d)).slice(0, 12);
+
+  const dayLine = (iso: string) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-GB",
+      { day: "2-digit", month: "short", year: "numeric", weekday: "long" });
+
+  if (tab === "requests") {
+    return (
+      <div className="att-wrap att-narrow att-stack">
+        <div className="att-between">
+          <b className="att-h2" style={{ margin: 0 }}>My leave requests</b>
+          <button className="att-btn sm" onClick={() => setApply(true)}>Apply Leave</button>
+        </div>
+        <div className="att-list">
+          {!mine.length && <p className="att-empty">No leave requests yet.</p>}
+          {mine.map((r) => (
+            <div className="att-row clk" key={r.id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave(r)}>
+              <span className="att-ltype">{r.leave_type}</span>
+              <div className="grow" style={{ minWidth: 130 }}>
+                <p>
+                  {fmtDate(r.from_date)}
+                  {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+                  <span className="att-muted"> · {r.days}d</span>
+                </p>
+                {r.from_time && (
+                  <p className="att-muted">{fmtHM(r.from_time)} – {fmtHM(r.to_time)}</p>
+                )}
+                {r.reason && (
+                  <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>
+                )}
+              </div>
+              <span className={pillClass(r.status)}>{r.status}</span>
+              {r.status === "Pending" && (
+                <button className="att-muted"
+                  onClick={(e) => { e.stopPropagation(); cancel(r.id); }}>Cancel</button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="att-list">
+          <div className="att-hd"><b>Regularization requests</b></div>
+          {!regs.length && <p className="att-empty">No requests yet.</p>}
+          {regs.map((r) => (
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <span style={{ width: 58, fontWeight: 650, flexShrink: 0 }}>
+                {fmtDate(r.work_date)}
+              </span>
+              <span className="grow att-muted" style={{ minWidth: 120 }}>
+                {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
+              </span>
+              <span className={pillClass(r.status)}>{r.status}</span>
+            </div>
+          ))}
+        </div>
+
+        {apply && <ApplyLeaveSheet me={me} types={types}
+          onClose={() => { setApply(false); load(); }} />}
+
+        {pickLeave && <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-daterow">
+        <span className="att-muted">
+          Leave booked this year: <b>{booked}</b> &nbsp;|&nbsp; Pending: <b>
+            {mine.filter((r) => r.status === "Pending").length}</b>
+        </span>
+        <b style={{ fontSize: 14.5 }}>01-Jan-{year} — 31-Dec-{year}</b>
+        <button className="att-btn sm" onClick={() => setApply(true)}>Apply Leave</button>
+      </div>
+
+      <div className="att-lvgrid">
+        {bal.map((b) => {
+          const [bg, fg] = LV_TINT[b.leave_type] || ["#f2f4f7", "#475467"];
+          return (
+            <div className="att-lv" key={b.leave_type}>
+              <div className="att-balhd">
+                <h4>{b.name}</h4>
+                {isAdmin && (
+                  <button className="att-baledit" title="Set allotment"
+                    onClick={() => setEditBal(b)}>
+                    <Icon n="pencil" c="currentColor" s={14} />
+                  </button>
+                )}
+              </div>
+              <div className="att-lvic" style={{ background: bg, color: fg }}>{b.leave_type}</div>
+              <hr />
+              <div className="att-lvrow">
+                <span className="att-muted">Allotted</span><b>{b.allocated}</b>
+              </div>
+              <div className="att-lvrow">
+                <span className="att-muted">Available</span>
+                <b style={{ color: b.remaining < 0 ? "#dc2626" : "#16a34a" }}>{b.remaining}</b>
+              </div>
+              <div className="att-lvrow">
+                <span className="att-muted">Booked</span><b>{b.used}</b>
+              </div>
+              {b.pending > 0 && (
+                <div className="att-lvrow">
+                  <span className="att-muted">Pending</span><b style={{ color: "#b54708" }}>{b.pending}</b>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!bal.length && <p className="att-empty">No balance set yet — ask your admin.</p>}
+      </div>
+
+      {editBal && (
+        <BalanceSheet b={editBal} who={who || me} year={year}
+          onClose={() => { setEditBal(null); load(); }} />
+      )}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />
+      )}
+
+      <div className="att-list">
+        <div className="att-hd"><b>Upcoming leaves & holidays</b></div>
+        {!upcoming.length && <p className="att-empty">Nothing coming up.</p>}
+        {upcoming.map((r, i) => (
+          <div className={`att-row ${r.leave ? "clk" : ""}`} key={i}
+            onClick={() => r.leave && setPickLeave(r.leave)}>
+            <span style={{ width: 175 }}>{dayLine(r.d)}</span>
+            <div className="grow">
+              <p><b>{r.label}</b> <span className="att-muted">· {r.sub}</span></p>
+            </div>
+            <span className={pillClass(r.status)}>{r.status}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="att-list">
+        <div className="att-hd"><b>Past leaves & holidays</b></div>
+        {!past.length && <p className="att-empty">Nothing yet.</p>}
+        {past.map((r, i) => (
+          <div className={`att-row ${r.leave ? "clk" : ""}`} key={i}
+            onClick={() => r.leave && setPickLeave(r.leave)}>
+            <span style={{ width: 175 }}>{dayLine(r.d)}</span>
+            <div className="grow">
+              <p><b>{r.label}</b> <span className="att-muted">· {r.sub}</span></p>
+            </div>
+            <span className={pillClass(r.status)}>{r.status}</span>
+          </div>
+        ))}
+      </div>
+
+      {apply && <ApplyLeaveSheet me={me} types={types}
+        onClose={() => { setApply(false); load(); }} />}
+    </div>
+  );
+}
+
+const LEAVE_RULES: Record<string, {
+  single?: boolean; fixedDays?: number; reasonReq?: boolean;
+  pastDays: number; futureDays: number; note: string;
+}> = {
+  SL:    { reasonReq: true, pastDays: 30, futureDays: 7,
+           note: "Can be applied up to 30 days back. Reason is required." },
+  CL:    { reasonReq: true, pastDays: 0, futureDays: 365,
+           note: "Apply in advance — backdated casual leave isn't allowed." },
+  EL:    { reasonReq: true, pastDays: 0, futureDays: 365,
+           note: "Apply in advance — backdated earned leave isn't allowed." },
+  SHORT: { single: true, fixedDays: 0.25, reasonReq: true, pastDays: 7, futureDays: 30,
+           note: "Single day only, counts as a quarter day. Reason is required." },
+  HALF:  { single: true, fixedDays: 0.5, reasonReq: true, pastDays: 7, futureDays: 30,
+           note: "Single day only, counts as half a day. Reason is required." },
+};
+
+function ApplyLeaveSheet({ me, types, onClose }: any) {
+  const today = istToday();
+  const [form, setForm] = useState<any>({
+    leave_type: types[0]?.code || "", from_date: today, to_date: today, reason: "",
+    from_time: nowHM(), to_time: addMins(nowHM(), 60),
+  });
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [busy, setBusy] = useState(false);
+
+  // types der se aayein to pehla apne aap chun lo
+  useEffect(() => {
+    if (!form.leave_type && types.length) {
+      setForm((f: any) => ({ ...f, leave_type: types[0].code }));
+    }
+  }, [types]);
+
+  const rule = LEAVE_RULES[form.leave_type]
+    || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: true };
+  const needsTime = ["SHORT", "HALF"].includes(form.leave_type);
+  const minDate = addDays(today, -rule.pastDays);
+  const maxDate = addDays(today, rule.futureDays);
+
+  // type badalte hi dates ko rule ke andar le aao
+  const setType = (code: string) => {
+    const r = LEAVE_RULES[code]
+      || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: false };
+    const lo = addDays(today, -r.pastDays);
+    const hi = addDays(today, r.futureDays);
+    let f = form.from_date < lo ? lo : form.from_date > hi ? hi : form.from_date;
+    let t = r.single ? f : form.to_date;
+    if (t < f) t = f;
+    if (t > hi) t = hi;
+    setForm({ ...form, leave_type: code, from_date: f, to_date: t });
+  };
+
+  const setFrom = (v: string) => {
+    const t = rule.single || v > form.to_date ? v : form.to_date;
+    setForm({ ...form, from_date: v, to_date: t });
+  };
+
+  const days = useMemo(() => {
+    if (rule.fixedDays) return rule.fixedDays;
+    const d = (new Date(form.to_date).getTime() - new Date(form.from_date).getTime()) / 86400000 + 1;
+    return Math.max(1, Math.round(d));
+  }, [form, rule]);
+
+  const problem = useMemo(() => {
+    if (form.to_date < form.from_date) return "To date can't be before the from date.";
+    if (form.from_date < minDate || form.to_date > maxDate)
+      return `For ${form.leave_type}, pick a date between ${fmtDate(minDate)} and ${fmtDate(maxDate)}.`;
+    if (rule.single && form.to_date !== form.from_date)
+      return "This leave type is for a single day only.";
+    if (!form.reason.trim()) return "Please write why you need this leave.";
+    if (days > 60) return "One request can't be longer than 60 days.";
+    return "";
+  }, [form, rule, days, minDate, maxDate]);
+
+  const submit = async () => {
+    if (problem) { setMsg({ err: problem, ok: "" }); return; }
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.from("leaves").insert({
+      employee_id: me.id, leave_type: form.leave_type,
+      from_date: form.from_date, to_date: form.to_date,
+      from_time: needsTime ? form.from_time : null,
+      to_time:   needsTime ? form.to_time   : null,
+      half_day: form.leave_type === "HALF", days,
+      reason: form.reason.trim(), status: "Pending",
+    });
+    if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
+    else setMsg({ err: "", ok: "Leave request sent for approval." });
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title="Apply Leave" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div>
+          <label>Leave type</label>
+          <select value={form.leave_type} onChange={(e) => setType(e.target.value)}>
+            {!types.length && <option value="">No leave types set up yet</option>}
+            {types.map((t: any) => (
+              <option key={t.code} value={t.code}>{t.name}{t.paid ? "" : " (unpaid)"}</option>
+            ))}
+          </select>
+          {rule.note && (
+            <p className="att-muted" style={{ marginTop: 6 }}>{rule.note}</p>
+          )}
+        </div>
+
+        <div className="att-row2">
+          <div>
+            <label>{rule.single ? "Date" : "From"}</label>
+            <input type="date" value={form.from_date} min={minDate} max={maxDate}
+              onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          {!rule.single && (
+            <div>
+              <label>To</label>
+              <input type="date" value={form.to_date} min={form.from_date} max={maxDate}
+                onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
+            </div>
+          )}
+        </div>
+
+        {needsTime && (
+          <div className="att-row2">
+            <div>
+              <label>From time</label>
+              <input type="time" lang="en-US" value={form.from_time}
+                onChange={(e) => setForm({
+                  ...form, from_time: e.target.value,
+                  to_time: e.target.value >= form.to_time
+                    ? addMins(e.target.value, 60) : form.to_time,
+                })} />
+            </div>
+            <div>
+              <label>To time</label>
+              <input type="time" lang="en-US" value={form.to_time} min={form.from_time}
+                onChange={(e) => setForm({ ...form, to_time: e.target.value })} />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label>Reason <span style={{ color: "#dc2626" }}>*</span></label>
+          <textarea rows={2} value={form.reason}
+            placeholder="Why do you need this leave?"
+            onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+        </div>
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <div className="att-between">
+          <span className="att-muted">
+            {days} day{days === 1 ? "" : "s"}
+            {rule.fixedDays ? " (counted)" : ""}
+          </span>
+          <button className="att-btn sm" onClick={submit} disabled={busy || !!problem}>
+            {busy ? "Sending…" : "Apply"}
+          </button>
+        </div>
+        {problem && !msg.err && <p className="att-muted">{problem}</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+/* ========================= approvals ========================= */
+function InboxScreen({ me, onCount, mode = "pending" }: any) {
+  const [pickLeave, setPickLeave] = useState<any>(null);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [regs, setRegs] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [status, setStatus] = useState("All");
+  const [range, setRange] = useState({
+    from: addDays(istToday(), -90), to: addDays(istToday(), 90),
+  });
+
+  const history = mode === "history";
+
+  const load = async () => {
+    const [l, r, emps] = await Promise.all([
+      history
+        ? supabase.from("leaves").select("*").order("from_date", { ascending: false }).limit(500)
+        : supabase.from("leaves").select("*").eq("status", "Pending").order("from_date"),
+      history
+        ? supabase.from("regularizations").select("*").order("work_date", { ascending: false }).limit(500)
+        : supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
+      supabase.from("employees").select("id, emp_code, full_name, designation"),
+    ]);
+    if (l.error) setErr(l.error.message);
+    const byId: Record<string, any> = {};
+    (emps.data || []).forEach((e: any) => { byId[e.id] = e; });
+    const attach = (x: any) => ({ ...x, emp: byId[x.employee_id] });
+    // RLS pehle hi scope kar deti hai (manager -> apni team, admin -> sab)
+    const keep = (x: any) => me.role === "admin" || x.employee_id !== me.id;
+    const L = (l.data || []).filter(keep).map(attach);
+    const R = (r.data || []).filter(keep).map(attach);
+    setLeaves(L); setRegs(R);
+    if (!history) onCount(L.length + R.length);
+  };
+  useEffect(() => { load(); }, [mode]);
+
+  const decideLeave = async (id: string, st: string) => {
+    setBusy(true);
+    await supabase.from("leaves").update({
+      status: st, approved_by: me.id, approved_at: new Date().toISOString(),
+    }).eq("id", id);
+    await load(); setBusy(false);
+  };
+
+  const decideReg = async (id: string, st: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("decide_regularization", { p_id: id, p_status: st });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  const inRange = (d: string) => d >= range.from && d <= range.to;
+  const stOk = (x: any) => status === "All" || x.status === status;
+  const shownL = leaves.filter((x) => stOk(x) && inRange(x.from_date));
+  const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date));
+  const total = shownL.length + shownR.length;
+
+  const Actions = ({ r, kind }: any) =>
+    r.status !== "Pending" ? (
+      <div style={{ textAlign: "right" }}>
+        <span className={pillClass(r.status)}>{r.status}</span>
+        {r.approved_at && (
+          <p className="att-muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+            {fmtDate(r.approved_at)}
+          </p>
+        )}
+      </div>
+    ) : (
+      <>
+        <button className="att-btn sm green" disabled={busy}
+          onClick={(e) => { e.stopPropagation();
+            kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved"); }}>
+          Approve
+        </button>
+        <button className="att-btn sm grey" disabled={busy}
+          onClick={(e) => { e.stopPropagation();
+            kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected"); }}>
+          Reject
+        </button>
+      </>
+    );
+
+  return (
+    <div className="att-wrap att-stack">
+      <Note>{err}</Note>
+
+      {history && (
+        <div className="att-range">
+          <div className="qk">
+            {["All", "Pending", "Approved", "Rejected", "Cancelled"].map((k) => (
+              <button key={k} className={status === k ? "on" : ""} onClick={() => setStatus(k)}>{k}</button>
+            ))}
+          </div>
+          <div className="att-flex" style={{ marginLeft: "auto" }}>
+            <input type="date" value={range.from}
+              onChange={(e) => setRange({ ...range, from: e.target.value })} />
+            <span className="att-muted">to</span>
+            <input type="date" value={range.to} min={range.from}
+              onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </div>
+        </div>
+      )}
+
+      {history && (
+        <div className="att-between">
+          <p className="att-muted">{total} requests</p>
+          <button className="att-btn sm line" disabled={!total}
+            onClick={() => downloadCsv([
+              ...shownL.map((r) => ({ Type: "Leave", Employee: r.emp?.full_name,
+                Code: r.emp?.emp_code, Kind: r.leave_type, From: r.from_date, To: r.to_date,
+                Days: r.days, Reason: r.reason, Status: r.status })),
+              ...shownR.map((r) => ({ Type: "Regularization", Employee: r.emp?.full_name,
+                Code: r.emp?.emp_code, Kind: "Missed punch", From: r.work_date, To: r.work_date,
+                Days: "", Reason: r.reason, Status: r.status })),
+            ], `HJS_approvals_${range.from}_${range.to}.csv`)}>CSV</button>
+        </div>
+      )}
+
+      {total === 0 && (
+        <div className="att-list">
+          <p className="att-empty">
+            {history ? "Nothing in this range." : "All clear. Nothing pending."}
+          </p>
+        </div>
+      )}
+
+      {shownL.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd"><b>Leave requests</b><span className="att-muted">{shownL.length}</span></div>
+          {shownL.map((r) => (
+            <div className="att-row clk" key={r.id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave(r)}>
+              <Avatar name={r.emp?.full_name} />
+              <div className="grow" style={{ minWidth: 150 }}>
+                <p><PName id={r.employee_id} code={r.emp?.emp_code}>
+                    <b>{r.emp?.emp_code} · {r.emp?.full_name}</b></PName>
+                  {r.employee_id === me.id && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
+                </p>
+                <p className="att-muted">
+                  {r.leave_type} · {fmtDate(r.from_date)}
+                  {r.from_date !== r.to_date ? ` – ${fmtDate(r.to_date)}` : ""}
+                  {r.from_time ? ` · ${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : ""}
+                  {" · "}{r.days}d
+                </p>
+                <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
+              </div>
+              <Actions r={r} kind="leave" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={me}
+          onClose={() => setPickLeave(null)} onChanged={load} />
+      )}
+
+      {shownR.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd"><b>Missed punch requests</b><span className="att-muted">{shownR.length}</span></div>
+          {shownR.map((r) => (
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <Avatar name={r.emp?.full_name} />
+              <div className="grow" style={{ minWidth: 150 }}>
+                <p><PName id={r.employee_id} code={r.emp?.emp_code}>
+                    <b>{r.emp?.emp_code} · {r.emp?.full_name}</b></PName>
+                  {r.employee_id === me.id && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
+                </p>
+                <p className="att-muted">
+                  {fmtDate(r.work_date)} · {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
+                </p>
+                <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
+              </div>
+              <Actions r={r} kind="reg" />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JoinersTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    const { data, error } = await supabase.rpc("pending_registrations");
+    if (error) setErr(error.message);
+    setRows(data || []); setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const decide = async (id: string, ok: boolean) => {
+    setBusy(true);
+    const { error } = await supabase.rpc("decide_registration", { p_emp: id, p_approve: ok });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  return (
+    <>
+      <Note>{err}</Note>
+      <p className="att-muted">
+        Anyone can create an account from the sign-in link. They land here until you approve them.
+      </p>
+      <div className="att-list">
+        {!rows.length && !busy && <p className="att-empty">No one waiting right now.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <Avatar name={r.full_name} />
+            <div className="grow" style={{ minWidth: 170 }}>
+              <p><PName id={r.id} code={r.emp_code}><b>{r.full_name}</b></PName>
+                <span className="att-muted"> {r.emp_code}</span></p>
+              <p className="att-muted">{r.email}{r.phone ? ` · ${r.phone}` : ""}</p>
+              <p className="att-muted" style={{ fontSize: 11.5 }}>
+                signed up {r.registered_at ? fmtDate(r.registered_at) : "—"}
+              </p>
+            </div>
+            <button className="att-btn sm green" disabled={busy}
+              onClick={() => decide(r.id, true)}>Approve</button>
+            <button className="att-btn sm grey" disabled={busy}
+              onClick={() => decide(r.id, false)}>Reject</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ========================= team ========================= */
+function TodayTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [date, setDate] = useState(istToday());
+  const [filter, setFilter] = useState("");
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const [{ data }, sess] = await Promise.all([
+        supabase.rpc("whos_in", { p_date: date }),
+        supabase.from("attendance_sessions")
+          .select("employee_id, in_at, in_lat, in_lng, in_distance_m, in_geo_ok")
+          .eq("work_date", date).order("in_at"),
+      ]);
+      const emps = await supabase.from("employees").select("id, emp_code");
+      const codeById: Record<string, string> = {};
+      (emps.data || []).forEach((e: any) => { codeById[e.id] = e.emp_code; });
+      const firstByCode: Record<string, any> = {};
+      (sess.data || []).forEach((x: any) => {
+        const c = codeById[x.employee_id];
+        if (c && !firstByCode[c]) firstByCode[c] = x;
+      });
+      setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code] })));
+      setBusy(false);
+    })();
+  }, [date]);
+
+  const inNow = rows.filter((r) => r.state === "In").length;
+  const done = rows.filter((r) => r.state === "Out").length;
+  const onLeave = rows.filter((r) => r.state === "Leave").length;
+  const notIn = rows.filter((r) => r.state === "Yet to check in").length;
+  const shown = rows
+    .filter((r) => !filter || r.state === filter)
+    .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
+  const teamNames = Object.keys(groups).sort();
+
+  return (
+    <>
+      <div className="att-range">
+        <div className="qk">
+          <button className={date === istToday() ? "on" : ""}
+            onClick={() => setDate(istToday())}>Today</button>
+          <button onClick={() => setDate(addDays(date, -1))}>‹ Previous</button>
+          <button onClick={() => setDate(addDays(date, 1))} disabled={date >= istToday()}>Next ›</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto" }}>
+          <input type="date" max={istToday()} value={date}
+            onChange={(e) => setDate(e.target.value)} />
+        </div>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      <div className="att-grid4">
+        <div className={`att-stat clk ${filter === "In" ? "on" : ""}`}
+          onClick={() => setFilter(filter === "In" ? "" : "In")}>
+          <b style={{ color: "#16a34a" }}>{inNow}</b><span>In now</span></div>
+        <div className="att-stat clk" onClick={() => setFilter(filter === "Out" ? "" : "Out")}>
+          <b style={{ color: "#6b7280" }}>{done}</b><span>Checked out</span></div>
+        <div className="att-stat clk" onClick={() => setFilter(filter === "Leave" ? "" : "Leave")}>
+          <b style={{ color: "#2563eb" }}>{onLeave}</b><span>On leave</span></div>
+        <div className="att-stat clk"
+          onClick={() => setFilter(filter === "Yet to check in" ? "" : "Yet to check in")}>
+          <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
+      </div>
+      <div className="att-flex">
+        <input placeholder="Search name, code, team" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>Clear {filter}</button>}
+      </div>
+
+      {teamNames.map((tn) => {
+        const g = groups[tn];
+        const gi = g.filter((x) => x.state === "In").length;
+        const gn = g.filter((x) => x.state === "Yet to check in").length;
+        return (
+          <Section key={tn} title={tn} count={g.length} open={!!q || teamNames.length <= 3}
+            chips={<>
+              <span style={{ background: "#ecfdf3", color: "#067647" }}>{gi} in</span>
+              {gn > 0 && <span style={{ background: "#fef3f2", color: "#b42318" }}>{gn} not in</span>}
+            </>}>
+            {g.map((r) => (
+              <div className="att-row" key={r.emp_code}>
+                <Avatar name={r.full_name} />
+                <div className="grow">
+                  <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
+                  <p className="att-muted">{r.designation || "—"}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[r.state] }}>{r.state}</p>
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
+                    {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
+                  </p>
+                  {r.punch && (
+                    <p style={{ marginTop: 3 }}>
+                      <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
+                        dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </Section>
+        );
+      })}
+      {!shown.length && !busy && (
+        <div className="att-list"><p className="att-empty">Nobody in this list.</p></div>
+      )}
+    </>
+  );
+}
+
+function DashTab() {
+  const [branches, setBranches] = useState<any[]>([]);
+  const [trend, setTrend] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [b, t] = await Promise.all([
+        supabase.rpc("dashboard_today", {}),
+        supabase.rpc("attendance_trend", { p_days: 14 }),
+      ]);
+      setBranches(b.data || []); setTrend(t.data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const maxT = Math.max(1, ...trend.map((d) => d.present + d.late + d.absent));
+
+  return (
+    <>
+      <div className="att-list">
+        <div className="att-hd"><b>Branch-wise (today)</b></div>
+        {branches.map((b) => {
+          const marked = b.present + b.late + b.half_day;
+          const pct = b.total ? Math.round((marked / b.total) * 100) : 0;
+          return (
+            <div className="att-row" key={b.branch} style={{ display: "block" }}>
+              <div className="att-between">
+                <b>{b.branch}</b>
+                <span className="att-muted">{marked}/{b.total} · {pct}%</span>
+              </div>
+              <div className="att-bar"><i style={{ width: `${pct}%` }} /></div>
+            </div>
+          );
+        })}
+        {!branches.length && <p className="att-empty">No data yet.</p>}
+      </div>
+
+      <div className="att-card">
+        <b>Last 14 days</b>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 120, marginTop: 12 }}>
+          {trend.map((d) => {
+            const h = ((d.present + d.late) / maxT) * 100;
+            const ha = (d.absent / maxT) * 100;
+            return (
+              <div key={d.d} style={{ flex: 1, display: "flex", flexDirection: "column",
+                justifyContent: "flex-end", height: "100%", gap: 2 }}>
+                <div style={{ height: `${ha}%`, background: "#fecdca", borderRadius: "3px 3px 0 0" }} />
+                <div style={{ height: `${h}%`, background: "#2563eb", borderRadius: ha ? 0 : "3px 3px 0 0" }} />
+              </div>
+            );
+          })}
+        </div>
+        <div className="att-between" style={{ marginTop: 9 }}>
+          <span className="att-muted">{fmtDate(trend[0]?.d)}</span>
+          <span className="att-muted">present · absent</span>
+          <span className="att-muted">{fmtDate(trend[trend.length - 1]?.d)}</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StaffTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
+  const [desigs, setDesigs] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+  const [add, setAdd] = useState(false);
+  const [edit, setEdit] = useState<any>(null);
+  const [mgD, setMgD] = useState(false);
+
+  const load = async () => {
+    const [e, b, t, d] = await Promise.all([
+      supabase.from("employees").select("*, branches(name), teams(name)").order("full_name"),
+      supabase.from("branches").select("*").order("name"),
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("designations").select("*").eq("active", true)
+        .order("sort_order").order("name"),
+    ]);
+    setRows(e.data || []); setBranches(b.data || []);
+    setTeams(t.data || []); setDesigs(d.data || []); setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+  const shown = rows.filter((r) =>
+    !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.teams?.name || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <>
+      <div className="att-flex">
+        <input placeholder="Search by name or code" value={q}
+          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        {me.role === "admin" && (
+          <>
+            <button className="att-btn sm line" onClick={() => setMgD(true)}>Designations</button>
+            <button className="att-btn sm" onClick={() => setAdd(true)}>+ New</button>
+          </>
+        )}
+      </div>
+      <div className="att-list">
+        {shown.map((r) => (
+          <div className="att-row" key={r.id}
+            style={{ cursor: me.role === "admin" ? "pointer" : "default" }}
+            onClick={() => me.role === "admin" && setEdit(r)}>
+            <Avatar name={r.full_name} />
+            <div className="grow">
+              <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
+              <p className="att-muted">
+                {r.designation || r.role}
+                {r.teams?.name ? ` · ${r.teams.name}` : ""}
+                {" · "}{fmtHM(r.shift_start)} – {fmtHM(r.shift_end)}
+              </p>
+            </div>
+            {!r.email && <span className="att-pill p-Absent">no email</span>}
+            {!r.auth_user_id && <span className="att-pill p-Late">code pending</span>}
+            {!r.active && <span className="att-pill p-Off">Inactive</span>}
+            {r.field_staff && <span className="att-pill p-Leave">Field</span>}
+          </div>
+        ))}
+        {!shown.length && <p className="att-empty">No match found.</p>}
+      </div>
+      {add && <EmployeeSheet branches={branches} teams={teams} desigs={desigs} people={rows}
+        onClose={() => { setAdd(false); load(); }} />}
+      {edit && <EmployeeSheet branches={branches} teams={teams} desigs={desigs} people={rows}
+        row={edit} onClose={() => { setEdit(null); load(); }} />}
+      {mgD && <DesignationSheet onClose={() => { setMgD(false); load(); }} />}
+    </>
+  );
+}
+
+function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
+  const isNew = !row;
+  const [f, setF] = useState<any>(row || {
+    emp_code: "", full_name: "", first_name: "", last_name: "",
+    email: "", phone: "", designation: "", nickname: "",
+    employment_type: "", employee_status: "Active", source_of_hire: "",
+    branch_id: branches[0]?.id || null, team_id: null, reports_to: null,
+    co_manager_id: null, role: "staff",
+    shift_start: "10:00", shift_end: "19:00", grace_minutes: 15,
+    field_staff: false, monthly_gross: "", active: true, week_off_days: [0],
+    show_verify_panel: true,
+  });
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [busy, setBusy] = useState(false);
+
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const removeEmp = async (hard: boolean) => {
+    if (!row) return;
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("delete_employee", { p_emp: row.id, p_hard: hard });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: hard ? "Employee deleted." : "Employee deactivated." });
+           setTimeout(onClose, 900); }
+    setBusy(false);
+  };
+
+  const resetCode = async () => {
+    if (!row) return;
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("reset_employee_code", { p_emp: row.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else setMsg({ err: "", ok: "Code cleared. They can set a new one on their next sign in." });
+    setBusy(false);
+  };
+
+  const save = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    try {
+      const payload: any = {
+        emp_code: String(f.emp_code).trim().toUpperCase(),
+        full_name: String(f.full_name).trim(),
+        first_name: (f.first_name || "").trim() || String(f.full_name).trim().split(" ")[0],
+        last_name: (f.last_name || "").trim()
+          || String(f.full_name).trim().split(" ").slice(1).join(" ") || null,
+        email: String(f.email || "").trim().toLowerCase() || null,
+        phone: f.phone || null, designation: f.designation || null,
+        branch_id: f.branch_id || null,
+        team_id: f.team_id || null,
+        reports_to: f.reports_to || null,
+        co_manager_id: f.co_manager_id || null,
+        role: f.role,
+        shift_start: f.shift_start, shift_end: f.shift_end,
+        grace_minutes: Number(f.grace_minutes) || 0,
+        date_of_birth: f.date_of_birth || null,
+        date_of_joining: f.date_of_joining || null,
+        employment_type: f.employment_type || null,
+        employee_status: f.employee_status || null,
+        source_of_hire: f.source_of_hire || null,
+        nickname: f.nickname || null,
+        field_staff: f.field_staff, active: f.active,
+        show_verify_panel: f.show_verify_panel !== false,
+        week_off_days: f.week_off_days,
+        monthly_gross: f.monthly_gross === "" || f.monthly_gross == null ? null : Number(f.monthly_gross),
+      };
+      if (isNew) {
+        if (!payload.email || !payload.email.includes("@"))
+          throw new Error("A work email is required — they sign in with it");
+        const { error } = await supabase.from("employees").insert(payload);
+        if (error) throw new Error(error.message);
+        await supabase.rpc("seed_leave_balances", {});
+        setMsg({ err: "",
+          ok: `${payload.full_name} added. Tell them to open the app, enter ${payload.email} and set their own 4-digit code.` });
+      } else {
+        const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
+        if (error) throw new Error(error.message);
+        setMsg({ err: "", ok: "Saved." });
+      }
+    } catch (e: any) { setMsg({ err: e.message, ok: "" }); }
+    setBusy(false);
+  };
+
+  const toggleOff = (d: number) => {
+    const cur: number[] = f.week_off_days || [];
+    setF({ ...f, week_off_days: cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d] });
+  };
+
+  return (
+    <Sheet title={isNew ? "New employee" : f.full_name} onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-row2">
+          <div>
+            <label>Employee code</label>
+            <input value={f.emp_code} style={{ textTransform: "uppercase" }}
+              onChange={(e) => setF({ ...f, emp_code: e.target.value })} placeholder="HJS007" />
+          </div>
+          <div>
+            <label>Full name</label>
+            <input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>First name</label>
+            <input value={f.first_name || ""}
+              onChange={(e) => setF({ ...f, first_name: e.target.value })} />
+          </div>
+          <div>
+            <label>Last name</label>
+            <input value={f.last_name || ""}
+              onChange={(e) => setF({ ...f, last_name: e.target.value })} />
+          </div>
+        </div>
+        <div>
+          <label>Work email {isNew && <span style={{ color: "#dc2626" }}>*</span>}</label>
+          <input type="email" value={f.email || ""} inputMode="email" autoCapitalize="none"
+            placeholder="name@gmail.com"
+            onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <p className="att-muted" style={{ marginTop: 6 }}>
+            {isNew
+              ? "They sign in with this email and set their own 4-digit code the first time."
+              : row?.auth_user_id ? "Code is set." : "Code not set yet — they'll create one on first sign in."}
+          </p>
+        </div>
+        {!isNew && row?.auth_user_id && (
+          <button className="att-btn line sm" onClick={resetCode} disabled={busy}>
+            Reset their 4-digit code
+          </button>
+        )}
+        <div className="att-row2">
+          <div>
+            <label>Phone</label>
+            <input value={f.phone || ""} inputMode="tel" onChange={(e) => setF({ ...f, phone: e.target.value })} />
+          </div>
+          <div>
+            <label>Designation</label>
+            <select value={f.designation || ""}
+              onChange={(e) => setF({ ...f, designation: e.target.value })}>
+              <option value="">— select —</option>
+              {(desigs || []).map((d: any) => (
+                <option key={d.id} value={d.name}>{d.name}</option>
+              ))}
+              {f.designation && !(desigs || []).some((d: any) => d.name === f.designation) && (
+                <option value={f.designation}>{f.designation}</option>
+              )}
+            </select>
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Team</label>
+            <select value={f.team_id || ""}
+              onChange={(e) => setF({ ...f, team_id: e.target.value || null })}>
+              <option value="">— none —</option>
+              {(teams || []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Reports to</label>
+            <select value={f.reports_to || ""}
+              onChange={(e) => setF({ ...f, reports_to: e.target.value || null })}>
+              <option value="">— none —</option>
+              {(people || []).filter((x: any) => x.id !== row?.id).map((x: any) => (
+                <option key={x.id} value={x.id}>{x.emp_code} · {x.full_name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label>Also reports to <span className="att-muted">(second manager, optional)</span></label>
+          <select value={f.co_manager_id || ""}
+            onChange={(e) => setF({ ...f, co_manager_id: e.target.value || null })}>
+            <option value="">— none —</option>
+            {(people || []).filter((x: any) => x.id !== row?.id).map((x: any) => (
+              <option key={x.id} value={x.id}>{x.emp_code} · {x.full_name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Branch (for geo-fence)</label>
+            <select value={f.branch_id || ""}
+              onChange={(e) => setF({ ...f, branch_id: e.target.value || null })}>
+              <option value="">— none —</option>
+              {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Role</label>
+            <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
+              <option value="staff">Staff</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Shift start</label>
+            <input type="time" lang="en-US" value={String(f.shift_start).slice(0, 5)}
+              onChange={(e) => setF({ ...f, shift_start: e.target.value })} />
+          </div>
+          <div>
+            <label>Shift end</label>
+            <input type="time" lang="en-US" value={String(f.shift_end).slice(0, 5)}
+              onChange={(e) => setF({ ...f, shift_end: e.target.value })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Employment type</label>
+            <select value={f.employment_type || ""}
+              onChange={(e) => setF({ ...f, employment_type: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Permanent</option>
+              <option>Trainee</option>
+              <option>Intern</option>
+              <option>Probation</option>
+              <option>Contract</option>
+              <option>Consultant</option>
+              <option>Team member</option>
+            </select>
+          </div>
+          <div>
+            <label>Employee status</label>
+            <select value={f.employee_status || ""}
+              onChange={(e) => setF({ ...f, employee_status: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Active</option>
+              <option>Probation</option>
+              <option>Notice period</option>
+              <option>On leave</option>
+              <option>Details pending</option>
+            </select>
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Source of hire</label>
+            <select value={f.source_of_hire || ""}
+              onChange={(e) => setF({ ...f, source_of_hire: e.target.value || null })}>
+              <option value="">— not set —</option>
+              <option>Direct</option>
+              <option>Referral</option>
+              <option>Advertisement</option>
+              <option>Consultancy</option>
+              <option>Campus</option>
+            </select>
+          </div>
+          <div>
+            <label>Nick name</label>
+            <input value={f.nickname || ""}
+              onChange={(e) => setF({ ...f, nickname: e.target.value || null })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Date of birth</label>
+            <input type="date" value={f.date_of_birth || ""}
+              onChange={(e) => setF({ ...f, date_of_birth: e.target.value || null })} />
+          </div>
+          <div>
+            <label>Joining date</label>
+            <input type="date" value={f.date_of_joining || ""}
+              onChange={(e) => setF({ ...f, date_of_joining: e.target.value || null })} />
+          </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Grace (minutes)</label>
+            <input inputMode="numeric" value={f.grace_minutes}
+              onChange={(e) => setF({ ...f, grace_minutes: e.target.value })} />
+          </div>
+          <div>
+            <label>Monthly gross</label>
+            <input inputMode="numeric" value={f.monthly_gross ?? ""}
+              onChange={(e) => setF({ ...f, monthly_gross: e.target.value })} />
+          </div>
+        </div>
+        <div>
+          <label>Weekly off</label>
+          <div style={{ display: "flex", gap: 5 }}>
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => {
+              const on = (f.week_off_days || []).includes(i);
+              return (
+                <button key={i} onClick={() => toggleOff(i)}
+                  style={{
+                    flex: 1, minHeight: 40, borderRadius: 8, fontWeight: 650,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: on ? "#2563eb" : "#eef0f3", color: on ? "#fff" : "#6b7280",
+                  }}>{d}</button>
+              );
+            })}
+          </div>
+        </div>
+        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+          <input type="checkbox" checked={f.field_staff}
+            onChange={(e) => setF({ ...f, field_staff: e.target.checked })} />
+          Field staff — skip the geo-fence
+        </label>
+        <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+          <input type="checkbox" checked={f.show_verify_panel !== false}
+            onChange={(e) => setF({ ...f, show_verify_panel: e.target.checked })} />
+          Show the daily "who turned up" panel on their home screen
+        </label>
+        {!isNew && (
+          <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
+            <input type="checkbox" checked={f.active}
+              onChange={(e) => setF({ ...f, active: e.target.checked })} />
+            Active
+          </label>
+        )}
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={save} disabled={busy || !f.emp_code || !f.full_name}>
+          {busy ? "Saving…" : isNew ? "Add employee" : "Save"}
+        </button>
+
+        {!isNew && (
+          <div style={{ borderTop: "1px solid #eaecf0", paddingTop: 13, marginTop: 4 }}>
+            {!confirmDel ? (
+              <div className="att-flex">
+                <button className="att-btn sm line" disabled={busy || !f.active}
+                  onClick={() => removeEmp(false)}>Deactivate</button>
+                <button className="att-btn sm line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+                  disabled={busy} onClick={() => setConfirmDel(true)}>Delete permanently</button>
+              </div>
+            ) : (
+              <div className="att-note err">
+                <span>
+                  This wipes {f.full_name}'s attendance, leaves and everything else. Deactivating
+                  keeps the record and the history — that's usually what you want.
+                </span>
+                <div className="att-flex" style={{ marginTop: 10 }}>
+                  <button className="att-btn sm" style={{ background: "#b42318" }}
+                    disabled={busy} onClick={() => removeEmp(true)}>Yes, delete</button>
+                  <button className="att-btn sm grey" onClick={() => setConfirmDel(false)}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function DesignationSheet({ onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [name, setName] = useState("");
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  const load = async () => {
+    const { data } = await supabase.from("designations").select("*")
+      .order("sort_order").order("name");
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    if (!name.trim()) return;
+    const { error } = await supabase.from("designations")
+      .insert({ name: name.trim(), sort_order: 100 });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setName(""); setMsg({ err: "", ok: "Added." }); load(); }
+  };
+
+  const toggle = async (r: any) => {
+    await supabase.from("designations").update({ active: !r.active }).eq("id", r.id);
+    load();
+  };
+
+  return (
+    <Sheet title="Designations" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-flex">
+          <input placeholder="New designation" value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()} style={{ flex: 1 }} />
+          <button className="att-btn sm" onClick={add} disabled={!name.trim()}>Add</button>
+        </div>
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <p className="att-muted">These show up in the designation dropdown.</p>
+      </div>
+      <div className="att-list" style={{ marginTop: 12 }}>
+        {rows.map((r) => (
+          <div className="att-row" key={r.id}>
+            <span className="grow">{r.name}</span>
+            {!r.active && <span className="att-pill p-Off">hidden</span>}
+            <button className="att-muted" onClick={() => toggle(r)}>
+              {r.active ? "Hide" : "Show"}
+            </button>
+          </div>
+        ))}
+        {!rows.length && <p className="att-empty">None yet.</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+function OrgTab() {
+  const [teams, setTeams] = useState<any[]>([]);
+  const [emps, setEmps] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [t, e] = await Promise.all([
+        supabase.from("teams").select("*").order("name"),
+        supabase.rpc("directory", {}),
+      ]);
+      setTeams(t.data || []); setEmps(e.data || []); setBusy(false);
+    })();
+  }, []);
+
+  if (busy) return <p className="att-muted">Loading…</p>;
+
+  const membersOf = (teamId: string) => emps.filter((e) => e.team_id === teamId);
+  // level 1 = teams, level 2 = members
+  const roots = teams.map((t) => ({ ...t, _kind: "team" }));
+
+  if (q) {
+    const hits = emps.filter((r) =>
+      `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team}`
+        .toLowerCase().includes(q.toLowerCase()));
+    return (
+      <>
+        <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+        <p className="att-muted">{hits.length} found</p>
+        <div className="att-people">
+          {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+      <p className="att-muted">{teams.length} teams · click the + on a team to see its people</p>
+      <OrgChart
+        roots={roots}
+        childrenOf={(n: any) => (n._kind === "team" ? membersOf(n.id) : [])}
+        countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
+        toCard={(n: any) => n._kind === "team"
+          ? { name: n.name, sub: `${membersOf(n.id).length} people` }
+          : { name: n.full_name, code: n.emp_code, pid: n.id,
+              sub: `${n.emp_code} · ${n.designation || "—"}` }}
+      />
+    </>
+  );
+}
+
+function ReportsTab() {
+  const [kind, setKind] = useState("muster");
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [data, setData] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const fn = kind === "muster" ? "muster_roll" : kind === "late" ? "late_report" : "absence_report";
+      const { data: d } = await supabase.rpc(fn, { p_month: `${month}-01` });
+      setData(d || []); setBusy(false);
+    })();
+  }, [kind, month]);
+
+  const muster = useMemo(() => {
+    if (kind !== "muster") return null;
+    const byEmp: Record<string, any> = {};
+    const dates: string[] = [];
+    data.forEach((r: any) => {
+      if (!dates.includes(r.d)) dates.push(r.d);
+      byEmp[r.emp_code] = byEmp[r.emp_code] || { name: r.full_name, marks: {} };
+      byEmp[r.emp_code].marks[r.d] = r.mark;
+    });
+    // har bande ka apna total
+    Object.values(byEmp).forEach((v: any) => {
+      const t: Record<string, number> = {};
+      Object.values(v.marks).forEach((m: any) => {
+        if (!m) return;
+        t[m] = (t[m] || 0) + 1;
+      });
+      v.t = t;
+      // payable = present + late + (half x 0.5) + paid leave
+      v.payable = (t.P || 0) + (t.L || 0) + (t.H || 0) * 0.5
+        + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F"].includes(k))
+            .reduce((a, k) => a + (k === "HALF" ? t[k] * 0.5 : k === "SHORT" ? t[k] * 0.25 : t[k]), 0);
+    });
+    return { rows: Object.entries(byEmp), dates: dates.sort() };
+  }, [data, kind]);
+
+  return (
+    <>
+      <div className="att-rephd">
+        <div className="att-seg" style={{ flex: 1 }}>
+          {[["muster", "Muster roll"], ["late", "Late"], ["absence", "Absence"]].map(([k, l]) => (
+            <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>
+          ))}
+        </div>
+        <input type="month" value={month} max={istToday().slice(0, 7)}
+          onChange={(e) => setMonth(e.target.value)} className="att-repmonth" />
+        <button className="att-btn sm" disabled={!data.length}
+          onClick={() => downloadCsv(
+            kind === "muster" && muster
+              ? muster.rows.map(([code, v]: any) => {
+                  const o: any = { Code: code, Name: v.name };
+                  muster.dates.forEach((d) => { o[new Date(d).getDate()] = v.marks[d] || ""; });
+                  o.Present = v.t.P || 0; o.Late = v.t.L || 0; o.Half = v.t.H || 0;
+                  o.Absent = v.t.A || 0;
+                  o.Leave = Object.keys(v.t)
+                    .filter((k) => !["P","L","H","A","W","F"].includes(k))
+                    .reduce((a: number, k) => a + v.t[k], 0);
+                  o["Week off"] = v.t.W || 0; o.Holiday = v.t.F || 0;
+                  o.Payable = v.payable;
+                  return o;
+                })
+              : data,
+            `HJS_${kind}_${month}.csv`)}>CSV</button>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && kind === "muster" && muster && (
+        <>
+          <div className="att-legend">
+            <span><i className="m-P">P</i> present</span>
+            <span><i className="m-L">L</i> late</span>
+            <span><i className="m-H">H</i> half</span>
+            <span><i className="m-A">A</i> absent</span>
+            <span><i className="m-W">W</i> week off</span>
+            <span><i className="m-F">F</i> holiday</span>
+            <span className="att-muted">Payable = present + late + half×0.5 + paid leave</span>
+          </div>
+          <div className="att-scroll">
+            <table className="att-table att-mx">
+              <thead>
+                <tr>
+                  <th className="name">Name</th>
+                  {muster.dates.map((d) => <th key={d}>{new Date(d).getDate()}</th>)}
+                  <th className="tot">P</th>
+                  <th className="tot">L</th>
+                  <th className="tot">H</th>
+                  <th className="tot">A</th>
+                  <th className="tot">Leave</th>
+                  <th className="tot">W</th>
+                  <th className="tot">F</th>
+                  <th className="tot pay">Payable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {muster.rows.map(([code, v]: any) => (
+                  <tr key={code}>
+                    <td className="name"><PName code={code}>{v.name}</PName></td>
+                    {muster.dates.map((d) => (
+                      <td key={d}><span className={markClass(v.marks[d])}>{v.marks[d] || "·"}</span></td>
+                    ))}
+                    <td className="tot" style={{ color: "#16a34a" }}>{v.t.P || 0}</td>
+                    <td className="tot" style={{ color: "#d97706" }}>{v.t.L || 0}</td>
+                    <td className="tot" style={{ color: "#ea580c" }}>{v.t.H || 0}</td>
+                    <td className="tot" style={{ color: "#dc2626" }}>{v.t.A || 0}</td>
+                    <td className="tot" style={{ color: "#2563eb" }}>
+                      {Object.keys(v.t).filter((k) => !["P","L","H","A","W","F"].includes(k))
+                        .reduce((a, k) => a + v.t[k], 0)}
+                    </td>
+                    <td className="tot att-muted">{v.t.W || 0}</td>
+                    <td className="tot att-muted">{v.t.F || 0}</td>
+                    <td className="tot pay">{v.payable}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {!busy && kind === "late" && (
+        <div className="att-list">
+          {!data.length && <p className="att-empty">No late marks this month. Nice.</p>}
+          {data.map((r: any, i: number) => (
+            <div className="att-row" key={i}>
+              <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
+              <span className="grow"><PName code={r.emp_code}>{r.full_name}</PName></span>
+              <span className="att-muted">{fmtTime(r.punch_in_at)}</span>
+              <span className="att-pill p-Late">{r.late_minutes}m</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!busy && kind === "absence" && (
+        <div className="att-list">
+          {!data.length && <p className="att-empty">No data yet.</p>}
+          {data.map((r: any, i: number) => (
+            <div className="att-row" key={i}>
+              <Avatar name={r.full_name} />
+              <div className="grow">
+                <p><PName code={r.emp_code}><b>{r.full_name}</b></PName></p>
+                <p className="att-muted">{r.branch}</p>
+              </div>
+              <span className="att-pill p-Late">{r.late_marks} late</span>
+              <span className="att-pill p-Absent">{r.absent_days} absent</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function PayrollTab() {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const { data } = await supabase.rpc("payroll_summary", { p_month: `${month}-01` });
+      setRows(data || []); setBusy(false);
+    })();
+  }, [month]);
+
+  return (
+    <>
+      <div className="att-flex">
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ flex: 1 }} />
+        <button className="att-btn sm" disabled={!rows.length}
+          onClick={() => downloadCsv(rows, `HJS_payroll_${month}.csv`)}>CSV</button>
+      </div>
+      <input placeholder="Search name, code, team" value={q}
+        onChange={(e) => setQ(e.target.value)} />
+
+      {busy && <p className="att-muted">Loading…</p>}
+      {!busy && (() => {
+        const shown = rows.filter((r: any) => !q ||
+          `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
+        const groups: Record<string, any[]> = {};
+        shown.forEach((r: any) => {
+          const k = r.team || "—";
+          (groups[k] = groups[k] || []).push(r);
+        });
+        const names = Object.keys(groups).sort();
+        if (!shown.length) return <div className="att-list"><p className="att-empty">No data for this month.</p></div>;
+        return names.map((tn) => {
+          const g = groups[tn];
+          const total = g.reduce((a: number, r: any) => a + Number(r.payable_amount || 0), 0);
+          return (
+            <Section key={tn} title={tn} count={g.length} open={!!q || names.length <= 3}
+              sub={total ? `₹ ${total.toLocaleString("en-IN")} payable` : "salary not set"}>
+              {g.map((r: any) => (
+                <div className="att-row" key={r.emp_code} style={{ display: "block" }}>
+                  <div className="att-between">
+                    <b><PName code={r.emp_code}>{r.emp_code} · {r.full_name}</PName></b>
+                    <b style={{ color: r.monthly_gross ? "#2563eb" : "#98a2b3" }}>
+                      {r.monthly_gross
+                        ? `₹ ${Number(r.payable_amount).toLocaleString("en-IN")}`
+                        : "salary not set"}
+                    </b>
+                  </div>
+                  <p className="att-muted" style={{ marginTop: 4 }}>
+                    Counted {r.counted_days} of {r.month_days} days ·{" "}
+                    {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid leave ·{" "}
+                    <span style={{ color: "#b42318" }}>{r.absent_days} absent</span>
+                  </p>
+                  <p className="att-muted" style={{ marginTop: 2 }}>
+                    Payable <b>{r.payable_days}</b> days
+                    {r.monthly_gross ? ` × ₹${r.per_day}/day` : ""}
+                  </p>
+                </div>
+              ))}
+            </Section>
+          );
+        });
+      })()}
+    </>
+  );
+}
+
+function TeamScreen({ me, tab }: any) {
+  const approver = ["manager", "admin"].includes(me.role);
+  return (
+    <div className="att-wrap att-stack">
+      {(tab === "today" || !approver) && <TodayTab />}
+      {approver && tab === "dash" && <DashTab />}
+      {approver && tab === "staff" && <StaffTab me={me} />}
+      {approver && tab === "reports" && <ReportsTab />}
+      {approver && tab === "payroll" && <PayrollTab />}
+    </div>
+  );
+}
+
+/* ========================= profile ========================= */
+function MeScreen({ me }: any) {
+  const info: [string, string][] = [
+    ["Employee code", me.emp_code],
+    ["Email", me.email || "—"],
+    ["Team", me.teams?.name || "—"],
+    ["Branch", me.branches?.name || "—"],
+    ["Designation", me.designation || "—"],
+    ["Role", me.role],
+    ["Shift", `${fmtHM(me.shift_start)} – ${fmtHM(me.shift_end)}`],
+    ["Phone", me.phone || "—"],
   ];
 
   return (
-    <div className="soc">
-      <div className="soc-head">
+    <div className="att-wrap att-narrow att-stack">
+      <div className="att-card att-flex">
+        <Avatar name={me.full_name} lg />
         <div>
-          <div className="soc-cust">{row.customer_name || 'Customer'}</div>
-          <div className="soc-inv">#{row.invoice_number}</div>
+          <h2 className="att-h1">{me.full_name}</h2>
+          <p className="att-muted">{me.designation || me.role} · {me.emp_code}</p>
         </div>
       </div>
-      <div className="soc-grid">
-        {rows.map(([k, v]) => (
-          <div className="soc-item" key={k}>
-            <div className="soc-k">{k}</div>
-            <div className="soc-v">{v}</div>
+
+      <div className="att-list">
+        {info.map(([k, v]) => (
+          <div className="att-row" key={k}>
+            <span className="grow att-muted">{k}</span>
+            <b style={{ fontSize: 14 }}>{v}</b>
           </div>
         ))}
       </div>
+
+      <p className="att-muted">
+        To change your 4-digit code, sign out and use "Forgot code?" on the sign-in screen.
+      </p>
     </div>
   );
 }
 
-function TrackResult({ row, pickup, showPhotos }) {
-  // Return shuru ho chuka hai to delivery ka timeline sikud jaata hai aur
-  // neeche pickup ka timeline chalne lagta hai.
-  const hasPickup = !!pickup;
-  const [openDel, setOpenDel] = useState(false);
-  // row = safe fields from track_order RPC (poora delivery row NAHI)
-  const equipment = equipmentText({
-    line_items: row.line_items,
-    item_name: row.item_name,
-  });
-  const items = equipmentList({
-    line_items: row.line_items,
-    item_name: row.item_name,
-  });
-  const stage = statusToStage(row.status);
-  const closedMeta = CLOSED[stage] || null;
-  const cancelled = !!closedMeta;
-  const idx = stageIndex(stage);
-  const log = Array.isArray(row.app_log) ? row.app_log : [];
-  // closed: cancel/mark se pehle jahan tak pahunchi thi (app_log se)
-  const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
-  const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
-  const Icon = equipIcon(equipment);
-  const person = row.delivery_partner || null;
-  const orderId = row.invoice_number;
-  // MBC = Managed By Client — customer khud collect karta hai. Us case mein
-  // "Out for Delivery" step dikhana galat hai; wording bhi pickup waali honi
-  // chahiye. Isliye steps filter + override karte hain.
-  const mbc = String(person || '').trim().toUpperCase() === 'MBC';
-  const steps = mbc
-    ? TRACK_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
-        st.id === 'scheduled'
-          ? {
-              ...st,
-              label: 'Ready for Collection',
-              desc: 'Your item has passed the quality check and is ready. You will collect it as arranged with the store.',
-            }
-          : st.id === 'delivered'
-            ? {
-                ...st,
-                label: 'Handed Over',
-                desc: 'Your order has been handed over to you. Thank you for choosing Healthy Jeena Sikho.',
-              }
-            : st,
-      )
-    : TRACK_STEPS;
+function BalanceSheet({ b, who, year, onClose }: any) {
+  const [val, setVal] = useState(String(b.allocated ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [scope, setScope] = useState<"one" | "team" | "all">("one");
+  const [teams, setTeams] = useState<any[]>([]);
+  const [teamId, setTeamId] = useState("");
 
-  const banner = cancelled
-    ? { text: closedMeta.label, bg: closedMeta.soft, fg: closedMeta.color }
-    : stage === 'delivered'
-      ? {
-          text: mbc ? 'Handed over successfully 🎉' : 'Delivered successfully 🎉',
-          bg: T.mint,
-          fg: T.green,
-        }
-      : stage === 'dispatched'
-        ? {
-            text: 'Your order is out for delivery',
-            bg: T.violetSoft,
-            fg: T.violet,
-          }
-        : stage === 'scheduled'
-          ? {
-              text: mbc
-                ? 'Your item is ready for collection'
-                : 'Your delivery is scheduled',
-              bg: T.amberSoft,
-              fg: T.amber,
-            }
-          : stage === 'talked'
-            ? { text: 'Your order is confirmed', bg: T.blueSoft, fg: T.blue }
-            : {
-                text: 'Your order has been received',
-                bg: T.slateSoft,
-                fg: T.slate,
-              };
+  useEffect(() => {
+    supabase.from("teams").select("id, name").order("name")
+      .then(({ data }) => setTeams(data || []));
+  }, []);
 
-  const schedDate = niceDate(row.confirmed_date);
-  const schedTime = niceTime(row.confirmed_time);
+  const save = async () => {
+    const num = Number(val);
+    if (isNaN(num) || num < 0) return setMsg({ err: "Enter a number, 0 or more.", ok: "" });
+    setBusy(true); setMsg({ err: "", ok: "" });
+
+    const { error } = scope === "one"
+      ? await supabase.rpc("set_leave_balance", {
+          p_emp: who.id, p_type: b.leave_type, p_allotted: num, p_year: year })
+      : await supabase.rpc("set_leave_balance_bulk", {
+          p_type: b.leave_type, p_allotted: num,
+          p_team: scope === "team" ? (teamId || null) : null, p_year: year });
+
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setMsg({ err: "", ok: "Saved." }); setTimeout(onClose, 700); }
+    setBusy(false);
+  };
 
   return (
-    <div className="track-result">
-      {/* order summary */}
-      <div className="track-order">
-        <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
-          <Icon size={22} color={T.green} />
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 15, color: T.ink }}>
-            {items.length > 1 ? `${items.length} items` : 'Order details'}
-          </div>
-          <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
-            Order #{orderId}
-          </div>
-        </div>
-      </div>
-      <ul className="eq-list">
-        {items.map((it, i) => (
-          <li key={i}>{it}</li>
-        ))}
-      </ul>
+    <Sheet title={`${b.name} allotment`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted">
+          How many <b>{b.name.toLowerCase()}</b> days for {year}. Booked days stay as they
+          are — only the allotment changes, and Available recalculates itself.
+        </p>
 
-      {!hasPickup && (
-        <div
-          className="track-banner"
-          style={{ background: banner.bg, color: banner.fg }}
-        >
-          {banner.text}
+        <div>
+          <label>Days allotted</label>
+          <input type="number" min="0" step="0.5" value={val} autoFocus
+            onChange={(e) => setVal(e.target.value)} />
         </div>
-      )}
 
-      {/* Return shuru ho gaya → delivery ka hissa ek line mein sikud jaata hai */}
-      {hasPickup && (
-        <button
-          className="phase-collapse"
-          onClick={() => setOpenDel((v) => !v)}
-        >
-          <span className="phase-tick">
-            <Check size={13} />
-          </span>
-          <span style={{ flex: 1, textAlign: 'left' }}>
-            Delivered
-            {niceDate(row.confirmed_date)
-              ? ` · ${niceDate(row.confirmed_date)}`
-              : ''}
-          </span>
-          <span className="phase-link">
-            {openDel ? 'Hide' : 'View details'}
-          </span>
-          <ChevronRight
-            size={16}
-            style={{
-              transform: openDel ? 'rotate(90deg)' : 'none',
-              transition: 'transform .15s',
-            }}
-          />
+        <div>
+          <label>Apply to</label>
+          <select value={scope} onChange={(e) => setScope(e.target.value as any)}>
+            <option value="one">Just {who.full_name}</option>
+            <option value="team">A whole team</option>
+            <option value="all">Everyone in the company</option>
+          </select>
+        </div>
+
+        {scope === "team" && (
+          <div>
+            <label>Team</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">— pick a team —</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {scope === "all" && (
+          <div className="att-note err">
+            <span>This overwrites the {b.name.toLowerCase()} allotment for every active
+            employee, including anyone you've already set individually.</span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={save}
+          disabled={busy || (scope === "team" && !teamId)}>
+          {busy ? "Saving…" : "Save"}
         </button>
+      </div>
+    </Sheet>
+  );
+}
+
+function LeaveSheet({ lv, who, onClose, onChanged }: any) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [emp, setEmp] = useState<any>(null);
+  const [confirm, setConfirm] = useState(false);
+  const ctx = usePerson();
+
+  useEffect(() => {
+    if (!lv.employee_id) return;
+    supabase.from("employees")
+      .select("emp_code, full_name, designation, email, phone")
+      .eq("id", lv.employee_id).maybeSingle()
+      .then(({ data }) => setEmp(data));
+  }, [lv.employee_id]);
+
+  const mine = lv.employee_id === who?.id;
+  const canCancel = mine && lv.status === "Pending";
+
+  const cancel = async () => {
+    setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.from("leaves")
+      .update({ status: "Cancelled" }).eq("id", lv.id);
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { onChanged && onChanged(); onClose(); }
+    setBusy(false);
+  };
+
+  const one = lv.from_date === lv.to_date;
+
+  return (
+    <Sheet title="Leave details" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-between">
+          <span className="att-ltype" style={{ fontSize: 13, padding: "5px 12px" }}>
+            {lv.leave_name || lv.leave_type}
+          </span>
+          <span className={pillClass(lv.status)}>{lv.status}</span>
+        </div>
+
+        {emp && !mine && (
+          <div className="att-row" style={{ padding: 0, borderBottom: 0 }}>
+            <Avatar name={emp.full_name} />
+            <div className="grow">
+              <p><PName id={lv.employee_id} code={emp.emp_code}>
+                <b>{emp.full_name}</b></PName></p>
+              <p className="att-muted">{emp.emp_code} · {emp.designation || "—"}</p>
+            </div>
+          </div>
+        )}
+
+        <dl className="att-dl">
+          <dt>{one ? "Date" : "From"}</dt>
+          <dd>{fmtDate(lv.from_date)}</dd>
+          {!one && (<><dt>To</dt><dd>{fmtDate(lv.to_date)}</dd></>)}
+          {lv.from_time && (<><dt>Time</dt>
+            <dd>{fmtHM(lv.from_time)} – {fmtHM(lv.to_time)}</dd></>)}
+          <dt>Days counted</dt>
+          <dd>{lv.days}</dd>
+          <dt>Reason</dt>
+          <dd style={{ whiteSpace: "normal" }}>
+            {lv.reason || <span className="att-muted">— none given —</span>}
+          </dd>
+          <dt>Applied on</dt>
+          <dd>{lv.created_at ? fmtDate(lv.created_at) : "—"}</dd>
+          {lv.status !== "Pending" && (
+            <>
+              <dt>{lv.status} by</dt>
+              <dd>{lv.approver_name || "—"}</dd>
+              <dt>{lv.status} on</dt>
+              <dd>{lv.approved_at ? fmtDate(lv.approved_at) : "—"}</dd>
+            </>
+          )}
+          {lv.approver_note && (<><dt>Note</dt>
+            <dd style={{ whiteSpace: "normal" }}>{lv.approver_note}</dd></>)}
+        </dl>
+
+        <Note>{msg.err}</Note>
+
+        {canCancel && !confirm && (
+          <button className="att-btn line" onClick={() => setConfirm(true)}>
+            Cancel this request
+          </button>
+        )}
+
+        {canCancel && confirm && (
+          <div className="att-note err">
+            <span>This withdraws your request. The days go back to your balance.</span>
+            <div className="att-flex" style={{ marginTop: 10 }}>
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => setConfirm(false)}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1, background: "#b42318" }}
+                disabled={busy} onClick={cancel}>Yes, cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/* ================= kaun leave pe hai ================= */
+function OnLeaveTab() {
+  const [pickLeave, setPickLeave] = useState<any>(null);
+  const [date, setDate] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [soon, setSoon] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const [a, b] = await Promise.all([
+        supabase.rpc("on_leave", { p_date: date }),
+        supabase.rpc("upcoming_leaves", { p_days: 30 }),
+      ]);
+      setRows(a.data || []); setSoon(b.data || []); setBusy(false);
+    })();
+  }, [date]);
+
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.team} ${r.leave_name}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team] = groups[r.team] || []).push(r); });
+  const teams = Object.keys(groups).sort();
+
+  const isToday = date === istToday();
+
+  return (
+    <>
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>
+            {shown.length} {shown.length === 1 ? "person" : "people"} on leave
+          </b>
+          <p className="att-muted">
+            {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+              { weekday: "long", day: "2-digit", month: "long" })}
+            {isToday ? " · today" : ""}
+          </p>
+        </div>
+        <div className="att-flex">
+          {!isToday && (
+            <button className="att-btn sm line" onClick={() => setDate(istToday())}>Today</button>
+          )}
+          <input type="date" value={date} className="att-repmonth"
+            onChange={(e) => setDate(e.target.value)} />
+          <button className="att-btn sm line" disabled={!shown.length}
+            onClick={() => downloadCsv(shown.map((r) => ({
+              Code: r.emp_code, Name: r.full_name, Department: r.team,
+              Leave: r.leave_name,
+              From: r.from_date, To: r.to_date,
+              Time: r.from_time ? `${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : "",
+              Day: `${r.day_index} of ${r.total_days}`,
+              Days: r.days, Reason: r.reason || "",
+            })), `HJS_on_leave_${date}.csv`)}>CSV</button>
+        </div>
+      </div>
+
+      {rows.length > 6 && (
+        <input placeholder="Search name, department, leave type"
+          value={q} onChange={(e) => setQ(e.target.value)} />
       )}
 
-      {/* the timeline */}
-      <div
-        className="track-tl"
-        style={hasPickup && !openDel ? { display: 'none' } : null}
-      >
-        {steps.map((step) => {
-          // array-index nahi, asli stage-index dekho (MBC mein ek step hata
-          // diya jaata hai, isliye index shift ho jaata)
-          const si = stageIndex(step.id);
-          if (si > flowIdx) return null; // sirf reached stages dikhao
-          const current = !cancelled && si === idx;
-          // "reached this stage" time — har stage pe green chhota timestamp
-          const reachedTs =
-            stepTime(log, step.id) ||
-            (step.id === 'new'
-              ? row.created_at ||
-                row.created_time ||
-                row.inserted_at ||
-                row.synced_at ||
-                null
-              : null);
-          const StepIcon = step.icon;
-          // closed hua to aakhri reached stage bhi neeche closed-entry se jude
-          const showLine = si < flowIdx || cancelled;
-          return (
-            <div className="ttl-row" key={step.id}>
-              <div className="ttl-left">
-                <div
-                  className="ttl-dot"
-                  style={{
-                    background: T.green,
-                    borderColor: T.green,
-                    color: '#fff',
-                  }}
-                >
-                  <StepIcon size={16} />
-                </div>
-                {showLine && (
-                  <span className="ttl-line" style={{ background: T.green }} />
-                )}
-              </div>
-              <div className="ttl-content">
-                <div
-                  className="ttl-title"
-                  style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
-                >
-                  {step.label}
-                  {current && <ArrowLeft className="ttl-now-arrow" size={18} />}
-                </div>
-                <div className="ttl-desc">{step.desc}</div>
+      {busy && <p className="att-muted">Loading…</p>}
 
-                {/* Stage 2 — confirmed delivery slot */}
-                {step.id === 'talked' && (schedDate || schedTime) && (
-                  <div className="ttl-extra">
-                    <div>
-                      <b>Confirmed slot:</b> {schedDate || ''}
-                      {schedDate && schedTime ? ', ' : ''}
-                      {schedTime || ''}
-                    </div>
-                  </div>
-                )}
-
-                {/* Stage 3 — delivery slot + partner */}
-                {step.id === 'scheduled' && (
-                  <div className="ttl-extra">
-                    {(schedDate || schedTime) && (
-                      <div>
-                        <b>{mbc ? 'Collection slot:' : 'Delivery slot:'}</b>{' '}
-                        {schedDate || ''}
-                        {schedDate && schedTime ? ', ' : ''}
-                        {schedTime || ''}
-                      </div>
-                    )}
-                    {mbc ? (
-                      <div>
-                        <b>Collection:</b> Self pickup — arranged by you
-                      </div>
-                    ) : (
-                      person && (
-                        <div>
-                          <b>Delivery partner:</b> {person}
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-
-                {/* Stage 4 — out for delivery: estimated arrival */}
-                {step.id === 'dispatched' && niceDateTime(row.app_eta) && (
-                  <div className="ttl-extra">
-                    <div>
-                      <b>Estimated arrival:</b> {niceDateTime(row.app_eta)}
-                    </div>
-                  </div>
-                )}
-
-                {/* Delivery ki photos — sirf sales tracker mein (internal
-                    proof-of-delivery). Customer link pe ye nahi dikhtin. */}
-                {showPhotos &&
-                  step.id === 'delivered' &&
-                  row.photo_delivered &&
-                  row.photo_delivered !== 'null' && (
-                    <div className="photo-grid" style={{ marginTop: 10 }}>
-                      {String(row.photo_delivered)
-                        .split('|')
-                        .filter(Boolean)
-                        .map((ph, pi) => (
-                          <a
-                            key={ph + pi}
-                            className="photo-thumb"
-                            href={ph}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <img src={ph} alt={`delivery photo ${pi + 1}`} />
-                          </a>
-                        ))}
-                    </div>
-                  )}
-
-                {/* har stage pe — kab update hua (green chhota) */}
-                {reachedTs && (
-                  <div className="ttl-time">
-                    Updated: {fmtDateTime(reachedTs)}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* closed → reached stages ke baad colored closed entry */}
-        {cancelled && (
-          <div className="ttl-row">
-            <div className="ttl-left">
-              <div
-                className="ttl-dot"
-                style={{
-                  background: closedMeta.color,
-                  borderColor: closedMeta.color,
-                  color: '#fff',
-                }}
-              >
-                {stage === 'cancelled' ? (
-                  <AlertTriangle size={16} />
-                ) : (
-                  <Info size={16} />
-                )}
-              </div>
-            </div>
-            <div className="ttl-content">
-              <div
-                className="ttl-title"
-                style={{ color: closedMeta.color, fontWeight: 800 }}
-              >
-                {closedMeta.label}
-              </div>
-              <div className="ttl-desc">{closedMeta.cust}</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {hasPickup && <PickupPhase pickup={pickup} />}
-    </div>
-  );
-}
-
-/* Kuch invoices delivery app se pehle ke hain — unki delivery row hoti hi
-   nahi. Un cases mein sirf pickup ka safar dikhta hai. */
-function PickupOnlyResult({ pickup }) {
-  const items = equipmentList({
-    line_items: pickup.line_items,
-    item_name: pickup.item_name,
-  });
-  const Icon = equipIcon(items.join(' '));
-  return (
-    <div className="track-result">
-      <div className="track-order">
-        <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
-          <Icon size={22} color={T.green} />
+      {!busy && !shown.length && (
+        <div className="att-list">
+          <p className="att-empty">
+            {rows.length ? "No match found." : "Nobody is on leave this day."}
+          </p>
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 15, color: T.ink }}>
-            Order details
+      )}
+
+      {teams.map((tn) => (
+        <div className="att-list" key={tn}>
+          <div className="att-hd">
+            <b>{tn}</b><span className="att-chip">{groups[tn].length}</span>
           </div>
-          <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>
-            Order #{pickup.invoice_number}
-          </div>
-        </div>
-      </div>
-      <PickupPhase pickup={pickup} hideTop />
-    </div>
-  );
-}
-
-/* ── Return / Pickup ka hissa — customer ke liye ─────────────────────── */
-function PickupPhase({ pickup, hideTop }) {
-  const stage = pickupStage(pickup.status);
-  const cancelled = stage === 'cancelled';
-  const idx = STAGES.findIndex((x) => x.id === stage);
-  const log = Array.isArray(pickup.app_log) ? pickup.app_log : [];
-  const resched = isResched(pickup.status);
-  const items = equipmentList({
-    line_items: pickup.line_items,
-    item_name: pickup.item_name,
-  });
-  const person = pickup.app_pickup_person || null;
-  const schedDate = niceDate(pickup.confirmed_date);
-  const schedTime = niceTime(pickup.confirmed_time);
-  const etaTime = niceTime(String(pickup.app_eta || '').slice(11, 16));
-
-  const banner = cancelled
-    ? { text: 'Pickup cancelled', bg: T.redSoft, fg: T.red }
-    : stage === 'delivered'
-      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
-      : stage === 'dispatched'
-        ? { text: 'Our team is on the way to collect the item', bg: T.violetSoft, fg: T.violet }
-        : stage === 'scheduled'
-          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
-          : stage === 'talked'
-            ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
-            : { text: 'Return request received', bg: T.slateSoft, fg: T.slate };
-
-  return (
-    <div className={hideTop ? 'phase-block no-top' : 'phase-block'}>
-      <div className="phase-head">
-        <RotateCcw size={16} color={T.green} /> Return &amp; Pickup
-      </div>
-
-      {/* poora order wapas nahi bhi ja sakta — isliye items alag se */}
-      <div className="phase-items">
-        <div className="phase-items-h">Item being picked up</div>
-        <ul className="eq-list" style={{ marginTop: 8 }}>
-          {items.map((it, i) => (
-            <li key={i}>{it}</li>
+          {groups[tn].map((r) => (
+            <div className="att-row clk" key={r.employee_id} style={{ flexWrap: "wrap" }}
+              onClick={() => setPickLeave({ ...r, id: r.leave_id, emp: r })}>
+              <Avatar name={r.full_name} />
+              <div className="grow" style={{ minWidth: 160 }}>
+                <p>
+                  <PName id={r.employee_id} code={r.emp_code}>
+                    <b>{r.emp_code}</b> · {r.full_name}
+                  </PName>
+                </p>
+                <p className="att-muted">{r.designation || "—"}</p>
+                {r.reason && (
+                  <p style={{ fontSize: 12.5, color: "#475467", whiteSpace: "normal" }}>
+                    {r.reason}
+                  </p>
+                )}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span className="att-pill p-Leave">{r.leave_name}</span>
+                <p className="att-muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  {r.from_date === r.to_date
+                    ? fmtDate(r.from_date)
+                    : `${fmtDate(r.from_date)} – ${fmtDate(r.to_date)}`}
+                </p>
+                {r.from_time && (
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    {fmtHM(r.from_time)} – {fmtHM(r.to_time)}
+                  </p>
+                )}
+                {r.total_days > 1 && (
+                  <p className="att-muted" style={{ fontSize: 11.5 }}>
+                    day {r.day_index} of {r.total_days}
+                  </p>
+                )}
+              </div>
+            </div>
           ))}
-        </ul>
-      </div>
+        </div>
+      ))}
 
-      <div className="track-banner" style={{ background: banner.bg, color: banner.fg }}>
-        {banner.text}
-      </div>
+      {pickLeave && (
+        <LeaveSheet lv={pickLeave} who={null}
+          onClose={() => setPickLeave(null)} />
+      )}
 
-      <div className="track-tl">
-        {PICKUP_STEPS.map((step, i) => {
-          if (i > idx) return null;
-          const current = !cancelled && i === idx;
-          const reachedTs =
-            stepTime(log, step.id) || (step.id === 'new' ? pickup.created_at : null);
-          const StepIcon = step.icon;
-          const showLine = i < idx || cancelled;
-          return (
-            <div className="ttl-row" key={step.id}>
-              <div className="ttl-left">
-                <div
-                  className="ttl-dot"
-                  style={{ background: T.green, borderColor: T.green, color: '#fff' }}
-                >
-                  <StepIcon size={16} />
-                </div>
-                {showLine && <span className="ttl-line" style={{ background: T.green }} />}
-              </div>
-              <div className="ttl-content">
-                <div
-                  className="ttl-title"
-                  style={{ color: T.ink, fontWeight: current ? 800 : 700 }}
-                >
-                  {step.label}
-                  {current && <ArrowLeft className="ttl-now-arrow" size={18} />}
-                </div>
-                <div className="ttl-desc">{step.desc}</div>
-
-                {/* date abhi tay nahi hui — customer ko seedhi baat */}
-                {step.id === 'new' && resched && (
-                  <div className="ttl-extra">
-                    Our team will confirm the pickup date with you shortly.
-                  </div>
-                )}
-
-                {step.id === 'talked' && (schedDate || schedTime) && (
-                  <div className="ttl-extra">
-                    <div>
-                      <b>Confirmed slot:</b> {schedDate || ''}
-                      {schedDate && schedTime ? ', ' : ''}
-                      {schedTime || ''}
-                    </div>
-                  </div>
-                )}
-
-                {step.id === 'scheduled' && (
-                  <div className="ttl-extra">
-                    {(schedDate || schedTime) && (
-                      <div>
-                        <b>Pickup slot:</b> {schedDate || ''}
-                        {schedDate && schedTime ? ', ' : ''}
-                        {schedTime || ''}
-                      </div>
-                    )}
-                    {person && (
-                      <div>
-                        <b>Pickup person:</b> {person}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {step.id === 'dispatched' && etaTime && (
-                  <div className="ttl-extra">
-                    <div>
-                      <b>Estimated arrival:</b> {etaTime}
-                    </div>
-                  </div>
-                )}
-
-                {reachedTs && (
-                  <div className="ttl-time">Updated: {fmtDateTime(reachedTs)}</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {cancelled && (
-          <div className="ttl-row">
-            <div className="ttl-left">
-              <div
-                className="ttl-dot"
-                style={{ background: T.red, borderColor: T.red, color: '#fff' }}
-              >
-                <AlertTriangle size={16} />
-              </div>
-            </div>
-            <div className="ttl-content">
-              <div className="ttl-title" style={{ color: T.red, fontWeight: 800 }}>
-                Pickup cancelled
-              </div>
-              <div className="ttl-desc">
-                This pickup has been cancelled. Please contact the store for any
-                questions.
-              </div>
-            </div>
+      {isToday && soon.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd">
+            <b>Coming up</b><span className="att-muted">next 30 days</span>
           </div>
-        )}
-      </div>
-    </div>
+          {soon.map((r, i) => (
+            <div className="att-row" key={i}>
+              <Avatar name={r.full_name} />
+              <div className="grow">
+                <p><PName code={r.emp_code}><b>{r.full_name}</b></PName>
+                  <span className="att-muted"> · {r.team}</span></p>
+                <p className="att-muted">
+                  {r.leave_name} · {r.from_date === r.to_date
+                    ? fmtDate(r.from_date)
+                    : `${fmtDate(r.from_date)} – ${fmtDate(r.to_date)}`} · {r.days}d
+                </p>
+              </div>
+              <span className="att-muted" style={{ fontSize: 12.5 }}>
+                {r.starts_in === 1 ? "tomorrow" : `in ${r.starts_in} days`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════ STYLES */
-/* ═════════════════════════════════════════════════ ACTIVITY LOG (overall)
-   Saari entries ke app_log events ek jagah, latest pehle — Books / Bigin ke
-   audit trail jaisa. Data wahi hai jo har entry ke andar timeline mein
-   dikhta hai; yahan sab merge karke "kisne kya kab kiya" ek screen pe.
-   Delete hui entries bhi yahan aati hain (view se hatti hain, log se nahi). */
-const ACT_KINDS = [
-  { id: 'all', label: 'Sab updates' },
-  { id: 'move', label: 'Stage move' },
-  { id: 'edit', label: 'Edit' },
-  { id: 'closed', label: 'Cancel / Dup / Renewal' },
-  { id: 'delete', label: 'Delete' },
-];
-function actKind(ev) {
-  if (!ev) return 'move';
-  if (ev.stage === 'deleted') return 'delete';
-  if (CLOSED[ev.stage]) return 'closed';
-  if (ev.action === 'Edited') return 'edit';
-  return 'move';
-}
-function actIconOf(k) {
-  return k === 'delete'
-    ? Trash2
-    : k === 'edit'
-      ? Pencil
-      : k === 'closed'
-        ? AlertTriangle
-        : ArrowRight;
-}
-function actTitle(ev) {
-  const k = actKind(ev);
-  const lbl =
-    (CLOSED[ev.stage] || STAGES[stageIndex(ev.stage)] || {}).label ||
-    ev.label ||
-    ev.stage;
-  if (k === 'delete') return 'Entry delete ki';
-  if (k === 'closed') return `${lbl} mark kiya`;
-  if (k === 'edit') return `${lbl} edit kiya`;
-  return `${lbl} pe move kiya`;
-}
-function actDayLabel(ds) {
-  const y = new Date();
-  y.setDate(y.getDate() - 1);
-  if (ds === todayStr()) return 'Aaj';
-  if (ds === dayStr(y)) return 'Kal';
-  const d = new Date(ds + 'T00:00');
-  return isNaN(d)
-    ? ds
-    : d.toLocaleDateString('en-IN', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-}
-function actTime(ts) {
-  const d = new Date(ts);
-  if (isNaN(d)) return '—';
-  return d.toLocaleTimeString('en-IN', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
+/* ================= adhoore records ================= */
+function NeedsSetupTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [open, setOpen] = useState<any>(null);
+  const canEdit = me?.role === "admin";
 
-function ActivityLog({ deliveries, session, onOpen, onClose }) {
-  const [q, setQ] = useState('');
-  const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
-  const [store, setStore] = useState('ALL');
-  const [kind, setKind] = useState('all');
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    const bad = (data || []).filter((r: any) =>
+      String(r.emp_code).startsWith("REG-")
+      || !r.team_id
+      || !r.designation
+      || (!r.reports_to && !r.co_manager_id && r.designation !== "Co-Founder")
+      || !r.email);
+    setRows(bad); setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
 
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    if (range === 'today') return [dayStr(t), dayStr(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [dayStr(y), dayStr(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [dayStr(s), dayStr(t)];
-    }
-    if (range === 'month') {
-      const s = new Date(t.getFullYear(), t.getMonth(), 1);
-      return [dayStr(s), dayStr(t)];
-    }
-    return ['0000-01-01', '9999-12-31'];
-  }, [range]);
+  const gaps = (r: any) => {
+    const g: string[] = [];
+    if (String(r.emp_code).startsWith("REG-")) g.push("employee code");
+    if (!r.team_id) g.push("department");
+    if (!r.designation) g.push("designation");
+    if (!r.reports_to && !r.co_manager_id && r.designation !== "Co-Founder")
+      g.push("reporting manager");
+    if (!r.email) g.push("email");
+    return g;
+  };
 
-  // saari entries ke app_log ko ek flat list mein merge karo (latest pehle)
-  const all = useMemo(() => {
-    const out = [];
-    deliveries.forEach((d) => {
-      const log = d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
-      log.forEach((ev, i) => {
-        if (ev && ev.ts) out.push({ ev, d, key: `${d.invoice_id}#${i}` });
-      });
-    });
-    out.sort((a, b) => String(b.ev.ts).localeCompare(String(a.ev.ts)));
-    return out;
-  }, [deliveries]);
-
-  const rows = useMemo(() => {
-    const [s, e] = bounds;
-    const term = q.trim().toLowerCase();
-    return all.filter(({ ev, d }) => {
-      const ds = dayStr(ev.ts);
-      if (ds < s || ds > e) return false;
-      if (store !== 'ALL' && d.branch !== store) return false;
-      if (kind !== 'all' && actKind(ev) !== kind) return false;
-      if (!term) return true;
-      const hay =
-        `${d.customer} ${d.id} ${branchLabel(d.branch)} ${actorText(ev)} ${actTitle(ev)}`.toLowerCase();
-      return hay.includes(term);
-    });
-  }, [all, bounds, store, kind, q]);
-
-  // din ke hisaab se group — heading ke neeche us din ke updates
-  const days = [];
-  const byDay = {};
-  rows.forEach((r) => {
-    const ds = dayStr(r.ev.ts);
-    if (!byDay[ds]) {
-      byDay[ds] = [];
-      days.push(ds);
-    }
-    byDay[ds].push(r);
-  });
+  if (busy) return <p className="att-muted">Loading…</p>;
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="act-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="act-head">
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>Activity log</div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-              Kisne kya update kiya · {rows.length}{' '}
-              {rows.length === 1 ? 'update' : 'updates'}
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
+    <>
+      <p className="att-muted" style={{ whiteSpace: "normal" }}>
+        These people are in the system but their record is missing something. Until it's
+        filled in they sit outside the org chart, and without an email they can't sign in.
+      </p>
 
-        <div className="act-filters">
-          <div className="act-search">
-            <Search size={15} color={T.inkSoft} />
-            <input
-              placeholder="Customer, invoice, store, naam…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <div className="act-selects">
-            <select
-              className="dash-inp"
-              value={range}
-              onChange={(e) => setRange(e.target.value)}
-            >
-              <option value="today">Aaj</option>
-              <option value="yesterday">Kal</option>
-              <option value="7d">Pichhle 7 din</option>
-              <option value="month">Is mahine</option>
-              <option value="all">Sabhi</option>
-            </select>
-            <select
-              className="dash-inp"
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              {ACT_KINDS.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-            {session && session.isHead && (
-              <select
-                className="dash-inp"
-                value={store}
-                onChange={(e) => setStore(e.target.value)}
-              >
-                <option value="ALL">All stores</option>
-                {STORE_ORDER.map((s) => (
-                  <option key={s} value={s}>
-                    {branchLabel(s)}
-                  </option>
-                ))}
-              </select>
+      <div className="att-list">
+        <div className="att-hd">
+          <b>Half-filled records</b><span className="att-muted">{rows.length}</span>
+        </div>
+        {!rows.length && <p className="att-empty">Everyone's record is complete.</p>}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <Avatar name={r.full_name} />
+            <div className="grow" style={{ minWidth: 170 }}>
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">
+                {r.team !== "—" ? r.team : "no department"}
+                {r.designation ? ` · ${r.designation}` : ""}
+              </p>
+              <p style={{ fontSize: 12, color: "#b54708", marginTop: 2 }}>
+                Missing: {gaps(r).join(", ")}
+              </p>
+            </div>
+            {canEdit && (
+              <button className="att-btn sm" onClick={() => setOpen(r)}>Fix it</button>
             )}
           </div>
+        ))}
+      </div>
+
+      {open && <PersonSheet p={open} canEdit={canEdit}
+        onClose={() => setOpen(null)} onDeleted={load} />}
+    </>
+  );
+}
+
+function DaySheet({ d, me, onClose }: any) {
+  const [sess, setSess] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    supabase.from("attendance_sessions").select("*")
+      .eq("employee_id", me.id).eq("work_date", d.d).order("in_at")
+      .then(({ data }) => { setSess(data || []); setBusy(false); });
+  }, [d.d]);
+
+  const pretty = new Date(d.d + "T00:00:00").toLocaleDateString("en-GB",
+    { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+  return (
+    <Sheet title={pretty} onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-between">
+          <span className={markClass(d.mark)} style={{ fontSize: 15, padding: "5px 14px" }}>
+            {d.mark}
+          </span>
+          <b style={{ fontSize: 15 }}>{d.label}</b>
         </div>
 
-        <div className="act-body">
-          {rows.length === 0 ? (
-            <div className="empty" style={{ padding: '44px 0' }}>
-              Is filter mein koi update nahi
-            </div>
-          ) : (
-            days.map((ds) => (
-              <div key={ds}>
-                <div className="act-day">{actDayLabel(ds)}</div>
-                {byDay[ds].map(({ ev, d, key }) => {
-                  const k = actKind(ev);
-                  const Ico = actIconOf(k);
-                  const c = k === 'delete' ? T.red : stageColorOf(ev.stage);
-                  const soft =
-                    k === 'delete' ? T.redSoft : stageMeta(ev.stage).soft;
-                  const fields =
-                    ev.fields && typeof ev.fields === 'object'
-                      ? Object.entries(ev.fields).filter(
-                          ([, v]) => v !== '' && v !== null && v !== undefined,
-                        )
-                      : [];
-                  return (
-                    <button
-                      key={key}
-                      className="act-row"
-                      onClick={() => onOpen(d)}
-                    >
-                      <div
-                        className="act-ico"
-                        style={{ background: soft, color: c }}
-                      >
-                        <Ico size={15} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div className="act-line">
-                          <span className="act-what" style={{ color: c }}>
-                            {actTitle(ev)}
-                          </span>
-                          <span className="act-time">{actTime(ev.ts)}</span>
-                        </div>
-                        <div className="act-who">
-                          <UserCog size={12} />{' '}
-                          <span className="ellip">{actorText(ev)}</span>
-                        </div>
-                        <div className="act-sub">
-                          <span className="act-cust">{d.customer}</span>
-                          <span className="act-dot">·</span>
-                          <span className="ellip">{d.id}</span>
-                          {session && session.isHead && (
-                            <>
-                              <span className="act-dot">·</span>
-                              <span>{branchLabel(d.branch)}</span>
-                            </>
-                          )}
-                        </div>
-                        {fields.length > 0 && (
-                          <div className="act-fields">
-                            {fields.map(([fk, fv]) => (
-                              <span key={fk} className="act-chip">
-                                <b>{fk}:</b> {String(fv)}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        color={T.inkSoft}
-                        style={{ flexShrink: 0, alignSelf: 'center' }}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            ))
-          )}
-          <div className="act-foot">
-            Purane updates mein naam nahi dikhega — "kisne kiya" ab se save
-            hona shuru hua hai.
+        {d.log && (
+          <dl className="att-dl">
+            <dt>First check-in</dt>
+            <dd>{fmtTime(d.log.punch_in_at)}</dd>
+            <dt>Last check-out</dt>
+            <dd>{d.log.punch_out_at ? fmtTime(d.log.punch_out_at)
+              : <span className="att-muted">still checked in</span>}</dd>
+            <dt>Hours worked</dt>
+            <dd>{hhmm(d.log.worked_minutes)}</dd>
+            <dt>Shift</dt>
+            <dd>{fmtHM(me.shift_start)} – {fmtHM(me.shift_end)}</dd>
+            {d.log.late_minutes ? (<><dt>Late by</dt><dd>{d.log.late_minutes} min</dd></>) : null}
+          </dl>
+        )}
+
+        {d.lv && (
+          <dl className="att-dl">
+            <dt>Leave type</dt><dd>{d.lv.leave_type}</dd>
+            <dt>From</dt><dd>{fmtDate(d.lv.from_date)}</dd>
+            <dt>To</dt><dd>{fmtDate(d.lv.to_date)}</dd>
+            {d.lv.from_time && (<><dt>Time</dt>
+              <dd>{fmtHM(d.lv.from_time)} – {fmtHM(d.lv.to_time)}</dd></>)}
+            <dt>Days</dt><dd>{d.lv.days}</dd>
+            {d.lv.reason && (<><dt>Reason</dt><dd>{d.lv.reason}</dd></>)}
+          </dl>
+        )}
+
+        {!d.log && !d.lv && (
+          <p className="att-muted">
+            {d.mark === "A" ? "No check-in recorded for this day."
+              : d.mark === "W" ? "This is your weekly off."
+              : d.mark === "F" ? "Company holiday." : "Nothing recorded."}
+          </p>
+        )}
+      </div>
+
+      {busy && <p className="att-muted">Loading sessions…</p>}
+
+      {!busy && sess.length > 0 && (
+        <div className="att-list" style={{ marginTop: 12 }}>
+          <div className="att-hd">
+            <b>Check-ins that day</b><span className="att-muted">{sess.length}</span>
           </div>
+          {sess.map((x, i) => (
+            <div className="att-row" key={x.id}>
+              <span style={{ width: 22, fontWeight: 700, color: "#98a2b3" }}>{i + 1}</span>
+              <div className="grow">
+                <p>
+                  {fmtTime(x.in_at)}
+                  {x.out_at ? ` – ${fmtTime(x.out_at)}` : " – still in"}
+                  {x.auto_closed && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>auto closed</span>)}
+                </p>
+                <Pin lat={x.in_lat} lng={x.in_lng} dist={x.in_distance_m} ok={x.in_geo_ok} />
+              </div>
+              <b style={{ fontSize: 13 }}>{x.minutes ? hhmm(x.minutes) : "—"}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/* ================= apni report (sabke liye) ================= */
+function MyReportTab({ me }: any) {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [filter, setFilter] = useState("all");
+  const [pick, setPick] = useState<any>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
+  const [hols, setHols] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      const from = `${month}-01`, to = lastDayOf(from);
+      const [a, l, h] = await Promise.all([
+        supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+          .gte("work_date", from).lte("work_date", to).order("work_date"),
+        supabase.from("leaves").select("*").eq("employee_id", me.id)
+          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+        supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
+      ]);
+      setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []);
+      setBusy(false);
+    })();
+  }, [month, me.id]);
+
+  const days = useMemo(() => {
+    const from = `${month}-01`;
+    const total = Number(lastDayOf(from).slice(-2));
+    const out: any[] = [];
+    for (let i = 0; i < total; i++) {
+      const d = addDays(from, i);
+      const log = logs.find((x: any) => x.work_date === d);
+      const lv = leaves.find((x: any) => d >= x.from_date && d <= x.to_date);
+      const hol = hols.find((x: any) => x.hol_date === d);
+      const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
+      let mark = "", label = "";
+      if (log) { mark = { Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P";
+                 label = log.status; }
+      else if (lv) { mark = lv.leave_type; label = lv.leave_type; }
+      else if (hol) { mark = "F"; label = hol.name; }
+      else if (off) { mark = "W"; label = "Week off"; }
+      else if (d > istToday()) { mark = ""; label = ""; }
+      else { mark = "A"; label = "Absent"; }
+      out.push({ d, mark, label, log, lv });
+    }
+    return out;
+  }, [logs, leaves, hols, month, me]);
+
+  const t = useMemo(() => {
+    const c: any = { P: 0, L: 0, H: 0, A: 0, W: 0, F: 0, leave: 0, mins: 0 };
+    days.forEach((x) => {
+      if (["P", "L", "H", "A", "W", "F"].includes(x.mark)) c[x.mark]++;
+      else if (x.mark) c.leave++;
+      if (x.log) c.mins += x.log.worked_minutes || 0;
+    });
+    c.payable = c.P + c.L + c.H * 0.5 + c.leave;
+    return c;
+  }, [days]);
+
+  const shownDays = days.filter((x) => {
+    if (!x.mark) return false;
+    if (filter === "worked") return ["P", "L", "H"].includes(x.mark);
+    if (filter === "absent") return x.mark === "A";
+    if (filter === "leave") return !["P", "L", "H", "A", "W", "F"].includes(x.mark);
+    return true;
+  });
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>My attendance</b>
+          <p className="att-muted">{me.emp_code} · {me.full_name}</p>
+        </div>
+        <div className="att-flex">
+          <input type="month" value={month} max={istToday().slice(0, 7)}
+            onChange={(e) => setMonth(e.target.value)} className="att-repmonth" />
+          <button className="att-btn sm line" disabled={!days.length}
+            onClick={() => downloadCsv(days.map((x) => ({
+              Date: x.d, Mark: x.mark, Status: x.label,
+              In: x.log ? fmtTime(x.log.punch_in_at) : "",
+              Out: x.log?.punch_out_at ? fmtTime(x.log.punch_out_at) : "",
+              Hours: x.log ? hhmm(x.log.worked_minutes) : "",
+            })), `${me.emp_code}_${month}.csv`)}>CSV</button>
+        </div>
+      </div>
+
+      <div className="att-stats">
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#16a34a" }}>{t.P}</b><span>Present</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#d97706" }}>{t.L}</b><span>Late</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#ea580c" }}>{t.H}</b><span>Half</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("absent")}>
+          <b style={{ color: "#dc2626" }}>{t.A}</b><span>Absent</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("leave")}>
+          <b style={{ color: "#2563eb" }}>{t.leave}</b><span>Leave</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("all")}>
+          <b>{t.W}</b><span>Week off</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("all")}>
+          <b>{t.F}</b><span>Holiday</span></button>
+        <div className="att-stat"><b style={{ color: "#1849a9" }}>{t.payable}</b><span>Payable</span></div>
+        <button className="att-stat clk" onClick={() => setFilter("worked")}>
+          <b style={{ color: "#2563eb" }}>{hhmm(t.mins)}</b><span>Hours</span></button>
+      </div>
+
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && (
+        <div className="att-list">
+          <div className="att-hd">
+            <b>Day by day</b>
+            <span className="att-muted">
+              {filter === "all" ? "every day" : filter} · tap a day for details
+            </span>
+          </div>
+
+          <div className="att-seg" style={{ padding: "10px 14px 4px" }}>
+            {[["all", "All"], ["worked", "Worked"], ["absent", "Absent"],
+              ["leave", "Leave"]].map(([k, l]) => (
+              <button key={k} className={filter === k ? "on" : ""}
+                onClick={() => setFilter(k)}>{l}</button>
+            ))}
+          </div>
+
+          {shownDays.map((x) => (
+            <button className={`att-dayrow ${["W", "F"].includes(x.mark) ? "off" : ""}`}
+              key={x.d} onClick={() => setPick(x)}>
+              <span className="dt">
+                <b>{x.d.slice(-2)}</b>
+                <i>{new Date(x.d + "T00:00:00").toLocaleDateString("en-GB",
+                  { weekday: "short" })}</i>
+              </span>
+
+              <span className={`${markClass(x.mark)} wide ${x.mark.length > 2 ? "long" : ""}`}>
+                {x.mark}
+              </span>
+
+              <span className="mid">
+                <b>{x.label}</b>
+                <span>
+                  {x.log
+                    ? `${fmtTime(x.log.punch_in_at)}${x.log.punch_out_at
+                        ? ` – ${fmtTime(x.log.punch_out_at)}` : " – still in"}`
+                    : x.lv?.from_time
+                      ? `${fmtHM(x.lv.from_time)} – ${fmtHM(x.lv.to_time)}`
+                      : "\u00a0"}
+                </span>
+              </span>
+
+              <span className={`hrs ${x.log?.worked_minutes ? "" : "none"}`}>
+                {x.log?.worked_minutes ? hhmm(x.log.worked_minutes) : "—"}
+              </span>
+            </button>
+          ))}
+
+          {!shownDays.length && <p className="att-empty">Nothing here for this filter.</p>}
+        </div>
+      )}
+
+      {pick && <DaySheet d={pick} me={me} onClose={() => setPick(null)} />}
+    </div>
+  );
+}
+
+/* ================= manager ka daily verification ================= */
+function VerifyRow({ r, onSet, onClear, busy, date }: any) {
+  const [menu, setMenu] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [up, setUp] = useState(false);
+
+  // neeche jagah kam ho to menu upar khulega
+  const openMenu = (setter: any, cur: boolean) => (e: any) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    setUp(window.innerHeight - box.bottom < 230);
+    setter(!cur);
+  };
+  const [confirm, setConfirm] = useState<null | "hold" | "cancel">(null);
+  const [note, setNote] = useState("");
+
+  const tone: any = {
+    Approved: { bg: "#ecfdf3", fg: "#067647" },
+    "On hold": { bg: "#fffaeb", fg: "#b54708" },
+    Cancelled: { bg: "#fef3f2", fg: "#b42318" },
+  };
+
+  return (
+    <>
+      <div className={`att-vrow ${r.status === "Approved" ? "ok"
+        : r.status === "On hold" ? "hold" : r.status === "Cancelled" ? "cut" : ""}`}>
+        <div className="who">
+        <Avatar name={r.full_name} />
+
+        <div className="grow" style={{ minWidth: 0 }}>
+          <p className="nm">
+            <PName id={r.employee_id} code={r.emp_code}><b>{r.full_name}</b></PName>
+            {r.still_in && (
+              <span className="att-pill p-Present" style={{ marginLeft: 7 }}>in now</span>)}
+            {r.geo_ok === false && (
+              <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>off-site</span>)}
+          </p>
+          <p className="att-muted">
+            {r.designation || "—"}
+            {r.day_status ? ` · ${r.day_status}` : ""}
+          </p>
+          {r.status && (
+            <p className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+              {r.status} by {r.verified_by_name || "—"}
+              {r.verified_at ? ` at ${fmtTime(r.verified_at)}` : ""}
+              {r.note ? ` — ${r.note}` : ""}
+            </p>
+          )}
+        </div>
+        </div>
+
+        <div className="when">
+          <p className="att-vtime">
+            {fmtTime(r.first_in)}{r.last_out ? ` – ${fmtTime(r.last_out)}` : ""}
+          </p>
+          {r.worked_minutes ? (
+            <p className="att-muted" style={{ fontSize: 11.5 }}>{hhmm(r.worked_minutes)}</p>
+          ) : null}
+        </div>
+
+        {r.status ? (
+          <>
+            <span className="att-vtag" style={{
+              background: tone[r.status]?.bg, color: tone[r.status]?.fg }}>{r.status}</span>
+
+            <div className="att-menu">
+              <button className="att-pencil" onClick={openMenu(setEdit, edit)}
+                aria-label="Change this">
+                <Icon n="pencil" c="currentColor" s={14} />
+              </button>
+              {edit && (
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    onClick={() => setEdit(false)} />
+                  <div className={`att-pop ${up ? "up" : ""}`}>
+                    <button onClick={() => { setEdit(false); onClear(r.employee_id); }}>
+                      Change to not approved
+                    </button>
+                    {r.status !== "On hold" && (
+                      <button onClick={() => { setEdit(false); setConfirm("hold"); }}>
+                        Put on hold
+                      </button>
+                    )}
+                    {r.status !== "Cancelled" && (
+                      <>
+                        <div className="sep" />
+                        <button className="danger"
+                          onClick={() => { setEdit(false); setConfirm("cancel"); }}>
+                          Cancel this attendance
+                        </button>
+                      </>
+                    )}
+                    <div className="sep" />
+                    <button onClick={() => setEdit(false)}>Cancel — leave it as is</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <button className="att-btn sm green" disabled={busy}
+              onClick={() => onSet(r.employee_id, "Approved")}>Approve</button>
+
+            <div className="att-menu">
+              <button className="att-dots" onClick={openMenu(setMenu, menu)}
+                aria-label="More options">
+                <Icon n="dots" c="currentColor" s={18} />
+              </button>
+              {menu && (
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    onClick={() => setMenu(false)} />
+                  <div className={`att-pop ${up ? "up" : ""}`}>
+                    <button onClick={() => { setMenu(false); setConfirm("hold"); }}>
+                      Put on hold
+                    </button>
+                    <div className="sep" />
+                    <button className="danger"
+                      onClick={() => { setMenu(false); setConfirm("cancel"); }}>
+                      Cancel this attendance
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {confirm && (
+        <Sheet title={confirm === "cancel" ? "Cancel attendance" : "Put on hold"}
+          onClose={() => { setConfirm(null); setNote(""); }}>
+          <div className="att-card att-stack">
+            {confirm === "cancel" ? (
+              <div className="att-note err">
+                <span>
+                  This marks <b>{r.full_name}</b> absent for {fmtDate(date)} even though
+                  they checked in at {fmtTime(r.first_in)}. Their hours go to zero and it
+                  shows up in payroll. Only do this if they didn't actually turn up.
+                </span>
+              </div>
+            ) : (
+              <p className="att-muted">
+                On hold keeps the day as-is but flags it so you can come back to it.
+              </p>
+            )}
+            <div>
+              <label>Reason {confirm === "cancel" ? "(required)" : "(optional)"}</label>
+              <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+                placeholder={confirm === "cancel"
+                  ? "Why is this being cancelled?" : "Anything to note?"} />
+            </div>
+            <div className="att-flex">
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => { setConfirm(null); setNote(""); }}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1,
+                  background: confirm === "cancel" ? "#b42318" : "#d97706" }}
+                disabled={busy || (confirm === "cancel" && !note.trim())}
+                onClick={() => {
+                  onSet(r.employee_id, confirm === "cancel" ? "Cancelled" : "On hold", note);
+                  setConfirm(null); setNote("");
+                }}>
+                {confirm === "cancel" ? "Yes, cancel it" : "Put on hold"}
+              </button>
+            </div>
+          </div>
+        </Sheet>
+      )}
+    </>
+  );
+}
+
+function VerifyPanel({ onCount }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [date, setDate] = useState(istToday());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState<"todo" | "all">("all");
+
+  const load = async (d = date) => {
+    const { data, error } = await supabase.rpc("verification_queue", { p_date: d });
+    if (error) setErr(error.message);
+    setRows(data || []);
+    if (onCount) onCount((data || []).filter((r: any) => !r.status).length);
+  };
+  useEffect(() => { load(date); }, [date]);
+
+  const setOne = async (emp: string, status: string, note?: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("set_verification", {
+      p_emp: emp, p_status: status, p_date: date, p_note: note || null,
+    });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  const clearOne = async (emp: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("clear_verification", { p_emp: emp, p_date: date });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
+  const approveMany = async (list: any[]) => {
+    setBusy(true); setErr("");
+    for (const r of list.filter((x) => !x.status)) {
+      const { error } = await supabase.rpc("set_verification", {
+        p_emp: r.employee_id, p_status: "Approved", p_date: date, p_note: null,
+      });
+      if (error) { setErr(error.message); break; }
+    }
+    await load(); setBusy(false);
+  };
+
+  const pending = rows.filter((r) => !r.status);
+  const done = rows.length - pending.length;
+  const pct = rows.length ? Math.round((done / rows.length) * 100) : 0;
+  const shown = filter === "todo" ? pending : rows;
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team || "—"] = groups[r.team || "—"] || []).push(r); });
+  const teams = Object.keys(groups).sort();
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-vhero">
+        <div>
+          <h2>Who turned up</h2>
+          <p className="dt">
+            {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+              { weekday: "long", day: "2-digit", month: "long" })}
+          </p>
+        </div>
+
+        <div className="att-vprog">
+          <div className="att-between">
+            <span className="att-muted">
+              {rows.length === 0 ? "Nobody has checked in yet"
+                : pending.length === 0 ? `All ${rows.length} checked`
+                : `${done} of ${rows.length} checked`}
+            </span>
+            <b style={{ color: pct === 100 ? "#16a34a" : "#344054" }}>{pct}%</b>
+          </div>
+          <div className="att-vbar"><i style={{ width: `${pct}%` }} /></div>
+        </div>
+
+        <div className="att-flex">
+          <input type="date" value={date} max={istToday()}
+            onChange={(e) => setDate(e.target.value)}
+            style={{ width: "auto", minWidth: 168 }} />
+          {pending.length > 0 && (
+            <button className="att-btn green" disabled={busy}
+              onClick={() => approveMany(rows)}>
+              Approve all ({pending.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      <Note>{err}</Note>
+
+      {rows.length > 0 && (
+        <div className="att-seg">
+          <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>
+            Everyone ({rows.length})
+          </button>
+          <button className={filter === "todo" ? "on" : ""} onClick={() => setFilter("todo")}>
+            Still to check ({pending.length})
+          </button>
+        </div>
+      )}
+
+      {rows.length === 0 && (
+        <div className="att-vwrap">
+          <div className="att-vempty">
+            <div className="big">🌤️</div>
+            <p>No check-ins recorded for this day.</p>
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && shown.length === 0 && (
+        <div className="att-vwrap">
+          <div className="att-vempty">
+            <div className="big">✓</div>
+            <p>Everyone's been checked. Nothing left for today.</p>
+          </div>
+        </div>
+      )}
+
+      {teams.map((tn) => {
+        const g = groups[tn];
+        const left = g.filter((x) => !x.status).length;
+        return (
+          <div className="att-vwrap" key={tn}>
+            <div className="att-vteam">
+              <b>{tn}</b>
+              <span className="att-muted">
+                {left ? `${left} to check` : "all checked"}
+              </span>
+              {left > 1 && (
+                <button className="att-btn sm line" style={{ marginLeft: "auto" }}
+                  disabled={busy} onClick={() => approveMany(g)}>
+                  Approve these {left}
+                </button>
+              )}
+            </div>
+            {g.map((r) => (
+              <VerifyRow key={r.employee_id} r={r} onSet={setOne} onClear={clearOne}
+                busy={busy} date={date} />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ================= person popup, poore app mein ================= */
+const PersonCtx = React.createContext<any>(null);
+const usePerson = () => React.useContext(PersonCtx);
+
+// Kisi bhi naam ko clickable banata hai
+function PName({ id, code, children, className = "" }: any) {
+  const ctx = usePerson();
+  if (!ctx || (!id && !code)) return <>{children}</>;
+  return (
+    <span className={`att-pname ${className}`}
+      onClick={(e) => { e.stopPropagation(); ctx.open({ id, code }); }}>
+      {children}
+    </span>
+  );
+}
+
+function PersonProvider({ me, children }: any) {
+  const [dir, setDir] = useState<any[]>([]);
+  const [pick, setPick] = useState<any>(null);
+  const canEdit = me?.role === "admin";
+
+  const load = async () => {
+    const { data } = await supabase.rpc("directory", {});
+    setDir(data || []);
+    return data || [];
+  };
+  useEffect(() => { load(); }, []);
+
+  const open = async ({ id, code }: any) => {
+    const find = (list: any[]) =>
+      list.find((r) => (id && r.id === id) || (code && r.emp_code === code));
+    let row = find(dir);
+    if (!row) row = find(await load());
+    if (row) setPick(row);
+  };
+
+  return (
+    <PersonCtx.Provider value={{ open }}>
+      {children}
+      {pick && (
+        <PersonSheet p={pick} canEdit={canEdit}
+          onClose={() => setPick(null)} onDeleted={load} />
+      )}
+    </PersonCtx.Provider>
+  );
+}
+
+/* ================= account linking ================= */
+function LinkAccount({ session, err: outerErr }: any) {
+  const email = session?.user?.email || "";
+  const [state, setState] = useState<"checking" | "notfound" | "stuck">("checking");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Sirf jodne ki koshish — kuch banata NAHI hai.
+  // Ek hi baar chalta hai; jud gaya to poora page reload, taaki loop na bane.
+  useEffect(() => {
+    const key = `hjs_linked_${session?.user?.id}`;
+    let done = false;
+
+    // 8 second se zyada atka to aage badho
+    const bail = setTimeout(() => {
+      if (!done) { setErr("Couldn't reach the server. Check your connection."); setState("notfound"); }
+    }, 8000);
+
+    (async () => {
+      const { data, error } = await supabase.rpc("link_self");
+      done = true; clearTimeout(bail);
+
+      if (error) {
+        // link_self hai hi nahi (SQL nahi chali) -> saaf batao
+        setErr(/function|schema cache/i.test(error.message)
+          ? "The app isn't fully set up yet. Ask your admin to run the latest database update."
+          : error.message);
+        setState("notfound");
+        return;
+      }
+      if (data === "linked") {
+        if (sessionStorage.getItem(key)) { setState("stuck"); return; }
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+        return;
+      }
+      setState("notfound");
+    })();
+
+    return () => clearTimeout(bail);
+  }, []);
+
+  const request = async () => {
+    if (!name.trim()) return setErr("Please enter your full name.");
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("register_self", {
+      p_full_name: name.trim(),
+      p_phone: phone.trim() || null,
+    });
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setBusy(false);
+    window.location.reload();
+  };
+
+  if (state === "checking") {
+    return (
+      <div className="att-center">
+        <p className="att-muted">Checking your account…</p>
+      </div>
+    );
+  }
+
+  // Login juda hua hai par employee record padha nahi ja raha
+  if (state === "stuck") {
+    return (
+      <div className="att-center">
+        <div className="att-card" style={{ maxWidth: 430 }}>
+          <h2 className="att-h1">Almost there</h2>
+          <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
+            Your login ({email}) is linked, but we can't read your employee record.
+            Ask your admin to check that your record is active.
+          </p>
+          {outerErr && <Note>{outerErr}</Note>}
+          <button className="att-btn line" style={{ marginTop: 14, width: "100%" }}
+            onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 430 }}>
+        <h2 className="att-h1">We don't have this email yet</h2>
+        <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
+          You're signed in as <b>{email}</b>, but that address isn't on the employee
+          list. If you have a different work email, sign out and try that one —
+          you'll go straight in.
+        </p>
+
+        <div className="att-stack" style={{ marginTop: 16 }}>
+          <div>
+            <label>Your full name</label>
+            <input value={name} autoFocus placeholder="Full name"
+              onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label>Mobile <span className="att-muted">(optional)</span></label>
+            <input value={phone} placeholder="98765 43210"
+              onChange={(e) => setPhone(e.target.value)} />
+          </div>
+          <Note>{err}</Note>
+          <button className="att-btn" disabled={busy || !name.trim()} onClick={request}>
+            {busy ? "Sending…" : "Ask an admin for access"}
+          </button>
+          <button className="att-btn line" onClick={() => supabase.auth.signOut()}>
+            Sign out and try another email
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function StyleTag() {
-  return (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
-      * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-      body { color: ${T.ink}; background: ${T.beige}; }
-      #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
+/* ========================= shell ========================= */
+// Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
+type View = { k: string; label: string };
+type Scope = { k: string; label: string; views: View[] };
+type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
 
-      /* ── EMBED MODE (Zoho iframe): app poora frame bhare (100vh = iframe height) ── */
-      .hjs-embed .track-wrap, .hjs-embed .login-wrap { min-height: 100vh; }
-      button { color: inherit; font-family: inherit; }
-      h1, h2, h3 { color: ${T.ink}; }
-      .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .spin { animation: spin 1s linear infinite; }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      ::-webkit-scrollbar { width: 9px; height: 9px; }
-      ::-webkit-scrollbar-thumb { background: #cfc8b8; border-radius: 8px; }
-      ::-webkit-scrollbar-track { background: transparent; }
+const MODULES: Module[] = [
+  {
+    k: "home", label: "Home", icon: "home",
+    scopes: [
+      { k: "myspace", label: "My Space", views: [
+        { k: "overview", label: "Overview" },
+        { k: "calendar", label: "Calendar" },
+      ]},
+      { k: "team", label: "Team", views: [
+        { k: "space", label: "Team Space" },
+        { k: "dept", label: "Department" },
+        { k: "peers", label: "Peers" },
+      ]},
+      { k: "org", label: "Organization", views: [
+        { k: "list", label: "Employee List" },
+        { k: "emptree", label: "Employee Tree" },
+        { k: "depttree", label: "Department Tree" },
+        { k: "deptdir", label: "Department Directory" },
+        { k: "people", label: "Birthdays & New Hires" },
+        { k: "notice", label: "Announcements" },
+      ]},
+    ],
+  },
+  {
+    k: "att", label: "Attendance", icon: "clock",
+    scopes: [
+      { k: "mydata", label: "My Data", views: [
+        { k: "summary", label: "Attendance Summary" },
+        { k: "calendar", label: "Calendar" },
+        { k: "regs", label: "Regularization" },
+      ]},
+      { k: "team", label: "Team", views: [
+        { k: "today", label: "Today" },
+        { k: "leave", label: "On Leave" },
+        { k: "matrix", label: "Monthly Matrix" },
+        { k: "dash", label: "Dashboard" },
+      ]},
+    ],
+  },
+  {
+    k: "leave", label: "Leave Tracker", icon: "cal",
+    scopes: [
+      { k: "mydata", label: "My Data", views: [
+        { k: "summary", label: "Leave Summary" },
+        { k: "requests", label: "Leave Requests" },
+      ]},
+      { k: "team", label: "Team", views: [{ k: "leaves", label: "Team Leaves" }]},
+      { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
+    ],
+  },
+  {
+    k: "approvals", label: "Approvals", icon: "check", approverOnly: true,
+    scopes: [
+      { k: "pending", label: "Pending", views: [{ k: "all", label: "Awaiting action" }]},
+      { k: "history", label: "History", views: [{ k: "all", label: "All requests" }]},
+      { k: "joiners", label: "New joiners", views: [{ k: "all", label: "Pending sign-ups" }]},
+      { k: "setup", label: "Needs setup", views: [{ k: "all", label: "Half-filled records" }]},
+    ],
+  },
+  {
+    k: "reports", label: "Reports", icon: "users",
+    scopes: [
+      { k: "mine", label: "My Reports", views: [
+        { k: "me", label: "My attendance" },
+      ]},
+      { k: "att", label: "Attendance", views: [
+        { k: "muster", label: "Muster Roll" },
+        { k: "payroll", label: "Payroll" },
+      ]},
+      { k: "people", label: "People", views: [{ k: "staff", label: "Staff" }]},
+    ],
+  },
+  {
+    k: "me", label: "Profile", icon: "user",
+    scopes: [{ k: "me", label: "My Profile", views: [{ k: "profile", label: "Profile" }]}],
+  },
+];
 
-      .sidebar { width: 240px; flex-shrink: 0; background: linear-gradient(180deg,${T.forest},${T.forestSoft}); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
-      .brand { display: flex; align-items: center; gap: 11px; }
-      .brand-badge { width: 40px; height: 40px; border-radius: 12px; background: ${T.green}; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(46,125,50,.35); }
-      .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; transition: background .15s; }
-      .nav-item:hover { background: rgba(255,255,255,.07); }
-      /* ── DASHBOARD ── */
-      .dash-switch { display: flex; margin-bottom: 16px; }
-      .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
-      .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
-      .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
-      .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
-      /* dashboard ke date inputs pe bhi wahi green calendar icon (warna
-         icon default light-grey hota hai aur beige background mein chhup jaata) */
-      .dash-inp[type="date"] { cursor: pointer; }
-      .dash-inp[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 18px; height: 18px; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
-      .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
-      .dash-card { text-align: left; border: 1.5px solid ${T.line}; background: #fff; border-radius: 14px; padding: 14px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .12s; }
-      .dash-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
-      .dash-card.on { box-shadow: 0 4px 16px rgba(20,57,43,.12); }
-      .dash-card-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
-      .dash-card-n { font-size: 26px; font-weight: 800; color: ${T.ink}; line-height: 1; }
-      .dash-card-l { font-size: 11.5px; font-weight: 600; color: ${T.inkSoft}; margin-top: 5px; }
-      .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
-      .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
-      .dash-table-wrap { overflow-x: auto; }
-      .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-      .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
-      .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
-      /* table scroll karte waqt pehla column (Store / Invoice) jama rehta hai */
-      .dash-table th:first-child, .dash-table td:first-child { position: sticky; left: 0; z-index: 2; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
-      .dash-table thead th:first-child { z-index: 3; }
-      .dash-row:hover td:first-child { background: ${T.cream}; }
-      .dash-store { font-weight: 700; color: ${T.ink}; }
-      .dash-td-click { font-weight: 700; color: ${T.green}; cursor: pointer; }
-      .dash-td-click:hover { background: ${T.mint}; }
-      .dash-td-zero { color: ${T.line2 || '#C9C7BE'}; }
-      .dash-row { cursor: pointer; }
-      .dash-row:hover { background: ${T.cream}; }
-      .dash-chip { padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-      .dash-empty { text-align: center; color: ${T.inkSoft}; padding: 26px !important; }
-      @media (max-width: 1100px) { .dash-cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-      @media (max-width: 760px) { .dash-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-      .soon { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; color: rgba(255,255,255,.7); }
-      .store-tag { margin: 12px; padding: 12px 14px; border-radius: 13px; background: rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
+export default function Attendance() {
+  const [session, setSession] = useState<any>(undefined);
+  const [me, setMe] = useState<any>(null);
+  // Nav ab URL ke hash mein rehta hai: #home/myspace/verify
+  // Isse refresh pe wahi tab khulta hai aur link share kiya ja sakta hai.
+  // Nav URL ke hash mein bhi rehta hai aur browser ki memory mein bhi.
+  // Iframe ke andar hash kabhi-kabhi udd jata hai (page ?attendance se
+  // dobara load hota hai), isliye localStorage bhi rakha hai — refresh
+  // pe wahi tab wapas khulta hai.
+  const NAV_KEY = "hjs_nav";
 
-      .topbar { height: 64px; background: rgba(251,249,244,.85); backdrop-filter: blur(10px); border-bottom: 1px solid ${T.line}; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; position: sticky; top: 0; z-index: 20; gap: 20px; }
-      .topbar-search { width: 100%; height: 40px; border: 1px solid ${T.line}; border-radius: 11px; padding: 0 14px 0 40px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
-      .topbar-search:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-      .icon-btn { position: relative; width: 38px; height: 38px; border-radius: 10px; border: 1px solid ${T.line}; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-      .icon-btn:hover { background: ${T.beige}; }
-      .icon-btn .dot { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: ${T.amber}; border: 2px solid #fff; }
-      .avatar { width: 36px; height: 36px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-      .live-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; padding: 7px 13px; border-radius: 20px; }
-      .store-switch { border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 8px 12px 8px 34px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; outline: none; appearance: none; }
-      .store-switch:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-      .login-err { background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; padding: 10px 13px; border-radius: 11px; font-size: 12.5px; font-weight: 600; text-align: center; }
+  const readHash = () => {
+    const h = (window.location.hash || "").replace(/^#/, "").split("/");
+    if (h[0]) return { m: h[0], s: h[1] || "", v: h[2] || "" };
+    try {
+      const saved = (localStorage.getItem(NAV_KEY) || "").split("/");
+      if (saved[0]) return { m: saved[0], s: saved[1] || "", v: saved[2] || "" };
+    } catch {}
+    return { m: "home", s: "", v: "" };
+  };
 
-      .err { display: flex; gap: 12px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; padding: 14px 16px; border-radius: 14px; margin-bottom: 20px; font-size: 13.5px; }
-      .loading { text-align: center; color: ${T.inkSoft}; padding: 50px; font-size: 14px; }
+  const [route, setRoute] = useState(readHash);
+  const mod = route.m, scope = route.s, view = route.v;
 
-      .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
-      .stat-grid.three { grid-template-columns: repeat(3,minmax(0,1fr)); }
-      .stat-card { background: #fff; border: 1px solid ${T.line}; border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 1px 2px rgba(20,57,43,.04); cursor: pointer; text-align: left; font-family: inherit; color: ${T.ink}; width: 100%; transition: transform .12s, box-shadow .12s, border-color .12s; }
-      .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
-      .stat-ico { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
-      .load-old { display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 1px dashed ${T.line}; border-radius: 11px; padding: 10px 15px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.green}; cursor: pointer; margin-bottom: 14px; }
-      .load-old:hover { background: ${T.mint}; border-color: ${T.green}; border-style: solid; }
-      .drill-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-      .arch-select { font-size: 17px; font-weight: 800; font-family: inherit; color: ${T.ink}; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; outline: none; }
-      .arch-select:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+  const remember = (m: string, s2: string, v: string) => {
+    try { localStorage.setItem(NAV_KEY, `${m}/${s2}/${v}`); } catch {}
+  };
 
-      /* ── layout toggle (Stages / Categories) ── */
-      .view-range { display: inline-flex; align-items: center; gap: 6px; }
-      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
-      .layout-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 3px; gap: 3px; }
-      .lt-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; padding: 8px 13px; border-radius: 9px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
-      .lt-btn.active { background: ${T.forest}; color: #fff; }
+  const goto = (m: string, s2: string, v: string) => {
+    const h = `#${m}/${s2}/${v}`;
+    if (window.location.hash !== h) window.location.hash = h;
+    remember(m, s2, v);
+    setRoute({ m, s: s2, v });
+  };
+  const setView = (v: string) => goto(mod, scope, v);
 
-      /* ── categories (collapsible stat categories) ── */
-      .cat-list { display: flex; flex-direction: column; gap: 14px; }
-      .cat-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 2px rgba(20,57,43,.04); }
-      .cat-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: #fff; border: none; cursor: pointer; font-family: inherit; color: ${T.ink}; }
-      .cat-head:hover { background: ${T.cream}; }
-      .cat-ico { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
-      .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  useEffect(() => {
+    const onHash = () => setRoute(readHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const [pending, setPending] = useState(0);
+  const [canVerify, setCanVerify] = useState(false);
+  const [meErr, setMeErr] = useState("");
+  const [toCheck, setToCheck] = useState(0);
 
-      .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
-      .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
-      .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
-      .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
-      .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
-      .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
-      .column:nth-child(5) { border-top: 3px solid ${T.green}; }
-      .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
-      .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-      .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
-      .col-body { display: flex; flex-direction: column; gap: 10px; padding: 4px; min-height: 40px; }
-      .empty { text-align: center; font-size: 12px; color: ${T.inkSoft}; padding: 18px 0; }
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
-      .card { background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 14px; cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
-      .card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
-      .eq-ico { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .card-name { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; line-height: 1.25; color: ${T.ink}; overflow-wrap: anywhere; }
-      .card-id { font-size: 11px; color: ${T.inkSoft}; margin-top: 2px; }
-      .card-equip { font-size: 12px; color: ${T.inkSoft}; margin-top: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .card-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; }
-      .card-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: ${T.inkSoft}; }
-      .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
-      .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
-      .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
-      .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
-      .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
-      /* card ke andar wala inline form — lamba button hone pe footer bahar
-         nikal jaata tha (justify-end + no wrap). Ab wrap hoke andar rehta hai. */
-      .inline-move .modal-foot { flex-wrap: wrap; gap: 8px; }
-      .inline-move .modal-foot .btn-ghost,
-      .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
-      .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
-      .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
-      .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
-      .card.is-cancelled:hover { border-color: #DFB9AC; }
-      .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
+  useEffect(() => {
+    if (!session) { setMe(null); return; }
+    supabase.from("employees").select("*, branches(name), teams(name)")
+      .eq("auth_user_id", session.user.id).maybeSingle()
+      .then(({ data, error }) => {
+        if (error) console.error("employee lookup failed:", error);
+        setMe(data || null);
+        setMeErr(error ? error.message : "");
+      });
+  }, [session]);
 
-      .foot-total { margin-top: 28px; padding-top: 16px; border-top: 1px solid ${T.line}; text-align: center; font-size: 13px; color: ${T.inkSoft}; font-weight: 700; }
-
-      .overlay { position: fixed; inset: 0; background: rgba(20,40,32,.42); backdrop-filter: blur(3px); z-index: 50; display: flex; animation: fade .18s ease; }
-      .overlay.center { align-items: center; justify-content: center; padding: 20px; }
-      @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
-      .drawer { margin-left: auto; width: 470px; max-width: 94vw; height: 100%; background: ${T.cream}; overflow-y: auto; padding: 22px; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
-      @keyframes slidein { from { transform: translateX(30px); opacity: .6 } to { transform: none; opacity: 1 } }
-      .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 10px; }
-      .stage-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 6px 11px; border-radius: 20px; }
-
-      .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 14px; }
-      .kv { min-width: 0; }
-      .kv-label { font-size: 10px; color: ${T.inkSoft}; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
-      .kv-val { font-size: 13px; font-weight: 600; margin-top: 2px; color: ${T.ink}; word-break: break-word; }
-      .sec-title { font-size: 12.5px; font-weight: 800; margin: 18px 0 8px; color: ${T.ink}; display: flex; align-items: center; gap: 6px; }
-      .mini-edit { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border: 1px solid ${T.mint}; border-radius: 8px; padding: 4px 9px; cursor: pointer; font-family: inherit; }
-      .mini-edit:hover { background: #dcebdd; }
-      .edit-btn { width: 100%; margin-top: 14px; border: 1px solid ${T.green}; background: ${T.mint}; color: ${T.green}; border-radius: 11px; padding: 11px; font-weight: 700; font-size: 13px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
-      .edit-btn:hover { background: #dcebdd; }
-
-      .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
-      .flag-note b { font-weight: 800; }
-      .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
-      .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-      .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
-      .btn-danger:hover { background: #F2D9D0; border-color: #DFB9AC; }
-      .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
-      .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
-      .tp12 { display: flex; align-items: center; gap: 7px; }
-      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
-      .tp12 .inp:last-child { flex: 0 0 84px; }
-      .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
-      .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
-      .created-note b { color: ${T.ink}; font-weight: 700; }
-      .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
-      .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
-      .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
-      .photo-btns { display: flex; gap: 9px; }
-      .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
-      .photo-btn.alt { background: #fff; color: ${T.green}; }
-      .photo-btn:disabled { opacity: .6; cursor: default; }
-      .photo-count { color: ${T.green}; font-weight: 800; }
-      .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-      .photo-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; aspect-ratio: 1 / 1; }
-      .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .photo-x { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: rgba(20,32,26,.85); color: #fff; border: none; border-radius: 7px; cursor: pointer; }
-      .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
-      .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
-
-      .timeline { margin-bottom: 8px; }
-      .tl-row { display: flex; gap: 12px; }
-      .tl-marker { display: flex; flex-direction: column; align-items: center; }
-      .tl-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 3px; box-shadow: 0 0 0 3px ${T.cream}; z-index: 1; }
-      .tl-line { flex: 1; width: 2px; margin: 2px 0; min-height: 14px; }
-      .tl-note { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
-      .tl-field { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; font-weight: 500; line-height: 1.4; }
-      .tl-field b { font-weight: 700; color: ${T.ink}; }
-
-      .stage-picker { display: flex; flex-wrap: wrap; gap: 10px; }
-      .stage-pick-btn { flex: 1 1 110px; min-width: 104px; border: 1.5px solid; border-radius: 12px; padding: 14px 10px; font-size: 15px; font-weight: 800; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .1s, box-shadow .12s; }
-      .stage-pick-btn:hover { transform: translateY(-1px); }
-      .stage-pick-btn.is-next { border-width: 2.5px; box-shadow: 0 3px 12px rgba(20,57,43,.12); }
-
-      .next-hint { display: flex; align-items: center; gap: 9px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 14px; color: ${T.ink}; margin-bottom: 12px; line-height: 1.4; }
-      .next-hint b { font-weight: 800; }
-      .next-hint .col-pip { width: 10px; height: 10px; }
-      .next-hint.done { background: ${T.mint}; border-color: #cfe3d0; color: ${T.green}; font-weight: 800; }
-      .next-badge { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 4px 10px; border-radius: 8px; }
-      .sec-title.stage-block-title { font-size: 15px; }
-      .block-next-note { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 8px; background: ${T.cream}; border: 1px dashed ${T.line}; border-radius: 10px; padding: 8px 11px; }
-      .block-next-note b { color: ${T.ink}; font-weight: 800; }
-
-      .tb-search { position: relative; flex: 1; max-width: 420px; }
-      .tb-brand { display: none; align-items: center; gap: 9px; }
-      .tb-brand span { font-weight: 800; font-size: 15px; letter-spacing: -0.3px; color: ${T.forest}; }
-      .tb-actions { display: flex; align-items: center; gap: 12px; }
-      .tb-user { display: flex; align-items: center; gap: 10px; }
-      .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
-      .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
-      .lang-btn.active { background: ${T.forest}; color: #fff; }
-      /* phone pe sidebar chhup jaata hai — head login ke liye page switcher
-         yahan topbar mein aa jaata hai (laptop pe sidebar hi kaafi hai) */
-      .page-switch { display: none; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 10px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; outline: none; max-width: 150px; }
-      .page-switch:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-      @media (max-width: 860px) { .page-switch { display: block; } }
-      .search-dd { position: absolute; top: 48px; left: 0; right: 0; background: #fff; border: 1px solid ${T.line}; border-radius: 13px; box-shadow: 0 14px 34px rgba(20,57,43,.16); z-index: 60; max-height: 380px; overflow-y: auto; padding: 6px; }
-      .search-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: none; padding: 10px 11px; border-radius: 10px; cursor: pointer; font-family: inherit; }
-      .search-row:hover { background: ${T.cream}; }
-      .search-row-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-      .search-name { font-size: 13.5px; font-weight: 700; color: ${T.ink}; min-width: 0; }
-      .search-tag { flex-shrink: 0; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 6px; }
-      .search-tag.today { background: ${T.mint}; color: ${T.green}; }
-      .search-tag.arch { background: ${T.slateSoft}; color: ${T.slate}; }
-      .search-tag.cancel { background: ${T.redSoft}; color: ${T.red}; }
-      .search-row.is-cancelled { background: #FCF2EF; }
-      .search-row.is-cancelled:hover { background: #F8E6E0; }
-      .search-mod { font-weight: 800; color: ${T.green}; }
-      .search-sub { font-size: 11.5px; color: ${T.inkSoft}; }
-      .search-empty { padding: 14px; text-align: center; font-size: 12.5px; color: ${T.inkSoft}; }
-      .m-board { display: flex; flex-direction: column; gap: 12px; }
-      .m-sec { background: #fff; border: 1px solid ${T.line}; border-top: 3px solid ${T.line}; border-radius: 14px; overflow: hidden; }
-      .m-sec-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 15px 14px; background: #fff; border: none; cursor: pointer; font-family: inherit; text-align: left; color: ${T.ink}; }
-      .m-sec-body { padding: 8px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
-
-      .modal { width: 470px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: ${T.cream}; border-radius: 20px; animation: pop .2s cubic-bezier(.2,.8,.2,1); text-align: left; }
-      @keyframes pop { from { transform: scale(.96); opacity: 0 } to { transform: none; opacity: 1 } }
-      .modal-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px 20px 14px; border-bottom: 1px solid ${T.line}; gap: 10px; }
-      .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
-      .modal-foot { padding: 14px 20px; border-top: 1px solid ${T.line}; display: flex; gap: 10px; justify-content: flex-end; }
-      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-      .field { display: flex; flex-direction: column; gap: 6px; }
-      .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
-      .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
-      .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
-      /* native date/time picker icon — proper calendar / clock (green).
-         Manual typing bhi chalti hai; icon sirf picker kholne ke liye hai. */
-      .inp[type="date"], .inp[type="time"], .inp[type="datetime-local"] { cursor: pointer; }
-      .inp[type="date"]::-webkit-calendar-picker-indicator,
-      .inp[type="time"]::-webkit-calendar-picker-indicator,
-      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 19px; height: 19px; padding: 0; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 19px 19px; }
-      .inp[type="date"]::-webkit-calendar-picker-indicator,
-      .inp[type="datetime-local"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
-      .inp[type="time"]::-webkit-calendar-picker-indicator { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'/%3E%3Cpolyline%20points='12%206%2012%2012%2016%2014'/%3E%3C/svg%3E"); }
-      textarea.inp { resize: vertical; }
-
-      .check1 { display: flex; align-items: center; gap: 10px; border: 1px solid ${T.line}; background: #fff; border-radius: 11px; padding: 12px 13px; cursor: pointer; font-family: inherit; text-align: left; }
-      .check-box { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-
-      .btn-primary { background: ${T.green}; color: #fff; border: none; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(46,125,50,.28); }
-      .btn-primary:hover { background: #276b2b; }
-      .btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
-      .btn-ghost { background: #fff; color: ${T.ink}; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; }
-      .btn-ghost:hover { background: ${T.beige}; }
-
-      .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
-      @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
-
-      .login-wrap { display: grid; grid-template-columns: 1.05fr .95fr; min-height: 100vh; }
-      .login-hero { background: linear-gradient(150deg,${T.forest} 0%,${T.forestSoft} 55%,#256b45 100%); color: #fff; padding: 54px 56px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
-      .hero-glow { position: absolute; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(61,154,66,.5), transparent 65%); top: -120px; right: -120px; }
-      .hero-h1 { font-size: 44px; line-height: 1.06; font-weight: 800; letter-spacing: -1.2px; margin: 30px 0 16px; color: #fff; }
-      .hero-p { font-size: 15px; line-height: 1.6; opacity: .82; max-width: 400px; margin: 0; }
-      .hero-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
-      .hero-chip { font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 20px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); }
-      .hero-flow { display: flex; align-items: center; gap: 10px; margin-top: 40px; flex-wrap: wrap; padding-top: 26px; border-top: 1px solid rgba(255,255,255,.14); }
-      .flow-dot { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; opacity: .92; }
-      .flow-pip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-      .login-form { background: ${T.beige}; display: flex; align-items: center; justify-content: center; padding: 40px; }
-      .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
-
-      /* ── customer track page ── */
-      .track-wrap { min-height: 100vh; background: ${T.beige}; }
-      .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
-      .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
-      .track-body.track-wide { max-width: 1100px; }
-      /* sales date inputs — calendar icon clearly dikhe (green) */
-      .mx-select, .mx-date { position: relative; }
-      .mx-date::-webkit-calendar-picker-indicator { opacity: 1; width: 18px; height: 18px; cursor: pointer; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
-      .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
-      .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
-      .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
-      .phone-row { display: flex; gap: 10px; }
-      .track-inv { display: inline-flex; align-items: center; align-self: flex-start; background: ${T.mint}; color: ${T.green}; border: 1px solid #cfe3d0; border-radius: 10px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; margin: -2px 0 2px; }
-      .phone-row .code-fixed { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid ${T.line}; border-radius: 11px; background: ${T.beige}; font-size: 14px; font-weight: 800; color: ${T.ink}; }
-      .phone-row .phone-input { flex: 1 1 auto; min-width: 0; }
-      .track-msg { background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: ${T.ink}; margin-top: 6px; }
-      .track-result { margin-top: 18px; background: #fff; border: 1px solid ${T.line}; border-radius: 20px; padding: 22px; box-shadow: 0 10px 30px rgba(20,57,43,.06); }
-      .track-order { display: flex; align-items: center; gap: 12px; }
-      .eq-list { margin: 12px 0 0; padding: 12px 14px; list-style: none; display: flex; flex-direction: column; gap: 7px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; }
-      .eq-list li { position: relative; padding-left: 17px; font-size: 12.5px; font-weight: 700; color: ${T.forestSoft}; line-height: 1.4; }
-      .eq-list li::before { content: ''; position: absolute; left: 2px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; }
-      .track-banner { text-align: center; font-weight: 800; font-size: 14px; padding: 12px; border-radius: 13px; margin: 16px 0 4px; }
-      .track-tl { margin-top: 14px; }
-      .ttl-row { display: flex; gap: 14px; }
-      .ttl-left { display: flex; flex-direction: column; align-items: center; }
-      .ttl-dot { width: 38px; height: 38px; border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 0 0 4px #fff; z-index: 1; }
-      .ttl-line { flex: 1; width: 3px; margin: 3px 0; min-height: 26px; border-radius: 3px; }
-      .ttl-content { padding-bottom: 22px; padding-top: 4px; }
-      .ttl-title { font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-      .ttl-now { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; color: ${T.green}; padding: 3px 8px; border-radius: 20px; }
-      .ttl-now-arrow { color: ${T.green}; flex-shrink: 0; }
-      .ttl-desc { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 2px; }
-      .ttl-time { font-size: 12px; color: ${T.green}; font-weight: 700; margin-top: 4px; }
-      .ttl-extra { margin-top: 8px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 11px; padding: 10px 12px; font-size: 12.5px; color: ${T.ink}; line-height: 1.6; }
-      .ttl-extra b { font-weight: 700; }
-      /* customer tracker — delivery phase collapse + return section */
-      .phase-collapse { width: 100%; display: flex; align-items: center; gap: 10px; background: ${T.mint}; border: 1px solid #cfe3d0; border-radius: 13px; padding: 12px 14px; font-size: 13.5px; font-weight: 800; color: ${T.green}; font-family: inherit; cursor: pointer; margin: 16px 0 4px; }
-      .phase-tick { width: 22px; height: 22px; border-radius: 50%; background: ${T.green}; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .phase-link { font-size: 12px; font-weight: 700; opacity: .85; }
-      .phase-block.no-top { margin-top: 6px; padding-top: 0; border-top: none; }
-      .phase-block { margin-top: 18px; padding-top: 18px; border-top: 1px dashed ${T.line}; }
-      .phase-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: ${T.ink}; margin-bottom: 12px; }
-      .phase-items-h { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; }
-      .phase-items { margin-bottom: 14px; }
-      .track-foot { text-align: center; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 22px; }
-      .track-back { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; margin-bottom: 14px; }
-      .track-back:hover { background: ${T.beige}; }
-      .sales-list { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
-      .sgroup { margin-top: 18px; }
-      .sgroup:first-child { margin-top: 8px; }
-      .sgroup-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: ${T.ink}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
-      .sgroup-dot { width: 9px; height: 9px; border-radius: 50%; }
-      .sgroup-count { margin-left: 4px; font-size: 12px; font-weight: 800; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 999px; padding: 1px 9px; }
-      .sales-list-head { font-size: 12px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; padding: 0 2px; }
-      .sales-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 13px 14px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
-      .sales-stores { margin-bottom: 16px; }
-      .sales-stores-label { font-size: 12px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 9px; }
-      .sales-stores-row { display: flex; flex-wrap: wrap; gap: 8px; }
-      .store-pill { border: 1.5px solid ${T.line}; background: #fff; color: ${T.ink}; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; transition: all .12s; }
-      .store-pill:hover { border-color: ${T.green}; }
-      .store-pill.is-active { background: ${T.forest}; border-color: ${T.forest}; color: #fff; }
-      .sales-listbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-      .sales-search { display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 8px 12px; min-width: 220px; flex: 1; max-width: 340px; }
-      .sales-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
-      /* Sales matrix — toolbar + polished light table */
-      .mx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-      .mx-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 10px 14px; flex: 1; min-width: 220px; }
-      .mx-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 14px; color: ${T.ink}; width: 100%; }
-      .mx-daterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-      .mx-select { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .mx-range { display: inline-flex; align-items: center; gap: 6px; }
-      .mx-date { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 9px 12px; font-size: 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
-      .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
-      .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
-      .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
-      .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
-      .mx-hclick { cursor: pointer; }
-      .mx-hclick:hover { background: ${T.green}; color: #fff; }
-      .matrix tbody td { border-bottom: 1px solid #F1EFE8; }
-      .matrix tbody tr:last-child td { border-bottom: none; }
-      .matrix tbody tr:nth-child(even) td { background: #FBFAF6; }
-      .matrix tbody tr:hover td { background: ${T.mint}; }
-      .mx-sticky { position: sticky; left: 0; z-index: 2; text-align: left !important; background: inherit; }
-      .matrix thead .mx-sticky { background: ${T.mint}; }
-      .matrix tbody tr:nth-child(even) .mx-sticky { background: #FBFAF6; }
-      .matrix tbody tr:nth-child(odd) .mx-sticky { background: #fff; }
-      .matrix tbody tr:hover .mx-sticky { background: ${T.mint}; }
-      .mx-store { min-width: 64px; }
-      .mx-name { font-weight: 700; color: ${T.ink}; min-width: 210px; font-size: 14px; }
-      .mx-nclick { cursor: pointer; }
-      .mx-nclick:hover { color: ${T.green}; text-decoration: underline; }
-      .mx-cell { font-weight: 800; font-size: 15.5px; }
-      .mx-click { color: ${T.green}; cursor: pointer; }
-      .mx-click:hover { text-decoration: underline; }
-      .mx-zero { color: #D0CEC4; font-weight: 500; }
-      .mx-total { font-weight: 800; color: ${T.ink}; background: #F4F2EB !important; font-size: 15px; }
-      .mx-tclick { cursor: pointer; }
-      .mx-tclick:hover { color: ${T.green}; text-decoration: underline; }
-      .matrix thead .mx-total { color: ${T.green}; background: ${T.mint} !important; }
-      .mx-footer td { border-top: 2px solid ${T.line}; font-weight: 800; background: #F4F2EB !important; }
-      .mx-footer .mx-sticky { background: #F4F2EB !important; }
-      /* Sales-only order details card */
-      .soc { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 18px 18px 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .soc-head { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #F1EFE8; margin-bottom: 4px; }
-      .soc-cust { font-size: 17px; font-weight: 800; color: ${T.ink}; }
-      .soc-inv { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; margin-top: 2px; }
-      .soc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-      .soc-item { padding: 11px 4px; border-bottom: 1px solid #F5F3EC; }
-      .soc-item:nth-child(odd) { padding-right: 16px; }
-      .soc-k { font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
-      .soc-v { font-size: 14px; font-weight: 600; color: ${T.ink}; }
-      @media (max-width: 560px) { .soc-grid { grid-template-columns: 1fr; } }
-      .sales-row:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(20,57,43,.09); border-color: #d8d1c0; }
-      .sales-row.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
-      .sales-row.is-cancelled:hover { border-color: #DFB9AC; }
-      .sales-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-      .sales-chip { flex-shrink: 0; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 3px 9px; border-radius: 8px; }
-      .sales-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 3px; font-weight: 600; }
-      .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
-      .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
-
-      /* ── activity log (overall history panel) ── */
-      .act-panel { margin-left: auto; width: 560px; max-width: 96vw; height: 100%; background: ${T.cream}; display: flex; flex-direction: column; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; }
-      .act-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 20px 20px 14px; border-bottom: 1px solid ${T.line}; background: #fff; }
-      .act-filters { padding: 12px 20px; border-bottom: 1px solid ${T.line}; background: #fff; display: flex; flex-direction: column; gap: 9px; }
-      .act-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; }
-      .act-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
-      .act-selects { display: flex; gap: 8px; flex-wrap: wrap; }
-      .act-selects .dash-inp { flex: 1 1 auto; min-width: 120px; }
-      .act-body { flex: 1; overflow-y: auto; padding: 8px 16px 30px; }
-      .act-day { font-size: 11px; font-weight: 800; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .5px; padding: 16px 4px 8px; position: sticky; top: 0; background: ${T.cream}; z-index: 1; }
-      .act-row { display: flex; gap: 12px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 13px 14px; margin-bottom: 9px; cursor: pointer; font-family: inherit; color: ${T.ink}; transition: transform .12s, box-shadow .12s, border-color .12s; }
-      .act-row:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(20,57,43,.08); border-color: #d8d1c0; }
-      .act-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
-      .act-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-      .act-what { font-size: 13.5px; font-weight: 800; letter-spacing: -0.2px; }
-      .act-time { flex-shrink: 0; font-size: 11.5px; font-weight: 700; color: ${T.inkSoft}; }
-      .act-who { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: ${T.forestSoft}; margin-top: 3px; min-width: 0; }
-      .act-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 3px; }
-      .act-cust { font-weight: 700; color: ${T.ink}; }
-      .act-dot { color: #C9C7BE; }
-      .act-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-      .act-chip { font-size: 11px; color: ${T.inkSoft}; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 8px; padding: 3px 8px; line-height: 1.4; }
-      .act-chip b { font-weight: 700; color: ${T.ink}; }
-      .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
-      @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
-
-      @media (max-width: 1400px) { .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
-      @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-      @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .board { grid-template-columns: 1fr; } }
-      @media (max-width: 760px) {
-        .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
-        .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
-        .tb-brand span { font-size: 14px; }
-        /* icons apni poori line lete hain aur barabar faila jaate hain —
-           warna right mein khaali jagah bach jaati thi */
-        .tb-actions { order: 1; flex: 1 1 100%; width: 100%; justify-content: space-between; align-items: center; gap: 6px; }
-        .tb-user-text { display: none; }
-        /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
-        .tb-user { display: none; }
-        .page-switch { order: 2; flex: 1 1 100%; max-width: none; }
-        .tb-search { order: 3; flex: 1 1 100%; max-width: none; }
-        .icon-btn { width: 34px; height: 34px; flex-shrink: 0; }
-        .lang-btn { padding: 6px 8px; }
-        main { padding: 10px 14px 60px !important; }
-        main > div:first-child { margin-bottom: 14px !important; }
-        h2 { font-size: 22px !important; }
-        .drawer { width: 100%; max-width: 100%; padding: 18px 16px; }
-        .kv-grid { grid-template-columns: 1fr 1fr; }
-        .modal { width: 100%; border-radius: 18px; }
-        .glass-card { padding: 24px 20px; }
-        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
-        .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
+  useEffect(() => {
+    if (!me) return;
+    supabase.rpc("should_verify").then(async ({ data }) => {
+      setCanVerify(!!data);
+      if (data) {
+        const q = await supabase.rpc("verification_queue", {});
+        setToCheck((q.data || []).filter((r: any) => !r.status).length);
       }
-      /* phone pe header ke controls (Today / Stages / All stores / chip) ek
-         doosre ke saath fit ho jaayein — pehle har ek apni line le leta tha */
-      @media (max-width: 760px) {
-        .hdr-controls { gap: 8px !important; width: 100%; }
-        .hdr-controls > * { flex: 0 1 auto; }
-        .store-switch { padding: 8px 10px 8px 30px; font-size: 12.5px; }
-        .lt-btn { padding: 8px 11px; font-size: 12px; }
-        .live-chip { font-size: 11.5px; padding: 7px 11px; }
-        .view-range .dash-inp { padding: 8px 10px; font-size: 12.5px; }
-      }
-      @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
-      @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-    `}</style>
+    });
+  }, [me]);
+
+  useEffect(() => {
+    if (!me || !["manager", "admin"].includes(me.role)) return;
+    (async () => {
+      const [l, r] = await Promise.all([
+        supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
+        supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
+      ]);
+      const j = await supabase.rpc("pending_registrations");
+      setPending([...(l.data || []), ...(r.data || [])]
+        .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length
+        + (j.data || []).length);
+    })();
+  }, [me, mod]);
+
+  const shell = (children: any) => (
+    <div className="hjsatt" lang="en-GB"><style>{CSS}</style>{children}</div>
+  );
+
+  if (session === undefined) return shell(<div className="att-center att-muted">Loading…</div>);
+  if (!session) return shell(<Login />);
+  if (!me) return shell(<LinkAccount session={session} err={meErr} />);
+
+  if (me.approval_status === "Pending") return shell(
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 420, textAlign: "center" }}>
+        <div className="att-flex" style={{ justifyContent: "center", marginBottom: 12 }}>
+          <Avatar name={me.full_name} lg />
+        </div>
+        <h2 className="att-h1">Waiting for approval</h2>
+        <p className="att-muted" style={{ marginTop: 8 }}>
+          Your account ({me.email}) has been created. An admin needs to approve it
+          before you can check in. You'll be able to sign in with the same code once
+          they do.
+        </p>
+        <button className="att-btn grey sm" style={{ marginTop: 16, width: "100%" }}
+          onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </div>
+    </div>
+  );
+
+  if (me.approval_status === "Rejected") return shell(
+    <div className="att-center">
+      <div className="att-card" style={{ maxWidth: 420, textAlign: "center" }}>
+        <h2 className="att-h1">Account not approved</h2>
+        <p className="att-muted" style={{ marginTop: 8 }}>
+          Please speak to your admin or HR.
+        </p>
+        <button className="att-btn grey sm" style={{ marginTop: 16, width: "100%" }}
+          onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </div>
+    </div>
+  );
+
+  const approver = ["manager", "admin"].includes(me.role);
+  // Muster roll aur payroll sirf admin / co-founder ko.
+  // Baaki sabko sirf "My Reports".
+  const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
+  const mods = MODULES.filter((m) => !m.approverOnly || approver)
+    .map((m) => m.k === "reports" && !topAdmin
+      ? { ...m, scopes: m.scopes.filter((sc) => sc.k === "mine") }
+      : m);
+  const curMod = mods.find((m) => m.k === mod) || mods[0];
+  const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
+  // "Daily check" tab sirf un logon ko jinke paas verify karne ko hai
+  const curScope = (curMod.k === "home" && rawScope.k === "myspace" && canVerify)
+    ? { ...rawScope, views: [...rawScope.views, { k: "verify", label: "Daily check" }] }
+    : rawScope;
+  const curView = curScope.views.find((v) => v.k === view) || curScope.views[0];
+
+  const goMod = (k: string) => {
+    const m = mods.find((x) => x.k === k)!;
+    goto(k, m.scopes[0].k, m.scopes[0].views[0].k);
+  };
+  const goScope = (k: string) => {
+    const sc = curMod.scopes.find((x) => x.k === k)!;
+    goto(mod, k, sc.views[0].k);
+  };
+
+  const key = `${curMod.k}/${curScope.k}/${curView.k}`;
+
+  // hash adhoora ya galat ho to chup-chaap sahi kar do.
+  // Ye hook NAHI hai — early returns ke baad hook nahi laga sakte.
+  if (typeof window !== "undefined") {
+    if (window.location.hash !== `#${key}`) {
+      window.history.replaceState(null, "", `#${key}`);
+    }
+    remember(curMod.k, curScope.k, curView.k);
+  }
+
+  const body = () => {
+    switch (key) {
+      // ---- Home ----
+      case "home/myspace/overview": return <HomeScreen me={me} />;
+      case "home/myspace/calendar": return <CalendarTab me={me} />;
+      case "home/myspace/verify":   return <VerifyPanel onCount={setToCheck} />;
+      case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
+      case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
+      case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab me={me} /></div>;
+      case "home/org/emptree":      return <div className="att-wrap att-stack"><EmpTreeTab /></div>;
+      case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab /></div>;
+      case "home/org/deptdir":      return <div className="att-wrap att-stack"><DeptTab /></div>;
+      case "home/org/people":       return <div className="att-wrap att-stack"><PeopleTab /></div>;
+      case "home/org/notice":       return <div className="att-wrap att-stack"><NoticeTab me={me} /></div>;
+      // ---- Attendance ----
+      case "att/mydata/summary":    return <AttSummary me={me} />;
+      case "att/mydata/calendar":   return <CalendarTab me={me} />;
+      case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
+      case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "att/team/leave":        return <div className="att-wrap att-stack"><OnLeaveTab /></div>;
+      case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
+      case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
+      // ---- Leave ----
+      case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
+      case "leave/mydata/requests": return <LeavesScreen me={me} tab="requests" />;
+      case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
+      case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
+      // ---- Approvals ----
+      case "approvals/pending/all":  return <InboxScreen me={me} onCount={setPending} mode="pending" />;
+      case "approvals/history/all":  return <InboxScreen me={me} onCount={setPending} mode="history" />;
+      case "approvals/joiners/all":  return <div className="att-wrap att-stack"><JoinersTab /></div>;
+      case "approvals/setup/all":    return <div className="att-wrap att-stack"><NeedsSetupTab me={me} /></div>;
+      case "me/me/profile":          return <MeScreen me={me} />;
+      // ---- Reports ----
+      case "reports/mine/me":       return <MyReportTab me={me} />;
+      case "reports/att/muster":    return <div className="att-wrap att-stack"><ReportsTab /></div>;
+      case "reports/att/payroll":   return <div className="att-wrap att-stack"><PayrollTab /></div>;
+      case "reports/people/staff":  return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
+      default:                      return <HomeScreen me={me} />;
+    }
+  };
+
+  return shell(
+    <PersonProvider me={me}>
+      <nav className="att-rail">
+        <div className="att-raillogo">HJS</div>
+        {mods.map((m) => (
+          <button key={m.k} className={`att-railbtn ${mod === m.k ? "on" : ""}`}
+            onClick={() => goMod(m.k)}>
+            <div className="ic"><Icon n={m.icon} c={mod === m.k ? "#ffffff" : "#cbd7ea"} /></div>
+            <span>{m.label}</span>
+            {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="att-body">
+        <header className="att-topbar">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b>{curMod.label}</b>
+            <span className="sub" style={{ display: "block", cursor: "pointer" }}>
+              <PName code={me.emp_code}>{me.emp_code} · {me.full_name}</PName>
+            </span>
+          </div>
+          <button className="att-signout" onClick={() => {
+            try { localStorage.removeItem(NAV_KEY); } catch {}
+            supabase.auth.signOut();
+          }}>Sign out</button>
+        </header>
+
+        <div className="att-scope">
+          {curMod.scopes.map((sc) => (
+            <button key={sc.k} className={`att-scopebtn ${scope === sc.k ? "on" : ""}`}
+              onClick={() => goScope(sc.k)}>
+              {sc.label}
+              {curMod.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+            </button>
+          ))}
+        </div>
+
+        <div className="att-mtabs">
+          {mods.map((m) => (
+            <button key={m.k} className={`att-tab ${mod === m.k ? "on" : ""}`}
+              onClick={() => goMod(m.k)}>
+              {m.label}
+              {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+            </button>
+          ))}
+        </div>
+
+        {curScope.views.length > 1 && (
+          <div className="att-subbar">
+            {curScope.views.map((v) => (
+              <button key={v.k} className={`att-tab ${curView.k === v.k ? "on" : ""}`}
+                onClick={() => setView(v.k)}>
+                {v.label}
+                {v.k === "verify" && toCheck > 0 && <span className="cnt">{toCheck}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <main className="att-main">{body()}</main>
+      </div>
+    </PersonProvider>
   );
 }
