@@ -6805,14 +6805,45 @@ function PickupPhase({ pickup, hideTop }) {
   const schedTime = niceTime(pickup.confirmed_time);
   const etaTime = niceTime(String(pickup.app_eta || '').slice(11, 16));
 
+  // MBC = customer khud item store pe drop karta hai. "Out for Pickup" step
+  // dikhana galat hai; wording bhi self-drop waali honi chahiye.
+  const mbc = String(person || '').trim().toUpperCase() === 'MBC';
+  const steps = mbc
+    ? PICKUP_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
+        st.id === 'scheduled'
+          ? {
+              ...st,
+              label: 'Ready to Drop',
+              desc: 'Your pickup is confirmed. You will drop the item at the store as arranged.',
+            }
+          : st.id === 'delivered'
+            ? {
+                ...st,
+                label: 'Item Received',
+                desc: 'Your item has been received at the store. Thank you for choosing Healthy Jeena Sikho.',
+              }
+            : st,
+      )
+    : PICKUP_STEPS;
+
   const banner = cancelled
     ? { text: 'Pickup cancelled', bg: T.redSoft, fg: T.red }
     : stage === 'delivered'
-      ? { text: 'Picked up successfully 🎉', bg: T.mint, fg: T.green }
+      ? {
+          text: mbc ? 'Item received successfully 🎉' : 'Picked up successfully 🎉',
+          bg: T.mint,
+          fg: T.green,
+        }
       : stage === 'dispatched'
         ? { text: 'Our team is on the way to collect the item', bg: T.violetSoft, fg: T.violet }
         : stage === 'scheduled'
-          ? { text: 'Your pickup is scheduled', bg: T.amberSoft, fg: T.amber }
+          ? {
+              text: mbc
+                ? 'Please drop the item at the store'
+                : 'Your pickup is scheduled',
+              bg: T.amberSoft,
+              fg: T.amber,
+            }
           : stage === 'talked'
             ? { text: 'Your pickup is confirmed', bg: T.blueSoft, fg: T.blue }
             : { text: 'Return request received', bg: T.slateSoft, fg: T.slate };
@@ -6838,13 +6869,14 @@ function PickupPhase({ pickup, hideTop }) {
       </div>
 
       <div className="track-tl">
-        {PICKUP_STEPS.map((step, i) => {
-          if (i > idx) return null;
-          const current = !cancelled && i === idx;
+        {steps.map((step) => {
+          const si = STAGES.findIndex((x) => x.id === step.id);
+          if (si > idx) return null;
+          const current = !cancelled && si === idx;
           const reachedTs =
             stepTime(log, step.id) || (step.id === 'new' ? pickup.created_at : null);
           const StepIcon = step.icon;
-          const showLine = i < idx || cancelled;
+          const showLine = si < idx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
               <div className="ttl-left">
@@ -6887,15 +6919,22 @@ function PickupPhase({ pickup, hideTop }) {
                   <div className="ttl-extra">
                     {(schedDate || schedTime) && (
                       <div>
-                        <b>Pickup slot:</b> {schedDate || ''}
+                        <b>{mbc ? 'Drop slot:' : 'Pickup slot:'}</b>{' '}
+                        {schedDate || ''}
                         {schedDate && schedTime ? ', ' : ''}
                         {schedTime || ''}
                       </div>
                     )}
-                    {person && (
+                    {mbc ? (
                       <div>
-                        <b>Pickup person:</b> {person}
+                        <b>Drop-off:</b> Self drop at store — arranged by you
                       </div>
+                    ) : (
+                      person && (
+                        <div>
+                          <b>Pickup person:</b> {person}
+                        </div>
+                      )
                     )}
                   </div>
                 )}
