@@ -492,10 +492,6 @@ const TXT = {
     en: 'What fixed the issue…',
     hi: 'Kya karne se theek hua…',
   },
-  spotFixNote: {
-    en: 'Repaired on the spot. No need to wait — tick below and the ticket will be marked Resolved directly.',
-    hi: 'Wahin theek ho gaya. Wait karne ki zarurat nahi — neeche tick karein, ticket seedha Resolved ho jayega.',
-  },
   finalResolution: { en: 'Final · resolution', hi: 'Final · resolution' },
   ticketStatus: { en: 'Ticket status', hi: 'Ticket status' },
   talkedNormal: { en: 'Talked to customer', hi: 'Customer se baat hui' },
@@ -506,7 +502,6 @@ const TXT = {
   cancel: { en: 'Cancel', hi: 'Cancel' },
   update: { en: 'Update', hi: 'Update' },
   save: { en: 'Save & update', hi: 'Save karein' },
-  saveResolved: { en: 'Save · Mark Resolved', hi: 'Save · Resolved' },
   saveCompleted: { en: 'Save · Completed', hi: 'Save · Poora' },
   edit: { en: 'Edit', hi: 'Edit' },
   // toasts
@@ -1201,12 +1196,6 @@ export default function App({
       patch.action_other = f.action === 'Other' ? f.actionOther || null : null;
       patch.expected_date = f.expected || null;
       patch.stage2_remarks = f.remarks || null;
-      // On-spot fix — wahin theek ho gaya, seedha Resolved.
-      if (f.spotFix) {
-        if (mode === 'move') patch.status = stageToStatus('resolution');
-        patch.is_resolved = !!f.resolved;
-        patch.stage3_remarks = f.remarks || null;
-      }
     } else if (toStage === 'resolution') {
       patch.is_resolved = !!f.resolved;
       patch.stage3_remarks = f.remarks || null;
@@ -1217,13 +1206,8 @@ export default function App({
   const applyMove = async (ticketId, toStage, fields, mode) => {
     const patch = buildPatch(toStage, fields, mode);
     const cur = tickets.find((x) => x.ticket_id === ticketId);
-    const spot = toStage === 'status' && fields.spotFix && mode === 'move';
-    patch.app_log = [
-      ...existingLog(cur),
-      makeEvent(toStage, fields, mode),
-      ...(spot ? [makeEvent('resolution', fields, 'move')] : []),
-    ];
-    const landed = spot ? 'resolution' : toStage;
+    patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
+    const landed = toStage;
     try {
       await sbPatch(ticketId, patch);
       ping(
@@ -3554,8 +3538,6 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
     } catch (_) {}
   };
   const otherAction = f.action === 'Other';
-  // On-spot fix — wahin theek ho gaya, seedha Resolved.
-  const spot = toStage === 'status' && f.action === 'Store pe repair kiya';
   const otherTech = f.tech === 'Other';
   const canSave =
     toStage === 'talk'
@@ -3565,9 +3547,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
           ? !!(f.techOther.trim() && f.techPhoneOther.trim())
           : !!f.tech
       : toStage === 'status'
-        ? spot
-          ? !!(f.action && f.resolved)
-          : !!(f.action && (!otherAction || f.actionOther.trim()) && f.expected)
+        ? !!(f.action && (!otherAction || f.actionOther.trim()) && f.expected)
         : toStage === 'resolution'
           ? !!f.resolved
           : true;
@@ -3726,15 +3706,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
             {otherAction && !f.actionOther.trim() && (
               <div className="req-note">{L('otherRequired')}</div>
             )}
-            {spot ? (
-              <div
-                className="flag-note"
-                style={{ background: T.mint, color: T.green }}
-              >
-                {L('spotFixNote')}
-              </div>
-            ) : (
-              <Field label={L('expectedBy')}>
+            <Field label={L('expectedBy')}>
                 <input
                   className="inp"
                   type="date"
@@ -3748,22 +3720,10 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
                     set('expected', v);
                   }}
                 />
-                {f.expected && (
-                  <span className="tp-preview">📅 {niceDate(f.expected)}</span>
-                )}
-              </Field>
-            )}
-
-            {spot && (
-              <>
-                <div className="mbc-divider">{L('finalResolution')}</div>
-                <Check1
-                  checked={f.resolved}
-                  onChange={() => set('resolved', !f.resolved)}
-                  label={L('markResolvedChk')}
-                />
-              </>
-            )}
+              {f.expected && (
+                <span className="tp-preview">📅 {niceDate(f.expected)}</span>
+              )}
+            </Field>
           </>
         )}
 
@@ -3824,17 +3784,15 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
               out.date = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
               out.time = `${p(t.getHours())}:${p(t.getMinutes())}`;
             }
-            onSave(spot ? { ...out, spotFix: true } : out);
+            onSave(out);
           }}
         >
           <ShieldCheck size={16} />{' '}
           {mode === 'edit'
             ? L('update')
-            : spot
-              ? L('saveResolved')
-              : toStage === 'resolution'
-                ? L('saveCompleted')
-                : L('save')}
+            : toStage === 'resolution'
+              ? L('saveCompleted')
+              : L('save')}
         </button>
       </div>
     </>
