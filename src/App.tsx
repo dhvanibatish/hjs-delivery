@@ -4480,25 +4480,34 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
   const appLog = (() => {
     if (cancelled) return rawLog;
     const haveStages = new Set(rawLog.map((e) => e && e.stage));
+    const mk = (sid, at) => {
+      const st = STAGES[stageIndex(sid)] || {};
+      return {
+        stage: sid,
+        label: st.label || sid,
+        action: 'Moved to',
+        at: at || null,
+        ts: at || null,
+        recon: true,
+      };
+    };
     const reconstructed = [];
-    // har reached stage (0..idx) jiska event log mein nahi hai, use bhar do
     STAGES.forEach((s, i) => {
       if (i > idx) return;
       if (haveStages.has(s.id)) return;
       if (s.id === 'new') {
-        reconstructed.push({ stage: 'new', at: r.created_at || null, recon: true });
+        reconstructed.push(mk('new', r.created_at));
       } else if (s.id === 'talked' && (r.confirmed_date || r.confirmed_time)) {
-        reconstructed.push({ stage: 'talked', at: null, recon: true });
+        reconstructed.push(mk('talked'));
       } else if (s.id === 'scheduled' && (r.app_delivery_person || r.photo_inspected)) {
-        reconstructed.push({ stage: 'scheduled', at: null, recon: true });
+        reconstructed.push(mk('scheduled'));
       } else if (s.id === 'dispatched' && r.app_eta) {
-        reconstructed.push({ stage: 'dispatched', at: null, recon: true });
+        reconstructed.push(mk('dispatched'));
       } else if (s.id === 'delivered' && r.item_delivered) {
-        reconstructed.push({ stage: 'delivered', at: null, recon: true });
+        reconstructed.push(mk('delivered'));
       }
     });
     if (reconstructed.length === 0) return rawLog;
-    // merge + stage order se sort
     const merged = [...reconstructed, ...rawLog];
     return merged.sort((a, b) => stageIndex(a.stage) - stageIndex(b.stage));
   })();
