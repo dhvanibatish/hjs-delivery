@@ -7444,8 +7444,8 @@ function StyleTag() {
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 7px 11px; margin-top: -4px; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
       .tp12 { display: flex; align-items: center; gap: 7px; }
-      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
-      .tp12 .inp:last-child { flex: 0 0 84px; }
+      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 6px; text-align: center; text-align-last: center; cursor: pointer; }
+      .tp12 .inp:last-child { flex: 0 0 96px; }
       .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
       .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
       .created-note b { color: ${T.ink}; font-weight: 700; }
