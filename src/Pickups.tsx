@@ -5885,8 +5885,8 @@ function StyleTag() {
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
       .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
       .tp12 { display: flex; align-items: center; gap: 7px; }
-      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 8px; text-align: center; cursor: pointer; }
-      .tp12 .inp:last-child { flex: 0 0 84px; }
+      .tp12 .inp { flex: 1; min-width: 0; padding: 11px 6px; text-align: center; text-align-last: center; cursor: pointer; }
+      .tp12 .inp:last-child { flex: 0 0 96px; }
       .tp12-sep { font-weight: 800; color: ${T.inkSoft}; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
