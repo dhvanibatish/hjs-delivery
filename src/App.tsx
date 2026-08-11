@@ -4482,12 +4482,41 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     const haveStages = new Set(rawLog.map((e) => e && e.stage));
     const mk = (sid, at) => {
       const st = STAGES[stageIndex(sid)] || {};
+      let fields = {};
+      if (sid === 'talked') {
+        fields = {
+          Date: niceDate(r.confirmed_date) || '—',
+          Time: niceTime(r.confirmed_time) || '—',
+        };
+      } else if (sid === 'scheduled') {
+        fields = {
+          'Delivery person': r.app_delivery_person || '—',
+          Vehicle: r.app_vehicle || '—',
+          Inspected: r.item_inspected ? 'Yes' : 'No',
+        };
+      } else if (sid === 'dispatched') {
+        fields = { 'Estimated arrival': niceDateTime(r.app_eta) || '—' };
+      } else if (sid === 'delivered') {
+        const amt =
+          r.amount_collected != null && r.amount_collected !== ''
+            ? `₹${Number(r.amount_collected).toLocaleString('en-IN')}${r.amount_type ? ' · ' + r.amount_type : ''}`
+            : '—';
+        const sec =
+          r.security_collected != null && r.security_collected !== ''
+            ? `₹${Number(r.security_collected).toLocaleString('en-IN')}${r.security_type ? ' · ' + r.security_type : ''}`
+            : '—';
+        fields = {
+          Amount: amt,
+          Security: sec,
+          Delivered: r.item_delivered ? 'Yes' : 'No',
+        };
+      }
       return {
         stage: sid,
         label: st.label || sid,
         action: 'Moved to',
-        at: at || null,
         ts: at || null,
+        fields,
         recon: true,
       };
     };
