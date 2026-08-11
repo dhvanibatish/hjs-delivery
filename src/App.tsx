@@ -4473,7 +4473,35 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     },
   ];
 
-  const appLog = Array.isArray(r.app_log) ? r.app_log : [];
+  const rawLog = Array.isArray(r.app_log) ? r.app_log : [];
+  // Kabhi-kabhi app_log adhoora hota hai (entry seedha aage move hui, ya purani
+  // entry jab log system nahi tha) — sirf aakhri event dikhta hai. Aise mein
+  // reached stages ko stage-data se reconstruct karke timeline poori dikhate hain.
+  const appLog = (() => {
+    if (cancelled) return rawLog;
+    const haveStages = new Set(rawLog.map((e) => e && e.stage));
+    const reconstructed = [];
+    // har reached stage (0..idx) jiska event log mein nahi hai, use bhar do
+    STAGES.forEach((s, i) => {
+      if (i > idx) return;
+      if (haveStages.has(s.id)) return;
+      if (s.id === 'new') {
+        reconstructed.push({ stage: 'new', at: r.created_at || null, recon: true });
+      } else if (s.id === 'talked' && (r.confirmed_date || r.confirmed_time)) {
+        reconstructed.push({ stage: 'talked', at: null, recon: true });
+      } else if (s.id === 'scheduled' && (r.app_delivery_person || r.photo_inspected)) {
+        reconstructed.push({ stage: 'scheduled', at: null, recon: true });
+      } else if (s.id === 'dispatched' && r.app_eta) {
+        reconstructed.push({ stage: 'dispatched', at: null, recon: true });
+      } else if (s.id === 'delivered' && r.item_delivered) {
+        reconstructed.push({ stage: 'delivered', at: null, recon: true });
+      }
+    });
+    if (reconstructed.length === 0) return rawLog;
+    // merge + stage order se sort
+    const merged = [...reconstructed, ...rawLog];
+    return merged.sort((a, b) => stageIndex(a.stage) - stageIndex(b.stage));
+  })();
   const hasClosedLog = appLog.some((e) => e && CLOSED[e.stage]);
 
   return (
