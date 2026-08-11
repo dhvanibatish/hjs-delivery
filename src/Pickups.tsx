@@ -3438,12 +3438,36 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     const haveStages = new Set(rawLog.map((e) => e && e.stage));
     const mk = (sid, at) => {
       const st = STAGES[stageIndex(sid)] || {};
+      let fields = {};
+      if (sid === 'talked') {
+        fields = {
+          Date: niceDate(r.confirmed_date) || '—',
+          Time: niceTime(r.confirmed_time) || '—',
+        };
+      } else if (sid === 'scheduled') {
+        fields = {
+          'Pickup person': r.app_pickup_person || '—',
+          Vehicle: r.app_vehicle || '—',
+        };
+      } else if (sid === 'dispatched') {
+        fields = { 'Estimated arrival': niceDateTime(r.app_eta) || '—' };
+      } else if (sid === 'delivered') {
+        const ch =
+          r.pickup_charges_collected != null && r.pickup_charges_collected !== ''
+            ? `₹${Number(r.pickup_charges_collected).toLocaleString('en-IN')}`
+            : '—';
+        fields = {
+          'Actual pickup': niceDate(r.actual_pickup_date) || '—',
+          'Pickup charges': ch,
+          'Picked up': r.pickup_done ? 'Yes' : 'No',
+        };
+      }
       return {
         stage: sid,
         label: st.label || sid,
         action: 'Moved to',
-        at: at || null,
         ts: at || null,
+        fields,
         recon: true,
       };
     };
