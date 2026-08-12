@@ -5,7 +5,7 @@
 // Multiple check-in / check-out per day (sessions).
 // Chalao: hjs_attendance_v2.sql phir hjs_attendance_v3.sql
 // ============================================================
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL;
@@ -429,6 +429,65 @@ const CSS = `
 @media (max-width: 560px) {
   .hjsatt .att-daterange { width: 100%; margin-left: 0 !important; }
   .hjsatt .att-daterange input { flex: 1; min-width: 0; }
+}
+
+/* ---------- jump to (search all tabs) ---------- */
+.hjsatt .att-railbtn.search { margin-bottom: 6px; padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.12); border-radius: 10px 10px 0 0; }
+.hjsatt .att-railbtn.search:hover .ic { background: rgba(255,255,255,.16); }
+
+.hjsatt .att-topsearch { display: none; align-items: center; gap: 7px;
+  padding: 7px 12px; border-radius: 9px; border: 1px solid #e5e7eb;
+  background: #f9fafb; color: #475467; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; }
+.hjsatt .att-topsearch:hover { background: #f2f4f7; color: #1d2939; }
+.hjsatt .att-topsearch svg { width: 15px; height: 15px; }
+
+.hjsatt .att-jumpwrap { position: fixed; inset: 0; z-index: 200;
+  background: rgba(16,24,40,.45); backdrop-filter: blur(2px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 68px 16px 16px; }
+.hjsatt .att-jump { width: 100%; max-width: 560px; background: #fff;
+  border-radius: 14px; box-shadow: 0 24px 48px -12px rgba(16,24,40,.25);
+  display: flex; flex-direction: column; max-height: calc(100vh - 100px);
+  overflow: hidden; }
+
+.hjsatt .att-jumphd { display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; border-bottom: 1px solid #f2f4f7; }
+.hjsatt .att-jumphd svg { width: 18px; height: 18px; color: #98a2b3; flex-shrink: 0; }
+.hjsatt .att-jumphd input { border: 0; padding: 0; font-size: 15.5px; flex: 1;
+  background: transparent; outline: none; min-width: 0; }
+.hjsatt .att-jumphd .esc { font-size: 12px; color: #667085; background: #f2f4f7;
+  border: 0; border-radius: 6px; padding: 5px 9px; cursor: pointer; flex-shrink: 0; }
+
+.hjsatt .att-jumplist { overflow-y: auto; padding: 6px 0 10px;
+  -webkit-overflow-scrolling: touch; }
+.hjsatt .att-jumplist .gh { font-size: 10.5px; font-weight: 700; color: #98a2b3;
+  text-transform: uppercase; letter-spacing: .05em; padding: 10px 16px 5px; }
+.hjsatt .att-jumplist .it { width: 100%; display: flex; align-items: center; gap: 11px;
+  padding: 10px 16px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; }
+.hjsatt .att-jumplist .it.on { background: #f5f8ff; }
+.hjsatt .att-jumplist .it .ic { width: 26px; height: 26px; border-radius: 7px;
+  background: #f2f4f7; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; }
+.hjsatt .att-jumplist .it .ic svg { width: 15px; height: 15px; }
+.hjsatt .att-jumplist .it .tx { flex: 1; font-size: 14px; font-weight: 600;
+  color: #1d2939; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.hjsatt .att-jumplist .it .ar { font-size: 12px; color: #d0d5dd; }
+.hjsatt .att-jumplist .it.on .ar { color: #667085; }
+
+@media (max-width: 860px) {
+  .hjsatt .att-topsearch { display: flex; }
+  .hjsatt .att-topsearch span { display: none; }
+  .hjsatt .att-topsearch { padding: 8px 10px; }
+}
+@media (max-width: 620px) {
+  .hjsatt .att-jumpwrap { padding: 0; align-items: stretch; }
+  .hjsatt .att-jump { max-width: none; border-radius: 0; max-height: 100vh; }
+  .hjsatt .att-jumphd { padding: 13px 14px; }
+  .hjsatt .att-jumplist .it { padding: 12px 14px; }
 }
 
 .hjsatt .att-search { position: relative; display: flex; align-items: center; }
@@ -5340,6 +5399,144 @@ function MyReportTab({ me }: any) {
 }
 
 
+/* ================= kahin bhi jao — search se ================= */
+function JumpTo({ mods, onGo, onClose }: any) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const boxRef = useRef<HTMLInputElement>(null);
+
+  // saare tabs ek flat list mein
+  const all = useMemo(() => {
+    const out: any[] = [];
+    mods.forEach((m: any) => m.scopes.forEach((sc: any) => sc.views.forEach((v: any) => {
+      // sirf ek view hai to scope ka naam hi asli naam hai
+      const only = sc.views.length === 1;
+      out.push({
+        key: `${m.k}/${sc.k}/${v.k}`,
+        title: only ? sc.label : v.label,
+        path: only ? m.label : `${m.label} › ${sc.label}`,
+        mod: m.k, scope: sc.k, view: v.k, icon: m.icon,
+        hay: `${m.label} ${sc.label} ${v.label} ${ALIASES[v.label] || ""} ${
+          ALIASES[sc.label] || ""}`.toLowerCase(),
+      });
+    })));
+    return out;
+  }, [mods]);
+
+  const hits = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return all;
+    const words = t.split(/\s+/);
+    return all
+      .map((x) => {
+        if (!words.every((w) => x.hay.includes(w))) return null;
+        // naam se shuru hota hai to upar
+        const rank = x.title.toLowerCase().startsWith(t) ? 0
+          : x.title.toLowerCase().includes(t) ? 1 : 2;
+        return { ...x, rank };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => a.rank - b.rank)
+      .slice(0, 40);
+  }, [q, all]);
+
+  useEffect(() => { boxRef.current?.focus(); }, []);
+  useEffect(() => { setSel(0); }, [q]);
+
+  const pick = (x: any) => { onGo(x.mod, x.scope, x.view); onClose(); };
+
+  const onKey = (e: any) => {
+    if (e.key === "Escape") return onClose();
+    if (e.key === "ArrowDown") { e.preventDefault(); setSel((i) => Math.min(i + 1, hits.length - 1)); }
+    if (e.key === "ArrowUp")   { e.preventDefault(); setSel((i) => Math.max(i - 1, 0)); }
+    if (e.key === "Enter" && hits[sel]) { e.preventDefault(); pick(hits[sel]); }
+  };
+
+  // groups
+  const groups: Record<string, any[]> = {};
+  hits.forEach((x: any) => { (groups[x.path] = groups[x.path] || []).push(x); });
+
+  return (
+    <div className="att-jumpwrap" onClick={onClose}>
+      <div className="att-jump" onClick={(e) => e.stopPropagation()}>
+        <div className="att-jumphd">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+          </svg>
+          <input ref={boxRef} value={q} onKeyDown={onKey}
+            placeholder="Where do you want to go?"
+            onChange={(e) => setQ(e.target.value)} />
+          <button className="esc" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="att-jumplist">
+          {!hits.length && (
+            <p className="att-empty">Nothing matches "{q}".</p>
+          )}
+          {Object.keys(groups).map((path) => (
+            <div key={path}>
+              <div className="gh">{path}</div>
+              {groups[path].map((x: any) => {
+                const i = hits.indexOf(x);
+                return (
+                  <button key={x.key} className={`it ${i === sel ? "on" : ""}`}
+                    onMouseEnter={() => setSel(i)} onClick={() => pick(x)}>
+                    <span className="ic"><Icon n={x.icon} c="#5b6b8c" /></span>
+                    <span className="tx">{x.title}</span>
+                    <span className="ar">↵</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// aam bol-chaal ke shabd jinse tab mil jaye
+const ALIASES: Record<string, string> = {
+  "Overview": "home dashboard check in punch today",
+  "Team Space": "my team colleagues who reports",
+  "Department": "my department team",
+  "Peers": "colleagues same manager",
+  "Employee List": "all staff people directory names table",
+  "Employee Tree": "org chart hierarchy reporting structure",
+  "Department Tree": "org chart departments teams structure",
+  "Department Directory": "departments teams list",
+  "Manage Staff": "add edit employee new joiner salary shift bulk merge delete",
+  "Birthdays & New Hires": "birthday dob joined anniversary",
+  "Announcements": "notice news post",
+  "Attendance Summary": "my hours worked days late",
+  "Calendar": "month view my attendance days",
+  "Regularisation (Missed a punch)": "forgot punch missed checkin checkout correction request",
+  "Who's In Today": "team present absent today live status",
+  "Monthly Grid": "matrix month team attendance grid",
+  "Dashboard": "charts stats trend team",
+  "Leave Summary": "balance available casual earned cl el remaining",
+  "Leave Requests": "apply leave my requests pending cancel",
+  "Balance History": "ledger given granted carried lapsed adjusted entries",
+  "On Leave Today": "who is on leave absent today",
+  "All Team Leaves": "team leave list everyone",
+  "Holiday List": "holidays festival calendar",
+  "My attendance": "my report month days present absent",
+  "My pay": "salary payable amount gross my pay",
+  "Muster Roll": "attendance register month all staff payroll",
+  "Payroll": "salary pay all staff amount payable gross",
+  "Pending sign-ups": "new joiner approve registration",
+  "Half-filled records": "incomplete missing setup needs",
+  // scope ke naam (jinme ek hi view hai)
+  "Pending": "approve leave request regularisation waiting action inbox",
+  "History": "past approved rejected old requests decisions",
+  "New joiners": "sign up register approve new account",
+  "Needs setup": "incomplete missing department manager email code",
+  "Holidays": "holiday list festival calendar public",
+  "My Profile": "account settings my details code shift password",
+};
+
+
 /* ================= search box (cross ke saath) ================= */
 function Search({ value, onChange, placeholder = "Search", style }: any) {
   return (
@@ -6881,7 +7078,7 @@ function LinkAccount({ session, err: outerErr }: any) {
 
 /* ========================= shell ========================= */
 // Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
-type View = { k: string; label: string };
+type View = { k: string; label: string; adminOnly?: boolean };
 type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean };
 type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
 
@@ -6891,7 +7088,6 @@ const MODULES: Module[] = [
     scopes: [
       { k: "myspace", label: "My Space", views: [
         { k: "overview", label: "Overview" },
-        { k: "calendar", label: "Calendar" },
       ]},
       { k: "team", label: "Team", views: [
         { k: "space", label: "Team Space" },
@@ -6903,6 +7099,7 @@ const MODULES: Module[] = [
         { k: "emptree", label: "Employee Tree" },
         { k: "depttree", label: "Department Tree" },
         { k: "deptdir", label: "Department Directory" },
+        { k: "staff", label: "Manage Staff", adminOnly: true },
         { k: "people", label: "Birthdays & New Hires" },
         { k: "notice", label: "Announcements" },
       ]},
@@ -6914,12 +7111,11 @@ const MODULES: Module[] = [
       { k: "mydata", label: "My Data", views: [
         { k: "summary", label: "Attendance Summary" },
         { k: "calendar", label: "Calendar" },
-        { k: "regs", label: "Regularization" },
+        { k: "regs", label: "Regularisation (Missed a punch)" },
       ]},
       { k: "team", label: "Team", views: [
-        { k: "today", label: "Today" },
-        { k: "leave", label: "On Leave" },
-        { k: "matrix", label: "Monthly Matrix" },
+        { k: "today", label: "Who's In Today" },
+        { k: "matrix", label: "Monthly Grid" },
         { k: "dash", label: "Dashboard" },
       ]},
     ],
@@ -6930,9 +7126,12 @@ const MODULES: Module[] = [
       { k: "mydata", label: "My Data", views: [
         { k: "summary", label: "Leave Summary" },
         { k: "requests", label: "Leave Requests" },
-        { k: "ledger", label: "History" },
+        { k: "ledger", label: "Balance History" },
       ]},
-      { k: "team", label: "Team", views: [{ k: "leaves", label: "Team Leaves" }]},
+      { k: "team", label: "Team", views: [
+        { k: "onleave", label: "On Leave Today" },
+        { k: "leaves", label: "All Team Leaves" },
+      ]},
       { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
     ],
   },
@@ -6956,8 +7155,7 @@ const MODULES: Module[] = [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
       ]},
-      { k: "people", label: "People", views: [{ k: "staff", label: "Staff" }],
-        adminOnly: true },
+
     ],
   },
   {
@@ -7007,8 +7205,24 @@ export default function Attendance() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // "/" ya Cmd/Ctrl+K se search khulta hai
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName || "");
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault(); setJump(true);
+      } else if (e.key === "/" && !typing) {
+        e.preventDefault(); setJump(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [pending, setPending] = useState(0);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [jump, setJump] = useState(false);
   const [canVerify, setCanVerify] = useState(false);
   const [meErr, setMeErr] = useState("");
   const [toCheck, setToCheck] = useState(0);
@@ -7110,7 +7324,12 @@ export default function Attendance() {
   // ki zaroorat nahi.
   const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
   const mods = MODULES.filter((m) => !m.approverOnly || approver)
-    .map((m) => ({ ...m, scopes: m.scopes.filter((sc) => !sc.adminOnly || topAdmin) }));
+    .map((m) => ({
+      ...m,
+      scopes: m.scopes
+        .filter((sc) => !sc.adminOnly || topAdmin)
+        .map((sc) => ({ ...sc, views: sc.views.filter((v) => !v.adminOnly || topAdmin) })),
+    }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
   const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
   // "Daily check" tab sirf un logon ko jinke paas verify karne ko hai
@@ -7143,7 +7362,6 @@ export default function Attendance() {
     switch (key) {
       // ---- Home ----
       case "home/myspace/overview": return <HomeScreen me={me} />;
-      case "home/myspace/calendar": return <CalendarTab me={me} />;
       case "home/myspace/verify":   return <VerifyPanel onCount={setToCheck} />;
       case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
@@ -7152,6 +7370,7 @@ export default function Attendance() {
       case "home/org/emptree":      return <div className="att-wrap att-stack"><EmpTreeTab /></div>;
       case "home/org/depttree":     return <div className="att-wrap att-stack"><OrgTab /></div>;
       case "home/org/deptdir":      return <div className="att-wrap att-stack"><DeptTab /></div>;
+      case "home/org/staff":        return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
       case "home/org/people":       return <div className="att-wrap att-stack"><PeopleTab /></div>;
       case "home/org/notice":       return <div className="att-wrap att-stack"><NoticeTab me={me} /></div>;
       // ---- Attendance ----
@@ -7159,13 +7378,13 @@ export default function Attendance() {
       case "att/mydata/calendar":   return <CalendarTab me={me} />;
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
-      case "att/team/leave":        return <div className="att-wrap att-stack"><OnLeaveTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
       // ---- Leave ----
       case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
       case "leave/mydata/requests": return <LeavesScreen me={me} tab="requests" />;
       case "leave/mydata/ledger":   return <LeaveLedgerTab me={me} />;
+      case "leave/team/onleave":    return <div className="att-wrap att-stack"><OnLeaveTab /></div>;
       case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
       case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
       // ---- Approvals ----
@@ -7181,7 +7400,6 @@ export default function Attendance() {
         return <div className="att-wrap att-stack"><ReportsTab isAdmin={topAdmin} /></div>;
       case "reports/att/payroll":
         return <div className="att-wrap att-stack"><PayrollTab isAdmin={topAdmin} /></div>;
-      case "reports/people/staff":  return <div className="att-wrap att-stack"><StaffTab me={me} /></div>;
       default:                      return <HomeScreen me={me} />;
     }
   };
@@ -7190,6 +7408,16 @@ export default function Attendance() {
     <PersonProvider me={me}>
       <nav className="att-rail">
         <div className="att-raillogo">HJS</div>
+        <button className="att-railbtn search" onClick={() => setJump(true)}
+          title="Search all tabs (press /)">
+          <div className="ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#cbd7ea"
+              strokeWidth="2" strokeLinecap="round" style={{ width: 17, height: 17 }}>
+              <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+            </svg>
+          </div>
+          <span>Search</span>
+        </button>
         {mods.map((m) => (
           <button key={m.k} className={`att-railbtn ${mod === m.k ? "on" : ""}`}
             onClick={() => goMod(m.k)}>
@@ -7208,6 +7436,14 @@ export default function Attendance() {
               <PName code={me.emp_code}>{me.emp_code} · {me.full_name}</PName>
             </span>
           </div>
+          <button className="att-topsearch" onClick={() => setJump(true)}
+            title="Search all tabs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+            </svg>
+            <span>Search tabs</span>
+          </button>
           <button className="att-signout" onClick={() => {
             try { localStorage.removeItem(NAV_KEY); } catch {}
             supabase.auth.signOut();
@@ -7250,6 +7486,11 @@ export default function Attendance() {
 
         <main className="att-main">{body()}</main>
       </div>
+
+      {jump && (
+        <JumpTo mods={mods} onClose={() => setJump(false)}
+          onGo={(m: string, sc: string, v: string) => goto(m, sc, v)} />
+      )}
     </PersonProvider>
   );
 }
