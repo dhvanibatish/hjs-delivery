@@ -3339,13 +3339,25 @@ function LeavesScreen({ me, tab }: any) {
   const [apply, setApply] = useState(false);
   const [editBal, setEditBal] = useState<any>(null);
   const [pickLeave, setPickLeave] = useState<any>(null);
+  const [span, setSpan] = useState<"year" | "month" | "custom">("year");
+  const [period, setPeriod] = useState({
+    y: Number(istToday().slice(0, 4)),
+    m: Number(istToday().slice(5, 7)),
+  });
+  const [range, setRange] = useState({
+    from: `${istToday().slice(0, 7)}-01`, to: istToday(),
+  });
   const isAdmin = me.role === "admin";
   const who = me;
 
   const load = async () => {
     const [t, b, l, r, h] = await Promise.all([
       supabase.from("leave_types").select("*"),
-      supabase.rpc("leave_balance", {}),
+      span === "month"
+        ? supabase.rpc("leave_balance_month",
+            { p_employee: null, p_year: period.y, p_month: period.m })
+        : supabase.rpc("leave_balance",
+            { p_employee: null, p_year: span === "year" ? period.y : null }),
       supabase.from("leaves").select("*").eq("employee_id", me.id)
         .order("from_date", { ascending: false }).limit(80),
       supabase.from("regularizations").select("*").eq("employee_id", me.id)
@@ -3355,7 +3367,7 @@ function LeavesScreen({ me, tab }: any) {
     setTypes(t.data || []); setBal(b.data || []); setMine(l.data || []);
     setRegs(r.data || []); setHols(h.data || []);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [span, period.y, period.m, range.from, range.to]);
 
   const cancel = async (id: string) => {
     await supabase.from("leaves").update({ status: "Cancelled" }).eq("id", id);
@@ -3364,20 +3376,37 @@ function LeavesScreen({ me, tab }: any) {
 
   const today = istToday();
   const year = today.slice(0, 4);
-  const booked = mine.filter((r) => r.status === "Approved" && r.from_date.startsWith(year))
+
+  // chuna hua daayra
+  const win = span === "year"
+    ? { from: `${period.y}-01-01`, to: `${period.y}-12-31` }
+    : span === "month"
+      ? { from: `${period.y}-${String(period.m).padStart(2, "0")}-01`,
+          to: lastDayOf(`${period.y}-${String(period.m).padStart(2, "0")}-01`) }
+      : range;
+
+  const inWin = (r: any) => r.from_date >= win.from && r.from_date <= win.to;
+
+  const booked = mine.filter((r) => r.status === "Approved" && inWin(r))
     .reduce((a, r) => a + Number(r.days), 0);
 
   const upcoming = [
     ...mine.filter((r) => r.to_date >= today && r.status !== "Cancelled")
-      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+      .map((r) => ({ d: r.from_date, label: r.leave_type,
+                     sub: r.from_time
+                       ? `${fmtHM(r.from_time)} – ${fmtHM(r.to_time)} · ${r.days}d`
+                       : `${r.days} day(s)`,
                      status: r.status, type: "leave", leave: r })),
     ...hols.filter((h) => h.hol_date >= today)
       .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
   ].sort((a, b) => a.d.localeCompare(b.d)).slice(0, 8);
 
   const past = [
-    ...mine.filter((r) => r.to_date < today)
-      .map((r) => ({ d: r.from_date, label: r.leave_type, sub: `${r.days} day(s)`,
+    ...mine.filter((r) => r.to_date < today && inWin(r))
+      .map((r) => ({ d: r.from_date, label: r.leave_type,
+                     sub: r.from_time
+                       ? `${fmtHM(r.from_time)} – ${fmtHM(r.to_time)} · ${r.days}d`
+                       : `${r.days} day(s)`,
                      status: r.status, type: "leave", leave: r })),
     ...hols.filter((h) => h.hol_date < today && h.hol_date.startsWith(year))
       .map((h) => ({ d: h.hol_date, label: h.name, sub: "Holiday", status: "Holiday", type: "hol" })),
@@ -3449,13 +3478,59 @@ function LeavesScreen({ me, tab }: any) {
 
   return (
     <div className="att-wrap att-stack">
-      <div className="att-daterow">
-        <span className="att-muted">
-          Leave booked this year: <b>{booked}</b> &nbsp;|&nbsp; Pending: <b>
-            {mine.filter((r) => r.status === "Pending").length}</b>
-        </span>
-        <b style={{ fontSize: 14.5 }}>01-Jan-{year} — 31-Dec-{year}</b>
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <b style={{ fontSize: 16 }}>
+            {span === "year" ? `Leave in ${period.y}`
+              : span === "month" ? `Leave in ${new Date(period.y, period.m - 1, 1)
+                  .toLocaleDateString("en-IN", { month: "long", year: "numeric" })}`
+              : "Leave in this range"}
+          </b>
+          <p className="att-muted">
+            Booked <b>{booked}</b> · Pending <b>
+              {mine.filter((r) => r.status === "Pending").length}</b>
+          </p>
+        </div>
         <button className="att-btn sm" onClick={() => setApply(true)}>Apply Leave</button>
+      </div>
+
+      <div className="att-range" style={{ flexWrap: "wrap" }}>
+        <div className="qk">
+          <button className={span === "year" ? "on" : ""}
+            onClick={() => setSpan("year")}>This year</button>
+          <button className={span === "month" ? "on" : ""}
+            onClick={() => setSpan("month")}>This month</button>
+          <button className={span === "custom" ? "on" : ""}
+            onClick={() => setSpan("custom")}>Custom</button>
+        </div>
+
+        <div className="att-flex att-daterange" style={{ marginLeft: "auto" }}>
+          {span === "year" && (
+            <select value={period.y} style={{ width: "auto" }}
+              onChange={(e) => setPeriod({ ...period, y: Number(e.target.value) })}>
+              {[0, 1, 2].map((i) => {
+                const y = Number(istToday().slice(0, 4)) - i;
+                return <option key={y} value={y}>{y}</option>;
+              })}
+            </select>
+          )}
+          {span === "month" && (
+            <input type="month" value={`${period.y}-${String(period.m).padStart(2, "0")}`}
+              onChange={(e) => {
+                const [y, m] = e.target.value.split("-");
+                setPeriod({ y: Number(y), m: Number(m) });
+              }} />
+          )}
+          {span === "custom" && (
+            <>
+              <input type="date" value={range.from}
+                onChange={(e) => setRange({ ...range, from: e.target.value })} />
+              <span className="att-muted">to</span>
+              <input type="date" value={range.to} min={range.from}
+                onChange={(e) => setRange({ ...range, to: e.target.value })} />
+            </>
+          )}
+        </div>
       </div>
 
       <div className="att-lvgrid">
@@ -3475,7 +3550,8 @@ function LeavesScreen({ me, tab }: any) {
               <div className="att-lvic" style={{ background: bg, color: fg }}>{b.leave_type}</div>
               <hr />
               <div className="att-lvrow">
-                <span className="att-muted">Allotted</span><b>{b.allocated}</b>
+                <span className="att-muted">{span === "month" ? "Given" : "Allotted"}</span>
+                <b>{span === "month" ? b.granted : b.allocated}</b>
               </div>
               <div className="att-lvrow">
                 <span className="att-muted">Available</span>
