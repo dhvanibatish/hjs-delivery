@@ -431,6 +431,16 @@ const CSS = `
   .hjsatt .att-daterange input { flex: 1; min-width: 0; }
 }
 
+.hjsatt .att-search { position: relative; display: flex; align-items: center; }
+.hjsatt .att-search .ic { position: absolute; left: 11px; width: 16px; height: 16px;
+  color: #98a2b3; pointer-events: none; }
+.hjsatt .att-search input { padding-left: 34px; padding-right: 34px; width: 100%; }
+.hjsatt .att-search .x { position: absolute; right: 6px; width: 24px; height: 24px;
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  color: #667085; background: transparent; border: 0; cursor: pointer; padding: 0; }
+.hjsatt .att-search .x:hover { background: #f2f4f7; color: #1d2939; }
+.hjsatt .att-search .x svg { width: 14px; height: 14px; }
+
 /* ---------- leave ledger ---------- */
 .hjsatt .att-ledrow { width: 100%; display: grid; align-items: start;
   grid-template-columns: 62px 82px 1fr 62px; gap: 12px;
@@ -2068,8 +2078,8 @@ function MatrixTab({ me }: any) {
       </div>
 
       {approver && (
-        <input placeholder="Search by name or code" value={q}
-          onChange={(e) => setQ(e.target.value)} style={{ marginTop: 10 }} />
+        <Search placeholder="Search by name or code" value={q}
+          onChange={setQ} style={{ marginTop: 10 }} />
       )}
 
       <p className="att-muted" style={{ marginTop: 10 }}>
@@ -2698,8 +2708,8 @@ function DirectoryTab({ me }: any) {
   return (
     <>
       <div className="att-flex" style={{ flexWrap: "wrap" }}>
-        <input placeholder="Search anything" value={q}
-          onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+        <Search placeholder="Search anything" value={q}
+          onChange={setQ} style={{ flex: 1, minWidth: 200 }} />
         <select value={team} onChange={(e) => setTeam(e.target.value)} style={{ width: "auto" }}>
           <option value="">All departments</option>
           {teams.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -2826,7 +2836,7 @@ function DeptTab() {
 
   return (
     <>
-      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Search value={q} onChange={setQ} />
       {Object.keys(teams).sort().map((tn) => {
         const byD = teams[tn];
         const n = Object.values(byD).reduce((a, x) => a + x.length, 0);
@@ -2963,7 +2973,7 @@ function EmpTreeTab() {
         .toLowerCase().includes(q.toLowerCase()));
     return (
       <>
-        <input placeholder="Search anyone" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Search placeholder="Search anyone" value={q} onChange={setQ} />
         <p className="att-muted">{hits.length} found · clear the search to see the tree</p>
         <div className="att-people">
           {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
@@ -2979,8 +2989,8 @@ function EmpTreeTab() {
   return (
     <>
       <div className="att-flex">
-        <input placeholder="Search anyone" value={q}
-          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <Search placeholder="Search anyone" value={q}
+          onChange={setQ} style={{ flex: 1 }} />
         <button className="att-btn sm line" onClick={() => setAll(true)}>Expand all</button>
         <button className="att-btn sm line" onClick={() => setAll(false)}>Collapse</button>
       </div>
@@ -3163,7 +3173,7 @@ function PeersTab() {
     `${r.full_name} ${r.emp_code} ${r.designation || ""}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Search value={q} onChange={setQ} />
       <p className="att-muted">{shown.length} people</p>
       <div className="att-people">
         {shown.map((p) => <PersonCard p={p} key={p.emp_code} />)}
@@ -4135,8 +4145,8 @@ function TodayTab() {
           <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
       </div>
       <div className="att-flex">
-        <input placeholder="Search name, code, team" value={q}
-          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <Search placeholder="Search name, code, team" value={q}
+          onChange={setQ} style={{ flex: 1 }} />
         {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>Clear {filter}</button>}
       </div>
 
@@ -4277,8 +4287,8 @@ function StaffTab({ me }: any) {
   return (
     <>
       <div className="att-flex">
-        <input placeholder="Search by name or code" value={q}
-          onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <Search placeholder="Search by name or code" value={q}
+          onChange={setQ} style={{ flex: 1 }} />
         {me.role === "admin" && (
           <>
             <button className="att-btn sm line" onClick={() => setMgD(true)}>Designations</button>
@@ -4747,7 +4757,7 @@ function OrgTab() {
         .toLowerCase().includes(q.toLowerCase()));
     return (
       <>
-        <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Search placeholder="Search team or person" value={q} onChange={setQ} />
         <p className="att-muted">{hits.length} found</p>
         <div className="att-people">
           {hits.map((p) => <PersonCard p={p} key={p.emp_code} />)}
@@ -4758,7 +4768,7 @@ function OrgTab() {
 
   return (
     <>
-      <input placeholder="Search team or person" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Search placeholder="Search team or person" value={q} onChange={setQ} />
       <p className="att-muted">{teams.length} teams · click the + on a team to see its people</p>
       <OrgChart
         roots={roots}
@@ -4969,8 +4979,7 @@ function PayrollTab({ isAdmin = false }: any) {
         <button className="att-btn sm" disabled={!rows.length}
           onClick={() => downloadCsv(rows, `HJS_payroll_${month}.csv`)}>CSV</button>
       </div>
-      <input placeholder="Search name, code, team" value={q}
-        onChange={(e) => setQ(e.target.value)} />
+      <Search placeholder="Search name, code, team" value={q} onChange={setQ} />
 
       {busy && <p className="att-muted">Loading…</p>}
       {!busy && (() => {
@@ -5331,6 +5340,29 @@ function MyReportTab({ me }: any) {
 }
 
 
+/* ================= search box (cross ke saath) ================= */
+function Search({ value, onChange, placeholder = "Search", style }: any) {
+  return (
+    <div className="att-search" style={style}>
+      <svg viewBox="0 0 24 24" className="ic" fill="none" stroke="currentColor"
+        strokeWidth="2" strokeLinecap="round">
+        <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+      </svg>
+      <input placeholder={placeholder} value={value}
+        onChange={(e) => onChange(e.target.value)} />
+      {value && (
+        <button className="x" onClick={() => onChange("")} aria-label="Clear search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.2" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+
 /* ================= leave ledger ke rang ================= */
 const LEDGER_KIND: Record<string, { label: string; bg: string; fg: string }> = {
   opening:    { label: "Opening",  bg: "#eff4ff", fg: "#1849a9" },
@@ -5614,8 +5646,8 @@ function OnLeaveTab() {
       </div>
 
       {rows.length > 6 && (
-        <input placeholder="Search name, department, leave type"
-          value={q} onChange={(e) => setQ(e.target.value)} />
+        <Search placeholder="Search name, department, leave type"
+          value={q} onChange={setQ} />
       )}
 
       {busy && <p className="att-muted">Loading…</p>}
