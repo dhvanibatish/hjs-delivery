@@ -1201,6 +1201,7 @@ export default function App() {
   const [page, setPage] = useState('deliveries'); // deliveries | dashboard
   const [showLog, setShowLog] = useState(false); // overall activity log panel
   const [dashKind, setDashKind] = useState('delivery'); // dashboard: delivery | pickups
+  const [slaKind, setSlaKind] = useState('delivery'); // Process & SLA: delivery | pickups
   // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
   // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
   const [reloadTick, setReloadTick] = useState(0);
@@ -1215,8 +1216,11 @@ export default function App() {
   // head store switch kar le tab bhi wo head hi rehta hai — Dashboard /
   // SLA / Complaints gayab nahi hone chahiye
   const isAllStores = session && session.isHead;
+  // Pickups module SLA page pe bhi mount hota hai — pickup SLA wahin banti hai
   const showPickups =
-    page === 'pickups' || (page === 'dashboard' && dashKind === 'pickups');
+    page === 'pickups' ||
+    (page === 'dashboard' && dashKind === 'pickups') ||
+    (page === 'sla' && slaKind === 'pickups');
   const showComplaints =
     page === 'complaints' || (page === 'dashboard' && dashKind === 'complaints');
   const inModule = page === 'pickups' || page === 'complaints';
@@ -1690,6 +1694,26 @@ export default function App() {
               </div>
             )}
 
+            {/* Process & SLA ka delivery/pickup switch */}
+            {isAllStores && page === 'sla' && (
+              <div className="dash-switch">
+                <div className="layout-toggle">
+                  <button
+                    className={slaKind === 'delivery' ? 'lt-btn active' : 'lt-btn'}
+                    onClick={() => setSlaKind('delivery')}
+                  >
+                    <Truck size={14} /> Deliveries
+                  </button>
+                  <button
+                    className={slaKind === 'pickups' ? 'lt-btn active' : 'lt-btn'}
+                    onClick={() => setSlaKind('pickups')}
+                  >
+                    <RotateCcw size={14} /> Pickups
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Deliveries board */}
             <div style={{ display: page === 'deliveries' ? 'block' : 'none' }}>
               <Header
@@ -1748,7 +1772,7 @@ export default function App() {
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             )}
-            {isAllStores && page === 'sla' && (
+            {isAllStores && page === 'sla' && slaKind === 'delivery' && (
               <SlaReport
                 deliveries={allStoresData}
                 logsLoaded={logsLoaded}
@@ -1764,7 +1788,13 @@ export default function App() {
               <div style={{ display: showPickups ? 'block' : 'none' }}>
                 <PickupsModule
                   session={session}
-                  view={page === 'dashboard' ? 'dashboard' : 'board'}
+                  view={
+                    page === 'dashboard'
+                      ? 'dashboard'
+                      : page === 'sla'
+                        ? 'sla'
+                        : 'board'
+                  }
                   reloadKey={reloadTick}
                   openLogKey={page === 'pickups' ? logTick : 0}
                   lang={lang}
