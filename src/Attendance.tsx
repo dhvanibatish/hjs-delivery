@@ -5536,7 +5536,7 @@ const ALIASES: Record<string, string> = {
   "Holiday List": "holidays festival calendar",
   "My attendance": "my report month days present absent",
   "My pay": "salary payable amount gross my pay",
-  "Muster Roll": "attendance register month all staff payroll",
+  "Muster Roll": "attendance register month all staff payroll company",
   "Payroll": "salary pay all staff amount payable gross",
   "Pending sign-ups": "new joiner approve registration",
   "Half-filled records": "incomplete missing setup needs",
@@ -7164,7 +7164,7 @@ const MODULES: Module[] = [
         { k: "me", label: "My attendance" },
         { k: "pay", label: "My pay" },
       ]},
-      { k: "att", label: "Attendance", views: [
+      { k: "att", label: "Company-wide", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
       ]},
