@@ -3339,7 +3339,7 @@ function LeavesScreen({ me, tab }: any) {
   const [apply, setApply] = useState(false);
   const [editBal, setEditBal] = useState<any>(null);
   const [pickLeave, setPickLeave] = useState<any>(null);
-  const [span, setSpan] = useState<"year" | "month" | "custom">("year");
+  const [span, setSpan] = useState<"year" | "month" | "custom">("month");
   const [period, setPeriod] = useState({
     y: Number(istToday().slice(0, 4)),
     m: Number(istToday().slice(5, 7)),
@@ -3496,10 +3496,10 @@ function LeavesScreen({ me, tab }: any) {
 
       <div className="att-range" style={{ flexWrap: "wrap" }}>
         <div className="qk">
-          <button className={span === "year" ? "on" : ""}
-            onClick={() => setSpan("year")}>This year</button>
           <button className={span === "month" ? "on" : ""}
             onClick={() => setSpan("month")}>This month</button>
+          <button className={span === "year" ? "on" : ""}
+            onClick={() => setSpan("year")}>This year</button>
           <button className={span === "custom" ? "on" : ""}
             onClick={() => setSpan("custom")}>Custom</button>
         </div>
