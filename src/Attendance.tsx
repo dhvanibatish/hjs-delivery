@@ -884,7 +884,6 @@ function RangeBar({ range, setRange }: any) {
 }
 
 function DayListSheet({ title, rows, onClose }: any) {
-  const [q, setQ] = useState("");
   return (
     <Sheet title={title} onClose={onClose}>
       <div className="att-list">
@@ -3108,9 +3107,7 @@ function PeopleTab() {
 
   return (
     <>
-      {(bd.length + nh.length) > 6 && (
-        <Search placeholder="Search name or department" value={q} onChange={setQ} />
-      )}
+              <Search placeholder="Search name or department" value={q} onChange={setQ} />
       <div className="att-list">
         <div className="att-hd"><b>Upcoming birthdays</b><span className="att-muted">next 45 days</span></div>
         {!bdS.length && (
@@ -3352,10 +3349,8 @@ function TeamLeavesTab({ me }: any) {
 
   return (
     <>
-      {rows.length > 6 && (
-        <Search placeholder="Search name, leave type or status"
+              <Search placeholder="Search name, leave type or status"
           value={q} onChange={setQ} />
-      )}
     <div className="att-list">
       <div className="att-hd"><b>Team leaves</b><span className="att-muted">{shown.length}</span></div>
       {!shown.length && (
@@ -3423,9 +3418,7 @@ function HolidaysTab({ me }: any) {
           <button className="att-btn sm" onClick={add} disabled={!f.name.trim()}>Add</button>
         </div>
       )}
-      {rows.length > 8 && (
-        <Search placeholder="Search holiday" value={q} onChange={setQ} />
-      )}
+              <Search placeholder="Search holiday" value={q} onChange={setQ} />
       <div className="att-list">
         <div className="att-hd"><b>Holidays {year}</b><span className="att-muted">{shown.length}</span></div>
         {!shown.length && (
@@ -4042,9 +4035,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     <div className="att-wrap att-stack">
       <Note>{err}</Note>
 
-      {(leaves.length + regs.length) > 5 && (
-        <Search placeholder="Search name, code or reason" value={q} onChange={setQ} />
-      )}
+              <Search placeholder="Search name, code or reason" value={q} onChange={setQ} />
 
       {history && (
         <div className="att-range">
@@ -4170,9 +4161,7 @@ function JoinersTab() {
       <p className="att-muted">
         Anyone can create an account from the sign-in link. They land here until you approve them.
       </p>
-      {rows.length > 6 && (
-        <Search placeholder="Search name or email" value={q} onChange={setQ} />
-      )}
+              <Search placeholder="Search name or email" value={q} onChange={setQ} />
       <div className="att-list">
         {!rows.length && !busy && <p className="att-empty">No one waiting right now.</p>}
         {rows.filter((r) => !q ||
@@ -4321,9 +4310,10 @@ function TodayTab() {
 }
 
 function DashTab() {
-  const [branches, setBranches] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
   const [trend, setTrend] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -4331,35 +4321,75 @@ function DashTab() {
         supabase.rpc("dashboard_today", {}),
         supabase.rpc("attendance_trend", { p_days: 14 }),
       ]);
-      setBranches(b.data || []); setTrend(t.data || []); setBusy(false);
+      if (b.error || t.error) setErr(b.error?.message || t.error?.message || "");
+      setTeams(b.data || []); setTrend(t.data || []); setBusy(false);
     })();
   }, []);
 
   if (busy) return <p className="att-muted">Loading…</p>;
   const maxT = Math.max(1, ...trend.map((d) => d.present + d.late + d.absent));
 
+  const tot = teams.reduce((a: any, x: any) => ({
+    total: a.total + (x.total || 0),
+    marked: a.marked + (x.present || 0) + (x.late || 0) + (x.half_day || 0),
+    leave: a.leave + (x.on_leave || 0),
+    none: a.none + (x.no_punch || 0),
+  }), { total: 0, marked: 0, leave: 0, none: 0 });
+
   return (
     <>
+      <Note>{err}</Note>
+
+      {teams.length > 0 && (
+        <div className="att-stats">
+          <div className="att-stat"><b style={{ color: "#16a34a" }}>{tot.marked}</b>
+            <span>Checked in</span></div>
+          <div className="att-stat"><b style={{ color: "#2563eb" }}>{tot.leave}</b>
+            <span>On leave</span></div>
+          <div className="att-stat"><b style={{ color: "#dc2626" }}>{tot.none}</b>
+            <span>Yet to check in</span></div>
+          <div className="att-stat"><b>{tot.total}</b><span>Total staff</span></div>
+        </div>
+      )}
+
       <div className="att-list">
-        <div className="att-hd"><b>Branch-wise (today)</b></div>
-        {branches.map((b) => {
-          const marked = b.present + b.late + b.half_day;
+        <div className="att-hd">
+          <b>Department-wise today</b>
+          <span className="att-muted">{teams.length} departments</span>
+        </div>
+        {teams.map((b, i) => {
+          const marked = (b.present || 0) + (b.late || 0) + (b.half_day || 0);
           const pct = b.total ? Math.round((marked / b.total) * 100) : 0;
           return (
-            <div className="att-row" key={b.branch} style={{ display: "block" }}>
+            <div className="att-row" key={b.team || i} style={{ display: "block" }}>
               <div className="att-between">
-                <b>{b.branch}</b>
+                <b>{b.team || "—"}</b>
                 <span className="att-muted">{marked}/{b.total} · {pct}%</span>
               </div>
               <div className="att-bar"><i style={{ width: `${pct}%` }} /></div>
+              <p className="att-muted" style={{ fontSize: 11.5, marginTop: 5 }}>
+                {b.present || 0} present · {b.late || 0} late · {b.half_day || 0} half ·{" "}
+                {b.on_leave || 0} leave ·{" "}
+                <span style={{ color: (b.no_punch || 0) > 0 ? "#b42318" : "inherit" }}>
+                  {b.no_punch || 0} yet to check in
+                </span>
+              </p>
             </div>
           );
         })}
-        {!branches.length && <p className="att-empty">No data yet.</p>}
+        {!teams.length && (
+          <p className="att-empty">
+            {err ? "Couldn't load — see the message above."
+              : "Nobody has checked in yet today."}
+          </p>
+        )}
       </div>
 
       <div className="att-card">
         <b>Last 14 days</b>
+        {!trend.length && (
+          <p className="att-muted" style={{ marginTop: 8 }}>Nothing recorded yet.</p>
+        )}
         <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 120, marginTop: 12 }}>
           {trend.map((d) => {
             const h = ((d.present + d.late) / maxT) * 100;
@@ -4373,11 +4403,18 @@ function DashTab() {
             );
           })}
         </div>
-        <div className="att-between" style={{ marginTop: 9 }}>
-          <span className="att-muted">{fmtDate(trend[0]?.d)}</span>
-          <span className="att-muted">present · absent</span>
-          <span className="att-muted">{fmtDate(trend[trend.length - 1]?.d)}</span>
-        </div>
+        {trend.length > 0 && (
+          <div className="att-between" style={{ marginTop: 9 }}>
+            <span className="att-muted">{fmtDate(trend[0]?.d)}</span>
+            <span className="att-muted">
+              <i style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2,
+                background: "#2563eb", marginRight: 4 }} />present
+              <i style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2,
+                background: "#fecdca", margin: "0 4px 0 10px" }} />absent
+            </span>
+            <span className="att-muted">{fmtDate(trend[trend.length - 1]?.d)}</span>
+          </div>
+        )}
       </div>
     </>
   );
@@ -5924,10 +5961,8 @@ function OnLeaveTab() {
         </div>
       </div>
 
-      {rows.length > 6 && (
-        <Search placeholder="Search name, department, leave type"
+              <Search placeholder="Search name, department, leave type"
           value={q} onChange={setQ} />
-      )}
 
       {busy && <p className="att-muted">Loading…</p>}
 
@@ -6055,10 +6090,8 @@ function NeedsSetupTab({ me }: any) {
         filled in they sit outside the org chart, and without an email they can't sign in.
       </p>
 
-      {rows.length > 6 && (
-        <Search placeholder="Search name, code or department"
+              <Search placeholder="Search name, code or department"
           value={q} onChange={setQ} />
-      )}
       <div className="att-list">
         <div className="att-hd">
           <b>Half-filled records</b><span className="att-muted">{rows.length}</span>
@@ -6426,10 +6459,8 @@ function LeaveLedgerTab({ me }: any) {
           })), `HJS_leave_history_${range.from}_${range.to}.csv`)}>CSV</button>
       </div>
 
-      {rows.length > 6 && (
-        <Search placeholder="Search reason, type or who gave it"
+              <Search placeholder="Search reason, type or who gave it"
           value={q} onChange={setQ} />
-      )}
 
       <div className="att-stats">
         <div className="att-stat"><b style={{ color: "#16a34a" }}>+{totals.given}</b>
