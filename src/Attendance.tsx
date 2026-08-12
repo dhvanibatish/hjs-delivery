@@ -1015,7 +1015,6 @@ function Login() {
   const [dob, setDob] = useState("");
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
-  const [empCode, setEmpCode] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [code2, setCode2] = useState("");
@@ -1743,11 +1742,6 @@ const minsOfDay = (ts: any) => {
 const hourLabel = (h: number) =>
   `${String(h % 12 || 12).padStart(2, "0")}${h >= 12 ? "PM" : "AM"}`;
 
-function AttendanceScreen({ me, tab }: any) {
-  if (tab === "matrix") return <div className="att-wrap"><MatrixTab me={me} /></div>;
-  if (tab === "calendar") return <CalendarTab me={me} />;
-  return <AttSummary me={me} />;
-}
 
 function AttSummary({ me }: any) {
   const [wk, setWk] = useState(mondayOf(istToday()));
@@ -3312,17 +3306,6 @@ function HolidaysTab({ me }: any) {
   );
 }
 
-function OrgScreen({ me, tab }: any) {
-  return (
-    <div className="att-wrap att-stack">
-      {tab === "directory" && <DirectoryTab me={me} />}
-      {tab === "dept" && <DeptTab />}
-      {tab === "tree" && <EmpTreeTab />}
-      {tab === "people" && <PeopleTab />}
-      {tab === "notice" && <NoticeTab me={me} />}
-    </div>
-  );
-}
 
 /* ========================= leave ========================= */
 const LV_TINT: Record<string, [string, string]> = {
@@ -4341,9 +4324,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
           throw new Error("A work email is required — they sign in with it");
         const { error } = await supabase.from("employees").insert(payload);
         if (error) throw new Error(error.message);
-        await supabase.rpc("seed_leave_balances", {});
         setMsg({ err: "",
-          ok: `${payload.full_name} added. Tell them to open the app, enter ${payload.email} and set their own 4-digit code.` });
+          ok: `${payload.full_name} added. Tell them to open the app, enter ${payload.email} and set their own 4-digit code. Give them leave days from Leave Tracker → History.` });
       } else {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
@@ -4964,18 +4946,6 @@ function PayrollTab({ isAdmin = false }: any) {
   );
 }
 
-function TeamScreen({ me, tab }: any) {
-  const approver = ["manager", "admin"].includes(me.role);
-  return (
-    <div className="att-wrap att-stack">
-      {(tab === "today" || !approver) && <TodayTab />}
-      {approver && tab === "dash" && <DashTab />}
-      {approver && tab === "staff" && <StaffTab me={me} />}
-      {approver && tab === "reports" && <ReportsTab />}
-      {approver && tab === "payroll" && <PayrollTab />}
-    </div>
-  );
-}
 
 /* ========================= profile ========================= */
 function MeScreen({ me }: any) {
@@ -6892,6 +6862,7 @@ export default function Attendance() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const [pending, setPending] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [canVerify, setCanVerify] = useState(false);
   const [meErr, setMeErr] = useState("");
   const [toCheck, setToCheck] = useState(0);
@@ -6927,14 +6898,24 @@ export default function Attendance() {
   useEffect(() => {
     if (!me || !["manager", "admin"].includes(me.role)) return;
     (async () => {
-      const [l, r] = await Promise.all([
+      const [l, r, j, dir] = await Promise.all([
         supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
+        supabase.rpc("pending_registrations"),
+        supabase.rpc("directory", {}),
       ]);
-      const j = await supabase.rpc("pending_registrations");
-      setPending([...(l.data || []), ...(r.data || [])]
-        .filter((x: any) => me.role === "admin" || x.employee_id !== me.id).length
-        + (j.data || []).length);
+
+      const mineOut = (x: any) => me.role === "admin" || x.employee_id !== me.id;
+      const approvals = [...(l.data || []), ...(r.data || [])].filter(mineOut).length;
+      const joiners = (j.data || []).length;
+      const setup = (dir.data || []).filter((x: any) =>
+        String(x.emp_code).startsWith("REG-")
+        || !x.team_id || !x.designation
+        || (!x.reports_to && !x.co_manager_id && x.designation !== "Co-Founder")
+        || !x.email).length;
+
+      setCounts({ pending: approvals, joiners, setup });   // history ka koi badge nahi
+      setPending(approvals + joiners);                      // rail pe kaam wale hi
     })();
   }, [me, mod]);
 
@@ -7092,7 +7073,9 @@ export default function Attendance() {
             <button key={sc.k} className={`att-scopebtn ${scope === sc.k ? "on" : ""}`}
               onClick={() => goScope(sc.k)}>
               {sc.label}
-              {curMod.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+              {curMod.k === "approvals" && (counts[sc.k] || 0) > 0 && (
+                <span className="cnt">{counts[sc.k]}</span>
+              )}
             </button>
           ))}
         </div>
