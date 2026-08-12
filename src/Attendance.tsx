@@ -4975,10 +4975,10 @@ function PayrollTab({ isAdmin = false }: any) {
       {busy && <p className="att-muted">Loading…</p>}
       {!busy && (() => {
         const shown = rows.filter((r: any) => !q ||
-          `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
+          `${r.full_name} ${r.emp_code} ${r.branch || ""}`.toLowerCase().includes(q.toLowerCase()));
         const groups: Record<string, any[]> = {};
         shown.forEach((r: any) => {
-          const k = r.team || "—";
+          const k = r.branch || "—";
           (groups[k] = groups[k] || []).push(r);
         });
         const names = Object.keys(groups).sort();
