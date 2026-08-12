@@ -3176,6 +3176,18 @@ function PeersTab() {
 function MyRegsTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState("");
+
+  const kill = async (r: any) => {
+    const hard = r.status !== "Pending";
+    if (hard && !window.confirm(
+      `Delete this request from ${fmtDate(r.work_date)} completely?`)) return;
+    setBusy(r.id);
+    const { error } = await supabase.rpc("delete_regularization",
+      { p_id: r.id, p_hard: hard });
+    if (error) window.alert(error.message);
+    setBusy(""); load();
+  };
   const load = async () => {
     const { data } = await supabase.from("regularizations").select("*")
       .eq("employee_id", me.id).order("work_date", { ascending: false }).limit(60);
@@ -3191,13 +3203,23 @@ function MyRegsTab({ me }: any) {
       <div className="att-list">
         {!rows.length && <p className="att-empty">No requests yet.</p>}
         {rows.map((r) => (
-          <div className="att-row" key={r.id}>
-            <span style={{ width: 54, fontWeight: 700 }}>{fmtDate(r.work_date)}</span>
-            <div className="grow">
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <span style={{ width: 54, fontWeight: 700, flexShrink: 0 }}>
+              {fmtDate(r.work_date)}
+            </span>
+            <div className="grow" style={{ minWidth: 120 }}>
               <p>{fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}</p>
-              <p className="att-muted">{r.reason}</p>
+              {r.reason && (
+                <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>
+              )}
             </div>
             <span className={pillClass(r.status)}>{r.status}</span>
+            {(r.status === "Pending" || me.role === "admin") && (
+              <button className="att-muted" disabled={busy === r.id}
+                onClick={() => kill(r)}>
+                {r.status === "Pending" ? "Cancel" : "Delete"}
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -3322,6 +3344,7 @@ function LeavesScreen({ me, tab }: any) {
   const [apply, setApply] = useState(false);
   const [editBal, setEditBal] = useState<any>(null);
   const [pickLeave, setPickLeave] = useState<any>(null);
+  const [busyReg, setBusyReg] = useState("");
   const [span, setSpan] = useState<"year" | "month" | "custom">("month");
   const [period, setPeriod] = useState({
     y: Number(istToday().slice(0, 4)),
@@ -3353,8 +3376,20 @@ function LeavesScreen({ me, tab }: any) {
   useEffect(() => { load(); }, [span, period.y, period.m, range.from, range.to]);
 
   const cancel = async (id: string) => {
-    await supabase.from("leaves").update({ status: "Cancelled" }).eq("id", id);
+    await supabase.rpc("delete_leave", { p_id: id, p_hard: false });
     load();
+  };
+
+  // regularization cancel (pending) ya delete (admin)
+  const killReg = async (r: any) => {
+    const hard = r.status !== "Pending";
+    if (hard && !confirm(
+      `Delete this missed-punch request from ${fmtDate(r.work_date)} completely?`)) return;
+    setBusyReg(r.id);
+    const { error } = await supabase.rpc("delete_regularization",
+      { p_id: r.id, p_hard: hard });
+    if (error) alert(error.message);
+    setBusyReg(""); load();
   };
 
   const today = istToday();
@@ -3442,10 +3477,21 @@ function LeavesScreen({ me, tab }: any) {
               <span style={{ width: 58, fontWeight: 650, flexShrink: 0 }}>
                 {fmtDate(r.work_date)}
               </span>
-              <span className="grow att-muted" style={{ minWidth: 120 }}>
-                {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
-              </span>
+              <div className="grow" style={{ minWidth: 120 }}>
+                <p className="att-muted">
+                  {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
+                </p>
+                {r.reason && (
+                  <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>
+                )}
+              </div>
               <span className={pillClass(r.status)}>{r.status}</span>
+              {(r.status === "Pending" || isAdmin) && (
+                <button className="att-muted" disabled={busyReg === r.id}
+                  onClick={() => killReg(r)}>
+                  {r.status === "Pending" ? "Cancel" : "Delete"}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -3823,6 +3869,18 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date));
   const total = shownL.length + shownR.length;
 
+  const kill = async (r: any, kind: string) => {
+    if (!window.confirm(
+      `Delete this ${kind === "leave" ? "leave" : "missed punch"} request completely? ` +
+      `It won't show in history anymore.`)) return;
+    setBusy(true);
+    const { error } = await supabase.rpc(
+      kind === "leave" ? "delete_leave" : "delete_regularization",
+      { p_id: r.id, p_hard: true });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
   const Actions = ({ r, kind }: any) =>
     r.status !== "Pending" ? (
       <div style={{ textAlign: "right" }}>
@@ -3831,6 +3889,11 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
           <p className="att-muted" style={{ fontSize: 11.5, marginTop: 3 }}>
             {fmtDate(r.approved_at)}
           </p>
+        )}
+        {me.role === "admin" && (
+          <button className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}
+            disabled={busy}
+            onClick={(e) => { e.stopPropagation(); kill(r, kind); }}>Delete</button>
         )}
       </div>
     ) : (
@@ -5349,7 +5412,7 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [emp, setEmp] = useState<any>(null);
-  const [confirm, setConfirm] = useState(false);
+  const [confirm, setConfirm] = useState<null | "cancel" | "delete">(null);
 
   useEffect(() => {
     if (!lv.employee_id) return;
@@ -5360,13 +5423,16 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
   }, [lv.employee_id]);
 
   const mine = lv.employee_id === who?.id;
-  const canCancel = mine && lv.status === "Pending";
+  const isAdmin = who?.role === "admin";
+  const isApprover = who && ["manager", "admin"].includes(who.role);
+  // apni pending, ya manager/admin kisi ki bhi
+  const canCancel = (mine && lv.status === "Pending") || isApprover;
   const one = lv.from_date === lv.to_date;
 
-  const cancel = async () => {
+  const act = async (hard: boolean) => {
     setBusy(true); setMsg({ err: "", ok: "" });
-    const { error } = await supabase.from("leaves")
-      .update({ status: "Cancelled" }).eq("id", lv.id);
+    const { error } = await supabase.rpc("delete_leave",
+      { p_id: lv.id, p_hard: hard });
     if (error) setMsg({ err: error.message, ok: "" });
     else { onChanged && onChanged(); onClose(); }
     setBusy(false);
@@ -5418,20 +5484,48 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
 
         <Note>{msg.err}</Note>
 
-        {canCancel && !confirm && (
-          <button className="att-btn line" onClick={() => setConfirm(true)}>
-            Cancel this request
+        {!confirm && lv.status !== "Cancelled" && canCancel && (
+          <button className="att-btn line" onClick={() => setConfirm("cancel")}>
+            {mine ? "Cancel this request" : "Cancel this leave"}
           </button>
         )}
 
-        {canCancel && confirm && (
+        {!confirm && isAdmin && (
+          <button className="att-btn line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+            onClick={() => setConfirm("delete")}>
+            Delete it completely
+          </button>
+        )}
+
+        {confirm === "cancel" && (
           <div className="att-note err">
-            <span>This withdraws your request. The days go back to your balance.</span>
+            <span>
+              {lv.status === "Approved"
+                ? `This cancels the leave. The ${lv.days} day(s) go back to ${
+                    mine ? "your" : "their"} balance and the day counts as normal again.`
+                : "This withdraws the request. Nothing is deducted."}
+            </span>
             <div className="att-flex" style={{ marginTop: 10 }}>
               <button className="att-btn grey sm" style={{ flex: 1 }}
-                onClick={() => setConfirm(false)}>Keep it</button>
+                onClick={() => setConfirm(null)}>Keep it</button>
               <button className="att-btn sm" style={{ flex: 1, background: "#b42318" }}
-                disabled={busy} onClick={cancel}>Yes, cancel</button>
+                disabled={busy} onClick={() => act(false)}>Yes, cancel</button>
+            </div>
+          </div>
+        )}
+
+        {confirm === "delete" && (
+          <div className="att-note err">
+            <span>
+              This wipes the request from history — nobody will see it was ever applied
+              for. The days go back to the balance. Use Cancel instead if you want a
+              record of it.
+            </span>
+            <div className="att-flex" style={{ marginTop: 10 }}>
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => setConfirm(null)}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1, background: "#b42318" }}
+                disabled={busy} onClick={() => act(true)}>Yes, delete</button>
             </div>
           </div>
         )}
