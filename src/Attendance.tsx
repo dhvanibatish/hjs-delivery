@@ -137,7 +137,20 @@ const CSS = `
   .hjsatt .att-rail { display: none; }
   .hjsatt .att-body { display: block; overflow: visible; }
   .hjsatt .att-main { overflow: visible; }
-  .hjsatt .att-mtabs { display: flex; position: sticky; top: 0; z-index: 12; }
+  /* teen bar ek ke neeche: module (navy) > scope (halka) > view (safed) */
+  .hjsatt .att-mtabs { display: flex; position: sticky; top: 0; z-index: 14;
+    background: #223354; border-bottom: 0; padding: 0 10px; }
+  .hjsatt .att-mtabs .att-tab { color: #a9bcd8; font-size: 14px; font-weight: 650;
+    padding: 13px 12px 12px; }
+  .hjsatt .att-mtabs .att-tab.on { color: #fff; box-shadow: inset 0 -2.5px 0 #fff; }
+
+  /* scope ab halke neele patti mein — navy se alag dikhe */
+  .hjsatt .att-scope { position: sticky; top: 45px; z-index: 13;
+    background: #eef2f8; border-bottom: 1px solid #dfe6f0; padding: 0 10px; }
+  .hjsatt .att-scopebtn { color: #5b6b8c; font-size: 13.5px; padding: 10px 12px 9px; }
+  .hjsatt .att-scopebtn.on { color: #1849a9; box-shadow: inset 0 -2.5px 0 #1849a9; }
+
+  .hjsatt .att-subbar { position: sticky; top: 84px; z-index: 12; }
   .hjsatt .att-card, .hjsatt .att-list { box-shadow: none; }
   .hjsatt .att-tcard { width: 240px; }
 }
@@ -7431,9 +7444,10 @@ export default function Attendance() {
       <div className="att-body">
         <header className="att-topbar">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <b>{curMod.label}</b>
-            <span className="sub" style={{ display: "block", cursor: "pointer" }}>
-              <PName code={me.emp_code}>{me.emp_code} · {me.full_name}</PName>
+            <b>{curScope.views.length > 1 ? curView.label : curScope.label}</b>
+            <span className="sub" style={{ display: "block" }}>
+              {curMod.label}
+              {curScope.views.length > 1 ? ` › ${curScope.label}` : ""}
             </span>
           </div>
           <button className="att-topsearch" onClick={() => setJump(true)}
@@ -7450,6 +7464,16 @@ export default function Attendance() {
           }}>Sign out</button>
         </header>
 
+        <div className="att-mtabs">
+          {mods.map((m) => (
+            <button key={m.k} className={`att-tab ${mod === m.k ? "on" : ""}`}
+              onClick={() => goMod(m.k)}>
+              {m.label}
+              {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
+            </button>
+          ))}
+        </div>
+
         <div className="att-scope">
           {curMod.scopes.map((sc) => (
             <button key={sc.k} className={`att-scopebtn ${scope === sc.k ? "on" : ""}`}
@@ -7458,16 +7482,6 @@ export default function Attendance() {
               {curMod.k === "approvals" && (counts[sc.k] || 0) > 0 && (
                 <span className="cnt">{counts[sc.k]}</span>
               )}
-            </button>
-          ))}
-        </div>
-
-        <div className="att-mtabs">
-          {mods.map((m) => (
-            <button key={m.k} className={`att-tab ${mod === m.k ? "on" : ""}`}
-              onClick={() => goMod(m.k)}>
-              {m.label}
-              {m.k === "approvals" && pending > 0 && <span className="cnt">{pending}</span>}
             </button>
           ))}
         </div>
