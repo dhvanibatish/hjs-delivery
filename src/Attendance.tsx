@@ -425,6 +425,40 @@ const CSS = `
   padding: 4px 9px; border-radius: 6px; background: #eff4ff; color: #1849a9;
   white-space: nowrap; align-self: flex-start; }
 
+.hjsatt .att-daterange { flex-wrap: nowrap; }
+@media (max-width: 560px) {
+  .hjsatt .att-daterange { width: 100%; margin-left: 0 !important; }
+  .hjsatt .att-daterange input { flex: 1; min-width: 0; }
+}
+
+/* ---------- leave ledger ---------- */
+.hjsatt .att-ledrow { width: 100%; display: grid; align-items: start;
+  grid-template-columns: 62px 82px 1fr 62px; gap: 12px;
+  padding: 13px 15px; border-bottom: 1px solid #f4f5f6; text-align: left; }
+.hjsatt .att-ledrow:last-child { border-bottom: 0; }
+.hjsatt .att-ledrow.clk { cursor: pointer; }
+.hjsatt .att-ledrow.clk:hover { background: #fafbff; }
+.hjsatt .att-ledrow .dt { font-size: 12.5px; font-weight: 650; color: #344054;
+  white-space: nowrap; padding-top: 2px; }
+.hjsatt .att-ledrow .tag { font-size: 10.5px; font-weight: 700; padding: 3px 7px;
+  border-radius: 6px; text-align: center; white-space: nowrap; justify-self: start; }
+.hjsatt .att-ledrow .mid { min-width: 0; }
+.hjsatt .att-ledrow .mid b { display: block; font-size: 13.5px; }
+.hjsatt .att-ledrow .mid p { font-size: 12px; color: #6b7280; white-space: normal;
+  margin-top: 2px; }
+.hjsatt .att-ledrow .amt { font-size: 16px; font-weight: 700; text-align: right;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 560px) {
+  .hjsatt .att-ledrow { grid-template-columns: 1fr auto; gap: 4px 10px;
+    padding: 12px 13px; }
+  .hjsatt .att-ledrow .dt { grid-column: 1; grid-row: 1; }
+  .hjsatt .att-ledrow .amt { grid-column: 2; grid-row: 1 / span 2;
+    align-self: center; font-size: 18px; }
+  .hjsatt .att-ledrow .tag { grid-column: 1; grid-row: 2; margin-top: 2px; }
+  .hjsatt .att-ledrow .mid { grid-column: 1; grid-row: 3; margin-top: 4px; }
+}
+
 /* ---------- reports ---------- */
 .hjsatt .att-dayrow { width: 100%; display: grid; align-items: center;
   grid-template-columns: 52px 62px 1fr 78px; gap: 16px;
@@ -5698,7 +5732,7 @@ function LeaveLedgerTab({ me }: any) {
         )}
       </div>
 
-      <div className="att-range">
+      <div className="att-range" style={{ flexWrap: "wrap" }}>
         <div className="qk">
           <button onClick={() => setRange({
             from: `${istToday().slice(0, 7)}-01`, to: istToday() })}>This month</button>
@@ -5711,7 +5745,7 @@ function LeaveLedgerTab({ me }: any) {
             from: `${Number(istToday().slice(0, 4)) - 1}-01-01`,
             to: `${Number(istToday().slice(0, 4)) - 1}-12-31` })}>Last year</button>
         </div>
-        <div className="att-flex" style={{ marginLeft: "auto", flexWrap: "wrap" }}>
+        <div className="att-flex att-daterange" style={{ marginLeft: "auto" }}>
           <input type="date" value={range.from}
             onChange={(e) => setRange({ ...range, from: e.target.value })} />
           <span className="att-muted">to</span>
@@ -5720,10 +5754,10 @@ function LeaveLedgerTab({ me }: any) {
         </div>
       </div>
 
-      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+      <div className="att-flex" style={{ flexWrap: "wrap", gap: 8 }}>
         {isAdmin && (
           <select value={who} onChange={(e) => setWho(e.target.value)}
-            style={{ flex: 1, minWidth: 180 }}>
+            style={{ flex: "1 1 190px", minWidth: 0 }}>
             <option value="">Me</option>
             {people.map((p) => (
               <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
@@ -5731,7 +5765,7 @@ function LeaveLedgerTab({ me }: any) {
           </select>
         )}
         <select value={type} onChange={(e) => setType(e.target.value)}
-          style={{ width: "auto", minWidth: 150 }}>
+          style={{ flex: "1 1 140px", width: "auto", minWidth: 0 }}>
           <option value="">All leave types</option>
           {types.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
         </select>
@@ -5766,30 +5800,26 @@ function LeaveLedgerTab({ me }: any) {
           {rows.map((r) => {
             const k = LEDGER_KIND[r.kind] || { label: r.kind, bg: "#f2f4f7", fg: "#667085" };
             return (
-              <div className={`att-row ${isAdmin && r.editable ? "clk" : ""}`} key={r.id}
+              <div className={`att-ledrow ${isAdmin && r.editable ? "clk" : ""}`} key={r.id}
                 onClick={() => isAdmin && r.editable && setEdit(r)}>
-                <span style={{ width: 62, flexShrink: 0 }}>
-                  <b style={{ fontSize: 13 }}>{fmtDate(r.entry_date)}</b>
-                </span>
-                <span className="att-ltype" style={{ background: k.bg, color: k.fg }}>
+                <span className="dt">{fmtDate(r.entry_date)}</span>
+                <span className="tag" style={{ background: k.bg, color: k.fg }}>
                   {k.label}
                 </span>
-                <div className="grow" style={{ minWidth: 120 }}>
-                  <p><b>{r.leave_name}</b>
+                <span className="mid">
+                  <b>{r.leave_name}
                     {isAdmin && who && (
-                      <span className="att-muted"> · {r.full_name}</span>)}
-                  </p>
-                  {r.note && (
-                    <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.note}</p>
-                  )}
+                      <span className="att-muted" style={{ fontWeight: 400 }}>
+                        {" · "}{r.full_name}</span>)}
+                  </b>
+                  {r.note && <p>{r.note}</p>}
                   {r.by_name && (
-                    <p className="att-muted" style={{ fontSize: 11.5 }}>by {r.by_name}</p>
+                    <p style={{ fontSize: 11.5 }}>by {r.by_name}</p>
                   )}
-                </div>
-                <b style={{ fontSize: 15, whiteSpace: "nowrap",
-                  color: r.days > 0 ? "#16a34a" : "#dc2626" }}>
+                </span>
+                <span className="amt" style={{ color: r.days > 0 ? "#16a34a" : "#dc2626" }}>
                   {r.days > 0 ? "+" : ""}{r.days}
-                </b>
+                </span>
               </div>
             );
           })}
