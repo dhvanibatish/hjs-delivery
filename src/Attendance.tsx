@@ -884,6 +884,7 @@ function RangeBar({ range, setRange }: any) {
 }
 
 function DayListSheet({ title, rows, onClose }: any) {
+  const [q, setQ] = useState("");
   return (
     <Sheet title={title} onClose={onClose}>
       <div className="att-list">
@@ -3083,6 +3084,7 @@ function EmpTreeTab() {
 }
 
 function PeopleTab() {
+  const [q, setQ] = useState("");
   const [bd, setBd] = useState<any[]>([]);
   const [nh, setNh] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
@@ -3099,14 +3101,24 @@ function PeopleTab() {
 
   if (busy) return <p className="att-muted">Loading…</p>;
 
+  const hit = (r: any) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.team || ""} ${r.designation || ""}`
+      .toLowerCase().includes(q.toLowerCase());
+  const bdS = bd.filter(hit), nhS = nh.filter(hit);
+
   return (
     <>
+      {(bd.length + nh.length) > 6 && (
+        <Search placeholder="Search name or department" value={q} onChange={setQ} />
+      )}
       <div className="att-list">
         <div className="att-hd"><b>Upcoming birthdays</b><span className="att-muted">next 45 days</span></div>
-        {!bd.length && (
-          <p className="att-empty">No birthdays in the next 45 days.</p>
+        {!bdS.length && (
+          <p className="att-empty">
+            {bd.length ? "No match found." : "No birthdays in the next 45 days."}
+          </p>
         )}
-        {bd.map((r: any) => (
+        {bdS.map((r: any) => (
           <div className="att-row" key={r.emp_code}>
             <Avatar name={r.full_name} />
             <div className="grow">
@@ -3129,10 +3141,12 @@ function PeopleTab() {
 
       <div className="att-list">
         <div className="att-hd"><b>New hires</b><span className="att-muted">last 90 days</span></div>
-        {!nh.length && (
-          <p className="att-empty">Nobody joined in the last 90 days.</p>
+        {!nhS.length && (
+          <p className="att-empty">
+            {nh.length ? "No match found." : "Nobody joined in the last 90 days."}
+          </p>
         )}
-        {nh.map((r: any) => (
+        {nhS.map((r: any) => (
           <div className="att-row" key={r.emp_code}>
             <Avatar name={r.full_name} />
             <div className="grow">
@@ -3311,6 +3325,7 @@ function MyRegsTab({ me }: any) {
 }
 
 function TeamLeavesTab({ me }: any) {
+  const [q, setQ] = useState("");
   const [pickLeave, setPickLeave] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
   const [emps, setEmps] = useState<Record<string, any>>({});
@@ -3329,11 +3344,24 @@ function TeamLeavesTab({ me }: any) {
     })();
   }, []);
   if (busy) return <p className="att-muted">Loading…</p>;
+
+  const shown = rows.filter((r) => !q ||
+    `${emps[r.employee_id]?.full_name || ""} ${emps[r.employee_id]?.emp_code || ""} ${
+      r.leave_type} ${r.status} ${r.reason || ""}`
+      .toLowerCase().includes(q.toLowerCase()));
+
   return (
+    <>
+      {rows.length > 6 && (
+        <Search placeholder="Search name, leave type or status"
+          value={q} onChange={setQ} />
+      )}
     <div className="att-list">
-      <div className="att-hd"><b>Team leaves</b><span className="att-muted">{rows.length}</span></div>
-      {!rows.length && <p className="att-empty">Nothing here.</p>}
-      {rows.map((r) => (
+      <div className="att-hd"><b>Team leaves</b><span className="att-muted">{shown.length}</span></div>
+      {!shown.length && (
+        <p className="att-empty">{rows.length ? "No match found." : "Nothing here."}</p>
+      )}
+      {shown.map((r) => (
         <div className="att-row clk" key={r.id}
           onClick={() => setPickLeave({ ...r, emp: emps[r.employee_id] })}>
           <Avatar name={emps[r.employee_id]?.full_name} />
@@ -3353,10 +3381,12 @@ function TeamLeavesTab({ me }: any) {
         <LeaveSheet lv={pickLeave} who={me} onClose={() => setPickLeave(null)} />
       )}
     </div>
+    </>
   );
 }
 
 function HolidaysTab({ me }: any) {
+  const [q, setQ] = useState("");
   const [rows, setRows] = useState<any[]>([]);
   const [f, setF] = useState({ hol_date: istToday(), name: "" });
   const [msg, setMsg] = useState({ err: "", ok: "" });
@@ -3375,7 +3405,8 @@ function HolidaysTab({ me }: any) {
     await supabase.from("holidays").delete().eq("id", id); load();
   };
   const year = istToday().slice(0, 4);
-  const shown = rows.filter((r) => String(r.hol_date).startsWith(year));
+  const shown = rows.filter((r) => String(r.hol_date).startsWith(year))
+    .filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       {isAdmin && (
@@ -3392,9 +3423,16 @@ function HolidaysTab({ me }: any) {
           <button className="att-btn sm" onClick={add} disabled={!f.name.trim()}>Add</button>
         </div>
       )}
+      {rows.length > 8 && (
+        <Search placeholder="Search holiday" value={q} onChange={setQ} />
+      )}
       <div className="att-list">
         <div className="att-hd"><b>Holidays {year}</b><span className="att-muted">{shown.length}</span></div>
-        {!shown.length && <p className="att-empty">No holidays added yet.</p>}
+        {!shown.length && (
+          <p className="att-empty">
+            {q ? "No match found." : "No holidays added yet."}
+          </p>
+        )}
         {shown.map((r) => (
           <div className="att-row" key={r.id}>
             <span style={{ width: 100, fontWeight: 700 }}>
@@ -3895,6 +3933,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
 
 /* ========================= approvals ========================= */
 function InboxScreen({ me, onCount, mode = "pending" }: any) {
+  const [q, setQ] = useState("");
   const [pickLeave, setPickLeave] = useState<any>(null);
   const [leaves, setLeaves] = useState<any[]>([]);
   const [regs, setRegs] = useState<any[]>([]);
@@ -3947,8 +3986,14 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
 
   const inRange = (d: string) => d >= range.from && d <= range.to;
   const stOk = (x: any) => status === "All" || x.status === status;
-  const shownL = leaves.filter((x) => stOk(x) && inRange(x.from_date));
-  const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date));
+  const hit = (x: any, extra = "") =>
+    !q || `${x.emp?.full_name || ""} ${x.emp?.emp_code || ""} ${x.reason || ""} ${extra}`
+      .toLowerCase().includes(q.toLowerCase());
+
+  const shownL = leaves.filter((x) => stOk(x) && inRange(x.from_date)
+    && hit(x, `${x.leave_type} ${x.status}`));
+  const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date)
+    && hit(x, x.status));
   const total = shownL.length + shownR.length;
 
   const kill = async (r: any, kind: string) => {
@@ -3996,6 +4041,10 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   return (
     <div className="att-wrap att-stack">
       <Note>{err}</Note>
+
+      {(leaves.length + regs.length) > 5 && (
+        <Search placeholder="Search name, code or reason" value={q} onChange={setQ} />
+      )}
 
       {history && (
         <div className="att-range">
@@ -4096,6 +4145,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
 }
 
 function JoinersTab() {
+  const [q, setQ] = useState("");
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
@@ -4120,9 +4170,15 @@ function JoinersTab() {
       <p className="att-muted">
         Anyone can create an account from the sign-in link. They land here until you approve them.
       </p>
+      {rows.length > 6 && (
+        <Search placeholder="Search name or email" value={q} onChange={setQ} />
+      )}
       <div className="att-list">
         {!rows.length && !busy && <p className="att-empty">No one waiting right now.</p>}
-        {rows.map((r) => (
+        {rows.filter((r) => !q ||
+          `${r.full_name} ${r.email || ""} ${r.emp_code} ${r.phone || ""}`
+            .toLowerCase().includes(q.toLowerCase()))
+          .map((r) => (
           <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
             <Avatar name={r.full_name} />
             <div className="grow" style={{ minWidth: 170 }}>
@@ -4856,6 +4912,7 @@ function OrgTab() {
 }
 
 function ReportsTab({ isAdmin = false }: any) {
+  const [q, setQ] = useState("");
   const [kind, setKind] = useState("muster");
   const [month, setMonth] = useState(istToday().slice(0, 7));
   const [data, setData] = useState<any[]>([]);
@@ -4901,6 +4958,10 @@ function ReportsTab({ isAdmin = false }: any) {
         <div className="att-note">
           <span>This is your own record. Team-wide reports are with HR and the founders.</span>
         </div>
+      )}
+      {isAdmin && (
+        <Search placeholder="Search name, code or department"
+          value={q} onChange={setQ} />
       )}
       <div className="att-rephd">
         <div className="att-seg" style={{ flex: 1 }}>
@@ -4959,7 +5020,10 @@ function ReportsTab({ isAdmin = false }: any) {
                 </tr>
               </thead>
               <tbody>
-                {muster.rows.map(([code, v]: any) => (
+                {muster.rows
+                  .filter(([code, v]: any) => !q ||
+                    `${code} ${v.name}`.toLowerCase().includes(q.toLowerCase()))
+                  .map(([code, v]: any) => (
                   <tr key={code}>
                     <td className="name"><PName code={code}>{v.name}</PName></td>
                     {muster.dates.map((d) => (
@@ -4987,7 +5051,9 @@ function ReportsTab({ isAdmin = false }: any) {
       {!busy && kind === "late" && (
         <div className="att-list">
           {!data.length && <p className="att-empty">No late marks this month. Nice.</p>}
-          {data.map((r: any, i: number) => (
+          {data.filter((r: any) => !q ||
+            `${r.emp_code} ${r.full_name}`.toLowerCase().includes(q.toLowerCase()))
+            .map((r: any, i: number) => (
             <div className="att-row" key={i}>
               <span style={{ width: 52, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
               <span className="grow"><PName code={r.emp_code}>{r.full_name}</PName></span>
@@ -5001,7 +5067,10 @@ function ReportsTab({ isAdmin = false }: any) {
       {!busy && kind === "absence" && (
         <div className="att-list">
           {!data.length && <p className="att-empty">No data yet.</p>}
-          {data.map((r: any, i: number) => (
+          {data.filter((r: any) => !q ||
+            `${r.emp_code} ${r.full_name} ${r.branch || ""}`
+              .toLowerCase().includes(q.toLowerCase()))
+            .map((r: any, i: number) => (
             <div className="att-row" key={i}>
               <Avatar name={r.full_name} />
               <div className="grow">
@@ -5949,6 +6018,7 @@ function OnLeaveTab() {
 
 /* ================= adhoore records ================= */
 function NeedsSetupTab({ me }: any) {
+  const [q, setQ] = useState("");
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [open, setOpen] = useState<any>(null);
@@ -5985,12 +6055,19 @@ function NeedsSetupTab({ me }: any) {
         filled in they sit outside the org chart, and without an email they can't sign in.
       </p>
 
+      {rows.length > 6 && (
+        <Search placeholder="Search name, code or department"
+          value={q} onChange={setQ} />
+      )}
       <div className="att-list">
         <div className="att-hd">
           <b>Half-filled records</b><span className="att-muted">{rows.length}</span>
         </div>
         {!rows.length && <p className="att-empty">Everyone's record is complete.</p>}
-        {rows.map((r) => (
+        {rows.filter((r) => !q ||
+          `${r.full_name} ${r.emp_code} ${r.team || ""} ${r.designation || ""}`
+            .toLowerCase().includes(q.toLowerCase()))
+          .map((r) => (
           <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
             <Avatar name={r.full_name} />
             <div className="grow" style={{ minWidth: 170 }}>
@@ -6262,6 +6339,7 @@ function LeaveLedgerTab({ me }: any) {
   });
   const [edit, setEdit] = useState<any>(null);
   const [grant, setGrant] = useState(false);
+  const [q, setQ] = useState("");
   const isAdmin = me.role === "admin";
 
   const load = async () => {
@@ -6348,6 +6426,11 @@ function LeaveLedgerTab({ me }: any) {
           })), `HJS_leave_history_${range.from}_${range.to}.csv`)}>CSV</button>
       </div>
 
+      {rows.length > 6 && (
+        <Search placeholder="Search reason, type or who gave it"
+          value={q} onChange={setQ} />
+      )}
+
       <div className="att-stats">
         <div className="att-stat"><b style={{ color: "#16a34a" }}>+{totals.given}</b>
           <span>Days given</span></div>
@@ -6366,7 +6449,10 @@ function LeaveLedgerTab({ me }: any) {
 
       {!busy && rows.length > 0 && (
         <div className="att-list">
-          {rows.map((r) => {
+          {rows.filter((r) => !q ||
+            `${r.leave_name} ${r.kind} ${r.note || ""} ${r.by_name || ""} ${r.full_name}`
+              .toLowerCase().includes(q.toLowerCase()))
+            .map((r) => {
             const k = LEDGER_KIND[r.kind] || { label: r.kind, bg: "#f2f4f7", fg: "#667085" };
             return (
               <div className={`att-ledrow ${isAdmin && r.editable ? "clk" : ""}`} key={r.id}
