@@ -5396,6 +5396,415 @@ function DaySheet({ d, me, onClose }: any) {
   );
 }
 
+/* ================= leave ka ledger ================= */
+const LEDGER_KIND: Record<string, { label: string; bg: string; fg: string }> = {
+  opening:    { label: "Opening",    bg: "#eff4ff", fg: "#1849a9" },
+  carry:      { label: "Carried",    bg: "#ecfdff", fg: "#0e7090" },
+  accrual:    { label: "Granted",    bg: "#ecfdf3", fg: "#067647" },
+  leave:      { label: "Leave",      bg: "#fef3f2", fg: "#b42318" },
+  adjustment: { label: "Adjusted",   bg: "#fffaeb", fg: "#b54708" },
+  lapse:      { label: "Lapsed",     bg: "#f2f4f7", fg: "#667085" },
+};
+
+function LedgerEditSheet({ row, onClose }: any) {
+  const [days, setDays] = useState(String(row.days));
+  const [note, setNote] = useState(row.note || "");
+  const [date, setDate] = useState(row.entry_date);
+  const [kind, setKind] = useState(row.kind);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const save = async () => {
+    const d = Number(days);
+    if (!d) return setMsg({ err: "Days can't be zero.", ok: "" });
+    if (!note.trim()) return setMsg({ err: "Please write a reason.", ok: "" });
+    setBusy(true);
+    const { error } = await supabase.rpc("leave_ledger_edit", {
+      p_id: row.id, p_days: d, p_note: note.trim(), p_date: date, p_kind: kind,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else onClose(true);
+    setBusy(false);
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    const { error } = await supabase.rpc("leave_ledger_delete", { p_id: row.id });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else onClose(true);
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title="Edit this entry" onClose={() => onClose(false)}>
+      <div className="att-card att-stack">
+        <p className="att-muted">
+          {row.full_name} · {row.leave_name}
+        </p>
+
+        <div className="att-row2">
+          <div>
+            <label>Days <span className="att-muted">(minus to take away)</span></label>
+            <input type="number" step="0.5" value={days}
+              onChange={(e) => setDays(e.target.value)} />
+          </div>
+          <div>
+            <label>Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+        </div>
+
+        <div>
+          <label>Type</label>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="opening">Opening — yearly allotment</option>
+            <option value="accrual">Granted — extra days given</option>
+            <option value="carry">Carried — from last month</option>
+            <option value="adjustment">Adjusted — correction</option>
+            <option value="lapse">Lapsed — days taken away</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Reason <span style={{ color: "#dc2626" }}>*</span></label>
+          <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+
+        <Note>{msg.err}</Note>
+
+        <button className="att-btn" onClick={save} disabled={busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+
+        {!confirmDel ? (
+          <button className="att-btn line" style={{ color: "#b42318", borderColor: "#fecdca" }}
+            onClick={() => setConfirmDel(true)}>Delete this entry</button>
+        ) : (
+          <div className="att-note err">
+            <span>
+              This removes {row.days > 0 ? `+${row.days}` : row.days} days from
+              {" "}{row.full_name}'s balance. It can't be undone.
+            </span>
+            <div className="att-flex" style={{ marginTop: 10 }}>
+              <button className="att-btn grey sm" style={{ flex: 1 }}
+                onClick={() => setConfirmDel(false)}>Keep it</button>
+              <button className="att-btn sm" style={{ flex: 1, background: "#b42318" }}
+                disabled={busy} onClick={remove}>Yes, delete</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function GrantSheet({ types, onClose }: any) {
+  const [mode, setMode] = useState<"one" | "team" | "all">("all");
+  const [type, setType] = useState(types[0]?.code || "CL");
+  const [days, setDays] = useState("1");
+  const [kind, setKind] = useState("accrual");
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(istToday());
+  const [teamId, setTeamId] = useState("");
+  const [empId, setEmpId] = useState("");
+  const [lists, setLists] = useState<any>({ teams: [], people: [] });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  useEffect(() => {
+    (async () => {
+      const [t, p] = await Promise.all([
+        supabase.from("teams").select("id, name").order("name"),
+        supabase.from("employees").select("id, emp_code, full_name")
+          .eq("active", true).order("full_name"),
+      ]);
+      setLists({ teams: t.data || [], people: p.data || [] });
+    })();
+  }, []);
+
+  const run = async () => {
+    const d = Number(days);
+    if (!d) return setMsg({ err: "Days can't be zero.", ok: "" });
+    if (!note.trim()) return setMsg({ err: "Please write a reason.", ok: "" });
+    setBusy(true); setMsg({ err: "", ok: "" });
+
+    const { data, error } = mode === "one"
+      ? await supabase.rpc("leave_adjust", {
+          p_emp: empId, p_type: type, p_days: d,
+          p_note: note.trim(), p_kind: kind, p_date: date })
+      : await supabase.rpc("leave_grant_bulk", {
+          p_type: type, p_days: d, p_note: note.trim(), p_kind: kind,
+          p_team: mode === "team" ? (teamId || null) : null, p_date: date });
+
+    if (error) setMsg({ err: error.message, ok: "" });
+    else {
+      setMsg({ err: "", ok: mode === "one"
+        ? "Done." : `${data} people updated.` });
+      setTimeout(() => onClose(true), 900);
+    }
+    setBusy(false);
+  };
+
+  const ready = mode === "one" ? !!empId : mode === "team" ? !!teamId : true;
+
+  return (
+    <Sheet title="Give or take leave days" onClose={() => onClose(false)}>
+      <div className="att-card att-stack">
+        <div>
+          <label>Who</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
+            <option value="all">Everyone in the company</option>
+            <option value="team">One team</option>
+            <option value="one">One person</option>
+          </select>
+        </div>
+
+        {mode === "team" && (
+          <div>
+            <label>Team</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">— pick a team —</option>
+              {lists.teams.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {mode === "one" && (
+          <div>
+            <label>Person</label>
+            <select value={empId} onChange={(e) => setEmpId(e.target.value)}>
+              <option value="">— pick a person —</option>
+              {lists.people.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="att-row2">
+          <div>
+            <label>Leave type</label>
+            <select value={type} onChange={(e) => setType(e.target.value)}>
+              {types.map((t: any) => (
+                <option key={t.code} value={t.code}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>Days <span className="att-muted">(minus to take away)</span></label>
+            <input type="number" step="0.5" value={days}
+              onChange={(e) => setDays(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="att-row2">
+          <div>
+            <label>Type</label>
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="accrual">Granted — monthly or extra days</option>
+              <option value="opening">Opening — yearly allotment</option>
+              <option value="adjustment">Adjusted — correction</option>
+              <option value="lapse">Lapsed — days taken away</option>
+            </select>
+          </div>
+          <div>
+            <label>Counts from</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+        </div>
+
+        <div>
+          <label>Reason <span style={{ color: "#dc2626" }}>*</span></label>
+          <textarea rows={2} value={note} placeholder="Monthly CL for August"
+            onChange={(e) => setNote(e.target.value)} />
+        </div>
+
+        {mode === "all" && (
+          <div className="att-note">
+            <span>
+              This adds the same entry for every active employee. It doesn't replace
+              anything — old entries stay, this one gets added on top.
+            </span>
+          </div>
+        )}
+
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <button className="att-btn" onClick={run} disabled={busy || !ready}>
+          {busy ? "Working…" : Number(days) < 0 ? "Take the days away" : "Give the days"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+function LeaveLedgerTab({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [types, setTypes] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [who, setWho] = useState("");
+  const [people, setPeople] = useState<any[]>([]);
+  const [type, setType] = useState("");
+  const [range, setRange] = useState({
+    from: `${istToday().slice(0, 4)}-01-01`, to: istToday(),
+  });
+  const [edit, setEdit] = useState<any>(null);
+  const [grant, setGrant] = useState(false);
+  const isAdmin = me.role === "admin";
+
+  const load = async () => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("leave_ledger_list", {
+      p_employee: who || null,
+      p_from: range.from, p_to: range.to,
+      p_type: type || null,
+    });
+    if (error) setErr(error.message);
+    setRows(data || []); setBusy(false);
+  };
+
+  useEffect(() => {
+    supabase.from("leave_types").select("*").then(({ data }) => setTypes(data || []));
+    if (isAdmin) {
+      supabase.from("employees").select("id, emp_code, full_name")
+        .eq("active", true).order("full_name")
+        .then(({ data }) => setPeople(data || []));
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [who, type, range.from, range.to]);
+
+  const totals = rows.reduce((a: any, r: any) => {
+    a.given += r.days > 0 ? Number(r.days) : 0;
+    a.taken += r.days < 0 ? -Number(r.days) : 0;
+    return a;
+  }, { given: 0, taken: 0 });
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>Leave history</b>
+          <p className="att-muted">
+            Where every leave day came from and where it went
+          </p>
+        </div>
+        {isAdmin && (
+          <button className="att-btn sm" onClick={() => setGrant(true)}>
+            Give / take days
+          </button>
+        )}
+      </div>
+
+      <div className="att-range">
+        <div className="qk">
+          <button onClick={() => setRange({
+            from: `${istToday().slice(0, 7)}-01`, to: istToday() })}>This month</button>
+          <button onClick={() => setRange({
+            from: shiftMonth(`${istToday().slice(0, 7)}-01`, -1),
+            to: lastDayOf(shiftMonth(`${istToday().slice(0, 7)}-01`, -1)) })}>Last month</button>
+          <button onClick={() => setRange({
+            from: `${istToday().slice(0, 4)}-01-01`, to: istToday() })}>This year</button>
+          <button onClick={() => setRange({
+            from: `${Number(istToday().slice(0, 4)) - 1}-01-01`,
+            to: `${Number(istToday().slice(0, 4)) - 1}-12-31` })}>Last year</button>
+        </div>
+        <div className="att-flex" style={{ marginLeft: "auto", flexWrap: "wrap" }}>
+          <input type="date" value={range.from}
+            onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          <span className="att-muted">to</span>
+          <input type="date" value={range.to} min={range.from}
+            onChange={(e) => setRange({ ...range, to: e.target.value })} />
+        </div>
+      </div>
+
+      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+        {isAdmin && (
+          <select value={who} onChange={(e) => setWho(e.target.value)}
+            style={{ flex: 1, minWidth: 180 }}>
+            <option value="">Me</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
+            ))}
+          </select>
+        )}
+        <select value={type} onChange={(e) => setType(e.target.value)}
+          style={{ width: "auto", minWidth: 150 }}>
+          <option value="">All leave types</option>
+          {types.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+        </select>
+        <button className="att-btn sm line" disabled={!rows.length}
+          onClick={() => downloadCsv(rows.map((r) => ({
+            Date: r.entry_date, Name: r.full_name, Type: r.leave_name,
+            Days: r.days, Kind: LEDGER_KIND[r.kind]?.label || r.kind,
+            Reason: r.note || "", By: r.by_name || "system",
+          })), `HJS_leave_history_${range.from}_${range.to}.csv`)}>CSV</button>
+      </div>
+
+      <div className="att-stats">
+        <div className="att-stat"><b style={{ color: "#16a34a" }}>+{totals.given}</b>
+          <span>Days given</span></div>
+        <div className="att-stat"><b style={{ color: "#dc2626" }}>−{totals.taken}</b>
+          <span>Days used</span></div>
+        <div className="att-stat"><b style={{ color: "#1849a9" }}>
+          {(totals.given - totals.taken).toFixed(1)}</b><span>Net</span></div>
+      </div>
+
+      <Note>{err}</Note>
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && !rows.length && (
+        <div className="att-list">
+          <p className="att-empty">Nothing in this range.</p>
+        </div>
+      )}
+
+      {!busy && rows.length > 0 && (
+        <div className="att-list">
+          {rows.map((r) => {
+            const k = LEDGER_KIND[r.kind] || { label: r.kind, bg: "#f2f4f7", fg: "#667085" };
+            return (
+              <div className={`att-row ${isAdmin && r.editable ? "clk" : ""}`} key={r.id}
+                onClick={() => isAdmin && r.editable && setEdit(r)}>
+                <span style={{ width: 62, flexShrink: 0 }}>
+                  <b style={{ fontSize: 13 }}>{fmtDate(r.entry_date)}</b>
+                </span>
+                <span className="att-ltype" style={{ background: k.bg, color: k.fg }}>
+                  {k.label}
+                </span>
+                <div className="grow" style={{ minWidth: 120 }}>
+                  <p><b>{r.leave_name}</b>
+                    {isAdmin && who && (
+                      <span className="att-muted"> · {r.full_name}</span>)}
+                  </p>
+                  {r.note && (
+                    <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.note}</p>
+                  )}
+                  {r.by_name && (
+                    <p className="att-muted" style={{ fontSize: 11.5 }}>by {r.by_name}</p>
+                  )}
+                </div>
+                <b style={{ fontSize: 15, whiteSpace: "nowrap",
+                  color: r.days > 0 ? "#16a34a" : "#dc2626" }}>
+                  {r.days > 0 ? "+" : ""}{r.days}
+                </b>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {edit && <LedgerEditSheet row={edit}
+        onClose={(changed: boolean) => { setEdit(null); if (changed) load(); }} />}
+
+      {grant && <GrantSheet types={types}
+        onClose={(changed: boolean) => { setGrant(false); if (changed) load(); }} />}
+    </div>
+  );
+}
+
 /* ================= apni salary (sirf apni) ================= */
 function MyPayTab({ me }: any) {
   const [month, setMonth] = useState(istToday().slice(0, 7));
@@ -6188,6 +6597,7 @@ const MODULES: Module[] = [
       { k: "mydata", label: "My Data", views: [
         { k: "summary", label: "Leave Summary" },
         { k: "requests", label: "Leave Requests" },
+        { k: "ledger", label: "History" },
       ]},
       { k: "team", label: "Team", views: [{ k: "leaves", label: "Team Leaves" }]},
       { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
@@ -6411,6 +6821,7 @@ export default function Attendance() {
       // ---- Leave ----
       case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
       case "leave/mydata/requests": return <LeavesScreen me={me} tab="requests" />;
+      case "leave/mydata/ledger":   return <LeaveLedgerTab me={me} />;
       case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
       case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
       // ---- Approvals ----
