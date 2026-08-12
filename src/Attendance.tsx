@@ -4393,6 +4393,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
         setMsg({ err: "", ok: "Saved." });
+        // payroll wagairah taaza ho jaye
+        window.dispatchEvent(new CustomEvent("hjs:employee-updated"));
       }
     } catch (e: any) { setMsg({ err: e.message, ok: "" }); }
     setBusy(false);
@@ -4940,12 +4942,19 @@ function PayrollTab({ isAdmin = false }: any) {
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
 
+  const load = async () => {
+    setBusy(true);
+    const { data } = await supabase.rpc("payroll_summary", { p_month: `${month}-01` });
+    setRows(data || []); setBusy(false);
+  };
+
+  useEffect(() => { load(); }, [month]);
+
+  // kisi ki salary ya details badli to yahan bhi taaza ho jaye
   useEffect(() => {
-    (async () => {
-      setBusy(true);
-      const { data } = await supabase.rpc("payroll_summary", { p_month: `${month}-01` });
-      setRows(data || []); setBusy(false);
-    })();
+    const onUpd = () => load();
+    window.addEventListener("hjs:employee-updated", onUpd);
+    return () => window.removeEventListener("hjs:employee-updated", onUpd);
   }, [month]);
 
   return (
@@ -4991,13 +5000,20 @@ function PayrollTab({ isAdmin = false }: any) {
                     </b>
                   </div>
                   <p className="att-muted" style={{ marginTop: 4 }}>
-                    Counted {r.counted_days} of {r.month_days} days ·{" "}
-                    {r.present_days} present · {r.half_days} half · {r.paid_leaves} paid leave ·{" "}
-                    <span style={{ color: "#b42318" }}>{r.absent_days} absent</span>
+                    {r.present} present · {r.half} half · {r.paid_leave} paid leave ·{" "}
+                    <span style={{ color: "#b42318" }}>{r.absent} absent</span> ·{" "}
+                    {r.week_off} week off · {r.holidays} holiday
+                    {Number(r.extra_days) > 0 && (
+                      <span style={{ color: "#067647" }}>
+                        {" · "}{r.extra_days} worked on an off day
+                      </span>
+                    )}
                   </p>
                   <p className="att-muted" style={{ marginTop: 2 }}>
-                    Payable <b>{r.payable_days}</b> days
-                    {r.monthly_gross ? ` × ₹${r.per_day}/day` : ""}
+                    Payable <b>{r.payable_days}</b> of {r.month_days} days
+                    {r.monthly_gross
+                      ? ` · monthly ₹${Number(r.monthly_gross).toLocaleString("en-IN")}`
+                      : ""}
                   </p>
                 </div>
               ))}
@@ -5125,6 +5141,10 @@ function MyPayTab({ me }: any) {
               <span>Absent</span></div>
             <div className="att-stat"><b>{row.week_off}</b><span>Week off</span></div>
             <div className="att-stat"><b>{row.holidays}</b><span>Holidays</span></div>
+            {Number(row.extra_days) > 0 && (
+              <div className="att-stat"><b style={{ color: "#067647" }}>{row.extra_days}</b>
+                <span>Worked off days</span></div>
+            )}
             <div className="att-stat"><b style={{ color: "#1849a9" }}>{row.payable_days}</b>
               <span>Payable days</span></div>
           </div>
