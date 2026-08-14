@@ -2366,6 +2366,16 @@ const slaMins = (m) => {
   return (a / 1440).toFixed(1) + 'd';
 };
 
+/* Adoption % ka color — 85+ green, 70–85 amber, uske neeche red */
+const slaAdoptColor = (p) =>
+  p == null ? T.inkSoft : p >= 85 ? T.green : p >= 70 ? T.amber : T.red;
+
+/* Adoption view ke naye drill kinds ke labels (ye cards mein nahi hote) */
+const SLA_KIND_LABEL = {
+  r10: 'Response ≤10 min',
+  r30: 'Response ≤30 min',
+};
+
 /* ── ek order ka poora SLA picture ── */
 function slaAnalyze(x) {
   const cycle = slaCycle(x);
@@ -2451,6 +2461,9 @@ function slaAnalyze(x) {
     totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
     openHrs: okStart && !delivered ? span(created, now) : null,
     respHrs,
+    /* Dashboard ke ≤10 / ≤30 buckets ke liye — wahi business-hours value,
+       bas minutes mein. Baat hi nahi hui to null (kisi bucket mein nahi). */
+    respMins: respHrs == null ? null : respHrs * 60,
     delHrs,
   };
 }
@@ -2603,6 +2616,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     resp: (a) => a.respBreach,
     eta: (a) => a.etaBreach,
     del: (a) => a.delBreach,
+    /* Dashboard ke response buckets — cumulative (≤10 wale ≤30 mein bhi) */
+    r10: (a) => a.respMins != null && a.respMins <= 10,
+    r30: (a) => a.respMins != null && a.respMins <= 30,
   };
 
   const statOf = (list, ov) => {
@@ -2622,6 +2638,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       total: list.length,
       delivered: dl.length,
       pending: list.length - dl.length,
+      /* Response speed buckets — entry se "Talked to Customer" tak, business
+         minutes mein. Jin orders pe abhi baat hui hi nahi (respMins null) wo
+         kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain. */
+      resp10: list.filter((a) => a.respMins != null && a.respMins <= 10).length,
+      resp30: list.filter((a) => a.respMins != null && a.respMins <= 30).length,
+      /* Adoption = is duration ke kitne orders deliver ho chuke */
+      adoption: list.length ? (dl.length / list.length) * 100 : null,
       respBreach: list.filter((a) => a.respBreach).length,
       etaBreach: list.filter((a) => a.etaBreach).length,
       delBreach: list.filter((a) => a.delBreach).length,
@@ -2677,6 +2700,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       ),
     }))
     .filter((r) => r.s.total > 0 || r.s.overdue > 0);
+
+  /* Adoption view — sirf jinke is duration mein orders hain, volume descending */
+  const adoptRows = storeStats
+    .filter((r) => r.s.total > 0)
+    .slice()
+    .sort((a, b) => b.s.total - a.s.total);
 
   /* delivery boy wise — person + store ke hisaab se group */
   const boyStats = useMemo(() => {
@@ -2737,7 +2766,10 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
   /* Kisi number pe click → poora view badal jaata hai: sirf us subset ki list
      dikhti hai, cards aur upar wali table chhup jaati hai. Back se wapas. */
   if (sel) {
-    const selLabel = cards.find((c) => c.kind === sel.kind)?.label || 'All';
+    const selLabel =
+      cards.find((c) => c.kind === sel.kind)?.label ||
+      SLA_KIND_LABEL[sel.kind] ||
+      'All';
     return (
       <div>
         <button className="track-back" onClick={() => setSel(null)}>
@@ -2883,6 +2915,15 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               }}
             >
               <User size={14} /> Delivery boys
+            </button>
+            <button
+              className={view === 'adopt' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('adopt');
+                setSel(null);
+              }}
+            >
+              <BarChart3 size={14} /> Dashboard
             </button>
           </div>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
@@ -3058,7 +3099,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
             </table>
           </div>
         </div>
-      ) : (
+      ) : view === 'boys' ? (
         <div className="dash-block">
           <div className="dash-block-h">
             Delivery boy wise · {rangeLabel}
@@ -3126,6 +3167,227 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                         <td style={{ textAlign: 'center' }}>{slaHrs(s.avgCycle)}</td>
                         {cell('del', s.delBreach, T.red)}
                         {cell('overdue', s.overdue, T.amber, true)}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="dash-block">
+          <div
+            className="dash-block-h"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-end',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              Store-wise Adoption · {rangeLabel}
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 3,
+                }}
+              >
+                {adoptRows.length} store · MBC aur cancelled entries chhod kar
+              </div>
+            </span>
+            <span style={{ textAlign: 'right' }}>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  color: slaAdoptColor(overall.adoption),
+                }}
+              >
+                {overall.adoption == null
+                  ? '—'
+                  : overall.adoption.toFixed(1) + '%'}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 4,
+                }}
+              >
+                {overall.delivered} delivered of {overall.total} orders
+              </div>
+            </span>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <SlaTh label="Store" />
+                  <SlaTh
+                    label="Orders"
+                    center
+                    div
+                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin."
+                  />
+                  <SlaTh label="Delivered" center />
+                  <SlaTh
+                    label="≤10 min"
+                    center
+                    div
+                    info={`Kitne orders mein entry aane ke 10 business minutes ke andar "Talked to Customer" bhar diya gaya. Neeche % total orders ka hai.`}
+                  />
+                  <SlaTh
+                    label="≤30 min"
+                    center
+                    info={`Kitne orders ${SLA_RESPONSE_MIN} business minutes ke andar "Talked to Customer" pe move hue — yahi SLA deadline hai. ≤10 min wale ismein bhi gine jaate hain.`}
+                  />
+                  <SlaTh
+                    label="Response TAT"
+                    center
+                    div
+                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai.`}
+                  />
+                  <SlaTh
+                    label="Delivery TAT"
+                    center
+                    info="Entry aane se Item Delivered tak ka poora average. Sirf delivered orders ka."
+                  />
+                  <SlaTh
+                    label="Adoption"
+                    center
+                    div
+                    info="Is duration ke kitne orders deliver ho chuke. 85%+ green, 70–85% amber, uske neeche red."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {adoptRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  adoptRows.map(({ st, s }) => {
+                    const cell = cellFor({ store: st, person: null });
+                    const pctOf = (n) =>
+                      s.total ? Math.round((n / s.total) * 100) : 0;
+                    const ac = slaAdoptColor(s.adoption);
+                    /* bucket cell — number + neeche chhota % */
+                    const bucket = (kind, n, div) => (
+                      <td
+                        className={n ? 'dash-td-click' : 'dash-td-zero'}
+                        style={{
+                          textAlign: 'center',
+                          ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+                          ...(n ? { color: T.green } : {}),
+                        }}
+                        onClick={() =>
+                          n && toggleSel({ kind, store: st, person: null })
+                        }
+                      >
+                        {n}
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: T.inkSoft,
+                          }}
+                        >
+                          {pctOf(n)}%
+                        </div>
+                      </td>
+                    );
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">
+                          {branchLabel(st)}
+                          {s.total < 5 && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 9.5,
+                                fontWeight: 800,
+                                letterSpacing: 0.4,
+                                textTransform: 'uppercase',
+                                color: T.inkSoft,
+                                background: T.beige,
+                                border: '1px solid ' + T.line,
+                                borderRadius: 6,
+                                padding: '2px 6px',
+                              }}
+                            >
+                              Low vol
+                            </span>
+                          )}
+                        </td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('delivered', s.delivered, T.green)}
+                        {bucket('r10', s.resp10, true)}
+                        {bucket('r30', s.resp30)}
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            borderLeft: '1px solid ' + T.line,
+                          }}
+                        >
+                          {slaHrs(s.avgResp)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {slaHrs(s.avgCycle)}
+                        </td>
+                        <td style={{ borderLeft: '1px solid ' + T.line }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 76,
+                                height: 5,
+                                borderRadius: 3,
+                                background: T.line,
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width:
+                                    Math.max(
+                                      0,
+                                      Math.min(100, s.adoption || 0),
+                                    ) + '%',
+                                  height: '100%',
+                                  background: ac,
+                                  borderRadius: 3,
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                color: ac,
+                                minWidth: 48,
+                                textAlign: 'right',
+                              }}
+                            >
+                              {s.adoption == null
+                                ? '—'
+                                : s.adoption.toFixed(1) + '%'}
+                            </span>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })
