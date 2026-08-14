@@ -2373,7 +2373,7 @@ const slaAdoptColor = (p) =>
 /* Adoption view ke naye drill kinds ke labels (ye cards mein nahi hote) */
 const SLA_KIND_LABEL = {
   r10: 'Response ≤10 min',
-  r30: 'Response ≤30 min',
+  r30: 'Response 10–30 min',
 };
 
 /* ── ek order ka poora SLA picture ── */
@@ -2616,9 +2616,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     resp: (a) => a.respBreach,
     eta: (a) => a.etaBreach,
     del: (a) => a.delBreach,
-    /* Dashboard ke response buckets — cumulative (≤10 wale ≤30 mein bhi) */
+    /* Dashboard ke response buckets — EXCLUSIVE (≤10 wale 10–30 mein nahi) */
     r10: (a) => a.respMins != null && a.respMins <= 10,
-    r30: (a) => a.respMins != null && a.respMins <= 30,
+    r30: (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
   };
 
   const statOf = (list, ov) => {
@@ -2640,9 +2640,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       pending: list.length - dl.length,
       /* Response speed buckets — entry se "Talked to Customer" tak, business
          minutes mein. Jin orders pe abhi baat hui hi nahi (respMins null) wo
-         kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain. */
+         kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain.
+         Buckets EXCLUSIVE hain: jo ≤10 min mein ho gaya wo 10–30 mein nahi
+         ginte, isliye dono column alag-alag orders dikhate hain. */
       resp10: list.filter((a) => a.respMins != null && a.respMins <= 10).length,
-      resp30: list.filter((a) => a.respMins != null && a.respMins <= 30).length,
+      resp30: list.filter(
+        (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+      ).length,
       /* Adoption = is duration ke kitne orders deliver ho chuke */
       adoption: list.length ? (dl.length / list.length) * 100 : null,
       respBreach: list.filter((a) => a.respBreach).length,
@@ -3244,9 +3248,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     info={`Kitne orders mein entry aane ke 10 business minutes ke andar "Talked to Customer" bhar diya gaya. Neeche % total orders ka hai.`}
                   />
                   <SlaTh
-                    label="≤30 min"
+                    label="10–30 min"
                     center
-                    info={`Kitne orders ${SLA_RESPONSE_MIN} business minutes ke andar "Talked to Customer" pe move hue — yahi SLA deadline hai. ≤10 min wale ismein bhi gine jaate hain.`}
+                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar "Talked to Customer" pe move hue. ≤10 min wale ismein NAHI aate — dono column alag orders dikhate hain, aur inka jod = SLA ke andar wale kul orders.`}
                   />
                   <SlaTh
                     label="Response TAT"
