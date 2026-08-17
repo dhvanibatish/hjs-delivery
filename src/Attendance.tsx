@@ -4548,6 +4548,7 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         grace_minutes: Number(f.grace_minutes) || 0,
         date_of_birth: f.date_of_birth || null,
         date_of_joining: f.date_of_joining || null,
+        date_of_leaving: f.date_of_leaving || null,
         employment_type: f.employment_type || null,
         employee_status: f.employee_status || null,
         source_of_hire: f.source_of_hire || null,
@@ -4759,6 +4760,18 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             <input type="date" value={f.date_of_joining || ""}
               onChange={(e) => setF({ ...f, date_of_joining: e.target.value || null })} />
           </div>
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>Last working day</label>
+            <input type="date" value={f.date_of_leaving || ""}
+              onChange={(e) => setF({ ...f, date_of_leaving: e.target.value || null })} />
+            <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Sirf resign/exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
+            </p>
+          </div>
+          <div></div>
+        </div>
         </div>
         <div className="att-row2">
           <div>
