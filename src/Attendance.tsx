@@ -7221,7 +7221,6 @@ const MODULES: Module[] = [
       ]},
       { k: "team", label: "Team", views: [
         { k: "space", label: "Team Space" },
-        { k: "dept", label: "Department" },
         { k: "peers", label: "Peers" },
       ]},
       { k: "org", label: "Organization", views: [
