@@ -4767,11 +4767,10 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             <input type="date" value={f.date_of_leaving || ""}
               onChange={(e) => setF({ ...f, date_of_leaving: e.target.value || null })} />
             <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
-              Sirf resign/exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
+              Sirf resign / exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
             </p>
           </div>
           <div></div>
-        </div>
         </div>
         <div className="att-row2">
           <div>
@@ -7013,7 +7012,7 @@ function VerifyPanel({ onCount }: any) {
       {rows.length === 0 && (
         <div className="att-vwrap">
           <div className="att-vempty">
-            <div className="big">🌤️</div>
+            <div className="big">??️</div>
             <p>No check-ins recorded for this day.</p>
           </div>
         </div>
