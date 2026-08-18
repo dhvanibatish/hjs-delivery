@@ -707,6 +707,9 @@ const CSS = `
 .hjsatt .att-tbadge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700;
   border-radius: 5px; padding: 2px 7px; flex-shrink: 0; }
 .hjsatt .att-tbadge.grey { background: #eef0f3; color: #475467; }
+.hjsatt .att-tbadge.jump { background: #eef0f3; color: #2563eb; }
+.hjsatt .att-node.flash > .att-tcard { border-color: #2563eb; background: #eaf1ff;
+  box-shadow: 0 0 0 3px rgba(37,99,235,.18); }
 
 /* parent -> children connector */
 .hjsatt .att-stub { width: 22px; height: 1px; background: #d0d5dd; flex-shrink: 0; }
@@ -2958,35 +2961,43 @@ function TreeCard({ p, open, canOpen, onClick, count }: any) {
         </span>
         <span className="dz">{p.sub}</span>
       </span>
-      {count > 0 && (
+      {p.jump ? (
+        <span className="att-tbadge jump" title="Go to their team">{"\u2197"}</span>
+      ) : count > 0 ? (
         <span className={`att-tbadge ${open ? "" : "grey"}`}>
           {open ? "\u2212" : "+"} {count}
         </span>
-      )}
+      ) : null}
     </button>
   );
 }
 
 // Asli org chart: parent se uske apne bachchon tak hi line jaati hai
-function OrgNode({ node, childrenOf, countOf, toCard, depth, openAll }: any) {
+function OrgNode({ node, childrenOf, countOf, toCard, depth, openAll, onJump }: any) {
   const kids = childrenOf(node);
   const [open, setOpen] = useState(depth < 1);
   useEffect(() => {
     if (openAll === undefined) return;
     setOpen(openAll ? true : depth < 1);
   }, [openAll]);
+  // co-manager ke neeche wali copy: team dobara nahi, sirf asli card tak le jaane ka link
+  const isCo = !!node._co && !!onJump;
+  const card = { ...toCard(node), jump: isCo };
   return (
-    <div className="att-node">
-      <TreeCard p={toCard(node)} count={kids.length} canOpen={kids.length > 0}
-        open={open && kids.length > 0} onClick={() => setOpen(!open)} />
-      {open && kids.length > 0 && (
+    <div className="att-node" id={node._co ? undefined : `org-${node.id}`}>
+      <TreeCard p={card}
+        count={isCo ? 0 : kids.length}
+        canOpen={isCo || kids.length > 0}
+        open={!isCo && open && kids.length > 0}
+        onClick={isCo ? () => onJump(node.id) : () => setOpen(!open)} />
+      {!isCo && open && kids.length > 0 && (
         <>
           <span className="att-stub" />
           <div className="att-kids">
             {kids.map((k: any) => (
               <div className="att-kid" key={k.id}>
                 <OrgNode node={k} childrenOf={childrenOf} countOf={countOf}
-                  toCard={toCard} depth={depth + 1} openAll={openAll} />
+                  toCard={toCard} depth={depth + 1} openAll={openAll} onJump={onJump} />
               </div>
             ))}
           </div>
@@ -2996,14 +3007,14 @@ function OrgNode({ node, childrenOf, countOf, toCard, depth, openAll }: any) {
   );
 }
 
-function OrgChart({ roots, childrenOf, countOf, toCard, openAll }: any) {
+function OrgChart({ roots, childrenOf, countOf, toCard, openAll, onJump }: any) {
   return (
     <div className="att-tw">
       <div className="att-kids">
         {roots.map((r: any) => (
           <div className="att-kid" key={r.id} style={{ paddingBottom: 14 }}>
             <OrgNode node={r} childrenOf={childrenOf} countOf={countOf}
-              toCard={toCard} depth={0} openAll={openAll} />
+              toCard={toCard} depth={0} openAll={openAll} onJump={onJump} />
           </div>
         ))}
         {!roots.length && <p className="att-empty">Nothing to show.</p>}
@@ -3062,6 +3073,18 @@ function EmpTreeTab() {
   // jinka manager list mein nahi hai wo bhi top pe dikhne chahiye
   const roots = rows.filter((r) => !r.reports_to || !idSet.has(r.reports_to));
 
+  // co-manager wale card se asli card tak: sab kholo, phir scroll + flash
+  const jumpTo = (id: string) => {
+    setAll(true);
+    setTimeout(() => {
+      const el = document.getElementById(`org-${id}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 1800);
+    }, 120);
+  };
+
   return (
     <>
       <div className="att-flex">
@@ -3075,8 +3098,10 @@ function EmpTreeTab() {
       </p>
       <OrgChart openAll={all}
         roots={roots}
-        childrenOf={(n: any) => kids[n.id] || []}
-        countOf={(n: any) => deep(n.id)}
+        onJump={jumpTo}
+        // co-manager ke neeche sirf naam dikhega, poori team dobara nahi
+        childrenOf={(n: any) => (n._co ? [] : kids[n.id] || [])}
+        countOf={(n: any) => (n._co ? 0 : deep(n.id))}
         toCard={(n: any) => ({
           name: n.full_name, code: n.emp_code, pid: n.id,
           sub: `${n.emp_code} · ${n.designation || "—"}${n._co ? " · also reports here" : ""}`,
