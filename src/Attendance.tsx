@@ -779,6 +779,9 @@ const fmtTime = (ts: any) =>
   ts ? new Date(ts).toLocaleTimeString(IST, { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }) : "—";
 const fmtDate = (d: any) =>
   d ? new Date(d).toLocaleDateString(IST, { day: "2-digit", month: "short", timeZone: TZ }) : "—";
+// same as fmtDate but with the year — for joining / birth / leaving dates
+const fmtDateY = (d: any) =>
+  d ? new Date(d).toLocaleDateString(IST, { day: "2-digit", month: "short", year: "numeric", timeZone: TZ }) : "—";
 const fmtHM = (t: any) => {
   if (!t) return "—";
   const [h, m] = String(t).split(":").map(Number);
@@ -2461,8 +2464,9 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Employee status", p.employee_status],
     ["Account", p.approval_status],
     ["Source of hire", p.source_of_hire],
-    ["Date of joining", p.date_of_joining ? fmtDate(p.date_of_joining) : null],
-    ["Date of birth", p.date_of_birth ? fmtDate(p.date_of_birth) : null],
+    ["Date of joining", p.date_of_joining ? fmtDateY(p.date_of_joining) : null],
+    ["Last working day", p.date_of_leaving ? fmtDateY(p.date_of_leaving) : null],
+    ["Date of birth", p.date_of_birth ? fmtDateY(p.date_of_birth) : null],
     ["Today", p.state],
   ];
 
@@ -2856,9 +2860,9 @@ function DirectoryTab({ me }: any) {
                 <td>{r.employment_type || "—"}</td>
                 <td>{r.employee_status || "—"}</td>
                 <td>{r.source_of_hire || "—"}</td>
-                <td>{r.date_of_joining ? fmtDate(r.date_of_joining) : "—"}</td>
+                <td>{r.date_of_joining ? fmtDateY(r.date_of_joining) : "—"}</td>
                 <td>{r.manager_name || "—"}</td>
-                <td>{r.date_of_birth ? fmtDate(r.date_of_birth) : "—"}</td>
+                <td>{r.date_of_birth ? fmtDateY(r.date_of_birth) : "—"}</td>
                 <td><span style={{ fontWeight: 650, color: stateColor[r.state] }}>{r.state}</span></td>
               </tr>
             ))}
