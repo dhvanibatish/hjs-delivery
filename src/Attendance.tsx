@@ -2161,7 +2161,7 @@ function MatrixTab({ me }: any) {
       )}
 
       <p className="att-muted" style={{ marginTop: 10 }}>
-        P present · L late · H half day · A absent · W week off · F holiday · CL/SL/EL = leave
+        P present · L late · H half day · A absent · W week off · F holiday · EL/SHORT/HALF = leave
       </p>
 
       {busy && <p className="att-muted">Loading…</p>}
