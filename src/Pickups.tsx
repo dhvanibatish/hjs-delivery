@@ -1181,7 +1181,13 @@ export default function App({
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
   const [ownPage, setOwnPage] = useState('pickups'); // pickups | dashboard
   // hosted mode mein page delivery app ka sidebar decide karta hai
-  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
+  const page = hosted
+    ? view === 'dashboard'
+      ? 'dashboard'
+      : view === 'sla'
+        ? 'sla'
+        : 'pickups'
+    : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
   // hosted mode: head login store switch kar sake (session App ka hai,
@@ -1404,9 +1410,9 @@ export default function App({
     // eslint-disable-next-line
   }, [activeId]);
   useEffect(() => {
-    if (showLog && !logsLoaded) loadLogs(null);
+    if ((showLog || page === 'sla') && !logsLoaded) loadLogs(null);
     // eslint-disable-next-line
-  }, [showLog]);
+  }, [showLog, page]);
 
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
@@ -1660,6 +1666,12 @@ export default function App({
             deliveries={allStoresData}
             onOpen={(x) => setActiveId(x.invoice_id)}
           />
+        ) : page === 'sla' ? (
+          <PkSlaReport
+            deliveries={allStoresData}
+            logsLoaded={logsLoaded}
+            onOpen={(x) => setActiveId(x.invoice_id)}
+          />
         ) : (
           <>
             <Header
@@ -1796,6 +1808,12 @@ export default function App({
             {session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
                 deliveries={allStoresData}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            ) : session.branch === 'ALL' && page === 'sla' ? (
+              <PkSlaReport
+                deliveries={allStoresData}
+                logsLoaded={logsLoaded}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
             ) : (
@@ -2499,6 +2517,1288 @@ function Dashboard({ deliveries, onOpen }) {
   );
 }
 
+/* ═══════════════════════════════════════════ PROCESS & SLA (all stores)
+   Teen SLA — delivery waale process ka pickup version:
+   1. RESPONSE   — pickup aane ke 60 min (business hours 10AM–8PM) mein
+                   "Contacted" pe move hona chahiye
+   2. ETA FILL   — jo pickup date+time customer ko confirm kiya, us tak entry
+                   "Out for Pickup" hokar estimated arrival bhar jani chahiye
+   3. PICKUP     — jo estimated arrival bhara, us tak item uth jana chahiye
+   Reschedule apne aap handle hota hai: promise hamesha row ki CURRENT
+   confirmed_date/time se banti hai, aur response clock aakhri "New" event se
+   dobara shuru hota hai. Dashboard ke hi dash-* classes use karta hai.     */
+
+const PK_BIZ_START = 10; // 10 AM
+const PK_BIZ_END = 20; // 8 PM
+const PK_RESPONSE_MIN = 60; // business minutes
+
+/* 60-min SLA duration hai isliye business-hours clock pe chalta hai.
+   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
+   normal wall clock. */
+function pkBizAdd(from, mins) {
+  const shift = (x) => {
+    const y = new Date(x);
+    const h = y.getHours() + y.getMinutes() / 60;
+    if (h < PK_BIZ_START) y.setHours(PK_BIZ_START, 0, 0, 0);
+    else if (h >= PK_BIZ_END) {
+      y.setDate(y.getDate() + 1);
+      y.setHours(PK_BIZ_START, 0, 0, 0);
+    }
+    return y;
+  };
+  let d = shift(new Date(from));
+  let left = mins;
+  for (let g = 0; g < 400 && left > 0; g++) {
+    const end = new Date(d);
+    end.setHours(PK_BIZ_END, 0, 0, 0);
+    const avail = (end - d) / 60000;
+    if (left <= avail) return new Date(d.getTime() + left * 60000);
+    left -= avail;
+    d = shift(new Date(end.getTime() + 60000));
+  }
+  return d;
+}
+
+/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi). */
+function pkBizMins(a, b) {
+  if (!a || !b || b <= a) return 0;
+  let total = 0;
+  let cur = new Date(a);
+  for (let g = 0; g < 400 && cur < b; g++) {
+    const s0 = new Date(cur);
+    s0.setHours(PK_BIZ_START, 0, 0, 0);
+    const e0 = new Date(cur);
+    e0.setHours(PK_BIZ_END, 0, 0, 0);
+    const s = cur < s0 ? s0 : cur;
+    const e = b < e0 ? b : e0;
+    if (e > s) total += (e - s) / 60000;
+    const nx = new Date(cur);
+    nx.setDate(nx.getDate() + 1);
+    nx.setHours(0, 0, 0, 0);
+    cur = nx;
+  }
+  return total;
+}
+
+const pkLog = (x) => {
+  const r = (x && x._raw) || {};
+  return Array.isArray(r.app_log) ? r.app_log : [];
+};
+
+/* Current cycle = aakhri baar "New" (ya Reschedule) ke baad ka hissa.
+   Reschedule bhi stage:'new' log karta hai, isliye uske baad ka clock naya. */
+function pkCycle(x) {
+  const mv = pkLog(x)
+    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
+    .slice()
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  let start = 0;
+  for (let i = mv.length - 1; i >= 0; i--)
+    if (mv[i].stage === 'new') {
+      start = i;
+      break;
+    }
+  return mv.slice(start);
+}
+function pkFirst(cycle, stage) {
+  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
+  return null;
+}
+/* Response clock kahan se — reschedule hua to us waqt se, warna entry aane se */
+function pkStart(x, cycle) {
+  if (cycle.length && cycle[0].stage === 'new' && cycle[0].ts) {
+    const d = new Date(cycle[0].ts);
+    if (!isNaN(d)) return d;
+  }
+  const c = new Date(createdTs(x));
+  return isNaN(c) ? null : c;
+}
+/* MBC = customer khud item store pe drop karta hai — store ki SLA lagti nahi */
+function pkIsMbc(x, cycle) {
+  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
+  return cycle.some((e) =>
+    String((e.fields && (e.fields.Person || e.fields['Pickup person'])) || '')
+      .toUpperCase()
+      .includes('MBC'),
+  );
+}
+/* Promise = confirmed_date + confirmed_time (Contacted stage pe bhara hua).
+   Reschedule pe ye null ho jaata hai, nayi date bharne pe naya promise. */
+function pkPromise(x) {
+  const r = (x && x._raw) || {};
+  const d = r.confirmed_date;
+  if (!d || d === 'null') return null;
+  let t =
+    r.confirmed_time && r.confirmed_time !== 'null'
+      ? String(r.confirmed_time)
+      : '20:00:00';
+  if (t.length === 5) t += ':00';
+  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
+  return isNaN(dt) ? null : dt;
+}
+/* ETA = app_eta column ("YYYY-MM-DDTHH:MM"), Out for Pickup pe bhara jaata hai */
+function pkEtaOf(x) {
+  const r = (x && x._raw) || {};
+  const v = r.app_eta;
+  if (!v || v === 'null') return null;
+  const dt = new Date(String(v).replace(' ', 'T'));
+  return isNaN(dt) ? null : dt;
+}
+
+const pkHrs = (h) =>
+  h == null
+    ? '—'
+    : h < 1
+      ? Math.round(h * 60) + 'm'
+      : h < 48
+        ? Math.round(h) + 'h'
+        : (h / 24).toFixed(1) + 'd';
+const pkMinsFmt = (m) => {
+  if (m == null) return '—';
+  const a = Math.abs(m);
+  if (a < 60) return Math.round(a) + 'm';
+  if (a < 2880) return Math.round(a / 60) + 'h';
+  return (a / 1440).toFixed(1) + 'd';
+};
+
+/* Adoption % ka color — 85+ green, 70–85 amber, uske neeche red */
+const pkAdoptColor = (p) =>
+  p == null ? T.inkSoft : p >= 85 ? T.green : p >= 70 ? T.amber : T.red;
+
+/* Dashboard view ke response buckets ke drill labels (ye cards mein nahi hote) */
+const PK_KIND_LABEL = {
+  r10: 'Response ≤10 min',
+  r30: 'Response 10–30 min',
+  r30p: 'Response >30 min',
+};
+
+/* ── ek pickup ka poora SLA picture ── */
+function pkAnalyze(x) {
+  const cycle = pkCycle(x);
+  const mbc = pkIsMbc(x, cycle);
+  const now = new Date();
+  const start = pkStart(x, cycle);
+  const okStart = !!start;
+  const span = (a, b) => (a && b && b >= a ? pkBizMins(a, b) / 60 : null);
+
+  const picked = x.stage === 'delivered';
+  const pickAt = picked ? new Date(deliveredTs(x)) : null;
+
+  /* SLA 1 — Response */
+  const talkedAt = pkFirst(cycle, 'talked');
+  const respDeadline = okStart ? pkBizAdd(start, PK_RESPONSE_MIN) : null;
+  const respEnd = talkedAt || now;
+  const respBreach = !!(respDeadline && respEnd > respDeadline);
+  const respOpen = !talkedAt;
+  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
+
+  const promise = pkPromise(x);
+  const dispAt = pkFirst(cycle, 'dispatched');
+  const eta = pkEtaOf(x);
+
+  /* SLA 2 — ETA fill: jo pickup time customer ko diya tha, us tak entry
+     "Out for Pickup" hokar estimated arrival bhar jani chahiye. */
+  const etaApplies = !!promise;
+  const etaEnd = dispAt || now;
+  const etaBreach = !!(etaApplies && etaEnd > promise);
+  const etaOpen = !dispAt;
+  const etaLateBy = etaBreach ? (etaEnd - promise) / 60000 : 0;
+
+  /* SLA 3 — Pickup: jo estimated arrival bhara, us tak item uth jana chahiye */
+  const pickDeadline = eta;
+  const pickEnd = pickAt || now;
+  const pickBreach = !!(pickDeadline && pickEnd > pickDeadline);
+  const pickLateBy = pickBreach ? (pickEnd - pickDeadline) / 60000 : 0;
+
+  /* Manager response — entry aane se Contacted tak (business hours) */
+  const respHrs = okStart && talkedAt ? span(start, talkedAt) : null;
+
+  /* Pickup person ka hissa — Out for Pickup se Picked Up tak */
+  let pickHrs = null;
+  if (pickAt && !isNaN(pickAt) && dispAt) pickHrs = span(dispAt, pickAt);
+
+  return {
+    x,
+    branch: x.branch,
+    picked,
+    mbc,
+    resched: isResched(x),
+    respBreach,
+    respOpen,
+    respLateBy,
+    respDeadline,
+    talkedAt,
+    promise,
+    eta,
+    dispAt,
+    etaApplies,
+    etaBreach,
+    etaOpen,
+    etaLateBy,
+    pickDeadline,
+    pickBreach,
+    pickLateBy,
+    pickAt,
+    /* abhi action chahiye: pending pickup jiski koi bhi SLA nikal chuki hai */
+    overdue:
+      !picked &&
+      ((respOpen && respBreach) || (etaOpen && etaBreach) || pickBreach),
+    totalHrs: okStart && pickAt && !isNaN(pickAt) ? span(start, pickAt) : null,
+    respHrs,
+    /* Dashboard ke ≤10 / 10–30 / >30 buckets ke liye — wahi business-hours
+       value, bas minutes mein. Baat hi nahi hui to null (kisi bucket mein nahi). */
+    respMins: respHrs == null ? null : respHrs * 60,
+    pickHrs,
+  };
+}
+
+/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka box */
+function PkTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
+  const [pos, setPos] = useState(null);
+  const ref = React.useRef(null);
+  const thStyle = {
+    whiteSpace: 'normal',
+    verticalAlign: 'bottom',
+    width: w || 'auto',
+    textAlign: center || group ? 'center' : 'left',
+    ...(group
+      ? { color: T.forestSoft, borderBottom: '1px solid ' + T.line, paddingBottom: 6 }
+      : {}),
+    ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+  };
+  const span = { colSpan, rowSpan };
+  if (!info)
+    return (
+      <th style={thStyle} {...span}>
+        {label}
+      </th>
+    );
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const w2 = 250;
+    setPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - w2 - 12)),
+      top: r.bottom + 6,
+      w: w2,
+    });
+  };
+
+  return (
+    <th style={thStyle} {...span}>
+      <span
+        ref={ref}
+        style={{ cursor: 'help' }}
+        onMouseEnter={show}
+        onMouseLeave={() => setPos(null)}
+        onClick={() => (pos ? setPos(null) : show())}
+      >
+        {label}{' '}
+        <Info size={12} color="#B3AFA4" style={{ verticalAlign: '-1px' }} />
+      </span>
+      {pos && (
+        <div
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            top: pos.top,
+            width: pos.w,
+            zIndex: 90,
+            background: T.forest,
+            color: '#fff',
+            borderRadius: 10,
+            padding: '10px 12px',
+            fontSize: 11.5,
+            fontWeight: 500,
+            lineHeight: 1.55,
+            letterSpacing: 0,
+            textTransform: 'none',
+            whiteSpace: 'normal',
+            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
+            pointerEvents: 'none',
+          }}
+        >
+          {info}
+        </div>
+      )}
+    </th>
+  );
+}
+
+function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [view, setView] = useState('stores'); // stores | boys
+  const [sel, setSel] = useState(null);
+  const [alertOn, setAlertOn] = useState(null);
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    return [from, to];
+  }, [range, from, to]);
+
+  /* Cancelled / Deleted SLA mein nahi aati. Jin rows ka timeline abhi load
+     nahi hua unhe bhi chhod dete hain — warna sab breach dikhne lagti hain. */
+  const live = useMemo(
+    () =>
+      deliveries.filter(
+        (d) => !isClosedStage(d.stage) && d._raw && Array.isArray(d._raw.app_log),
+      ),
+    [deliveries],
+  );
+
+  const inRange = useMemo(() => {
+    const [s, e] = bounds;
+    return live.filter((d) => {
+      const cd = dayStr(createdTs(d));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && d.branch !== store) return false;
+      return true;
+    });
+  }, [live, bounds, store]);
+
+  /* MBC = customer khud store pe drop karta hai — poori report se bahar */
+  const rows = useMemo(() => inRange.map(pkAnalyze).filter((a) => !a.mbc), [inRange]);
+
+  /* Overdue = abhi ka metric, date range se filter nahi hota */
+  const overdueAll = useMemo(
+    () =>
+      live
+        .filter((d) => d.stage !== 'delivered')
+        .map(pkAnalyze)
+        .filter((a) => a.overdue && !a.mbc && (store === 'ALL' || a.branch === store)),
+    [live, store],
+  );
+
+  const pick = {
+    all: () => true,
+    picked: (a) => a.picked,
+    pending: (a) => !a.picked,
+    resp: (a) => a.respBreach,
+    eta: (a) => a.etaBreach,
+    pk: (a) => a.pickBreach,
+    /* Dashboard ke response buckets — EXCLUSIVE (≤10 wale 10–30 mein nahi).
+       Jinpe abhi baat hui hi nahi wo kisi bucket mein nahi — wo Response
+       breach card mein pakde jaate hain. */
+    r10: (a) => a.respMins != null && a.respMins <= 10,
+    r30: (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+    r30p: (a) => a.respMins != null && a.respMins > 30,
+  };
+
+  const statOf = (list, ov) => {
+    const dl = list.filter((a) => a.picked);
+    const avg = (k) => {
+      const v = dl.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
+    const avgAll = (k) => {
+      const v = list.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
+    return {
+      total: list.length,
+      picked: dl.length,
+      pending: list.length - dl.length,
+      /* Response speed buckets — entry se "Contacted" tak, business minutes
+         mein. Teeno EXCLUSIVE hain, jod = jitni pickups pe baat ho chuki hai. */
+      resp10: list.filter((a) => a.respMins != null && a.respMins <= 10).length,
+      resp30: list.filter(
+        (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+      ).length,
+      resp30p: list.filter((a) => a.respMins != null && a.respMins > 30).length,
+      /* Adoption = is duration ki kitni pickups uth chuki hain */
+      adoption: list.length ? (dl.length / list.length) * 100 : null,
+      respBreach: list.filter((a) => a.respBreach).length,
+      etaBreach: list.filter((a) => a.etaBreach).length,
+      pickBreach: list.filter((a) => a.pickBreach).length,
+      avgRespLate: (() => {
+        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
+        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+      })(),
+      overdue: ov.length,
+      avgCycle: avg('totalHrs'),
+      avgResp: avgAll('respHrs'),
+      avgPick: avg('pickHrs'),
+    };
+  };
+
+  const overall = statOf(rows, overdueAll);
+
+  const cards = [
+    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
+    { kind: 'picked', label: 'Picked up', n: overall.picked, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
+    { kind: 'eta', label: 'ETA breach', n: overall.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
+    { kind: 'pk', label: 'Pickup breach', n: overall.pickBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+  ];
+
+  /* pickup person ka naam — assign na hua to "Not assigned" */
+  const personOf = (a) => {
+    const p = String(a.x.person || '').trim();
+    if (!p || p === 'null') return 'Not assigned';
+    return p;
+  };
+
+  const drill = useMemo(() => {
+    if (!sel) return [];
+    let list = sel.kind === 'overdue' ? overdueAll : rows;
+    if (sel.store) list = list.filter((a) => a.branch === sel.store);
+    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
+    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) =>
+        String(createdTs(b.x) || '').localeCompare(String(createdTs(a.x) || '')),
+      );
+    // eslint-disable-next-line
+  }, [rows, overdueAll, sel]);
+
+  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
+    .map((st) => ({
+      st,
+      s: statOf(
+        rows.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+    }))
+    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
+
+  /* Dashboard view — sirf jinke is duration mein pickups hain, volume desc */
+  const adoptRows = storeStats
+    .filter((r) => r.s.total > 0)
+    .slice()
+    .sort((a, b) => b.s.total - a.s.total);
+
+  /* pickup person wise — person + store ke hisaab se group */
+  const boyStats = useMemo(() => {
+    const skip = (a) => personOf(a) === 'Not assigned';
+    const keys = new Set();
+    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    return [...keys]
+      .map((k) => {
+        const [person, br] = k.split('|');
+        return {
+          person,
+          br,
+          s: statOf(
+            rows.filter((a) => personOf(a) === person && a.branch === br),
+            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
+          ),
+        };
+      })
+      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
+      .sort((a, b) => a.person.localeCompare(b.person));
+    // eslint-disable-next-line
+  }, [rows, overdueAll]);
+
+  const rangeLabel =
+    range === 'today'
+      ? 'Aaj'
+      : range === 'yesterday'
+        ? 'Kal'
+        : range === '7d'
+          ? 'Pichhle 7 din'
+          : `${from} → ${to}`;
+
+  const toggleSel = (next) =>
+    setSel((cur) =>
+      cur &&
+      cur.kind === next.kind &&
+      cur.store === next.store &&
+      cur.person === next.person
+        ? null
+        : next,
+    );
+
+  const cellFor = (target) => (kind, n, color, div) => (
+    <td
+      className={n ? 'dash-td-click' : 'dash-td-zero'}
+      style={{
+        textAlign: 'center',
+        ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+        ...(n ? { color } : {}),
+      }}
+      onClick={() => n && toggleSel({ kind, store: null, person: null, ...target })}
+    >
+      {n}
+    </td>
+  );
+
+  /* Kisi number pe click → sirf us subset ki list. Back se wapas. */
+  if (sel) {
+    const selLabel =
+      cards.find((c) => c.kind === sel.kind)?.label ||
+      PK_KIND_LABEL[sel.kind] ||
+      'All';
+    return (
+      <div>
+        <button className="track-back" onClick={() => setSel(null)}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="dash-head">
+          <div>
+            <div className="dash-sub">
+              {selLabel}
+              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
+              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
+            </div>
+            <h2 style={{ margin: '2px 0 0' }}>
+              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
+            </h2>
+          </div>
+        </div>
+        <div className="dash-block">
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <PkTh label="Invoice" />
+                  <PkTh label="Customer" />
+                  <PkTh label="Store" />
+                  <PkTh label="Stage" />
+                  <PkTh
+                    label="Response"
+                    info={`Entry aane se "Contacted" tak kitna time laga. Lal ho to ${PK_RESPONSE_MIN} min ki deadline paar ho gayi thi. Reschedule ke baad clock naya shuru hota hai.`}
+                  />
+                  <PkTh
+                    label="Promise"
+                    info="Jo pickup date aur time customer ko diya gaya tha — Contacted stage pe bhara hua confirmed slot. Is time tak ETA bhar jani chahiye."
+                  />
+                  <PkTh
+                    label="ETA"
+                    info="Out for Pickup stage pe bhara hua Estimated arrival. Is time tak item uth jana chahiye."
+                  />
+                  <PkTh label="Picked up" />
+                  <PkTh
+                    label="Late by"
+                    info="Jo SLA breach hui hai, us deadline se kitna time nikal gaya."
+                  />
+                  <PkTh label="Pickup person" />
+                </tr>
+              </thead>
+              <tbody>
+                {drill.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="dash-empty">
+                      Koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  drill.map((a) => {
+                    const stg = stageMeta(a.x.stage);
+                    return (
+                      <tr
+                        key={a.x.invoice_id}
+                        className="dash-row"
+                        onClick={() => onOpen(a.x)}
+                      >
+                        <td>{a.x.id}</td>
+                        <td>{a.x.customer}</td>
+                        <td>{branchLabel(a.branch)}</td>
+                        <td>
+                          <span
+                            className="dash-chip"
+                            style={{ background: stg.soft, color: stg.color }}
+                          >
+                            {a.resched ? 'Rescheduled' : stg.short}
+                          </span>
+                        </td>
+                        <td
+                          style={{
+                            color: a.respBreach ? T.red : T.ink,
+                            fontWeight: a.respBreach ? 700 : 500,
+                          }}
+                        >
+                          {a.respOpen ? 'abhi tak nahi' : pkHrs(a.respHrs)}
+                        </td>
+                        <td
+                          style={{
+                            color: a.etaBreach ? T.red : T.ink,
+                            fontWeight: a.etaBreach ? 700 : 500,
+                          }}
+                        >
+                          {a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}
+                        </td>
+                        <td>
+                          {a.eta ? (
+                            fmtDateTime(a.eta.toISOString())
+                          ) : (
+                            <span
+                              style={{
+                                color: a.etaBreach ? T.red : T.inkSoft,
+                                fontWeight: a.etaBreach ? 700 : 500,
+                              }}
+                            >
+                              {a.etaBreach ? 'bhari nahi' : '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {a.pickAt && !isNaN(a.pickAt) ? (
+                            fmtDateTime(a.pickAt.toISOString())
+                          ) : (
+                            <span
+                              style={{
+                                color: a.pickBreach ? T.red : T.inkSoft,
+                                fontWeight: a.pickBreach ? 700 : 500,
+                              }}
+                            >
+                              {a.pickBreach ? 'nahi hui' : '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            color: a.pickBreach || a.etaBreach ? T.red : T.inkSoft,
+                            fontWeight: a.pickBreach || a.etaBreach ? 700 : 500,
+                          }}
+                        >
+                          {a.pickBreach
+                            ? pkMinsFmt(a.pickLateBy)
+                            : a.etaBreach
+                              ? pkMinsFmt(a.etaLateBy)
+                              : '—'}
+                        </td>
+                        <td>{personOf(a)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!logsLoaded)
+    return (
+      <div className="loading">
+        Timeline load ho raha hai… SLA usi se banti hai.
+      </div>
+    );
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Pickup Process &amp; SLA</div>
+          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
+        </div>
+        <div className="dash-filters">
+          <div className="layout-toggle">
+            <button
+              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('stores');
+                setSel(null);
+              }}
+            >
+              <Building2 size={14} /> Stores
+            </button>
+            <button
+              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('boys');
+                setSel(null);
+              }}
+            >
+              <User size={14} /> Pickup boys
+            </button>
+            <button
+              className={view === 'adopt' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('adopt');
+                setSel(null);
+              }}
+            >
+              <BarChart3 size={14} /> Dashboard
+            </button>
+          </div>
+          <select
+            className="dash-inp"
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+          >
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input
+                className="dash-inp"
+                type="date"
+                value={from}
+                max={to}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+              <input
+                className="dash-inp"
+                type="date"
+                value={to}
+                min={from}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel(null);
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>
+                {branchLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
+          return (
+            <button
+              key={c.label}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={{
+                ...(on ? { borderColor: c.color } : {}),
+                ...(c.n ? {} : { cursor: 'default' }),
+              }}
+              onClick={() =>
+                c.n && toggleSel({ kind: c.kind, store: null, person: null })
+              }
+            >
+              <div
+                className="dash-card-ico"
+                style={{ background: c.soft, color: c.color }}
+              >
+                <c.icon size={16} />
+              </div>
+              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
+                {c.n}
+              </div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {view === 'stores' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <PkTh label="Store" rowSpan={2} />
+                  <PkTh label="Pickups" colSpan={2} group div />
+                  <PkTh label="Response" colSpan={3} group div />
+                  <PkTh label="Pickup" colSpan={3} group div />
+                  <PkTh
+                    label="Overdue"
+                    rowSpan={2}
+                    center
+                    div
+                    info={`Pending pickups jinki koi bhi SLA nikal chuki hai — ${PK_RESPONSE_MIN} min ka response, ETA fill, ya ETA tak pickup. Inpe abhi action chahiye. Ye column date filter follow nahi karta, isliye Total se zyada ho sakta hai.`}
+                  />
+                  <PkTh label="Alert" rowSpan={2} center w={70} div />
+                </tr>
+                <tr>
+                  <PkTh
+                    label="Total"
+                    center
+                    div
+                    info="Is date range ki pickups. MBC (customer khud store pe drop karta hai) aur cancelled entries isme nahi aatin — un pe store ki SLA lagti hi nahi."
+                  />
+                  <PkTh label="Picked" center />
+                  <PkTh
+                    label="Avg Time"
+                    center
+                    div
+                    info={`Entry aane se "Contacted" tak ka average. Business hours (${PK_BIZ_START}AM–${PK_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
+                  />
+                  <PkTh
+                    label="Breach"
+                    center
+                    info={`Kitni pickups ${PK_RESPONSE_MIN} min ke andar "Contacted" pe move nahi hui. Ye store manager ki zimmedari hai.`}
+                  />
+                  <PkTh
+                    label="Avg Breach Time"
+                    center
+                    info={`Jo pickups ${PK_RESPONSE_MIN} min ki deadline paar kar gayin, unka average kitna upar nikle.`}
+                  />
+                  <PkTh
+                    label="Avg Time"
+                    center
+                    div
+                    info="Entry aane se Picked Up tak ka poora average. Sirf ho-chuki pickups ka."
+                  />
+                  <PkTh
+                    label="ETA Breach"
+                    center
+                    info="Jo pickup time customer ko diya tha, us tak entry Out for Pickup hokar Estimated arrival bhar jani chahiye thi — nahi hui."
+                  />
+                  <PkTh
+                    label="Pick Breach"
+                    center
+                    info="Jo Estimated arrival bhara tha, us tak item nahi utha (ya abhi tak utha hi nahi)."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {storeStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  storeStats.map(({ st, s }) => {
+                    const cell = cellFor({ store: st, person: null });
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">{branchLabel(st)}</td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('picked', s.picked, T.green)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {pkHrs(s.avgResp)}
+                        </td>
+                        {cell('resp', s.respBreach, T.red)}
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            color: s.avgRespLate == null ? '#C9C7BE' : T.red,
+                          }}
+                        >
+                          {s.avgRespLate == null ? '—' : '+' + pkMinsFmt(s.avgRespLate)}
+                        </td>
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {pkHrs(s.avgCycle)}
+                        </td>
+                        {cell('eta', s.etaBreach, T.red)}
+                        {cell('pk', s.pickBreach, T.red)}
+                        {cell('overdue', s.overdue, T.amber, true)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          <button
+                            className="mini-edit"
+                            style={
+                              s.overdue || s.respBreach || s.pickBreach
+                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
+                                : {}
+                            }
+                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
+                          >
+                            <Bell size={12} /> Alert
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : view === 'boys' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">Pickup boy wise · {rangeLabel}</div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <PkTh
+                    label="Pickup boy"
+                    rowSpan={2}
+                    info="Bina-assign wali pickups is view mein nahi aatin, isliye yahan ke totals Stores view se thode kam ho sakte hain."
+                  />
+                  <PkTh label="Store" rowSpan={2} />
+                  <PkTh label="Pickups" colSpan={2} group div />
+                  <PkTh label="Pickup" colSpan={3} group div />
+                  <PkTh
+                    label="Overdue"
+                    rowSpan={2}
+                    center
+                    div
+                    info="Pending pickups jinki koi bhi SLA nikal chuki hai. Ye column date filter follow nahi karta."
+                  />
+                </tr>
+                <tr>
+                  <PkTh label="Total" center div />
+                  <PkTh label="Picked" center />
+                  <PkTh
+                    label="Pick Time"
+                    center
+                    div
+                    info="Out for Pickup se Picked Up tak ka average — sirf pickup boy ka hissa."
+                  />
+                  <PkTh
+                    label="Avg Time"
+                    center
+                    info="Entry aane se Picked Up tak ka poora average, jisme manager ka time bhi shaamil hai."
+                  />
+                  <PkTh
+                    label="Breach"
+                    center
+                    info="Jo Estimated arrival bhara tha, us tak item nahi utha (ya abhi tak utha hi nahi)."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {boyStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  boyStats.map(({ person, br, s }) => {
+                    const cell = cellFor({ person, store: null });
+                    return (
+                      <tr key={person + br}>
+                        <td className="dash-store">{person}</td>
+                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('picked', s.picked, T.green)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {pkHrs(s.avgPick)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>{pkHrs(s.avgCycle)}</td>
+                        {cell('pk', s.pickBreach, T.red)}
+                        {cell('overdue', s.overdue, T.amber, true)}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="dash-block">
+          <div
+            className="dash-block-h"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-end',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              Store-wise Adoption · {rangeLabel}
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 3,
+                }}
+              >
+                {adoptRows.length} store · MBC aur cancelled entries chhod kar
+              </div>
+            </span>
+            <span style={{ textAlign: 'right' }}>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  color: pkAdoptColor(overall.adoption),
+                }}
+              >
+                {overall.adoption == null
+                  ? '—'
+                  : overall.adoption.toFixed(1) + '%'}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 4,
+                }}
+              >
+                {overall.picked} picked of {overall.total} pickups
+              </div>
+            </span>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <PkTh label="Store" />
+                  <PkTh
+                    label="Pickups"
+                    center
+                    div
+                    info="Is date range ki pickups. MBC (customer khud store pe drop karta hai) aur cancelled entries isme nahi aatin."
+                  />
+                  <PkTh label="Picked" center />
+                  <PkTh
+                    label="≤10 min"
+                    center
+                    div
+                    info="Kitni pickups mein entry aane ke 10 business minutes ke andar 'Contacted' bhar diya gaya. Neeche % total pickups ka hai."
+                  />
+                  <PkTh
+                    label="10–30 min"
+                    center
+                    info={`Jo pickups 10 min ke baad, par ${PK_RESPONSE_MIN} business minutes ke andar "Contacted" pe move hui. ≤10 min waali ismein NAHI aatin — teeno column alag pickups dikhate hain.`}
+                  />
+                  <PkTh
+                    label=">30 min"
+                    center
+                    info={`Jo pickups ${PK_RESPONSE_MIN} min ki deadline ke BAAD "Contacted" pe move hui — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aatin; wo upar Response breach card mein hain.`}
+                  />
+                  <PkTh
+                    label="Response TAT"
+                    center
+                    div
+                    info={`Entry aane se "Contacted" tak ka average. Business hours (${PK_BIZ_START}AM–${PK_BIZ_END - 12}PM) mein gina jaata hai.`}
+                  />
+                  <PkTh
+                    label="Pickup TAT"
+                    center
+                    info="Entry aane se Picked Up tak ka poora average. Sirf ho-chuki pickups ka."
+                  />
+                  <PkTh
+                    label="Adoption"
+                    center
+                    div
+                    info="Is duration ki kitni pickups uth chuki hain. 85%+ green, 70–85% amber, uske neeche red."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {adoptRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  adoptRows.map(({ st, s }) => {
+                    const cell = cellFor({ store: st, person: null });
+                    const pctOf = (n) =>
+                      s.total ? Math.round((n / s.total) * 100) : 0;
+                    const ac = pkAdoptColor(s.adoption);
+                    /* bucket cell — number + neeche chhota % */
+                    const bucket = (kind, n, div, color) => (
+                      <td
+                        className={n ? 'dash-td-click' : 'dash-td-zero'}
+                        style={{
+                          textAlign: 'center',
+                          ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+                          ...(n ? { color: color || T.green } : {}),
+                        }}
+                        onClick={() =>
+                          n && toggleSel({ kind, store: st, person: null })
+                        }
+                      >
+                        {n}
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: T.inkSoft,
+                          }}
+                        >
+                          {pctOf(n)}%
+                        </div>
+                      </td>
+                    );
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">{branchLabel(st)}</td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('picked', s.picked, T.green)}
+                        {bucket('r10', s.resp10, true)}
+                        {bucket('r30', s.resp30)}
+                        {bucket('r30p', s.resp30p, false, T.red)}
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            borderLeft: '1px solid ' + T.line,
+                          }}
+                        >
+                          {pkHrs(s.avgResp)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {pkHrs(s.avgCycle)}
+                        </td>
+                        <td style={{ borderLeft: '1px solid ' + T.line }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 76,
+                                height: 5,
+                                borderRadius: 3,
+                                background: T.line,
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width:
+                                    Math.max(
+                                      0,
+                                      Math.min(100, s.adoption || 0),
+                                    ) + '%',
+                                  height: '100%',
+                                  background: ac,
+                                  borderRadius: 3,
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                color: ac,
+                                minWidth: 48,
+                                textAlign: 'right',
+                              }}
+                            >
+                              {s.adoption == null
+                                ? '—'
+                                : s.adoption.toFixed(1) + '%'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {alertOn && (
+        <PkSlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ── Alert modal — abhi sirf UI, backend baad mein ── */
+function PkSlaAlert({ title, s, onClose }) {
+  const problems = [];
+  if (s.overdue)
+    problems.push([
+      'Overdue pickups',
+      `${s.overdue} pickup ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
+    ]);
+  if (s.respBreach)
+    problems.push([
+      'Response late',
+      `${s.respBreach} pickup mein ${PK_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
+        (s.avgRespLate ? ` — average ${pkMinsFmt(s.avgRespLate)} deadline se upar.` : '.'),
+    ]);
+  if (s.etaBreach)
+    problems.push([
+      'ETA bhari nahi gayi',
+      `${s.etaBreach} pickup diye hue time tak Out for Pickup nahi hui — estimated arrival hi nahi bhari.`,
+    ]);
+  if (s.pickBreach)
+    problems.push([
+      'Pickup breach',
+      `${s.pickBreach} pickup apni estimated arrival se late gayi.`,
+    ]);
+
+  const KVLine = ({ label, value }) => (
+    <div className="kv">
+      <div className="kv-label">{label}</div>
+      <div className="kv-val">{value}</div>
+    </div>
+  );
+
+  return (
+    <div className="overlay center" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+              Store head ko bhejne wali summary
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="kv-grid">
+            <KVLine label="Overdue" value={s.overdue} />
+            <KVLine label="Avg response time" value={pkHrs(s.avgResp)} />
+            <KVLine label="Avg pickup time" value={pkHrs(s.avgCycle)} />
+            <KVLine label="Response breach" value={s.respBreach} />
+            <KVLine label="ETA breach" value={s.etaBreach} />
+          </div>
+
+          <div className="sec-title" style={{ margin: '4px 0 0' }}>
+            Main problems
+          </div>
+          {problems.length === 0 ? (
+            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
+          ) : (
+            problems.slice(0, 2).map(([t, d], i) => (
+              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
+                <b>{t}</b>
+                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn-primary" disabled>
+            <Bell size={15} /> Send alert
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login({ onLogin }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
@@ -2580,7 +3880,12 @@ function Sidebar({ session, page, onNav }) {
       },
     },
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-    ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
+    ...(isAll
+      ? [
+          { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+          { id: 'sla', icon: Clock, label: 'Process & SLA' },
+        ]
+      : []),
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
     { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
@@ -2732,6 +4037,7 @@ function Topbar({
         >
           <option value="pickups">Pickups</option>
           <option value="dashboard">Dashboard</option>
+          <option value="sla">Process &amp; SLA</option>
         </select>
       )}
       <div className="tb-actions">
