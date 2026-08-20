@@ -2374,6 +2374,7 @@ const slaAdoptColor = (p) =>
 const SLA_KIND_LABEL = {
   r10: 'Response ≤10 min',
   r30: 'Response 10–30 min',
+  r30p: 'Response >30 min',
 };
 
 /* ── ek order ka poora SLA picture ── */
@@ -2619,6 +2620,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     /* Dashboard ke response buckets — EXCLUSIVE (≤10 wale 10–30 mein nahi) */
     r10: (a) => a.respMins != null && a.respMins <= 10,
     r30: (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+    /* >30 min — SLA ke baad baat hui. Jinpe abhi tak baat hui hi nahi
+       (respMins null) wo yahan nahi, wo Response Breach card mein hain. */
+    r30p: (a) => a.respMins != null && a.respMins > 30,
   };
 
   const statOf = (list, ov) => {
@@ -2647,6 +2651,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       resp30: list.filter(
         (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
       ).length,
+      /* >30 min — deadline ke baad baat hui. Ye teesra exclusive bucket hai;
+         teeno ka jod = jitne orders pe ab tak baat ho chuki hai. */
+      resp30p: list.filter((a) => a.respMins != null && a.respMins > 30).length,
       /* Adoption = is duration ke kitne orders deliver ho chuke */
       adoption: list.length ? (dl.length / list.length) * 100 : null,
       respBreach: list.filter((a) => a.respBreach).length,
@@ -3253,6 +3260,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar "Talked to Customer" pe move hue. ≤10 min wale ismein NAHI aate — dono column alag orders dikhate hain, aur inka jod = SLA ke andar wale kul orders.`}
                   />
                   <SlaTh
+                    label=">30 min"
+                    center
+                    info={`Jo orders ${SLA_RESPONSE_MIN} business minutes ki deadline ke BAAD "Talked to Customer" pe move hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
+                  />
+                  <SlaTh
                     label="Response TAT"
                     center
                     div
@@ -3274,7 +3286,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <tbody>
                 {adoptRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="dash-empty">
+                    <td colSpan={9} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3285,13 +3297,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                       s.total ? Math.round((n / s.total) * 100) : 0;
                     const ac = slaAdoptColor(s.adoption);
                     /* bucket cell — number + neeche chhota % */
-                    const bucket = (kind, n, div) => (
+                    const bucket = (kind, n, div, color) => (
                       <td
                         className={n ? 'dash-td-click' : 'dash-td-zero'}
                         style={{
                           textAlign: 'center',
                           ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-                          ...(n ? { color: T.green } : {}),
+                          ...(n ? { color: color || T.green } : {}),
                         }}
                         onClick={() =>
                           n && toggleSel({ kind, store: st, person: null })
@@ -3311,31 +3323,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     );
                     return (
                       <tr key={st}>
-                        <td className="dash-store">
-                          {branchLabel(st)}
-                          {s.total < 5 && (
-                            <span
-                              style={{
-                                marginLeft: 8,
-                                fontSize: 9.5,
-                                fontWeight: 800,
-                                letterSpacing: 0.4,
-                                textTransform: 'uppercase',
-                                color: T.inkSoft,
-                                background: T.beige,
-                                border: '1px solid ' + T.line,
-                                borderRadius: 6,
-                                padding: '2px 6px',
-                              }}
-                            >
-                              Low vol
-                            </span>
-                          )}
-                        </td>
+                        <td className="dash-store">{branchLabel(st)}</td>
                         {cell('all', s.total, T.green, true)}
                         {cell('delivered', s.delivered, T.green)}
                         {bucket('r10', s.resp10, true)}
                         {bucket('r30', s.resp30)}
+                        {bucket('r30p', s.resp30p, false, T.red)}
                         <td
                           style={{
                             textAlign: 'center',
