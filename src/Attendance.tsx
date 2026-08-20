@@ -2070,6 +2070,11 @@ function MatrixTab({ me }: any) {
   const [dates, setDates] = useState<string[]>([]);
   const [busy, setBusy] = useState(true);
   const [q, setQ] = useState("");
+  // cell click -> us din ki detail + location
+  const [empByCode, setEmpByCode] = useState<Record<string, any>>({});
+  const [logByKey, setLogByKey] = useState<Record<string, any>>({});
+  const [pick, setPick] = useState<any>(null);
+  const [pickEmp, setPickEmp] = useState<any>(null);
 
   const load = async () => {
     setBusy(true);
@@ -2081,13 +2086,31 @@ function MatrixTab({ me }: any) {
     setDates(all);
 
     if (approver) {
-      const { data } = await supabase.rpc("muster_roll", { p_month: from });
+      const [{ data }, em, lgs] = await Promise.all([
+        supabase.rpc("muster_roll", { p_month: from }),
+        supabase.from("employees")
+          .select("id, emp_code, full_name, shift_start, shift_end, week_off_days"),
+        supabase.from("attendance_logs").select("*")
+          .gte("work_date", from).lte("work_date", to),
+      ]);
       const byEmp: Record<string, any> = {};
       (data || []).forEach((r: any) => {
         byEmp[r.emp_code] = byEmp[r.emp_code] || { code: r.emp_code, name: r.full_name, marks: {} };
         byEmp[r.emp_code].marks[r.d] = r.mark;
       });
       setRows(Object.values(byEmp));
+
+      const byCode: Record<string, any> = {};
+      const codeById: Record<string, string> = {};
+      (em.data || []).forEach((e: any) => { byCode[e.emp_code] = e; codeById[e.id] = e.emp_code; });
+      setEmpByCode(byCode);
+
+      const lk: Record<string, any> = {};
+      (lgs.data || []).forEach((x: any) => {
+        const c = codeById[x.employee_id];
+        if (c) lk[`${c}|${x.work_date}`] = x;
+      });
+      setLogByKey(lk);
     } else {
       const [lg, lv, hl] = await Promise.all([
         supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
@@ -2109,6 +2132,10 @@ function MatrixTab({ me }: any) {
           : d > istToday() ? "" : "A";
       });
       setRows([{ code: me.emp_code, name: me.full_name, marks }]);
+      setEmpByCode({ [me.emp_code]: me });
+      const lk: Record<string, any> = {};
+      (lg.data || []).forEach((x: any) => { lk[`${me.emp_code}|${x.work_date}`] = x; });
+      setLogByKey(lk);
     }
     setBusy(false);
   };
@@ -2116,6 +2143,20 @@ function MatrixTab({ me }: any) {
 
   const shown = rows.filter((r) =>
     !q || `${r.name} ${r.code}`.toLowerCase().includes(q.toLowerCase()));
+
+  const MARK_LABEL: Record<string, string> = {
+    P: "Present", L: "Late", H: "Half day",
+    A: "Absent", W: "Week off", F: "Holiday",
+  };
+
+  const openDay = (code: string, d: string, mark: string) => {
+    if (!mark) return;
+    const emp = empByCode[code];
+    if (!emp) return;
+    setPickEmp(emp);
+    setPick({ d, mark, label: MARK_LABEL[mark] || `${mark} leave`,
+      log: logByKey[`${code}|${d}`] });
+  };
 
   const tally = (m: Record<string, string>) => {
     const v = Object.values(m);
@@ -2164,6 +2205,11 @@ function MatrixTab({ me }: any) {
         P present · L late · H half day · A absent · W week off · F holiday · EL/SHORT/HALF = leave
       </p>
 
+      {pick && pickEmp && (
+        <DaySheet d={pick} me={pickEmp}
+          onClose={() => { setPick(null); setPickEmp(null); }} />
+      )}
+
       {busy && <p className="att-muted">Loading…</p>}
 
       {!busy && (
@@ -2203,7 +2249,10 @@ function MatrixTab({ me }: any) {
                         <PName id={r.id} code={r.code}>{r.code} · {r.name}</PName>
                       </td>
                       {dates.map((d) => (
-                        <td key={d} style={{ textAlign: "center" }}>
+                        <td key={d} style={{ textAlign: "center",
+                          cursor: r.marks[d] ? "pointer" : "default" }}
+                          title={r.marks[d] ? "Open this day" : undefined}
+                          onClick={() => openDay(r.code, d, r.marks[d])}>
                           <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
                         </td>
                       ))}
