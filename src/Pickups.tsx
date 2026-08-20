@@ -586,6 +586,9 @@ function clean(v) {
 function equipmentText(r) {
   let li = r.line_items;
   // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo.
+  // NOTE: naye project mein line_items jsonb hai; track RPC ::text cast karti
+  // hai to wo "Oxymed..." (quotes ke saath) aati hai. '"' waali ko bhi parse
+  // karo taaki quotes hat jaayein.
   if (typeof li === 'string') {
     const t = li.trim();
     if (t.startsWith('[') || t.startsWith('{') || t.startsWith('"')) {
@@ -764,7 +767,8 @@ function stageFields(toStage, f) {
 }
 /* ── Kaun kar raha hai ─────────────────────────────────────────────────
    Har app_log event ke saath login ka store + us store ka manager stamp
-   hota hai, taaki Activity log mein "kisne kiya" dikh sake. */
+   hota hai, taaki Activity log mein "kisne kiya" dikh sake. Koi naya
+   Supabase column nahi — ye app_log ke JSON ke andar hi baith jaata hai. */
 let ACTOR = { by: null, byName: null };
 function setActor(session) {
   if (!session) {
@@ -816,7 +820,9 @@ function makeClosedEvent(flag, remarks) {
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
-/* cancelled order: cancel hone se theek pehle jo aakhri (latest) stage set thi. */
+/* cancelled order: cancel hone se theek pehle jo aakhri (latest) stage set thi.
+   NOTE: max NAHI lete — app_log mein aage-peeche move ho sakta hai, isliye
+   sabse last event hi asli "current" stage hai jab cancel hua. */
 function reachedIdxFromLog(log) {
   if (Array.isArray(log) && log.length) {
     for (let i = log.length - 1; i >= 0; i--) {
@@ -827,7 +833,8 @@ function reachedIdxFromLog(log) {
   return 0; // koi log nahi → New
 }
 
-/* ── Today vs Archived ───────────────────────────────────────────────── */
+/* ── Today vs Archived ─────────────────────────────────────────────────
+   Today = sirf aaj create hui entries (kisi bhi stage). Archived = sab.   */
 function isToday(ts) {
   if (!ts) return false;
   const d = new Date(ts);
@@ -839,6 +846,8 @@ function isToday(ts) {
     d.getDate() === n.getDate()
   );
 }
+/* Supabase created time — row jab create hui. Agar tumhare table mein column
+   ka naam alag ho (e.g. created_time), ye list usko bhi cover karti hai. */
 function createdTs(x) {
   const r = (x && x._raw) || {};
   return (
@@ -851,7 +860,7 @@ function createdTs(x) {
     null
   );
 }
-/* pickup kab hui — app_log ke aakhri 'delivered' event se. Fallback updated_at */
+/* delivery kab hui — app_log ke aakhri 'delivered' event se. Fallback updated_at */
 function deliveredTs(x) {
   const r = (x && x._raw) || {};
   const log = Array.isArray(r.app_log) ? r.app_log : [];
@@ -862,22 +871,33 @@ function deliveredTs(x) {
 }
 function inView(x, viewMode, vFrom, vTo) {
   const st = x.stage;
+  // pending = abhi kaam baaki
   const pending = st !== 'delivered' && !isClosedStage(st);
   if (viewMode === 'archived') {
+    // Archived (all time) = ho-chuki entries: Delivered + Cancelled waghera
     return !pending;
   }
   if (viewMode === 'today') {
+    // Today (kaam waala view):
+    //   - saari pending (chahe purani ho)
+    //   - jo aaj create hui
+    //   - jo AAJ complete hui (purani entry bhi)
     return (
       pending ||
       isToday(createdTs(x)) ||
       (st === 'delivered' && isToday(deliveredTs(x)))
     );
   }
+  // yesterday / month / custom — date range ke hisaab se: jo us duration mein
+  // aayi ya us duration mein complete hui. Pending purani entries yahan nahi
+  // aatin (wo Today mein dikhti hain).
   const [s, e] = viewBounds(viewMode, vFrom, vTo);
   const cd = dayStr(createdTs(x));
   const dd = st === 'delivered' ? dayStr(deliveredTs(x)) : '';
   return (cd && cd >= s && cd <= e) || (dd && dd >= s && dd <= e);
 }
+/* view dropdown ke liye [start, end] — dayStr/todayStr neeche define hain
+   par hoisted functions hain, isliye yahan use kar sakte hain. */
 /* dropdown ka chhota label — live chip mein dikhta hai */
 function viewLabel(mode) {
   if (mode === 'archived') return 'Archived';
@@ -902,7 +922,10 @@ function viewBounds(mode, vFrom, vTo) {
   return [dayStr(t), dayStr(t)];
 }
 
-/* stat categories jinpe collapsible entries khulti hain. */
+/* stat categories jinpe collapsible entries khulti hain.
+   NOTE: "Total Pickups" ab yahan se hata diya — wo count Header ke
+   "Today/Archived · Total deliveries · N" chip mein dikhta hai. Pending +
+   Delivered + Cancelled se poori picture mil jaati hai.                 */
 const CATS = [
   {
     id: 'pending',
@@ -950,18 +973,25 @@ function rowToDelivery(r) {
     phone: clean(r.phone) || '—',
     area: clean(r.address) || '—',
     equipment: equipmentText(r),
+    // Card / Drawer ka "Amount" = invoice ka total (Supabase se aata hai).
+    // Pickup charges alag cheez hai — wo Picked Up stage pe khud bhare jaate
+    // hain aur usi block mein dikhte hain. Khaali ho to blank, 0 nahi.
     amount:
       r.total_amount != null &&
       r.total_amount !== '' &&
       r.total_amount !== 'null'
         ? Number(r.total_amount)
         : null,
+    // pending = invoice ka bacha hua balance (Books se aata hai). Card pe
+    // yahi dikhta hai — wahi to uthana hai customer se.
     pending:
       r.pending_amount != null &&
       r.pending_amount !== '' &&
       r.pending_amount !== 'null'
         ? Number(r.pending_amount)
         : null,
+    // Books se: security kis mode se li gayi thi (refund usi mode mein karna
+    // hota hai) aur delivery pe amount kis mode se aaya tha. Sirf type.
     securityType: clean(r.security_type),
     securityAmount:
       r.security_amount != null &&
@@ -1083,6 +1113,9 @@ function useIsMobile(bp = 760) {
 const EMBEDDED =
   typeof window !== 'undefined' && window.parent && window.parent !== window;
 
+/* Embed mode: sirf ek class lagti hai (CSS ke liye). Height ab app khud
+   nahi bhejta — iframe ko fixed 100vh di jaati hai aur app usko poora bharta
+   hai, isliye na neeche white space aata hai na cut hota hai. */
 function useEmbedFlag() {
   useEffect(() => {
     if (!EMBEDDED) return;
@@ -1105,10 +1138,14 @@ export default function App({
 }) {
   useEmbedFlag();
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
-  // screen, na apna Sidebar/Topbar — sirf board/dashboard/sla render hota hai.
+  // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
   const hosted = !!extSession;
   // console ka "Sales Pickup" tab — sirf matrix page, koi login nahi
   if (route === 'sales') return <PickupSalesPage />;
+  // Tracking routes (Netlify SPA — query params + optional /track path):
+  //   /track                → sales: number se saari deliveries + timeline
+  //   /track?inv=CHD/...     → customer: single invoice (phone verify)
+  //   ?inv=CHD/...           → customer (bina /track ke bhi chalega)
   const params =
     typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search)
@@ -1116,6 +1153,10 @@ export default function App({
   const path = typeof window !== 'undefined' ? window.location.pathname : '';
   const isTrackPath = /\/track\/?$/.test(path);
   const inv = params.get('inv') || '';
+  // ?order  → STATIC customer link (WhatsApp CTA button ke liye). Koi invoice
+  // nahi chahiye — customer apna registered phone daale, uska latest order
+  // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
+  // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
   if (!hosted && inv) return <TrackPage invoice={inv} />;
   if (!hosted && (params.has('order') || params.has('my')))
     return <TrackPage invoice="" />;
@@ -1139,17 +1180,12 @@ export default function App({
   const [lang, setLang] = useState(HJS_LANG); // en | hi (sirf re-render trigger)
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
   const [ownPage, setOwnPage] = useState('pickups'); // pickups | dashboard
-  // hosted mode mein page delivery app ka sidebar decide karta hai.
-  // view='sla' → Process & SLA ka pickup side.
-  const page = hosted
-    ? view === 'dashboard'
-      ? 'dashboard'
-      : view === 'sla'
-        ? 'sla'
-        : 'pickups'
-    : ownPage;
+  // hosted mode mein page delivery app ka sidebar decide karta hai
+  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
+  // hosted mode: head login store switch kar sake (session App ka hai,
+  // isliye branch yahin local rakhte hain)
   const [viewBranch, setViewBranch] = useState(null);
   const [fullHistory, setFullHistory] = useState(false);
   const [remoteRows, setRemoteRows] = useState([]);
@@ -1160,6 +1196,7 @@ export default function App({
     setHjsLang(l);
     setLang(HJS_LANG);
   };
+  // har store (aur head) → chosen layout. Default Stages (board), toggle se Categories.
   const effLayout = layoutMode;
 
   const ping = (m) => {
@@ -1218,13 +1255,15 @@ export default function App({
 
   const scoped = useMemo(() => {
     if (!session) return [];
+    // Deleted (soft-deleted) entries app ke kisi bhi view mein nahi aati —
+    // par Supabase mein status="Deleted" ke saath row bani rehti hai.
     const base = deliveries.filter((x) => x.stage !== 'deleted');
     const br = viewBranch || session.branch;
     if (br === 'ALL') return base;
     return base.filter((x) => x.branch === br);
   }, [deliveries, session, viewBranch]);
 
-  // Dashboard / SLA store-independent — upar jo store select hai usse farak nahi.
+  // Dashboard store-independent — upar jo store select hai usse farak nahi.
   const allStoresData = useMemo(
     () => deliveries.filter((x) => x.stage !== 'deleted'),
     [deliveries],
@@ -1237,6 +1276,8 @@ export default function App({
     return deliveries.filter((x) => x.branch === session.branch);
   }, [deliveries, session]);
 
+  // hosted mode mein topbar ka search seedha board ko filter karta hai
+  // (dropdown delivery app ka hai, wo sirf deliveries dikhata hai)
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
   // Board hamesha today/archived ke hisaab se — search se affect NAHI hota
@@ -1245,6 +1286,8 @@ export default function App({
     [scoped, viewMode, vFrom, vTo],
   );
 
+  // hosted: topbar ke dropdown ke liye results upar bhejte hain (delivery
+  // app jaisa hi — poori list mein match, top 8)
   useEffect(() => {
     if (!hosted || !onResults) return;
     if (!hostSearch) {
@@ -1301,6 +1344,7 @@ export default function App({
 
   // topbar dropdown se koi result chuna gaya
   useEffect(() => {
+    // pickKey har click pe badalta hai — wahi entry dobara chunne pe bhi khule
     if (!pickId) return;
     if (!deliveries.some((d) => d.invoice_id === pickId)) {
       const extra = remoteRows.find((d) => d.invoice_id === pickId);
@@ -1310,6 +1354,7 @@ export default function App({
     // eslint-disable-next-line
   }, [pickKey]);
 
+  // Search = alag dropdown (Bigin jaisa) — poori list mein match (today + archived), top 8
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
@@ -1326,6 +1371,10 @@ export default function App({
 
   const active = deliveries.find((x) => x.invoice_id === activeId) || null;
 
+  // ── Egress bachane ke liye ──────────────────────────────────────────
+  // Pehle har save ke baad poori list dobara Supabase se aati thi. Ab sirf
+  // usi row ko local state mein patch kar dete hain — result wahi dikhta hai,
+  // par ek save = ek chhoti update call (poora table nahi).
   // ── Timeline (app_log) on-demand — list ab uske bina aati hai ──────
   const [logsLoaded, setLogsLoaded] = useState(false);
   const mergeLogs = (rows) => {
@@ -1354,11 +1403,10 @@ export default function App({
     if (row && row._raw && row._raw.app_log === undefined) loadLogs(activeId);
     // eslint-disable-next-line
   }, [activeId]);
-  // Activity log aur Process & SLA — dono ko saare logs chahiye, ek hi baar
   useEffect(() => {
-    if ((showLog || page === 'sla') && !logsLoaded) loadLogs(null);
+    if (showLog && !logsLoaded) loadLogs(null);
     // eslint-disable-next-line
-  }, [showLog, page]);
+  }, [showLog]);
 
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
@@ -1385,8 +1433,7 @@ export default function App({
         patch.item_inspected = !!f.inspected;
         patch.pickup_image = f.photoPicked || null;
         patch.actual_pickup_date = f.pickDate || null;
-        patch.pickup_charges_collected =
-          f.charges === '' || f.charges == null ? null : Number(f.charges);
+        patch.pickup_charges_collected = null; // MBC mein pickup charges nahi
         patch.pending_collected =
           f.pendingCollected === '' || f.pendingCollected == null
             ? null
@@ -1413,6 +1460,7 @@ export default function App({
     return patch;
   };
 
+  // closed mark (cancelled/duplicate/renewal) — status column mein likha jaata hai
   const closeEntry = async (invoiceId, flag, remarks) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     const patch = {
@@ -1440,7 +1488,9 @@ export default function App({
     }
   };
 
+  // core move/edit apply — modal aur inline card dono use karte hain
   // Reschedule — entry pehli stage mein hi rehti hai, bas status "Rescheduled"
+  // ho jaata hai aur pehle se bhari confirmed date/time hat jaati hai.
   const rescheduleEntry = async (invoiceId, remarks) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     const patch = {
@@ -1476,6 +1526,7 @@ export default function App({
   };
 
   const applyMove = async (invoiceId, toStage, fields, mode) => {
+    // pehli stage ka dropdown: reschedule / cancel alag raaste
     if (toStage === 'talked' && mode === 'move') {
       if (fields.flow === 'cancelled')
         return closeEntry(invoiceId, 'cancelled', fields.remarks);
@@ -1556,6 +1607,8 @@ export default function App({
     }
   };
 
+  // delete — sirf head. HARD delete NAHI: row Supabase mein rehti hai,
+  // bas status="Deleted" ho jaata hai aur app ke views se hat jaati hai.
   const removeEntry = async (invoiceId) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     const patch = {
@@ -1607,12 +1660,6 @@ export default function App({
             deliveries={allStoresData}
             onOpen={(x) => setActiveId(x.invoice_id)}
           />
-        ) : page === 'sla' ? (
-          <PkSlaReport
-            deliveries={allStoresData}
-            logsLoaded={logsLoaded}
-            onOpen={(x) => setActiveId(x.invoice_id)}
-          />
         ) : (
           <>
             <Header
@@ -1621,6 +1668,10 @@ export default function App({
               count={viewItems.length}
               viewMode={viewMode}
               onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
               vFrom={vFrom}
               vTo={vTo}
               onVFrom={setVFrom}
@@ -1747,59 +1798,57 @@ export default function App({
                 deliveries={allStoresData}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
-            ) : session.branch === 'ALL' && page === 'sla' ? (
-              <PkSlaReport
-                deliveries={allStoresData}
-                logsLoaded={logsLoaded}
-                onOpen={(x) => setActiveId(x.invoice_id)}
-              />
             ) : (
               <>
-                <Header
-                  session={session}
-                  live={CONFIGURED}
-                  count={viewItems.length}
-                  viewMode={viewMode}
-                  onViewMode={setViewMode}
-                  vFrom={vFrom}
-                  vTo={vTo}
-                  onVFrom={setVFrom}
-                  onVTo={setVTo}
-                  layoutMode={layoutMode}
-                  onLayoutMode={setLayoutMode}
-                  onSwitchStore={(b) =>
-                    setSession((s) => ({
-                      ...s,
-                      branch: b,
-                      storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
-                    }))
-                  }
-                />
-                {error && (
-                  <div className="err">
-                    <CloudOff size={18} color={T.red} />
-                    <div>
-                      <b>Supabase se connect nahi hua.</b> {error}
-                      <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
-                        anon key + RLS SELECT policy check karo.
-                      </div>
-                    </div>
+            <Header
+              session={session}
+              live={CONFIGURED}
+              count={viewItems.length}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+            vFrom={vFrom}
+            vTo={vTo}
+            onVFrom={setVFrom}
+            onVTo={setVTo}
+              vFrom={vFrom}
+              vTo={vTo}
+              onVFrom={setVFrom}
+              onVTo={setVTo}
+              layoutMode={layoutMode}
+              onLayoutMode={setLayoutMode}
+              onSwitchStore={(b) =>
+                setSession((s) => ({
+                  ...s,
+                  branch: b,
+                  storeName: b === 'ALL' ? 'All stores' : branchLabel(b),
+                }))
+              }
+            />
+            {error && (
+              <div className="err">
+                <CloudOff size={18} color={T.red} />
+                <div>
+                  <b>Supabase se connect nahi hua.</b> {error}
+                  <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>
+                    anon key + RLS SELECT policy check karo.
                   </div>
-                )}
-                <EntriesView
-                  items={viewItems}
-                  viewMode={viewMode}
-                  layoutMode={effLayout}
-                  loading={loading}
-                  onOpen={(x) => setActiveId(x.invoice_id)}
-                  onMove={(x, toStage) =>
-                    setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
-                  }
-                  onCommit={(dd, toStage, fields) =>
-                    applyMove(dd.invoice_id, toStage, fields, 'move')
-                  }
-                  focus={lastMove}
-                />
+                </div>
+              </div>
+            )}
+            <EntriesView
+              items={viewItems}
+              viewMode={viewMode}
+              layoutMode={effLayout}
+              loading={loading}
+              onOpen={(x) => setActiveId(x.invoice_id)}
+              onMove={(x, toStage) =>
+                setModal({ invoiceId: x.invoice_id, toStage, mode: 'move' })
+              }
+              onCommit={(dd, toStage, fields) =>
+                applyMove(dd.invoice_id, toStage, fields, 'move')
+              }
+              focus={lastMove}
+            />
               </>
             )}
           </main>
@@ -1850,7 +1899,10 @@ export default function App({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════ ENTRIES VIEW */
+/* ═══════════════════════════════════════════════════════════ ENTRIES VIEW
+   FIX: ye component missing tha isliye login ke baad screen crash ho rahi
+   thi ("EntriesView is not defined"). Ab ye Stats + Board/MobileBoard +
+   FooterTotal ko viewMode aur screen-size ke hisaab se jodta hai.        */
 function EntriesView({
   items,
   viewMode,
@@ -1919,7 +1971,7 @@ function EntriesView({
     );
   }
 
-  // Board layout → stage-wise kanban. Archived mein sirf Picked Up list.
+  // Board layout → stage-wise kanban. Archived mein sirf Delivered list.
   return (
     <>
       {!isMobile && (
@@ -1986,6 +2038,7 @@ const STAT_CATS = {
 /* Stat card click → us category ki entries grid + Back to stages */
 function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
   const meta = STAT_CATS[cat] || STAT_CATS.total;
+  // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
   const allArchived = cat === 'total' && viewMode === 'archived';
   const rows = items.filter(allArchived ? () => true : meta.test);
   const label = allArchived ? 'All archived' : meta.label;
@@ -2027,7 +2080,8 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
   );
 }
 
-/* Archived board → Picked Up / Cancelled dropdown se choose karo. */
+/* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
+   color bhi badalta hai (green = delivered, red = cancelled). */
 function ArchivedList({ items, onOpen, onMove, onCommit }) {
   const [mode, setMode] = useState('delivered');
   const meta =
@@ -2087,7 +2141,10 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════ CATEGORIES VIEW */
+/* ═══════════════════════════════════════════════════════ CATEGORIES VIEW
+   Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
+   har card clickable + collapsible. Click karo to us category ki entries
+   khulti hain. Ismein koi stage-wise board NAHI hota.                    */
 function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
   const [open, setOpen] = useState('pending'); // default: Pending khula
   if (loading && items.length === 0)
@@ -2161,7 +2218,10 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
   );
 }
 
-/* ═══════════════════════════════════════════ DASHBOARD (all stores · MIS) */
+/* ═══════════════════════════════════════════════════════════════ LOGIN */
+/* ═══════════════════════════════════════════ DASHBOARD (all stores · MIS)
+   Store-wise daily picture. Cards + table sab clickable → entries neeche
+   table mein khulti hain. Sirf head login mein dikhta hai.              */
 function Dashboard({ deliveries, onOpen }) {
   const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
   const [from, setFrom] = useState(todayStr());
@@ -2255,6 +2315,8 @@ function Dashboard({ deliveries, onOpen }) {
     : range === 'all' ? 'Sabhi'
     : `${from} → ${to}`;
 
+  // ── Kisi number pe click → poora view badal jaata hai: sirf us subset ki
+  // list, upar Back button. Dobara dashboard pe aane ke liye Back dabao.
   if (sel) {
     return (
       <div>
@@ -2437,1035 +2499,6 @@ function Dashboard({ deliveries, onOpen }) {
   );
 }
 
-/* ═══════════════════════════════════════════ PROCESS & SLA (all stores)
-   Teen SLA — delivery waale process ka pickup version:
-   1. RESPONSE   — pickup aane ke 60 min (business hours 10AM–8PM) mein
-                   "Contacted" pe move hona chahiye
-   2. ETA FILL   — jo pickup date+time customer ko confirm kiya, us tak entry
-                   "Out for Pickup" hokar estimated arrival bhar jani chahiye
-   3. PICKUP     — jo estimated arrival bhara, us tak item uth jana chahiye
-   Reschedule apne aap handle hota hai: promise hamesha row ki CURRENT
-   confirmed_date/time se banti hai, aur response clock aakhri "New" event se
-   dobara shuru hota hai. Dashboard ke hi dash-* classes use karta hai.     */
-
-const PK_BIZ_START = 10; // 10 AM
-const PK_BIZ_END = 20; // 8 PM
-const PK_RESPONSE_MIN = 60; // business minutes
-
-/* 60-min SLA duration hai isliye business-hours clock pe chalta hai.
-   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
-   normal wall clock. */
-function pkBizAdd(from, mins) {
-  const shift = (x) => {
-    const y = new Date(x);
-    const h = y.getHours() + y.getMinutes() / 60;
-    if (h < PK_BIZ_START) y.setHours(PK_BIZ_START, 0, 0, 0);
-    else if (h >= PK_BIZ_END) {
-      y.setDate(y.getDate() + 1);
-      y.setHours(PK_BIZ_START, 0, 0, 0);
-    }
-    return y;
-  };
-  let d = shift(new Date(from));
-  let left = mins;
-  for (let g = 0; g < 400 && left > 0; g++) {
-    const end = new Date(d);
-    end.setHours(PK_BIZ_END, 0, 0, 0);
-    const avail = (end - d) / 60000;
-    if (left <= avail) return new Date(d.getTime() + left * 60000);
-    left -= avail;
-    d = shift(new Date(end.getTime() + 60000));
-  }
-  return d;
-}
-
-/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi). */
-function pkBizMins(a, b) {
-  if (!a || !b || b <= a) return 0;
-  let total = 0;
-  let cur = new Date(a);
-  for (let g = 0; g < 400 && cur < b; g++) {
-    const s0 = new Date(cur);
-    s0.setHours(PK_BIZ_START, 0, 0, 0);
-    const e0 = new Date(cur);
-    e0.setHours(PK_BIZ_END, 0, 0, 0);
-    const s = cur < s0 ? s0 : cur;
-    const e = b < e0 ? b : e0;
-    if (e > s) total += (e - s) / 60000;
-    const nx = new Date(cur);
-    nx.setDate(nx.getDate() + 1);
-    nx.setHours(0, 0, 0, 0);
-    cur = nx;
-  }
-  return total;
-}
-
-const pkLog = (x) => {
-  const r = (x && x._raw) || {};
-  return Array.isArray(r.app_log) ? r.app_log : [];
-};
-
-/* Current cycle = aakhri baar "New" (ya Reschedule) ke baad ka hissa.
-   Reschedule bhi stage:'new' log karta hai, isliye uske baad ka clock naya. */
-function pkCycle(x) {
-  const mv = pkLog(x)
-    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
-    .slice()
-    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-  let start = 0;
-  for (let i = mv.length - 1; i >= 0; i--)
-    if (mv[i].stage === 'new') {
-      start = i;
-      break;
-    }
-  return mv.slice(start);
-}
-function pkFirst(cycle, stage) {
-  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
-  return null;
-}
-/* Response clock kahan se — reschedule hua to us waqt se, warna entry aane se */
-function pkStart(x, cycle) {
-  if (cycle.length && cycle[0].stage === 'new' && cycle[0].ts) {
-    const d = new Date(cycle[0].ts);
-    if (!isNaN(d)) return d;
-  }
-  const c = new Date(createdTs(x));
-  return isNaN(c) ? null : c;
-}
-/* MBC = customer khud item store pe drop karta hai — store ki SLA lagti nahi */
-function pkIsMbc(x, cycle) {
-  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
-  return cycle.some((e) =>
-    String((e.fields && (e.fields.Person || e.fields['Pickup person'])) || '')
-      .toUpperCase()
-      .includes('MBC'),
-  );
-}
-/* Promise = confirmed_date + confirmed_time (Contacted stage pe bhara hua).
-   Reschedule pe ye null ho jaata hai, nayi date bharne pe naya promise. */
-function pkPromise(x) {
-  const r = (x && x._raw) || {};
-  const d = r.confirmed_date;
-  if (!d || d === 'null') return null;
-  let t =
-    r.confirmed_time && r.confirmed_time !== 'null'
-      ? String(r.confirmed_time)
-      : '20:00:00';
-  if (t.length === 5) t += ':00';
-  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
-  return isNaN(dt) ? null : dt;
-}
-/* ETA = app_eta column ("YYYY-MM-DDTHH:MM"), Out for Pickup pe bhara jaata hai */
-function pkEtaOf(x) {
-  const r = (x && x._raw) || {};
-  const v = r.app_eta;
-  if (!v || v === 'null') return null;
-  const dt = new Date(String(v).replace(' ', 'T'));
-  return isNaN(dt) ? null : dt;
-}
-
-const pkHrs = (h) =>
-  h == null
-    ? '—'
-    : h < 1
-      ? Math.round(h * 60) + 'm'
-      : h < 48
-        ? Math.round(h) + 'h'
-        : (h / 24).toFixed(1) + 'd';
-const pkMinsFmt = (m) => {
-  if (m == null) return '—';
-  const a = Math.abs(m);
-  if (a < 60) return Math.round(a) + 'm';
-  if (a < 2880) return Math.round(a / 60) + 'h';
-  return (a / 1440).toFixed(1) + 'd';
-};
-
-/* ── ek pickup ka poora SLA picture ── */
-function pkAnalyze(x) {
-  const cycle = pkCycle(x);
-  const mbc = pkIsMbc(x, cycle);
-  const now = new Date();
-  const start = pkStart(x, cycle);
-  const okStart = !!start;
-  const span = (a, b) => (a && b && b >= a ? pkBizMins(a, b) / 60 : null);
-
-  const picked = x.stage === 'delivered';
-  const pickAt = picked ? new Date(deliveredTs(x)) : null;
-
-  /* SLA 1 — Response */
-  const talkedAt = pkFirst(cycle, 'talked');
-  const respDeadline = okStart ? pkBizAdd(start, PK_RESPONSE_MIN) : null;
-  const respEnd = talkedAt || now;
-  const respBreach = !!(respDeadline && respEnd > respDeadline);
-  const respOpen = !talkedAt;
-  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
-
-  const promise = pkPromise(x);
-  const dispAt = pkFirst(cycle, 'dispatched');
-  const eta = pkEtaOf(x);
-
-  /* SLA 2 — ETA fill: jo pickup time customer ko diya tha, us tak entry
-     "Out for Pickup" hokar estimated arrival bhar jani chahiye. */
-  const etaApplies = !!promise;
-  const etaEnd = dispAt || now;
-  const etaBreach = !!(etaApplies && etaEnd > promise);
-  const etaOpen = !dispAt;
-  const etaLateBy = etaBreach ? (etaEnd - promise) / 60000 : 0;
-
-  /* SLA 3 — Pickup: jo estimated arrival bhara, us tak item uth jana chahiye */
-  const pickDeadline = eta;
-  const pickEnd = pickAt || now;
-  const pickBreach = !!(pickDeadline && pickEnd > pickDeadline);
-  const pickLateBy = pickBreach ? (pickEnd - pickDeadline) / 60000 : 0;
-
-  /* Manager response — entry aane se Contacted tak (business hours) */
-  const respHrs = okStart && talkedAt ? span(start, talkedAt) : null;
-
-  /* Pickup person ka hissa — Out for Pickup se Picked Up tak */
-  let pickHrs = null;
-  if (pickAt && !isNaN(pickAt) && dispAt) pickHrs = span(dispAt, pickAt);
-
-  return {
-    x,
-    branch: x.branch,
-    picked,
-    mbc,
-    resched: isResched(x),
-    respBreach,
-    respOpen,
-    respLateBy,
-    respDeadline,
-    talkedAt,
-    promise,
-    eta,
-    dispAt,
-    etaApplies,
-    etaBreach,
-    etaOpen,
-    etaLateBy,
-    pickDeadline,
-    pickBreach,
-    pickLateBy,
-    pickAt,
-    /* abhi action chahiye: pending pickup jiski koi bhi SLA nikal chuki hai */
-    overdue:
-      !picked &&
-      ((respOpen && respBreach) || (etaOpen && etaBreach) || pickBreach),
-    totalHrs: okStart && pickAt && !isNaN(pickAt) ? span(start, pickAt) : null,
-    respHrs,
-    pickHrs,
-  };
-}
-
-/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka box */
-function PkTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
-  const [pos, setPos] = useState(null);
-  const ref = React.useRef(null);
-  const thStyle = {
-    whiteSpace: 'normal',
-    verticalAlign: 'bottom',
-    width: w || 'auto',
-    textAlign: center || group ? 'center' : 'left',
-    ...(group
-      ? { color: T.forestSoft, borderBottom: '1px solid ' + T.line, paddingBottom: 6 }
-      : {}),
-    ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-  };
-  const span = { colSpan, rowSpan };
-  if (!info)
-    return (
-      <th style={thStyle} {...span}>
-        {label}
-      </th>
-    );
-
-  const show = () => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const w2 = 250;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - w2 - 12)),
-      top: r.bottom + 6,
-      w: w2,
-    });
-  };
-
-  return (
-    <th style={thStyle} {...span}>
-      <span
-        ref={ref}
-        style={{ cursor: 'help' }}
-        onMouseEnter={show}
-        onMouseLeave={() => setPos(null)}
-        onClick={() => (pos ? setPos(null) : show())}
-      >
-        {label}{' '}
-        <Info size={12} color="#B3AFA4" style={{ verticalAlign: '-1px' }} />
-      </span>
-      {pos && (
-        <div
-          style={{
-            position: 'fixed',
-            left: pos.left,
-            top: pos.top,
-            width: pos.w,
-            zIndex: 90,
-            background: T.forest,
-            color: '#fff',
-            borderRadius: 10,
-            padding: '10px 12px',
-            fontSize: 11.5,
-            fontWeight: 500,
-            lineHeight: 1.55,
-            letterSpacing: 0,
-            textTransform: 'none',
-            whiteSpace: 'normal',
-            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
-            pointerEvents: 'none',
-          }}
-        >
-          {info}
-        </div>
-      )}
-    </th>
-  );
-}
-
-function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
-  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
-  const [store, setStore] = useState('ALL');
-  const [view, setView] = useState('stores'); // stores | boys
-  const [sel, setSel] = useState(null);
-  const [alertOn, setAlertOn] = useState(null);
-
-  const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    const mk = (d) => dayStr(d);
-    if (range === 'today') return [mk(t), mk(t)];
-    if (range === 'yesterday') {
-      const y = new Date(t);
-      y.setDate(y.getDate() - 1);
-      return [mk(y), mk(y)];
-    }
-    if (range === '7d') {
-      const s = new Date(t);
-      s.setDate(s.getDate() - 6);
-      return [mk(s), mk(t)];
-    }
-    return [from, to];
-  }, [range, from, to]);
-
-  /* Cancelled / Deleted SLA mein nahi aati. Jin rows ka timeline abhi load
-     nahi hua unhe bhi chhod dete hain — warna sab breach dikhne lagti hain. */
-  const live = useMemo(
-    () =>
-      deliveries.filter(
-        (d) => !isClosedStage(d.stage) && d._raw && Array.isArray(d._raw.app_log),
-      ),
-    [deliveries],
-  );
-
-  const inRange = useMemo(() => {
-    const [s, e] = bounds;
-    return live.filter((d) => {
-      const cd = dayStr(createdTs(d));
-      if (cd < s || cd > e) return false;
-      if (store !== 'ALL' && d.branch !== store) return false;
-      return true;
-    });
-  }, [live, bounds, store]);
-
-  /* MBC = customer khud store pe drop karta hai — poori report se bahar */
-  const rows = useMemo(() => inRange.map(pkAnalyze).filter((a) => !a.mbc), [inRange]);
-
-  /* Overdue = abhi ka metric, date range se filter nahi hota */
-  const overdueAll = useMemo(
-    () =>
-      live
-        .filter((d) => d.stage !== 'delivered')
-        .map(pkAnalyze)
-        .filter((a) => a.overdue && !a.mbc && (store === 'ALL' || a.branch === store)),
-    [live, store],
-  );
-
-  const pick = {
-    all: () => true,
-    picked: (a) => a.picked,
-    pending: (a) => !a.picked,
-    resp: (a) => a.respBreach,
-    eta: (a) => a.etaBreach,
-    pk: (a) => a.pickBreach,
-  };
-
-  const statOf = (list, ov) => {
-    const dl = list.filter((a) => a.picked);
-    const avg = (k) => {
-      const v = dl.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-    const avgAll = (k) => {
-      const v = list.map((a) => a[k]).filter((n) => n != null);
-      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-    };
-    return {
-      total: list.length,
-      picked: dl.length,
-      pending: list.length - dl.length,
-      respBreach: list.filter((a) => a.respBreach).length,
-      etaBreach: list.filter((a) => a.etaBreach).length,
-      pickBreach: list.filter((a) => a.pickBreach).length,
-      avgRespLate: (() => {
-        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
-        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
-      })(),
-      overdue: ov.length,
-      avgCycle: avg('totalHrs'),
-      avgResp: avgAll('respHrs'),
-      avgPick: avg('pickHrs'),
-    };
-  };
-
-  const overall = statOf(rows, overdueAll);
-
-  const cards = [
-    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
-    { kind: 'picked', label: 'Picked up', n: overall.picked, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
-    { kind: 'eta', label: 'ETA breach', n: overall.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
-    { kind: 'pk', label: 'Pickup breach', n: overall.pickBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
-  ];
-
-  /* pickup person ka naam — assign na hua to "Not assigned" */
-  const personOf = (a) => {
-    const p = String(a.x.person || '').trim();
-    if (!p || p === 'null') return 'Not assigned';
-    return p;
-  };
-
-  const drill = useMemo(() => {
-    if (!sel) return [];
-    let list = sel.kind === 'overdue' ? overdueAll : rows;
-    if (sel.store) list = list.filter((a) => a.branch === sel.store);
-    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
-    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
-    return list
-      .filter(fn)
-      .sort((a, b) =>
-        String(createdTs(b.x) || '').localeCompare(String(createdTs(a.x) || '')),
-      );
-    // eslint-disable-next-line
-  }, [rows, overdueAll, sel]);
-
-  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
-    .map((st) => ({
-      st,
-      s: statOf(
-        rows.filter((a) => a.branch === st),
-        overdueAll.filter((a) => a.branch === st),
-      ),
-    }))
-    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
-
-  /* pickup person wise — person + store ke hisaab se group */
-  const boyStats = useMemo(() => {
-    const skip = (a) => personOf(a) === 'Not assigned';
-    const keys = new Set();
-    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
-    return [...keys]
-      .map((k) => {
-        const [person, br] = k.split('|');
-        return {
-          person,
-          br,
-          s: statOf(
-            rows.filter((a) => personOf(a) === person && a.branch === br),
-            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
-          ),
-        };
-      })
-      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
-      .sort((a, b) => a.person.localeCompare(b.person));
-    // eslint-disable-next-line
-  }, [rows, overdueAll]);
-
-  const rangeLabel =
-    range === 'today'
-      ? 'Aaj'
-      : range === 'yesterday'
-        ? 'Kal'
-        : range === '7d'
-          ? 'Pichhle 7 din'
-          : `${from} → ${to}`;
-
-  const toggleSel = (next) =>
-    setSel((cur) =>
-      cur &&
-      cur.kind === next.kind &&
-      cur.store === next.store &&
-      cur.person === next.person
-        ? null
-        : next,
-    );
-
-  const cellFor = (target) => (kind, n, color, div) => (
-    <td
-      className={n ? 'dash-td-click' : 'dash-td-zero'}
-      style={{
-        textAlign: 'center',
-        ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
-        ...(n ? { color } : {}),
-      }}
-      onClick={() => n && toggleSel({ kind, store: null, person: null, ...target })}
-    >
-      {n}
-    </td>
-  );
-
-  /* Kisi number pe click → sirf us subset ki list. Back se wapas. */
-  if (sel) {
-    const selLabel = cards.find((c) => c.kind === sel.kind)?.label || 'All';
-    return (
-      <div>
-        <button className="track-back" onClick={() => setSel(null)}>
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="dash-head">
-          <div>
-            <div className="dash-sub">
-              {selLabel}
-              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
-              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
-            </div>
-            <h2 style={{ margin: '2px 0 0' }}>
-              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
-            </h2>
-          </div>
-        </div>
-        <div className="dash-block">
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <PkTh label="Invoice" />
-                  <PkTh label="Customer" />
-                  <PkTh label="Store" />
-                  <PkTh label="Stage" />
-                  <PkTh
-                    label="Response"
-                    info={`Entry aane se "Contacted" tak kitna time laga. Lal ho to ${PK_RESPONSE_MIN} min ki deadline paar ho gayi thi. Reschedule ke baad clock naya shuru hota hai.`}
-                  />
-                  <PkTh
-                    label="Promise"
-                    info="Jo pickup date aur time customer ko diya gaya tha — Contacted stage pe bhara hua confirmed slot. Is time tak ETA bhar jani chahiye."
-                  />
-                  <PkTh
-                    label="ETA"
-                    info="Out for Pickup stage pe bhara hua Estimated arrival. Is time tak item uth jana chahiye."
-                  />
-                  <PkTh label="Picked up" />
-                  <PkTh
-                    label="Late by"
-                    info="Jo SLA breach hui hai, us deadline se kitna time nikal gaya."
-                  />
-                  <PkTh label="Pickup person" />
-                </tr>
-              </thead>
-              <tbody>
-                {drill.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="dash-empty">
-                      Koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  drill.map((a) => {
-                    const stg = stageMeta(a.x.stage);
-                    return (
-                      <tr
-                        key={a.x.invoice_id}
-                        className="dash-row"
-                        onClick={() => onOpen(a.x)}
-                      >
-                        <td>{a.x.id}</td>
-                        <td>{a.x.customer}</td>
-                        <td>{branchLabel(a.branch)}</td>
-                        <td>
-                          <span
-                            className="dash-chip"
-                            style={{ background: stg.soft, color: stg.color }}
-                          >
-                            {a.resched ? 'Rescheduled' : stg.short}
-                          </span>
-                        </td>
-                        <td
-                          style={{
-                            color: a.respBreach ? T.red : T.ink,
-                            fontWeight: a.respBreach ? 700 : 500,
-                          }}
-                        >
-                          {a.respOpen ? 'abhi tak nahi' : pkHrs(a.respHrs)}
-                        </td>
-                        <td
-                          style={{
-                            color: a.etaBreach ? T.red : T.ink,
-                            fontWeight: a.etaBreach ? 700 : 500,
-                          }}
-                        >
-                          {a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}
-                        </td>
-                        <td>
-                          {a.eta ? (
-                            fmtDateTime(a.eta.toISOString())
-                          ) : (
-                            <span
-                              style={{
-                                color: a.etaBreach ? T.red : T.inkSoft,
-                                fontWeight: a.etaBreach ? 700 : 500,
-                              }}
-                            >
-                              {a.etaBreach ? 'bhari nahi' : '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          {a.pickAt && !isNaN(a.pickAt) ? (
-                            fmtDateTime(a.pickAt.toISOString())
-                          ) : (
-                            <span
-                              style={{
-                                color: a.pickBreach ? T.red : T.inkSoft,
-                                fontWeight: a.pickBreach ? 700 : 500,
-                              }}
-                            >
-                              {a.pickBreach ? 'nahi hui' : '—'}
-                            </span>
-                          )}
-                        </td>
-                        <td
-                          style={{
-                            color: a.pickBreach || a.etaBreach ? T.red : T.inkSoft,
-                            fontWeight: a.pickBreach || a.etaBreach ? 700 : 500,
-                          }}
-                        >
-                          {a.pickBreach
-                            ? pkMinsFmt(a.pickLateBy)
-                            : a.etaBreach
-                              ? pkMinsFmt(a.etaLateBy)
-                              : '—'}
-                        </td>
-                        <td>{personOf(a)}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!logsLoaded)
-    return (
-      <div className="loading">
-        Timeline load ho raha hai… SLA usi se banti hai.
-      </div>
-    );
-
-  return (
-    <div>
-      <div className="dash-head">
-        <div>
-          <div className="dash-sub">All stores · Pickup Process &amp; SLA</div>
-          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
-        </div>
-        <div className="dash-filters">
-          <div className="layout-toggle">
-            <button
-              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('stores');
-                setSel(null);
-              }}
-            >
-              <Building2 size={14} /> Stores
-            </button>
-            <button
-              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
-              onClick={() => {
-                setView('boys');
-                setSel(null);
-              }}
-            >
-              <User size={14} /> Pickup boys
-            </button>
-          </div>
-          <select
-            className="dash-inp"
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-          >
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <>
-              <input
-                className="dash-inp"
-                type="date"
-                value={from}
-                max={to}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-              <input
-                className="dash-inp"
-                type="date"
-                value={to}
-                min={from}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </>
-          )}
-          <select
-            className="dash-inp"
-            value={store}
-            onChange={(e) => {
-              setStore(e.target.value);
-              setSel(null);
-            }}
-          >
-            <option value="ALL">All stores</option>
-            {DASH_STORES.map((s) => (
-              <option key={s} value={s}>
-                {branchLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="dash-cards">
-        {cards.map((c) => {
-          const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
-          return (
-            <button
-              key={c.label}
-              className={on ? 'dash-card on' : 'dash-card'}
-              style={{
-                ...(on ? { borderColor: c.color } : {}),
-                ...(c.n ? {} : { cursor: 'default' }),
-              }}
-              onClick={() =>
-                c.n && toggleSel({ kind: c.kind, store: null, person: null })
-              }
-            >
-              <div
-                className="dash-card-ico"
-                style={{ background: c.soft, color: c.color }}
-              >
-                <c.icon size={16} />
-              </div>
-              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
-                {c.n}
-              </div>
-              <div className="dash-card-l">{c.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {view === 'stores' ? (
-        <div className="dash-block">
-          <div className="dash-block-h">Store-wise · {rangeLabel}</div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <PkTh label="Store" rowSpan={2} />
-                  <PkTh label="Pickups" colSpan={2} group div />
-                  <PkTh label="Response" colSpan={3} group div />
-                  <PkTh label="Pickup" colSpan={3} group div />
-                  <PkTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info={`Pending pickups jinki koi bhi SLA nikal chuki hai — ${PK_RESPONSE_MIN} min ka response, ETA fill, ya ETA tak pickup. Inpe abhi action chahiye. Ye column date filter follow nahi karta, isliye Total se zyada ho sakta hai.`}
-                  />
-                  <PkTh label="Alert" rowSpan={2} center w={70} div />
-                </tr>
-                <tr>
-                  <PkTh
-                    label="Total"
-                    center
-                    div
-                    info="Is date range ki pickups. MBC (customer khud store pe drop karta hai) aur cancelled entries isme nahi aatin — un pe store ki SLA lagti hi nahi."
-                  />
-                  <PkTh label="Picked" center />
-                  <PkTh
-                    label="Avg Time"
-                    center
-                    div
-                    info={`Entry aane se "Contacted" tak ka average. Business hours (${PK_BIZ_START}AM–${PK_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
-                  />
-                  <PkTh
-                    label="Breach"
-                    center
-                    info={`Kitni pickups ${PK_RESPONSE_MIN} min ke andar "Contacted" pe move nahi hui. Ye store manager ki zimmedari hai.`}
-                  />
-                  <PkTh
-                    label="Avg Breach Time"
-                    center
-                    info={`Jo pickups ${PK_RESPONSE_MIN} min ki deadline paar kar gayin, unka average kitna upar nikle.`}
-                  />
-                  <PkTh
-                    label="Avg Time"
-                    center
-                    div
-                    info="Entry aane se Picked Up tak ka poora average. Sirf ho-chuki pickups ka."
-                  />
-                  <PkTh
-                    label="ETA Breach"
-                    center
-                    info="Jo pickup time customer ko diya tha, us tak entry Out for Pickup hokar Estimated arrival bhar jani chahiye thi — nahi hui."
-                  />
-                  <PkTh
-                    label="Pick Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak item nahi utha (ya abhi tak utha hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {storeStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  storeStats.map(({ st, s }) => {
-                    const cell = cellFor({ store: st, person: null });
-                    return (
-                      <tr key={st}>
-                        <td className="dash-store">{branchLabel(st)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('picked', s.picked, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {pkHrs(s.avgResp)}
-                        </td>
-                        {cell('resp', s.respBreach, T.red)}
-                        <td
-                          style={{
-                            textAlign: 'center',
-                            color: s.avgRespLate == null ? '#C9C7BE' : T.red,
-                          }}
-                        >
-                          {s.avgRespLate == null ? '—' : '+' + pkMinsFmt(s.avgRespLate)}
-                        </td>
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {pkHrs(s.avgCycle)}
-                        </td>
-                        {cell('eta', s.etaBreach, T.red)}
-                        {cell('pk', s.pickBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          <button
-                            className="mini-edit"
-                            style={
-                              s.overdue || s.respBreach || s.pickBreach
-                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
-                                : {}
-                            }
-                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
-                          >
-                            <Bell size={12} /> Alert
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="dash-block">
-          <div className="dash-block-h">Pickup boy wise · {rangeLabel}</div>
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <PkTh
-                    label="Pickup boy"
-                    rowSpan={2}
-                    info="Bina-assign wali pickups is view mein nahi aatin, isliye yahan ke totals Stores view se thode kam ho sakte hain."
-                  />
-                  <PkTh label="Store" rowSpan={2} />
-                  <PkTh label="Pickups" colSpan={2} group div />
-                  <PkTh label="Pickup" colSpan={3} group div />
-                  <PkTh
-                    label="Overdue"
-                    rowSpan={2}
-                    center
-                    div
-                    info="Pending pickups jinki koi bhi SLA nikal chuki hai. Ye column date filter follow nahi karta."
-                  />
-                </tr>
-                <tr>
-                  <PkTh label="Total" center div />
-                  <PkTh label="Picked" center />
-                  <PkTh
-                    label="Pick Time"
-                    center
-                    div
-                    info="Out for Pickup se Picked Up tak ka average — sirf pickup boy ka hissa."
-                  />
-                  <PkTh
-                    label="Avg Time"
-                    center
-                    info="Entry aane se Picked Up tak ka poora average, jisme manager ka time bhi shaamil hai."
-                  />
-                  <PkTh
-                    label="Breach"
-                    center
-                    info="Jo Estimated arrival bhara tha, us tak item nahi utha (ya abhi tak utha hi nahi)."
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {boyStats.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="dash-empty">
-                      Is duration mein koi entry nahi
-                    </td>
-                  </tr>
-                ) : (
-                  boyStats.map(({ person, br, s }) => {
-                    const cell = cellFor({ person, store: null });
-                    return (
-                      <tr key={person + br}>
-                        <td className="dash-store">{person}</td>
-                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
-                        {cell('all', s.total, T.green, true)}
-                        {cell('picked', s.picked, T.green)}
-                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {pkHrs(s.avgPick)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>{pkHrs(s.avgCycle)}</td>
-                        {cell('pk', s.pickBreach, T.red)}
-                        {cell('overdue', s.overdue, T.amber, true)}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {alertOn && (
-        <PkSlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />
-      )}
-    </div>
-  );
-}
-
-/* ── Alert modal — abhi sirf UI, backend baad mein ── */
-function PkSlaAlert({ title, s, onClose }) {
-  const problems = [];
-  if (s.overdue)
-    problems.push([
-      'Overdue pickups',
-      `${s.overdue} pickup ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
-    ]);
-  if (s.respBreach)
-    problems.push([
-      'Response late',
-      `${s.respBreach} pickup mein ${PK_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
-        (s.avgRespLate ? ` — average ${pkMinsFmt(s.avgRespLate)} deadline se upar.` : '.'),
-    ]);
-  if (s.etaBreach)
-    problems.push([
-      'ETA bhari nahi gayi',
-      `${s.etaBreach} pickup diye hue time tak Out for Pickup nahi hui — estimated arrival hi nahi bhari.`,
-    ]);
-  if (s.pickBreach)
-    problems.push([
-      'Pickup breach',
-      `${s.pickBreach} pickup apni estimated arrival se late gayi.`,
-    ]);
-
-  const KVLine = ({ label, value }) => (
-    <div className="kv">
-      <div className="kv-label">{label}</div>
-      <div className="kv-val">{value}</div>
-    </div>
-  );
-
-  return (
-    <div className="overlay center" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-              Store head ko bhejne wali summary
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={18} color={T.ink} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="kv-grid">
-            <KVLine label="Overdue" value={s.overdue} />
-            <KVLine label="Avg response time" value={pkHrs(s.avgResp)} />
-            <KVLine label="Avg pickup time" value={pkHrs(s.avgCycle)} />
-            <KVLine label="Response breach" value={s.respBreach} />
-            <KVLine label="ETA breach" value={s.etaBreach} />
-          </div>
-
-          <div className="sec-title" style={{ margin: '4px 0 0' }}>
-            Main problems
-          </div>
-          {problems.length === 0 ? (
-            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
-          ) : (
-            problems.slice(0, 2).map(([t, d], i) => (
-              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-                <b>{t}</b>
-                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>
-            Close
-          </button>
-          <button className="btn-primary" disabled>
-            <Bell size={15} /> Send alert
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════ LOGIN */
 function Login({ onLogin }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
@@ -3547,12 +2580,7 @@ function Sidebar({ session, page, onNav }) {
       },
     },
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
-    ...(isAll
-      ? [
-          { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
-          { id: 'sla', icon: Clock, label: 'Process & SLA' },
-        ]
-      : []),
+    ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
     { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
@@ -3704,7 +2732,6 @@ function Topbar({
         >
           <option value="pickups">Pickups</option>
           <option value="dashboard">Dashboard</option>
-          <option value="sla">Process &amp; SLA</option>
         </select>
       )}
       <div className="tb-actions">
@@ -4081,8 +3108,9 @@ function Board({ items, loading, onOpen, onMove, onCommit }) {
   );
 }
 
-/* Mobile: stage tabs (accordion). Records tap karne pe hi khulte hain. */
+/* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
 function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
+  // Phone: sirf entry-waale stages dikhao. Accordion single-open.
   const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
   const activeIds = active.map((s) => s.id);
   const sig = activeIds.join(',');
@@ -4090,6 +3118,8 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
   const consumed = React.useRef(0);
   useEffect(() => {
     setOpen((prev) => {
+      // abhi-abhi move hua → us DESTINATION stage ko kholo (chahe purane stage
+      // mein aur entries bachi ho). Har move ek hi baar consume hota hai.
       if (
         focus &&
         focus.n !== consumed.current &&
@@ -4098,7 +3128,9 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
         consumed.current = focus.n;
         return focus.stage;
       }
+      // khula stage mein abhi bhi entry hai → wahi rehne do
       if (prev && activeIds.includes(prev)) return prev;
+      // warna aage ka pehla active stage
       const prevIdx = prev ? stageIndex(prev) : -1;
       const forward = active.find((s) => stageIndex(s.id) > prevIdx);
       return forward ? forward.id : activeIds[0] || null;
@@ -4308,7 +3340,15 @@ function FooterTotal({ items }) {
     (s) => `${s.short} ${items.filter((x) => x.stage === s.id).length}`,
   ).join(' · ');
   const can = items.filter((x) => x.stage === 'cancelled').length;
-  const extra = [can && `Cancelled ${can}`].filter(Boolean).join(' · ');
+  const dup = items.filter((x) => x.stage === 'duplicate').length;
+  const ren = items.filter((x) => x.stage === 'renewal').length;
+  const extra = [
+    can && `Cancelled ${can}`,
+    ren && `Renewal ${ren}`,
+    dup && `Duplicate ${dup}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div className="foot-total">
       Total {board.length} pickups &nbsp;•&nbsp; {per}
@@ -4322,16 +3362,19 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
   const [confirmDel, setConfirmDel] = useState(false);
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
-  const cancelled = !!closedMeta;
+  const cancelled = !!closedMeta; // "closed" = cancelled / duplicate / renewal
   const idx = stageIndex(d.stage);
   const stage = cancelled
     ? { label: closedMeta.label, color: closedMeta.color, soft: closedMeta.soft }
     : STAGES[idx] || STAGES[0];
-  const next = STAGES[idx + 1] || null;
+  const next = STAGES[idx + 1] || null; // agli actionable stage (nahi to null)
+  // closed: yahan tak pahunchi thi (greyed dikhane ke liye)
   const reachedIdx = cancelled ? reachedIdxFromLog(d._raw && d._raw.app_log) : idx;
   const r = d._raw || {};
+  // app_log is the timeline source now (table is locked; no direct fetch)
   const tl = [];
 
+  // per-stage field blocks (previous + current editable, future locked)
   const blocks = [
     {
       id: 'talked',
@@ -4387,6 +3430,8 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
   ];
 
   const rawLog = Array.isArray(r.app_log) ? r.app_log : [];
+  // Adhoora app_log (entry seedha aage move hui / purani entry) — reached stages
+  // ko pickup stage-data se reconstruct karke timeline poori dikhate hain.
   const appLog = (() => {
     if (cancelled) return rawLog;
     const haveStages = new Set(rawLog.map((e) => e && e.stage));
@@ -4536,7 +3581,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
             <div className="stage-picker">
               {STAGES.map((s, i) => {
-                if (i > reachedIdx) return null;
+                if (i > reachedIdx) return null; // jahan tak pahunchi thi
                 return (
                   <button
                     key={s.id}
@@ -4561,6 +3606,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           </>
         ) : (
           <>
+            {/* ── Move to stage — progressive: bhari hui + sirf agli stage ── */}
             <div className="sec-title" style={{ marginTop: 16 }}>
               Move to stage
             </div>
@@ -4578,9 +3624,9 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             )}
             <div className="stage-picker">
               {STAGES.map((s, i) => {
-                if (i > idx + 1) return null;
-                const filled = i <= idx;
-                const isNext = i === idx + 1;
+                if (i > idx + 1) return null; // aage wali stages abhi chhupi hain
+                const filled = i <= idx; // bhar chuki → solid color
+                const isNext = i === idx + 1; // agli actionable stage → soft tint
                 return (
                   <button
                     key={s.id}
@@ -4639,6 +3685,7 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           <KV label="Store manager" value={d.manager} full />
         </div>
 
+        {/* stage-wise fields — normal: progressive; cancelled: reached blocks read-only */}
         {blocks.map((b) => {
           const limit = cancelled ? reachedIdx : idx + 1;
           if (b.i > limit) return null;
@@ -4837,9 +3884,11 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
             </div>
           </div>
         )}
+        {/* sabse neeche — ye entry app mein kab aayi */}
         <div className="created-note">
           Entry app mein aayi: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
         </div>
+
       </div>
     </div>
   );
@@ -4943,13 +3992,15 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
     done: !!r.pickup_done,
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  // MBC = customer khud item store pe drop karta hai.
+  // MBC = customer khud item store pe drop karta hai. Scheduled form mein hi
+  // final pickup details bhar ke entry seedha Picked Up ho jaati hai.
   const mbc = toStage === 'scheduled' && f.person === 'MBC';
   const openPicker = (e) => { try { e.currentTarget.showPicker(); } catch (_) {} };
   const canSave =
     toStage === 'talked'
       ? f.flow === 'cancelled' || f.flow === 'resched'
-        ? !!String(f.remarks || '').trim()
+        ? // reschedule / cancel — dono mein reason likhna zaroori hai
+          !!String(f.remarks || '').trim()
         : !!(f.date && f.time)
     : toStage === 'scheduled'
       ? mbc
@@ -5042,10 +4093,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 <Field label="Actual pickup date *">
                   <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
                 </Field>
-                <Field label="Pickup charges collected (₹)">
-                  <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
-                    onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
-                </Field>
                 <Field label="Pending amount collected (₹)">
                   <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
                     onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
@@ -5093,11 +4140,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 Pickup charges bharna zaroori hai — kuch nahi liya to 0 daal do.
               </div>
             )}
+            {/* optional — bakaya amount agar wahin collect ho jaye to yahan */}
             <Field label="Pending amount collected (₹)">
               <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
                 onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
             </Field>
             <Check1 checked={f.done} onChange={() => set('done', !f.done)} label="Pickup done" />
+            {/* photo tabhi maanga jaata hai jab "Pickup done" tick ho —
+                delivery app jaisa hi flow */}
             {f.done && (
               <PhotoUpload label="Pickup photo *" invoiceNumber={delivery.id} kind="picked" value={f.photoPicked} onChange={(url) => set('photoPicked', url)} />
             )}
@@ -5107,6 +4157,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
           </>
         )}
         {(() => {
+          // pehli stage pe reschedule/cancel chuna to reason likhna zaroori
           const needRemarks =
             toStage === 'talked' &&
             (f.flow === 'resched' || f.flow === 'cancelled');
@@ -5164,6 +4215,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
 
 /* SMALL UI */
 function Field({ label, children }) {
+  // NOTE: <label> nahi — label ke andar button click dobara forward hota hai,
+  // jisse picker khulke turant band ho jaata tha (laptop pe).
   return (
     <div className="field">
       <span className="field-label">{label}</span>
@@ -5171,7 +4224,10 @@ function Field({ label, children }) {
     </div>
   );
 }
-/* 12-ghante ka time picker — hour (1-12) + minute + AM/PM. */
+/* 12-ghante ka time picker — hour (1-12) + minute + AM/PM.
+   Native <input type="time"> device ke locale pe chalta hai (kahin 24-hr dikhta)
+   aur Zoho iframe mein showPicker() block ho jaata hai, isliye apna control:
+   value andar "HH:MM" (24h) hi rehti hai. */
 function TimePick12({ value, onChange }) {
   const [hh, mm] = String(value || '')
     .split(':')
@@ -5252,7 +4308,8 @@ function Check1({ checked, onChange, label }) {
   );
 }
 
-/* Photo upload — camera se click ya device se choose. */
+/* Photo upload — camera se click ya device se choose. Supabase Storage pe
+   upload hoke URL onChange se milta hai. */
 function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -5376,24 +4433,30 @@ function stepTime(log, stageId) {
   return evs.length ? evs[evs.length - 1].ts : null;
 }
 
-/* ── SALES PICKUP PAGE ─────────────────────────────────────────────── */
+/* ── SALES TRACK PAGE ──────────────────────────────────────────────────
+   /track → sales team ek customer ka number daale, us number ki saari
+   deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
+   timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
 function PickupSalesPage() {
+  // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
   const [range, setRange] = useState('today');
   const [from, setFrom] = useState(dayStr(Date.now()));
   const [to, setTo] = useState(dayStr(Date.now()));
   const [storeFilter, setStoreFilter] = useState(''); // '' = all stores
-  const [statusFilter, setStatusFilter] = useState('all'); // all|pending|picked
+  const [statusFilter, setStatusFilter] = useState('all'); // all|pending|delivered
   const [matrix, setMatrix] = useState([]); // [{salesperson, store, cnt}]
   const [mState, setMState] = useState('loading'); // loading|done|error
   const [mErr, setMErr] = useState('');
   const [cell, setCell] = useState(null); // {sales, store}
   const [rows, setRows] = useState([]);
   const [cState, setCState] = useState('idle');
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(''); // global search (customer/invoice/salesperson)
   const [sRows, setSRows] = useState([]);
   const [sState, setSState] = useState('idle'); // idle|loading|done
-  const [lq, setLq] = useState('');
+  const [lq, setLq] = useState(''); // list search (cell view)
   const [selected, setSelected] = useState(null);
+  // order chunte hi uska timeline (app_log) le aao — customer link jaisa
+  // "Updated: ..." har stage pe dikhe
   const pickOrder = async (r) => {
     setSelected(r);
     if (!r || !r.invoice_number || r.app_log) return;
@@ -5414,6 +4477,7 @@ function PickupSalesPage() {
     }
   };
 
+  // global search — 2+ akshar pe deliveries dhoondo (matrix ki jagah list)
   useEffect(() => {
     const term = q.trim();
     if (term.length < 2) {
@@ -5522,11 +4586,13 @@ function PickupSalesPage() {
     rowTotal[m.salesperson] = (rowTotal[m.salesperson] || 0) + Number(m.cnt);
     colTotal[m.store] = (colTotal[m.store] || 0) + Number(m.cnt);
   });
+  // store order fixed rakho jaha possible
   const STORE_ORDER = [
     'NOD', 'JKP', 'NWD', 'GGN', 'JPR', 'LKO', 'MOH', 'JAL', 'LDH', 'CHD', 'NCR',
   ];
   stores.sort((a, b) => STORE_ORDER.indexOf(a) - STORE_ORDER.indexOf(b));
   const shownStores = stores;
+  // number waale (asli salespeople) upar, bina-number waale neeche; phir total se
   const hasNum = (p) => /\d{6,}/.test(String(p || ''));
   people.sort((a, b) => {
     const na = hasNum(a) ? 1 : 0;
@@ -5574,6 +4640,7 @@ function PickupSalesPage() {
       </div>
 
       <div className={cell || selected ? 'track-body' : 'track-body track-wide'}>
+        {/* DETAIL VIEW */}
         {selected ? (
           <>
             <button className="track-back" onClick={() => setSelected(null)}>
@@ -5584,6 +4651,7 @@ function PickupSalesPage() {
             <TrackResult row={selected} />
           </>
         ) : cell ? (
+          /* CELL LIST VIEW */
           <>
             <button
               className="track-back"
@@ -5616,6 +4684,7 @@ function PickupSalesPage() {
             )}
           </>
         ) : (
+          /* MATRIX OVERVIEW */
           <>
             <div className="mx-toolbar">
               <div className="mx-search">
@@ -5696,6 +4765,7 @@ function PickupSalesPage() {
             </div>
 
             {sState !== 'idle' ? (
+              /* GLOBAL SEARCH RESULTS — matrix ki jagah */
               <>
                 <div className="mx-caption">
                   {sState === 'loading'
@@ -5741,7 +4811,7 @@ function PickupSalesPage() {
                           <td
                             className="mx-sticky mx-name mx-nclick"
                             onClick={() => openCell(person, '')}
-                            title="Click for all pickups"
+                            title="Click for all deliveries"
                           >
                             {person}
                           </td>
@@ -5800,7 +4870,9 @@ function PickupSalesPage() {
   );
 }
 
-/* Sales pickup detail pe upar — usi invoice ki delivery ka collapsed hissa. */
+
+/* Sales pickup detail pe upar — usi invoice ki delivery ka collapsed hissa.
+   Delivery record na mile to kuch render nahi hota. */
 function DeliveryPhase({ invoice }) {
   const [row, setRow] = useState(null);
   const [open, setOpen] = useState(false);
@@ -5954,13 +5026,13 @@ function PkGroupedList({ rows, onPick }) {
   return (
     <>
       {Group('Pending', pending, T.blue)}
-      {Group('Picked up', delivered, T.green)}
+      {Group('Delivered', delivered, T.green)}
       {Group('Cancelled', cancelled, T.red)}
     </>
   );
 }
 
-/* Sales-only detail card — sab zaroori info ek jagah */
+/* Sales-only detail card — sab zaroori info ek jagah, systematically */
 function PkOrderCard({ row }) {
   const store = deriveBranch(row);
   const manager = STORE_MANAGERS[store] || '—';
@@ -5993,6 +5065,7 @@ function PkOrderCard({ row }) {
     ['Invoice total', money(row.total_amount) || '—'],
   ];
 
+
   return (
     <div className="soc">
       <div className="soc-head">
@@ -6013,6 +5086,7 @@ function PkOrderCard({ row }) {
   );
 }
 
+
 function TrackPage({ invoice }) {
   const [phone, setPhone] = useState('');
   const [state, setState] = useState('idle'); // idle | loading | done | notfound | error
@@ -6031,6 +5105,8 @@ function TrackPage({ invoice }) {
     setRow(null);
     try {
       const all = await sbTrack(invoice || '', `+91${digits}`);
+      // Renewal / Duplicate / Deleted = internal cheezein — customer ko na dikhe.
+      // Cancelled dikhta hai (customer ko pata hona chahiye).
       const res = (all || []).filter((r) => {
         const st = statusToStage(r.status);
         return st !== 'renewal' && st !== 'duplicate' && st !== 'deleted';
@@ -6041,6 +5117,8 @@ function TrackPage({ invoice }) {
         return;
       }
       setRows(res);
+      // Ek hi order → seedha timeline. Ek se zyada (jaise oxygen + cannula
+      // alag invoices) → list dikhao, customer apna order chun le.
       if (res.length === 1) setRow(res[0]);
       setState('done');
     } catch (e) {
@@ -6124,6 +5202,7 @@ function TrackPage({ invoice }) {
           )}
         </div>
 
+        {/* 1 se zyada order → customer apna order chune */}
         {state === 'done' && !row && rows.length > 1 && (
           <div className="sales-list">
             <div className="sales-list-head">
@@ -6199,6 +5278,7 @@ function TrackPage({ invoice }) {
 }
 
 function TrackResult({ row }) {
+  // row = safe fields from track_order RPC (poora delivery row NAHI)
   const equipment = equipmentText({
     line_items: row.line_items,
     item_name: row.item_name,
@@ -6212,11 +5292,14 @@ function TrackResult({ row }) {
   const cancelled = !!closedMeta;
   const idx = stageIndex(stage);
   const log = Array.isArray(row.app_log) ? row.app_log : [];
+  // closed: cancel/mark se pehle jahan tak pahunchi thi (app_log se)
   const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
-  const flowIdx = cancelled ? reachedIdx : idx;
+  const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
   const Icon = equipIcon(equipment);
   const person = row.delivery_partner || row.app_pickup_person || null;
   const orderId = row.invoice_number;
+  // MBC = customer khud item store pe drop karta hai. "Out for Pickup" step
+  // dikhana galat hai; wording bhi self-drop waali honi chahiye.
   const mbc = String(person || '').trim().toUpperCase() === 'MBC';
   const steps = mbc
     ? TRACK_STEPS.filter((st) => st.id !== 'dispatched').map((st) =>
@@ -6271,6 +5354,7 @@ function TrackResult({ row }) {
 
   return (
     <div className="track-result">
+      {/* order summary */}
       <div className="track-order">
         <div className="eq-ico" style={{ width: 44, height: 44, background: T.mint }}>
           <Icon size={22} color={T.green} />
@@ -6294,11 +5378,13 @@ function TrackResult({ row }) {
         {banner.text}
       </div>
 
+      {/* the timeline */}
       <div className="track-tl">
         {steps.map((step) => {
           const si = stageIndex(step.id);
-          if (si > flowIdx) return null;
+          if (si > flowIdx) return null; // sirf reached stages dikhao
           const current = !cancelled && si === idx;
+          // "reached this stage" time — har stage pe green chhota timestamp
           const reachedTs =
             stepTime(log, step.id) ||
             (step.id === 'new'
@@ -6309,6 +5395,7 @@ function TrackResult({ row }) {
                 null
               : null);
           const StepIcon = step.icon;
+          // closed hua to aakhri reached stage bhi neeche closed-entry se jude
           const showLine = si < flowIdx || cancelled;
           return (
             <div className="ttl-row" key={step.id}>
@@ -6337,6 +5424,7 @@ function TrackResult({ row }) {
                 </div>
                 <div className="ttl-desc">{step.desc}</div>
 
+                {/* Stage 2 — confirmed delivery slot */}
                 {step.id === 'talked' && (schedDate || schedTime) && (
                   <div className="ttl-extra">
                     <div>
@@ -6347,6 +5435,7 @@ function TrackResult({ row }) {
                   </div>
                 )}
 
+                {/* Stage 3 — delivery slot + partner */}
                 {step.id === 'scheduled' && (
                   <div className="ttl-extra">
                     {(schedDate || schedTime) && (
@@ -6371,6 +5460,7 @@ function TrackResult({ row }) {
                   </div>
                 )}
 
+                {/* Stage 4 — out for delivery: estimated arrival */}
                 {step.id === 'dispatched' && row.app_eta && (
                   <div className="ttl-extra">
                     <div>
@@ -6380,6 +5470,7 @@ function TrackResult({ row }) {
                   </div>
                 )}
 
+                {/* har stage pe — kab update hua (green chhota) */}
                 {reachedTs && (
                   <div className="ttl-time">
                     Updated: {fmtDateTime(reachedTs)}
@@ -6390,6 +5481,7 @@ function TrackResult({ row }) {
           );
         })}
 
+        {/* closed → reached stages ke baad colored closed entry */}
         {cancelled && (
           <div className="ttl-row">
             <div className="ttl-left">
@@ -6424,12 +5516,12 @@ function TrackResult({ row }) {
   );
 }
 
-/* Standalone pickup app ka /track — customer wala hi page reuse hota hai */
-function SalesTrackPage() {
-  return <PickupSalesPage />;
-}
-
-/* ═════════════════════════════════════════════════ ACTIVITY LOG (overall) */
+/* ══════════════════════════════════════════════════════════════ STYLES */
+/* ═════════════════════════════════════════════════ ACTIVITY LOG (overall)
+   Saari entries ke app_log events ek jagah, latest pehle — Books / Bigin ke
+   audit trail jaisa. Data wahi hai jo har entry ke andar timeline mein
+   dikhta hai; yahan sab merge karke "kisne kya kab kiya" ek screen pe.
+   Delete hui entries bhi yahan aati hain (view se hatti hain, log se nahi). */
 const ACT_KINDS = [
   { id: 'all', label: 'Sab updates' },
   { id: 'move', label: 'Stage move' },
@@ -6517,6 +5609,7 @@ function ActivityLog({ deliveries, session, onOpen, onClose }) {
     return ['0000-01-01', '9999-12-31'];
   }, [range]);
 
+  // saari entries ke app_log ko ek flat list mein merge karo (latest pehle)
   const all = useMemo(() => {
     const out = [];
     deliveries.forEach((d) => {
@@ -6544,6 +5637,7 @@ function ActivityLog({ deliveries, session, onOpen, onClose }) {
     });
   }, [all, bounds, store, kind, q]);
 
+  // din ke hisaab se group — heading ke neeche us din ke updates
   const days = [];
   const byDay = {};
   rows.forEach((r) => {
@@ -6781,7 +5875,7 @@ function StyleTag() {
       .hjs-pickups .column:nth-child(3) { border-top: 3px solid ${T.amber}; }
       .hjs-pickups .column:nth-child(4) { border-top: 3px solid ${T.violet}; }
       .hjs-pickups .column:nth-child(5) { border-top: 3px solid ${T.green}; }
-      .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; flex-wrap: wrap; }
+      .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
       .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
       .col-body { display: flex; flex-direction: column; gap: 10px; padding: 4px; min-height: 40px; }
@@ -6799,7 +5893,10 @@ function StyleTag() {
       .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
       .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
       .inline-move .modal-body { display: flex; flex-direction: column; gap: 13px; max-height: none; overflow: visible; padding: 0; }
-      .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; flex-wrap: wrap; gap: 8px; }
+      .inline-move .modal-foot { padding: 12px 0 2px; border-top: none; margin-top: 2px; }
+      /* card ke andar wala inline form — lamba button hone pe footer bahar
+         nikal jaata tha (justify-end + no wrap). Ab wrap hoke andar rehta hai. */
+      .inline-move .modal-foot { flex-wrap: wrap; gap: 8px; }
       .inline-move .modal-foot .btn-ghost,
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
@@ -6891,6 +5988,8 @@ function StyleTag() {
       .lang-toggle { display: inline-flex; background: #fff; border: 1px solid ${T.line}; border-radius: 10px; padding: 2px; gap: 2px; }
       .lang-btn { border: none; background: transparent; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .lang-btn.active { background: ${T.forest}; color: #fff; }
+      /* phone pe sidebar chhup jaata hai — head login ke liye page switcher
+         yahan topbar mein aa jaata hai (laptop pe sidebar hi kaafi hai) */
       .page-switch { display: none; border: 1px solid ${T.line}; background: #fff; border-radius: 10px; padding: 7px 10px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; outline: none; max-width: 150px; }
       .page-switch:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
       @media (max-width: 860px) { .page-switch { display: block; } }
@@ -6923,6 +6022,8 @@ function StyleTag() {
       .field-label { font-size: 12px; font-weight: 700; color: ${T.ink}; }
       .inp { width: 100%; border: 1px solid ${T.line}; border-radius: 11px; padding: 11px 13px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; color: ${T.ink}; }
       .inp:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px rgba(46,125,50,.12); }
+      /* native date/time picker icon — proper calendar / clock (green).
+         Manual typing bhi chalti hai; icon sirf picker kholne ke liye hai. */
       .inp[type="date"], .inp[type="time"], .inp[type="datetime-local"] { cursor: pointer; }
       .inp[type="date"]::-webkit-calendar-picker-indicator,
       .inp[type="time"]::-webkit-calendar-picker-indicator,
@@ -6961,7 +6062,6 @@ function StyleTag() {
       .track-wrap { min-height: 100vh; background: ${T.beige}; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
-      .track-body.track-wide { max-width: 1100px; }
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
@@ -7017,7 +6117,7 @@ function StyleTag() {
       .mx-select { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 13.5px; font-weight: 600; font-family: inherit; color: ${T.ink}; cursor: pointer; }
       .mx-range { display: inline-flex; align-items: center; gap: 6px; }
       .mx-date { border: 1px solid ${T.line}; background: #fff; border-radius: 12px; padding: 9px 12px; font-size: 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .mx-date::-webkit-calendar-picker-indicator { opacity: 1; width: 18px; height: 18px; cursor: pointer; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
+      .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
       .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
       .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
@@ -7068,12 +6168,13 @@ function StyleTag() {
       .sales-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
       .sales-meta span { font-size: 11.5px; color: ${T.inkSoft}; max-width: 100%; }
 
-      /* ── DASHBOARD / SLA ── */
-      .dash-switch { display: flex; margin-bottom: 16px; }
+      /* ── DASHBOARD ── */
       .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
       .dash-sub { font-size: 12.5px; color: ${T.inkSoft}; font-weight: 600; }
       .dash-filters { display: flex; gap: 8px; flex-wrap: wrap; }
       .dash-inp { border: 1px solid ${T.line}; border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; font-family: inherit; background: #fff; color: ${T.ink}; cursor: pointer; }
+      /* dashboard ke date inputs pe bhi wahi green calendar icon (warna
+         icon default light-grey hota hai aur beige background mein chhup jaata) */
       .dash-inp[type="date"] { cursor: pointer; }
       .dash-inp[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; width: 18px; height: 18px; margin-left: 6px; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
       .dash-cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
@@ -7089,6 +6190,7 @@ function StyleTag() {
       .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
       .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
       .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
+      /* table scroll karte waqt pehla column (Store / Invoice) jama rehta hai */
       .dash-table th:first-child, .dash-table td:first-child { position: sticky; left: 0; z-index: 2; background: #fff; box-shadow: 1px 0 0 ${T.line}; }
       .dash-table thead th:first-child { z-index: 3; }
       .dash-row:hover td:first-child { background: ${T.cream}; }
@@ -7136,8 +6238,11 @@ function StyleTag() {
         .topbar { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 8px 10px; }
         .tb-brand { display: flex; order: 0; flex: 1 1 auto; min-width: 0; }
         .tb-brand span { font-size: 14px; }
+        /* icons apni poori line lete hain aur barabar faila jaate hain —
+           warna right mein khaali jagah bach jaati thi */
         .tb-actions { order: 1; flex: 1 1 100%; width: 100%; justify-content: space-between; align-items: center; gap: 6px; }
         .tb-user-text { display: none; }
+        /* phone pe avatar ki jagah nahi — naam waise bhi chhupa hua hai */
         .tb-user { display: none; }
         .page-switch { order: 2; flex: 1 1 100%; max-width: none; }
         .tb-search { order: 3; flex: 1 1 100%; max-width: none; }
@@ -7150,8 +6255,11 @@ function StyleTag() {
         .kv-grid { grid-template-columns: 1fr 1fr; }
         .modal { width: 100%; border-radius: 18px; }
         .glass-card { padding: 24px 20px; }
+        /* time input pe AM/PM hamesha dikhe — width thodi zyada rakho */
         .inp[type="time"], .inp[type="datetime-local"] { min-height: 44px; }
       }
+      /* phone pe header ke controls (Today / Stages / All stores / chip) ek
+         doosre ke saath fit ho jaayein — pehle har ek apni line le leta tha */
       @media (max-width: 760px) {
         .hdr-controls { gap: 8px !important; width: 100%; }
         .hdr-controls > * { flex: 0 1 auto; }
