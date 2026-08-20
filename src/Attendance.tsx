@@ -257,6 +257,8 @@ const CSS = `
 .hjsatt .att-day .dh { font-size: 10px; color: #98a2b3; }
 
 .hjsatt .att-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hjsatt .att-grid5 { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 640px) { .hjsatt .att-grid5 { grid-template-columns: repeat(3, 1fr); } }
 .hjsatt .att-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .hjsatt .att-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
   padding: 12px 6px; }
@@ -303,9 +305,9 @@ const CSS = `
 .hjsatt .att-mark { display: inline-block; width: 21px; text-align: center;
   font-weight: 700; font-size: 12px; }
 .hjsatt .m-P { color: #16a34a; } .hjsatt .m-L { color: #d97706; }
-.hjsatt .m-H { color: #ea580c; } .hjsatt .m-A { color: #dc2626; }
-.hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #0891b2; }
-.hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #7c3aed; }
+.hjsatt .m-H { color: #9333ea; } .hjsatt .m-A { color: #dc2626; }
+.hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #a16207; }
+.hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-X { color: #2563eb; }
 
 .hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(16,24,40,.45);
@@ -4337,7 +4339,7 @@ function TodayTab() {
 
       {busy && <p className="att-muted">Loading…</p>}
 
-      <div className="att-grid4">
+      <div className="att-grid4 att-grid5">
         <div className={`att-stat clk ${filter === "In" ? "on" : ""}`}
           onClick={() => setFilter(filter === "In" ? "" : "In")}>
           <b style={{ color: "#16a34a" }}>{inNow}</b><span>In now</span></div>
@@ -4348,15 +4350,10 @@ function TodayTab() {
         <div className="att-stat clk"
           onClick={() => setFilter(filter === "Yet to check in" ? "" : "Yet to check in")}>
           <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
+        <div className={`att-stat clk ${filter === "offsite" ? "on" : ""}`}
+          onClick={() => setFilter(filter === "offsite" ? "" : "offsite")}>
+          <b style={{ color: "#9333ea" }}>{offSite}</b><span>Off-site</span></div>
       </div>
-      {offSite > 0 && (
-        <div className="att-flex" style={{ marginTop: 8 }}>
-          <button className={`att-btn sm ${filter === "offsite" ? "" : "line"}`}
-            onClick={() => setFilter(filter === "offsite" ? "" : "offsite")}>
-            ◉ Off-site ({offSite})
-          </button>
-        </div>
-      )}
       <div className="att-flex">
         <Search placeholder="Search name, code, team" value={q}
           onChange={setQ} style={{ flex: 1 }} />
