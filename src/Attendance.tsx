@@ -4252,8 +4252,11 @@ function TodayTab() {
   const done = rows.filter((r) => r.state === "Out").length;
   const onLeave = rows.filter((r) => r.state === "Leave").length;
   const notIn = rows.filter((r) => r.state === "Yet to check in").length;
+  // geofence ke bahar se punch — HR ko roz ye dekhne hote hain
+  const offSite = rows.filter((r) => r.punch && r.punch.in_geo_ok === false).length;
   const shown = rows
-    .filter((r) => !filter || r.state === filter)
+    .filter((r) => filter !== "offsite" || (r.punch && r.punch.in_geo_ok === false))
+    .filter((r) => !filter || filter === "offsite" || r.state === filter)
     .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
       .toLowerCase().includes(q.toLowerCase()));
 
@@ -4290,10 +4293,19 @@ function TodayTab() {
           onClick={() => setFilter(filter === "Yet to check in" ? "" : "Yet to check in")}>
           <b style={{ color: "#dc2626" }}>{notIn}</b><span>Not in</span></div>
       </div>
+      {offSite > 0 && (
+        <div className="att-flex" style={{ marginTop: 8 }}>
+          <button className={`att-btn sm ${filter === "offsite" ? "" : "line"}`}
+            onClick={() => setFilter(filter === "offsite" ? "" : "offsite")}>
+            ◉ Off-site ({offSite})
+          </button>
+        </div>
+      )}
       <div className="att-flex">
         <Search placeholder="Search name, code, team" value={q}
           onChange={setQ} style={{ flex: 1 }} />
-        {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>Clear {filter}</button>}
+        {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>
+          Clear {filter === "offsite" ? "off-site" : filter}</button>}
       </div>
 
       {teamNames.map((tn) => {
@@ -6805,6 +6817,10 @@ function VerifyRow({ r, onSet, onClear, busy, date }: any) {
           <p className="att-muted">
             {r.designation || "—"}
             {r.day_status ? ` · ${r.day_status}` : ""}
+          </p>
+          {/* check-in ki jagah — click karke map khulega */}
+          <p style={{ marginTop: 3 }}>
+            <Pin lat={r.in_lat} lng={r.in_lng} dist={r.in_distance_m} ok={r.geo_ok} />
           </p>
           {r.status && (
             <p className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
