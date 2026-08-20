@@ -2559,7 +2559,10 @@ function pkBizAdd(from, mins) {
   return d;
 }
 
-/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi). */
+/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi).
+   NOTE: ab averages ismein nahi aate — wo seedha wall clock hain. Ye sirf
+   spare helper hai agar kabhi business-hours duration chahiye ho. */
+// eslint-disable-next-line no-unused-vars
 function pkBizMins(a, b) {
   if (!a || !b || b <= a) return 0;
   let total = 0;
@@ -2661,6 +2664,17 @@ const pkMinsFmt = (m) => {
   return (a / 1440).toFixed(1) + 'd';
 };
 
+/* Pickup ke TAT din mein — pickup multi-day cheez hai, ghanton mein padhna
+   mushkil hota hai. 24 ghante se kam ho to ghante hi dikhate hain. */
+const pkDays = (h) =>
+  h == null
+    ? '—'
+    : h < 1
+      ? Math.round(h * 60) + 'm'
+      : h < 24
+        ? Math.round(h) + 'h'
+        : (h / 24).toFixed(1) + 'd';
+
 /* Adoption % ka color — 85+ green, 70–85 amber, uske neeche red */
 const pkAdoptColor = (p) =>
   p == null ? T.inkSoft : p >= 85 ? T.green : p >= 70 ? T.amber : T.red;
@@ -2670,6 +2684,7 @@ const PK_KIND_LABEL = {
   r10: 'Response ≤10 min',
   r30: 'Response 10–30 min',
   r30p: 'Response >30 min',
+  rna: 'Response not recorded',
 };
 
 /* ── ek pickup ka poora SLA picture ── */
@@ -2679,7 +2694,10 @@ function pkAnalyze(x) {
   const now = new Date();
   const start = pkStart(x, cycle);
   const okStart = !!start;
-  const span = (a, b) => (a && b && b >= a ? pkBizMins(a, b) / 60 : null);
+  /* Average ab SEEDHA wall clock hai — entry kab aayi se lekar jo hua tab tak,
+     poore ghante. Business-hours (10AM–8PM) ka hisaab sirf 60-min response
+     DEADLINE pe lagta hai, average pe nahi. */
+  const span = (a, b) => (a && b && b >= a ? (b - a) / 3600000 : null);
 
   const picked = x.stage === 'delivered';
   const pickAt = picked ? new Date(deliveredTs(x)) : null;
@@ -2688,8 +2706,13 @@ function pkAnalyze(x) {
   const talkedAt = pkFirst(cycle, 'talked');
   const respDeadline = okStart ? pkBizAdd(start, PK_RESPONSE_MIN) : null;
   const respEnd = talkedAt || now;
-  const respBreach = !!(respDeadline && respEnd > respDeadline);
-  const respOpen = !talkedAt;
+  /* Pickup ho chuki par "Contacted" app mein bhara hi nahi — ye process skip
+     hai, late response NAHI. Isko breach mein ginna jhooth hoga, isliye alag
+     flag: respMissing (report mein "Not recorded"). */
+  const respMissing = !talkedAt && picked;
+  const respBreach = !!(respDeadline && !respMissing && respEnd > respDeadline);
+  /* respOpen = abhi bhi pending hai aur baat hui hi nahi — ye asli breach hai */
+  const respOpen = !talkedAt && !picked;
   const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
 
   const promise = pkPromise(x);
@@ -2725,6 +2748,7 @@ function pkAnalyze(x) {
     resched: isResched(x),
     respBreach,
     respOpen,
+    respMissing,
     respLateBy,
     respDeadline,
     talkedAt,
@@ -2900,6 +2924,8 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
     r10: (a) => a.respMins != null && a.respMins <= 10,
     r30: (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
     r30p: (a) => a.respMins != null && a.respMins > 30,
+    /* Timeline mein Contacted hai hi nahi — response measure ho hi nahi sakta */
+    rna: (a) => a.respMins == null,
   };
 
   const statOf = (list, ov) => {
@@ -2923,6 +2949,12 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
         (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
       ).length,
       resp30p: list.filter((a) => a.respMins != null && a.respMins > 30).length,
+      /* Jitni pickups ka response NAAPA ja saka (Contacted app mein bhara hua).
+         Buckets ka % isi ka hota hai — total ka nahi, warna jinka timeline hi
+         nahi wo har bucket ko neeche kheench lete hain. */
+      respMeasured: list.filter((a) => a.respMins != null).length,
+      /* Timeline mein Contacted hai hi nahi — na naapa ja sakta, na breach */
+      respNA: list.filter((a) => a.respMins == null).length,
       /* Adoption = is duration ki kitni pickups uth chuki hain */
       adoption: list.length ? (dl.length / list.length) * 100 : null,
       respBreach: list.filter((a) => a.respBreach).length,
@@ -3128,7 +3160,11 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                             fontWeight: a.respBreach ? 700 : 500,
                           }}
                         >
-                          {a.respOpen ? 'abhi tak nahi' : pkHrs(a.respHrs)}
+                          {a.respMissing
+                            ? 'record nahi'
+                            : a.respOpen
+                              ? 'abhi tak nahi'
+                              : pkHrs(a.respHrs)}
                         </td>
                         <td
                           style={{
@@ -3343,7 +3379,7 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Avg Time"
                     center
                     div
-                    info={`Entry aane se "Contacted" tak ka average. Business hours (${PK_BIZ_START}AM–${PK_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
+                    info={'Entry aane se "Contacted" tak ka average — seedha wall clock, poore ghante gine jaate hain.'}
                   />
                   <PkTh
                     label="Breach"
@@ -3401,7 +3437,7 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                           {s.avgRespLate == null ? '—' : '+' + pkMinsFmt(s.avgRespLate)}
                         </td>
                         <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {pkHrs(s.avgCycle)}
+                          {pkDays(s.avgCycle)}
                         </td>
                         {cell('eta', s.etaBreach, T.red)}
                         {cell('pk', s.pickBreach, T.red)}
@@ -3488,9 +3524,9 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                         {cell('all', s.total, T.green, true)}
                         {cell('picked', s.picked, T.green)}
                         <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
-                          {pkHrs(s.avgPick)}
+                          {pkDays(s.avgPick)}
                         </td>
-                        <td style={{ textAlign: 'center' }}>{pkHrs(s.avgCycle)}</td>
+                        <td style={{ textAlign: 'center' }}>{pkDays(s.avgCycle)}</td>
                         {cell('pk', s.pickBreach, T.red)}
                         {cell('overdue', s.overdue, T.amber, true)}
                       </tr>
@@ -3580,10 +3616,15 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                     info={`Jo pickups ${PK_RESPONSE_MIN} min ki deadline ke BAAD "Contacted" pe move hui — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aatin; wo upar Response breach card mein hain.`}
                   />
                   <PkTh
+                    label="Not recorded"
+                    center
+                    info={`Jin pickups ke timeline mein "Contacted" bhara hi nahi gaya — stage skip karke seedha Picked Up kar diya, ya status Books se set hua. Inka response time naapa hi nahi ja sakta, isliye ye kisi bucket mein nahi aatin aur breach mein bhi nahi gintin. Baaki teeno column ka % inhe chhod kar nikalta hai.`}
+                  />
+                  <PkTh
                     label="Response TAT"
                     center
                     div
-                    info={`Entry aane se "Contacted" tak ka average. Business hours (${PK_BIZ_START}AM–${PK_BIZ_END - 12}PM) mein gina jaata hai.`}
+                    info={'Entry aane se "Contacted" tak ka average — seedha wall clock, poore ghante gine jaate hain.'}
                   />
                   <PkTh
                     label="Pickup TAT"
@@ -3601,7 +3642,7 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
               <tbody>
                 {adoptRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="dash-empty">
+                    <td colSpan={10} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3609,7 +3650,9 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                   adoptRows.map(({ st, s }) => {
                     const cell = cellFor({ store: st, person: null });
                     const pctOf = (n) =>
-                      s.total ? Math.round((n / s.total) * 100) : 0;
+                      s.respMeasured
+                        ? Math.round((n / s.respMeasured) * 100)
+                        : 0;
                     const ac = pkAdoptColor(s.adoption);
                     /* bucket cell — number + neeche chhota % */
                     const bucket = (kind, n, div, color) => (
@@ -3645,6 +3688,33 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                         {bucket('r30', s.resp30)}
                         {bucket('r30p', s.resp30p, false, T.red)}
                         <td
+                          className={
+                            s.respNA ? 'dash-td-click' : 'dash-td-zero'
+                          }
+                          style={{
+                            textAlign: 'center',
+                            ...(s.respNA ? { color: T.inkSoft } : {}),
+                          }}
+                          onClick={() =>
+                            s.respNA &&
+                            toggleSel({ kind: 'rna', store: st, person: null })
+                          }
+                        >
+                          {s.respNA}
+                          <div
+                            style={{
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              color: T.inkSoft,
+                            }}
+                          >
+                            {s.total
+                              ? Math.round((s.respNA / s.total) * 100)
+                              : 0}
+                            %
+                          </div>
+                        </td>
+                        <td
                           style={{
                             textAlign: 'center',
                             borderLeft: '1px solid ' + T.line,
@@ -3653,7 +3723,7 @@ function PkSlaReport({ deliveries, onOpen, logsLoaded }) {
                           {pkHrs(s.avgResp)}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {pkHrs(s.avgCycle)}
+                          {pkDays(s.avgCycle)}
                         </td>
                         <td style={{ borderLeft: '1px solid ' + T.line }}>
                           <div
@@ -3767,7 +3837,7 @@ function PkSlaAlert({ title, s, onClose }) {
           <div className="kv-grid">
             <KVLine label="Overdue" value={s.overdue} />
             <KVLine label="Avg response time" value={pkHrs(s.avgResp)} />
-            <KVLine label="Avg pickup time" value={pkHrs(s.avgCycle)} />
+            <KVLine label="Avg pickup time" value={pkDays(s.avgCycle)} />
             <KVLine label="Response breach" value={s.respBreach} />
             <KVLine label="ETA breach" value={s.etaBreach} />
           </div>
