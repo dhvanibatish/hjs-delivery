@@ -304,7 +304,9 @@ const CSS = `
   font-weight: 700; font-size: 12px; }
 .hjsatt .m-P { color: #16a34a; } .hjsatt .m-L { color: #d97706; }
 .hjsatt .m-H { color: #ea580c; } .hjsatt .m-A { color: #dc2626; }
-.hjsatt .m-W, .hjsatt .m-F { color: #b0b7c3; } .hjsatt .m-X { color: #2563eb; }
+.hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #0891b2; }
+.hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #7c3aed; }
+.hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-X { color: #2563eb; }
 
 .hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(16,24,40,.45);
   display: flex; align-items: flex-end; justify-content: center; }
@@ -385,6 +387,7 @@ const CSS = `
 .hjsatt .att-mx th, .hjsatt .att-mx td { font-size: 14px; padding: 11px 10px; }
 .hjsatt .att-mx th { font-size: 11.5px; }
 .hjsatt .att-mx .att-mark { width: 30px; font-size: 15px; font-weight: 800; }
+.hjsatt .att-mxleg b { font-weight: 800; }
 .hjsatt .att-mx td.name, .hjsatt .att-mx th.name { min-width: 190px; font-size: 14.5px; }
 .hjsatt .att-mx tr.tot td { border-top: 0; padding: 0 10px 12px; }
 .hjsatt .att-totchips { display: flex; gap: 7px; flex-wrap: wrap; }
@@ -828,7 +831,7 @@ const pillClass = (s: string) => {
   return `att-pill ${map[s] || "p-Off"}`;
 };
 const markClass = (m: string) =>
-  `att-mark m-${["P", "L", "H", "A", "W", "F"].includes(m) ? m : "X"}`;
+  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF"].includes(m) ? m : "X"}`;
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
@@ -2201,8 +2204,12 @@ function MatrixTab({ me }: any) {
           onChange={setQ} style={{ marginTop: 10 }} />
       )}
 
-      <p className="att-muted" style={{ marginTop: 10 }}>
-        P present · L late · H half day · A absent · W week off · F holiday · EL/SHORT/HALF = leave
+      <p className="att-muted att-mxleg" style={{ marginTop: 10 }}>
+        <b className="m-P">P</b> present · <b className="m-L">L</b> late ·{" "}
+        <b className="m-H">H</b> half day · <b className="m-A">A</b> absent ·{" "}
+        <b className="m-W">W</b> week off · <b className="m-F">F</b> holiday ·{" "}
+        <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
+        <b className="m-HALF">HALF</b> half-day leave
       </p>
 
       {pick && pickEmp && (
