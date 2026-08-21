@@ -4083,6 +4083,26 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     await load(); setBusy(false);
   };
 
+  // HR chahe to kitne din unpaid hain wo khud set kar sakta hai
+  const setUnpaid = async (r: any) => {
+    const cur = Number(r.unpaid_days || 0);
+    const ans = window.prompt(
+      `${r.emp?.full_name} · ${r.days} din ki ${r.leave_type}\n\n` +
+      `Kitne din unpaid (UL) rakhne hain? 0 se ${r.days} ke beech.`,
+      String(cur));
+    if (ans === null) return;
+    const n = Number(ans);
+    if (isNaN(n) || n < 0 || n > Number(r.days)) {
+      setErr(`Unpaid days 0 se ${r.days} ke beech hone chahiye.`);
+      return;
+    }
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("leave_set_unpaid",
+      { p_leave: r.id, p_days: n });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
   const decideReg = async (id: string, st: string) => {
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("decide_regularization", { p_id: id, p_status: st });
@@ -4209,6 +4229,24 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                   {r.from_time ? ` · ${fmtHM(r.from_time)} – ${fmtHM(r.to_time)}` : ""}
                   {" · "}{r.days}d
                 </p>
+                {r.status === "Approved" && (
+                  <p style={{ marginTop: 3 }}>
+                    {Number(r.unpaid_days || 0) > 0 ? (
+                      <span className="att-pill p-Absent">
+                        {r.unpaid_days}d unpaid
+                      </span>
+                    ) : (
+                      <span className="att-muted" style={{ fontSize: 12.5 }}>fully paid</span>
+                    )}
+                    {me.role === "admin" && (
+                      <button className="att-btn sm line" style={{ marginLeft: 8 }}
+                        disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); setUnpaid(r); }}>
+                        Change
+                      </button>
+                    )}
+                  </p>
+                )}
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
               </div>
               <Actions r={r} kind="leave" />
