@@ -308,7 +308,8 @@ const CSS = `
 .hjsatt .m-H { color: #9333ea; } .hjsatt .m-A { color: #dc2626; }
 .hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #a16207; }
 .hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
-.hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-X { color: #2563eb; }
+.hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
+.hjsatt .m-X { color: #2563eb; }
 
 .hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(16,24,40,.45);
   display: flex; align-items: flex-end; justify-content: center; }
@@ -833,7 +834,7 @@ const pillClass = (s: string) => {
   return `att-pill ${map[s] || "p-Off"}`;
 };
 const markClass = (m: string) =>
-  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF"].includes(m) ? m : "X"}`;
+  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL"].includes(m) ? m : "X"}`;
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
@@ -1503,15 +1504,19 @@ function HomeScreen({ me }: any) {
       const key = ymd(d);
       const log = recent.find((r: any) => r.work_date === key);
       const lv = myLeaves.find((x: any) => key >= x.from_date && key <= x.to_date);
-      const off = (me.week_off_days || []).includes(d.getDay());
+      const offDays = me.week_off_days || [];
+      const off = offDays.includes(d.getDay());
+      const isWork = (k: string) => !offDays.includes(new Date(k + "T00:00:00").getDay());
+      const lvm = off ? "" : leaveMarkFor(lv, key, isWork);
       const status = log?.status
-        || (lv ? lv.leave_type : off ? "Off" : key > istToday() ? "" : "Absent");
+        || (off ? "Off" : lvm ? (lvm === "UL" ? "Unpaid leave" : lvm)
+            : key > istToday() ? "" : "Absent");
       return {
         key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
         isToday: key === istToday(),
         status,
         mark: log ? ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P")
-              : lv ? lv.leave_type : off ? "W" : key > istToday() ? "" : "A",
+              : off ? "W" : lvm ? lvm : key > istToday() ? "" : "A",
         mins: log?.worked_minutes,
         log, lv,
       };
@@ -1819,6 +1824,16 @@ const mondayOf = (iso: string) => {
   t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
   return ymd(t);
 };
+// muster_roll wali logic ka frontend version: leave ke andar jitne din
+// balance mein the wo paid, uske baad UL. Week off / holiday ginti mein nahi.
+const leaveMarkFor = (lv: any, key: string, isWork: (k: string) => boolean) => {
+  if (!lv) return "";
+  const paid = Number(lv.days || 0) - Number(lv.unpaid_days || 0);
+  let n = 0;
+  for (let k = lv.from_date; k <= key; k = addDays(k, 1)) if (isWork(k)) n++;
+  return n - 1 >= paid ? "UL" : lv.leave_type;
+};
+
 const addDays = (iso: string, n: number) => {
   const t = new Date(iso + "T00:00:00"); t.setDate(t.getDate() + n);
   return ymd(t);
@@ -1914,6 +1929,9 @@ function AttSummary({ me }: any) {
     return {
       key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
       isToday: key === istToday(), list, log, lv, hol, off, mins,
+      ul: !off && !hol && leaveMarkFor(lv, key, (k) =>
+        !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
+        && !hols.some((h: any) => h.hol_date === k)) === "UL",
       first: list[0]?.in_at, last: list.filter((x) => x.out_at).slice(-1)[0]?.out_at,
     };
   }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess]);
@@ -1928,8 +1946,9 @@ function AttSummary({ me }: any) {
     const half = days.filter((d) => d.log?.status === "Half Day").length;
     const weekend = days.filter((d) => d.off && !d.log).length;
     const holiday = days.filter((d) => d.hol && !d.off && !d.log).length;
-    const paid = days.filter((d) => d.lv && !d.log).length;
-    return { present, half, weekend, holiday, paid,
+    const paid = days.filter((d) => d.lv && !d.log && !d.off && !d.hol && !d.ul).length;
+    const unpaid = days.filter((d) => d.ul && !d.log).length;
+    return { present, half, weekend, holiday, paid, unpaid,
       payable: present + half * 0.5 + weekend + holiday + paid,
       hours: days.reduce((a, d) => a + d.mins, 0) };
   }, [days]);
@@ -2211,7 +2230,7 @@ function MatrixTab({ me }: any) {
         <b className="m-H">H</b> half day · <b className="m-A">A</b> absent ·{" "}
         <b className="m-W">W</b> week off · <b className="m-F">F</b> holiday ·{" "}
         <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
-        <b className="m-HALF">HALF</b> half-day leave
+        <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave
       </p>
 
       {pick && pickEmp && (
@@ -2332,10 +2351,17 @@ function CalendarTab({ me }: any) {
     const hol = hols.find((x: any) => x.hol_date === key);
     const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
     if (log) return { label: log.status, mins: log.worked_minutes,
-      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c" }[log.status as string] || "#475467" };
-    if (lv) return { label: lv.leave_type, color: "#2563eb" };
-    if (hol) return { label: hol.name, color: "#0891b2" };
+      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#9333ea" }[log.status as string] || "#475467" };
+    if (hol) return { label: hol.name, color: "#a16207" };
     if (off) return { label: "Week off", color: "#98a2b3" };
+    if (lv) {
+      const m = leaveMarkFor(lv, key, (k) =>
+        !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
+        && !hols.some((h: any) => h.hol_date === k));
+      return m === "UL"
+        ? { label: "Unpaid leave", color: "#be123c" }
+        : { label: lv.leave_type, color: "#2563eb" };
+    }
     if (key > istToday()) return { label: "", color: "#d0d5dd" };
     return { label: "Absent", color: "#dc2626" };
   };
@@ -5091,7 +5117,7 @@ function ReportsTab({ isAdmin = false }: any) {
       // sirf absent kata hai, half day aadha. 26 present + 4 Sunday = 30 payable.
       v.payable = (t.P || 0) + (t.L || 0) + (t.H || 0) * 0.5
         + (t.W || 0) + (t.F || 0)
-        + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F"].includes(k))
+        + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F", "UL"].includes(k))
             .reduce((a, k) => a + (k === "HALF" ? t[k] * 0.5 : k === "SHORT" ? t[k] * 0.25 : t[k]), 0);
     });
     return { rows: Object.entries(byEmp), dates: dates.sort() };
@@ -5496,9 +5522,14 @@ function MyReportTab({ me }: any) {
       let mark = "", label = "";
       if (log) { mark = { Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P";
                  label = log.status; }
-      else if (lv) { mark = lv.leave_type; label = lv.leave_type; }
       else if (hol) { mark = "F"; label = hol.name; }
       else if (off) { mark = "W"; label = "Week off"; }
+      else if (lv) {
+        mark = leaveMarkFor(lv, d, (k) =>
+          !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
+          && !hols.some((h: any) => h.hol_date === k));
+        label = mark === "UL" ? "Unpaid leave" : lv.leave_type;
+      }
       else if (d > istToday()) { mark = ""; label = ""; }
       else { mark = "A"; label = "Absent"; }
       out.push({ d, mark, label, log, lv });
