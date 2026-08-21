@@ -5087,8 +5087,10 @@ function ReportsTab({ isAdmin = false }: any) {
         t[m] = (t[m] || 0) + 1;
       });
       v.t = t;
-      // payable = present + late + (half x 0.5) + paid leave
+      // 30 din ke mahine ki poori salary. Week off aur holiday paid hain —
+      // sirf absent kata hai, half day aadha. 26 present + 4 Sunday = 30 payable.
       v.payable = (t.P || 0) + (t.L || 0) + (t.H || 0) * 0.5
+        + (t.W || 0) + (t.F || 0)
         + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F"].includes(k))
             .reduce((a, k) => a + (k === "HALF" ? t[k] * 0.5 : k === "SHORT" ? t[k] * 0.25 : t[k]), 0);
     });
@@ -5144,7 +5146,7 @@ function ReportsTab({ isAdmin = false }: any) {
             <span><i className="m-A">A</i> absent</span>
             <span><i className="m-W">W</i> week off</span>
             <span><i className="m-F">F</i> holiday</span>
-            <span className="att-muted">Payable = present + late + half×0.5 + paid leave</span>
+            <span className="att-muted">Payable = present + late + half×0.5 + week off + holiday + paid leave</span>
           </div>
           <div className="att-scroll">
             <table className="att-table att-mx">
