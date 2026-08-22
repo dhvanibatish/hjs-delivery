@@ -482,6 +482,10 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-coverprev { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.hjsatt .att-coverprev img { width: 150px; height: 84px; object-fit: cover;
+  border-radius: 8px; border: 1px solid #e6e8ec; background: #eef1f6; }
+
 .hjsatt .att-cert-cta { display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 13px 15px; border-radius: 10px; background: #f6fef9;
   border: 1px solid #b7ebc9; }
@@ -8104,6 +8108,7 @@ function LmsCourseForm({ row, onClose, onSaved }: any) {
   const [f, setF] = useState<any>({
     title: "", description: "", cover_url: "", seq: 0, active: true, ...row });
   const [busy, setBusy] = useState(false);
+  const [up, setUp] = useState(false);
   const [err, setErr] = useState("");
 
   const save = async () => {
@@ -8135,8 +8140,33 @@ function LmsCourseForm({ row, onClose, onSaved }: any) {
         <div><label>Description</label>
           <textarea rows={3} value={f.description || ""}
             onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
-        <div><label>Cover image URL</label>
-          <input value={f.cover_url || ""} placeholder="https://…"
+        <div><label>Cover image</label>
+          {f.cover_url && (
+            <div className="att-coverprev">
+              <img src={driveImg(f.cover_url)} alt="" />
+              <button className="att-btn sm line" onClick={() => setF({ ...f, cover_url: "" })}>
+                Remove
+              </button>
+            </div>
+          )}
+          <input type="file" accept="image/*" disabled={up}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setUp(true); setErr("");
+              const ext = (file.name.split(".").pop() || "png").toLowerCase();
+              const path = `covers/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+              const { error } = await supabase.storage.from("lms")
+                .upload(path, file, { upsert: true, contentType: file.type });
+              if (error) { setErr(error.message); setUp(false); return; }
+              const { data } = supabase.storage.from("lms").getPublicUrl(path);
+              setF({ ...f, cover_url: data.publicUrl });
+              setUp(false);
+            }} />
+          <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {up ? "Uploading…" : "Image upload karo, ya neeche Drive/koi bhi link paste kar do."}
+          </p>
+          <input style={{ marginTop: 6 }} value={f.cover_url || ""} placeholder="https://…"
             onChange={(e) => setF({ ...f, cover_url: e.target.value })} /></div>
         <div><label>Overview</label>
           <textarea rows={10} value={f.overview || ""}
