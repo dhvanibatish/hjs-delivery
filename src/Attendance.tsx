@@ -391,6 +391,58 @@ const CSS = `
 .hjsatt .att-mx th { font-size: 11.5px; }
 .hjsatt .att-mx .att-mark { width: 30px; font-size: 15px; font-weight: 800; }
 .hjsatt .att-mxleg b { font-weight: 800; }
+
+/* ---- trainings ---- */
+.hjsatt .att-cgrid { display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); }
+.hjsatt .att-ccard { display: flex; flex-direction: column; text-align: left;
+  background: #fff; border: 1px solid #e6e8ec; border-radius: 12px; overflow: hidden;
+  cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.hjsatt .att-ccard:hover { border-color: #2563eb; box-shadow: 0 2px 10px rgba(16,24,40,.07); }
+.hjsatt .att-ccard .cover { height: 108px; background: #eef1f6; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+.hjsatt .att-ccard .cover img { width: 100%; height: 100%; object-fit: cover; }
+.hjsatt .att-ccard .cover .ph { font-size: 26px; font-weight: 800; color: #98a2b3; }
+.hjsatt .att-ccard .body { padding: 11px 13px; flex: 1; }
+.hjsatt .att-ccard .body b { display: block; font-size: 14.5px; white-space: normal; }
+.hjsatt .att-ccard .body p { font-size: 12.5px; margin-top: 5px; white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hjsatt .att-ccard .foot { padding: 9px 13px; border-top: 1px solid #eef0f3;
+  font-size: 12px; font-weight: 750; letter-spacing: .03em; color: #2563eb; }
+.hjsatt .att-ccard .foot.done { color: #16a34a; }
+.hjsatt .att-ccard .foot.doing { color: #d97706; }
+.hjsatt .att-ccard .foot.empty { color: #98a2b3; }
+
+.hjsatt .att-prog { display: flex; align-items: center; gap: 10px; }
+.hjsatt .att-prog .bar { flex: 1; height: 7px; background: #eef0f3;
+  border-radius: 99px; overflow: hidden; }
+.hjsatt .att-prog .bar span { display: block; height: 100%; background: #2563eb;
+  border-radius: 99px; transition: width .25s; }
+
+.hjsatt .att-player { position: relative; width: 100%; padding-top: 56.25%;
+  background: #0b1220; border-radius: 10px; overflow: hidden; }
+.hjsatt .att-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+.hjsatt .att-num { width: 26px; height: 26px; flex: none; border-radius: 99px;
+  background: #eef0f3; color: #475467; font-size: 12.5px; font-weight: 750;
+  display: flex; align-items: center; justify-content: center; }
+.hjsatt .att-num.ok { background: #dcfce7; color: #16a34a; }
+.hjsatt .att-row.on { background: #f5f8ff; }
+
+.hjsatt .att-opt { display: flex; gap: 10px; align-items: flex-start; width: 100%;
+  text-align: left; padding: 11px 13px; border: 1px solid #e6e8ec; border-radius: 10px;
+  background: #fff; cursor: pointer; }
+.hjsatt .att-opt:hover { border-color: #c3cddb; }
+.hjsatt .att-opt.on { border-color: #2563eb; background: #f5f8ff; }
+.hjsatt .att-opt .ltr { width: 22px; height: 22px; flex: none; border-radius: 99px;
+  background: #eef0f3; font-size: 12px; font-weight: 750; color: #475467;
+  display: flex; align-items: center; justify-content: center; }
+.hjsatt .att-opt.on .ltr { background: #2563eb; color: #fff; }
+.hjsatt .att-opt .txt { white-space: normal; font-size: 14.5px; }
+
+.hjsatt .att-score { font-size: 34px; font-weight: 800; }
+.hjsatt .att-score.ok { color: #16a34a; }
+.hjsatt .att-score.no { color: #dc2626; }
 .hjsatt .att-mx td.name, .hjsatt .att-mx th.name { min-width: 190px; font-size: 14.5px; }
 .hjsatt .att-mx tr.tot td { border-top: 0; padding: 0 10px 12px; }
 .hjsatt .att-totchips { display: flex; gap: 7px; flex-wrap: wrap; }
@@ -7393,6 +7445,696 @@ function LinkAccount({ session, err: outerErr }: any) {
 type View = { k: string; label: string; adminOnly?: boolean };
 type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean };
 type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
+
+
+/* ============================================================
+   TRAININGS (LMS)
+   Content Google Drive pe rehta hai — hum sirf link store karte hain
+   aur usko embed/preview mein badal dete hain.
+   ============================================================ */
+
+// Drive ka normal share link embed ke laayak banao.
+// https://drive.google.com/file/d/ABC/view  ->  .../ABC/preview
+const driveEmbed = (url: string) => {
+  if (!url) return "";
+  const f = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (f) return `https://drive.google.com/file/d/${f[1]}/preview`;
+  const o = url.match(/[?&]id=([^&]+)/);
+  if (o && /drive\.google/.test(url)) return `https://drive.google.com/file/d/${o[1]}/preview`;
+  const y = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
+  if (y) return `https://www.youtube.com/embed/${y[1]}`;
+  if (/docs\.google\.com/.test(url)) return url.replace(/\/(edit|view)(\?.*)?$/, "/preview");
+  return url;
+};
+
+const KIND_LABEL: Record<string, string> = {
+  video: "Video", doc: "Document", link: "Link",
+};
+
+function LmsCatalog({ me, mine }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [items, setItems] = useState<Record<string, any[]>>({});
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState<any>(null);
+
+  const load = async () => {
+    setBusy(true);
+    const [c, i, p] = await Promise.all([
+      supabase.from("lms_courses").select("*").eq("active", true).order("seq"),
+      supabase.from("lms_items").select("*").order("seq"),
+      supabase.from("lms_progress").select("item_id").eq("employee_id", me.id),
+    ]);
+    setRows(c.data || []);
+    const by: Record<string, any[]> = {};
+    (i.data || []).forEach((x: any) => {
+      (by[x.course_id] = by[x.course_id] || []).push(x);
+    });
+    setItems(by);
+    setDone(new Set((p.data || []).map((x: any) => x.item_id)));
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const stat = (c: any) => {
+    const list = items[c.id] || [];
+    if (!list.length) return { n: 0, total: 0, state: "empty" };
+    const n = list.filter((x) => done.has(x.id)).length;
+    return { n, total: list.length,
+      state: n === 0 ? "new" : n === list.length ? "done" : "doing" };
+  };
+
+  const shown = rows
+    .filter((c) => !q || `${c.title} ${c.description || ""}`.toLowerCase().includes(q.toLowerCase()))
+    .filter((c) => !mine || stat(c).n > 0);
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">{mine ? "My Courses" : "Course Catalog"}</h3>
+        <span className="att-muted">{shown.length} course{shown.length === 1 ? "" : "s"}</span>
+      </div>
+
+      <Search placeholder="Search courses" value={q} onChange={setQ} style={{ marginTop: 10 }} />
+
+      {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
+
+      {!busy && shown.length === 0 && (
+        <div className="att-list" style={{ marginTop: 10 }}>
+          <p className="att-empty">
+            {mine ? "You haven't started any course yet. Open the Catalog to begin."
+                  : "No courses yet."}
+          </p>
+        </div>
+      )}
+
+      <div className="att-cgrid" style={{ marginTop: 12 }}>
+        {shown.map((c) => {
+          const st = stat(c);
+          return (
+            <button className="att-ccard" key={c.id} onClick={() => setOpen(c)}>
+              <div className="cover">
+                {c.cover_url
+                  ? <img src={c.cover_url} alt="" />
+                  : <span className="ph">{c.title.slice(0, 2).toUpperCase()}</span>}
+              </div>
+              <div className="body">
+                <b>{c.title}</b>
+                <p className="att-muted">{c.description}</p>
+              </div>
+              <div className={`foot ${st.state}`}>
+                {st.state === "done" ? "COMPLETED"
+                  : st.state === "doing" ? `IN PROGRESS · ${st.n}/${st.total}`
+                  : st.state === "empty" ? "COMING SOON" : "START NOW"}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {open && (
+        <LmsCourseSheet me={me} course={open} items={items[open.id] || []}
+          done={done} onClose={() => setOpen(null)}
+          onChange={load} />
+      )}
+    </>
+  );
+}
+
+function LmsCourseSheet({ me, course, items, done, onClose, onChange }: any) {
+  const [play, setPlay] = useState<any>(items[0] || null);
+  const [busy, setBusy] = useState(false);
+  const [asmts, setAsmts] = useState<any[]>([]);
+  const [quiz, setQuiz] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.from("lms_assessments").select("*")
+      .eq("course_id", course.id).eq("active", true).order("seq")
+      .then(({ data }) => setAsmts(data || []));
+  }, [course.id]);
+
+  const nDone = items.filter((x: any) => done.has(x.id)).length;
+  const pct = items.length ? Math.round((nDone / items.length) * 100) : 0;
+
+  const toggle = async (item: any) => {
+    setBusy(true);
+    if (done.has(item.id)) {
+      await supabase.from("lms_progress").delete()
+        .eq("employee_id", me.id).eq("item_id", item.id);
+    } else {
+      await supabase.from("lms_progress")
+        .upsert({ employee_id: me.id, item_id: item.id });
+    }
+    await onChange();
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={course.title} onClose={onClose}>
+      <div className="att-stack">
+        {course.description && (
+          <p className="att-muted" style={{ whiteSpace: "normal" }}>{course.description}</p>
+        )}
+
+        <div className="att-prog">
+          <div className="bar"><span style={{ width: `${pct}%` }} /></div>
+          <span className="att-muted">{nDone} of {items.length} done · {pct}%</span>
+        </div>
+
+        {play && (
+          <div className="att-player">
+            <iframe src={driveEmbed(play.url)} title={play.title}
+              allow="autoplay; encrypted-media" allowFullScreen />
+          </div>
+        )}
+
+        {play && (
+          <div className="att-between">
+            <div>
+              <b>{play.title}</b>
+              <p className="att-muted">
+                {KIND_LABEL[play.kind] || play.kind}
+                {play.duration_min ? ` · ${play.duration_min} min` : ""}
+              </p>
+            </div>
+            <div className="att-flex">
+              <a className="att-btn sm line" href={play.url} target="_blank" rel="noreferrer">
+                Open in Drive
+              </a>
+              <button className={`att-btn sm ${done.has(play.id) ? "line" : ""}`}
+                disabled={busy} onClick={() => toggle(play)}>
+                {done.has(play.id) ? "✓ Done" : "Mark as done"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="att-list">
+          <div className="att-hd"><b>Chapters</b><span className="att-muted">{items.length}</span></div>
+          {items.length === 0 && <p className="att-empty">No content added yet.</p>}
+          {items.map((x: any, i: number) => (
+            <div className={`att-row clk ${play?.id === x.id ? "on" : ""}`} key={x.id}
+              onClick={() => setPlay(x)}>
+              <span className={`att-num ${done.has(x.id) ? "ok" : ""}`}>
+                {done.has(x.id) ? "✓" : i + 1}
+              </span>
+              <div className="grow">
+                <p><b>{x.title}</b></p>
+                <p className="att-muted">
+                  {KIND_LABEL[x.kind] || x.kind}
+                  {x.duration_min ? ` · ${x.duration_min} min` : ""}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {asmts.length > 0 && (
+          <div className="att-list">
+            <div className="att-hd"><b>Assessments</b><span className="att-muted">{asmts.length}</span></div>
+            {asmts.map((a: any) => (
+              <div className="att-row" key={a.id}>
+                <div className="grow">
+                  <p><b>{a.title}</b></p>
+                  <p className="att-muted">{a.duration_min} min · pass {a.pass_percent}%</p>
+                </div>
+                <button className="att-btn sm" onClick={() => setQuiz(a)}>Start</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {quiz && <LmsQuiz a={quiz} onClose={() => setQuiz(null)} />}
+    </Sheet>
+  );
+}
+
+/* ---------------- quiz ---------------- */
+
+function LmsQuiz({ a, onClose }: any) {
+  const [qs, setQs] = useState<any[]>([]);
+  const [ans, setAns] = useState<Record<string, number>>({});
+  const [i, setI] = useState(0);
+  const [busy, setBusy] = useState(true);
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState("");
+  const [left, setLeft] = useState((a.duration_min || 10) * 60);
+
+  useEffect(() => {
+    supabase.rpc("lms_quiz_start", { p_assessment: a.id }).then(({ data, error }) => {
+      if (error) setErr(error.message);
+      setQs(data || []); setBusy(false);
+    });
+  }, [a.id]);
+
+  const submit = async () => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("lms_quiz_submit",
+      { p_assessment: a.id, p_answers: ans });
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setRes((data || [])[0] || null);
+    setBusy(false);
+  };
+
+  // timer — waqt khatam to apne aap jama ho jayega
+  useEffect(() => {
+    if (res || busy) return;
+    if (left <= 0) { submit(); return; }
+    const t = setTimeout(() => setLeft(left - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left, res, busy]);
+
+  const mm = String(Math.floor(Math.max(left, 0) / 60)).padStart(2, "0");
+  const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
+  const q = qs[i];
+  const answered = Object.keys(ans).length;
+
+  return (
+    <Sheet title={a.title} onClose={onClose}>
+      <Note>{err}</Note>
+
+      {res ? (
+        <div className="att-stack" style={{ textAlign: "center" }}>
+          <div className={`att-score ${res.passed ? "ok" : "no"}`}>
+            {Number(res.score)} / {Number(res.total)}
+          </div>
+          <b style={{ fontSize: 17, color: res.passed ? "#16a34a" : "#dc2626" }}>
+            {res.passed ? "Passed" : "Not passed"}
+          </b>
+          <p className="att-muted">Pass mark {a.pass_percent}%</p>
+          <button className="att-btn" onClick={onClose}>Done</button>
+        </div>
+      ) : busy ? (
+        <p className="att-muted">Loading…</p>
+      ) : qs.length === 0 ? (
+        <p className="att-empty">No questions in this assessment yet.</p>
+      ) : (
+        <div className="att-stack">
+          <div className="att-between">
+            <span className="att-muted">Question {i + 1} of {qs.length}</span>
+            <span className={`att-pill ${left < 60 ? "p-Absent" : "p-Late"}`}>{mm}:{ss}</span>
+          </div>
+
+          <div className="att-prog">
+            <div className="bar"><span style={{ width: `${((i + 1) / qs.length) * 100}%` }} /></div>
+          </div>
+
+          <p style={{ fontWeight: 650, whiteSpace: "normal", fontSize: 15.5 }}>{q.question}</p>
+
+          <div className="att-stack" style={{ gap: 8 }}>
+            {(q.options || []).map((o: string, k: number) => (
+              <button key={k}
+                className={`att-opt ${ans[q.id] === k ? "on" : ""}`}
+                onClick={() => setAns({ ...ans, [q.id]: k })}>
+                <span className="ltr">{String.fromCharCode(65 + k)}</span>
+                <span className="txt">{o}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="att-between">
+            <button className="att-btn sm line" disabled={i === 0}
+              onClick={() => setI(i - 1)}>Back</button>
+            {i < qs.length - 1 ? (
+              <button className="att-btn sm" onClick={() => setI(i + 1)}>Next</button>
+            ) : (
+              <button className="att-btn sm" disabled={busy} onClick={submit}>
+                Submit ({answered}/{qs.length})
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/* ---------------- my assessments ---------------- */
+
+function LmsMyAssessments({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [at, as, cs] = await Promise.all([
+        supabase.from("lms_attempts").select("*")
+          .eq("employee_id", me.id).order("submitted_at", { ascending: false }),
+        supabase.from("lms_assessments").select("*"),
+        supabase.from("lms_courses").select("id, title"),
+      ]);
+      const am: Record<string, any> = {};
+      (as.data || []).forEach((x: any) => { am[x.id] = x; });
+      const cm: Record<string, any> = {};
+      (cs.data || []).forEach((x: any) => { cm[x.id] = x; });
+      setRows((at.data || []).map((x: any) => ({
+        ...x, a: am[x.assessment_id], c: cm[am[x.assessment_id]?.course_id] })));
+      setBusy(false);
+    })();
+  }, []);
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">My Assessments</h3>
+        <span className="att-muted">{rows.length} attempt{rows.length === 1 ? "" : "s"}</span>
+      </div>
+
+      {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
+
+      <div className="att-list" style={{ marginTop: 10 }}>
+        {!busy && rows.length === 0 && (
+          <p className="att-empty">You haven't taken any assessment yet.</p>
+        )}
+        {rows.map((r) => (
+          <div className="att-row" key={r.id}>
+            <div className="grow">
+              <p><b>{r.a?.title || "Assessment"}</b></p>
+              <p className="att-muted">
+                {r.c?.title || "—"}
+                {r.submitted_at ? ` · ${fmtDate(r.submitted_at)}` : ""}
+              </p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p><b>{Number(r.score)} / {Number(r.total)}</b></p>
+              <span className={`att-pill ${r.passed ? "p-Present" : "p-Absent"}`}>
+                {r.passed ? "Pass" : "Fail"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ---------------- admin: manage courses ---------------- */
+
+function LmsManage({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [items, setItems] = useState<Record<string, any[]>>({});
+  const [busy, setBusy] = useState(true);
+  const [edit, setEdit] = useState<any>(null);
+  const [openC, setOpenC] = useState<any>(null);
+
+  const load = async () => {
+    setBusy(true);
+    const [c, i] = await Promise.all([
+      supabase.from("lms_courses").select("*").order("seq"),
+      supabase.from("lms_items").select("*").order("seq"),
+    ]);
+    setRows(c.data || []);
+    const by: Record<string, any[]> = {};
+    (i.data || []).forEach((x: any) => { (by[x.course_id] = by[x.course_id] || []).push(x); });
+    setItems(by);
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">Manage Courses</h3>
+        <button className="att-btn sm" onClick={() => setEdit({ seq: rows.length, active: true })}>
+          + New course
+        </button>
+      </div>
+
+      {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
+
+      <div className="att-list" style={{ marginTop: 10 }}>
+        {!busy && rows.length === 0 && <p className="att-empty">No courses yet.</p>}
+        {rows.map((c) => (
+          <div className="att-row" key={c.id}>
+            <div className="grow">
+              <p><b>{c.title}</b>
+                {!c.active && <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>hidden</span>}
+              </p>
+              <p className="att-muted">
+                {(items[c.id] || []).length} chapter{(items[c.id] || []).length === 1 ? "" : "s"}
+              </p>
+            </div>
+            <div className="att-flex">
+              <button className="att-btn sm line" onClick={() => setOpenC(c)}>Chapters</button>
+              <button className="att-btn sm line" onClick={() => setEdit(c)}>Edit</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {edit && <LmsCourseForm row={edit} onClose={() => setEdit(null)}
+        onSaved={() => { setEdit(null); load(); }} />}
+      {openC && <LmsItemsSheet course={openC} rows={items[openC.id] || []}
+        onClose={() => setOpenC(null)} onSaved={load} />}
+    </>
+  );
+}
+
+function LmsCourseForm({ row, onClose, onSaved }: any) {
+  const [f, setF] = useState<any>({
+    title: "", description: "", cover_url: "", seq: 0, active: true, ...row });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const save = async () => {
+    if (!f.title.trim()) return setErr("Title is required.");
+    setBusy(true); setErr("");
+    const p = { title: f.title.trim(), description: f.description || null,
+      cover_url: f.cover_url || null, seq: Number(f.seq) || 0, active: !!f.active };
+    const { error } = f.id
+      ? await supabase.from("lms_courses").update(p).eq("id", f.id)
+      : await supabase.from("lms_courses").insert(p);
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setBusy(false); onSaved();
+  };
+
+  const kill = async () => {
+    if (!window.confirm("Delete this course and all its chapters?")) return;
+    setBusy(true);
+    await supabase.from("lms_courses").delete().eq("id", f.id);
+    setBusy(false); onSaved();
+  };
+
+  return (
+    <Sheet title={f.id ? "Edit course" : "New course"} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+        <div><label>Title</label>
+          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
+        <div><label>Description</label>
+          <textarea rows={3} value={f.description || ""}
+            onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
+        <div><label>Cover image URL</label>
+          <input value={f.cover_url || ""} placeholder="https://…"
+            onChange={(e) => setF({ ...f, cover_url: e.target.value })} /></div>
+        <div className="att-row2">
+          <div><label>Order</label>
+            <input type="number" value={f.seq}
+              onChange={(e) => setF({ ...f, seq: e.target.value })} /></div>
+          <div style={{ alignSelf: "end" }}>
+            <label className="att-check">
+              <input type="checkbox" checked={!!f.active}
+                onChange={(e) => setF({ ...f, active: e.target.checked })} />
+              <span>Visible to staff</span>
+            </label>
+          </div>
+        </div>
+        <button className="att-btn" disabled={busy} onClick={save}>Save</button>
+        {f.id && <button className="att-btn line" style={{ color: "#dc2626" }}
+          disabled={busy} onClick={kill}>Delete course</button>}
+      </div>
+    </Sheet>
+  );
+}
+
+function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
+  const [list, setList] = useState<any[]>(rows);
+  const [f, setF] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const reload = async () => {
+    const { data } = await supabase.from("lms_items").select("*")
+      .eq("course_id", course.id).order("seq");
+    setList(data || []);
+    onSaved();
+  };
+
+  const save = async () => {
+    if (!f.title?.trim() || !f.url?.trim()) return setErr("Title and link are both required.");
+    setBusy(true); setErr("");
+    const p = { course_id: course.id, title: f.title.trim(), url: f.url.trim(),
+      kind: f.kind || "video", seq: Number(f.seq) || 0,
+      duration_min: f.duration_min ? Number(f.duration_min) : null };
+    const { error } = f.id
+      ? await supabase.from("lms_items").update(p).eq("id", f.id)
+      : await supabase.from("lms_items").insert(p);
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setF(null); setBusy(false); await reload();
+  };
+
+  const kill = async (id: string) => {
+    if (!window.confirm("Delete this chapter?")) return;
+    await supabase.from("lms_items").delete().eq("id", id);
+    await reload();
+  };
+
+  return (
+    <Sheet title={`Chapters · ${course.title}`} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+
+        {f ? (
+          <div className="att-stack att-card">
+            <div><label>Title</label>
+              <input value={f.title || ""} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
+            <div><label>Google Drive / YouTube link</label>
+              <input value={f.url || ""} placeholder="https://drive.google.com/file/d/…/view"
+                onChange={(e) => setF({ ...f, url: e.target.value })} />
+              <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Drive file "Anyone with the link — Viewer" honi chahiye, warna staff ko access maangna padega.
+              </p></div>
+            <div className="att-row2">
+              <div><label>Type</label>
+                <select value={f.kind || "video"} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+                  <option value="video">Video</option>
+                  <option value="doc">Document</option>
+                  <option value="link">Link</option>
+                </select></div>
+              <div><label>Minutes</label>
+                <input type="number" value={f.duration_min || ""}
+                  onChange={(e) => setF({ ...f, duration_min: e.target.value })} /></div>
+            </div>
+            <div><label>Order</label>
+              <input type="number" value={f.seq ?? 0}
+                onChange={(e) => setF({ ...f, seq: e.target.value })} /></div>
+            <div className="att-flex">
+              <button className="att-btn sm" disabled={busy} onClick={save}>Save</button>
+              <button className="att-btn sm line" onClick={() => { setF(null); setErr(""); }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button className="att-btn sm" onClick={() => setF({ seq: list.length, kind: "video" })}>
+            + Add chapter
+          </button>
+        )}
+
+        <div className="att-list">
+          {list.length === 0 && <p className="att-empty">No chapters yet.</p>}
+          {list.map((x, i) => (
+            <div className="att-row" key={x.id}>
+              <span className="att-num">{i + 1}</span>
+              <div className="grow">
+                <p><b>{x.title}</b></p>
+                <p className="att-muted">
+                  {KIND_LABEL[x.kind] || x.kind}{x.duration_min ? ` · ${x.duration_min} min` : ""}
+                </p>
+              </div>
+              <div className="att-flex">
+                <button className="att-btn sm line" onClick={() => setF(x)}>Edit</button>
+                <button className="att-btn sm line" style={{ color: "#dc2626" }}
+                  onClick={() => kill(x.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ---------------- admin: who finished what ---------------- */
+
+function LmsProgressReport() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const [emps, courses, items, prog] = await Promise.all([
+        supabase.from("employees").select("id, emp_code, full_name").eq("active", true),
+        supabase.from("lms_courses").select("id, title").eq("active", true).order("seq"),
+        supabase.from("lms_items").select("id, course_id"),
+        supabase.from("lms_progress").select("employee_id, item_id"),
+      ]);
+      const perCourse: Record<string, number> = {};
+      const itemCourse: Record<string, string> = {};
+      (items.data || []).forEach((x: any) => {
+        perCourse[x.course_id] = (perCourse[x.course_id] || 0) + 1;
+        itemCourse[x.id] = x.course_id;
+      });
+      const byEmp: Record<string, Record<string, number>> = {};
+      (prog.data || []).forEach((p: any) => {
+        const c = itemCourse[p.item_id];
+        if (!c) return;
+        byEmp[p.employee_id] = byEmp[p.employee_id] || {};
+        byEmp[p.employee_id][c] = (byEmp[p.employee_id][c] || 0) + 1;
+      });
+      setRows((emps.data || []).map((e: any) => ({
+        ...e,
+        courses: (courses.data || []).map((c: any) => ({
+          id: c.id, title: c.title,
+          n: byEmp[e.id]?.[c.id] || 0, total: perCourse[c.id] || 0,
+        })),
+      })).sort((a: any, b: any) => a.full_name.localeCompare(b.full_name)));
+      setBusy(false);
+    })();
+  }, []);
+
+  const shown = rows.filter((r) =>
+    !q || `${r.full_name} ${r.emp_code}`.toLowerCase().includes(q.toLowerCase()));
+  const heads = rows[0]?.courses || [];
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">Team Progress</h3>
+        <button className="att-btn sm line" disabled={!shown.length}
+          onClick={() => downloadCsv(shown.map((r) => {
+            const o: any = { Code: r.emp_code, Name: r.full_name };
+            r.courses.forEach((c: any) => { o[c.title] = `${c.n}/${c.total}`; });
+            return o;
+          }), "HJS_training_progress.csv")}>CSV</button>
+      </div>
+
+      <Search placeholder="Search by name or code" value={q} onChange={setQ}
+        style={{ marginTop: 10 }} />
+
+      {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
+
+      {!busy && (
+        <div className="att-scroll" style={{ marginTop: 10 }}>
+          <table className="att-table">
+            <thead>
+              <tr>
+                <th className="name">Employee</th>
+                {heads.map((c: any) => <th key={c.id}>{c.title}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.id}>
+                  <td className="name"><b>{r.emp_code}</b> · {r.full_name}</td>
+                  {r.courses.map((c: any) => (
+                    <td key={c.id} style={{ textAlign: "center" }}>
+                      <span className={`att-mark ${c.total && c.n === c.total ? "m-P"
+                        : c.n ? "m-L" : "m-A"}`}>
+                        {c.total ? `${c.n}/${c.total}` : "—"}
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
 
 const MODULES: Module[] = [
   {
