@@ -939,6 +939,7 @@ const ICONS: Record<string, string> = {
   users: "M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20M9 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 20v-1.5a4 4 0 0 0-3-3.8M16.5 3.7a4 4 0 0 1 0 6.9",
   user: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
   pencil: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
+  book: "M4 4.5A1.5 1.5 0 0 1 5.5 3H19v18H5.5A1.5 1.5 0 0 1 4 19.5v-15ZM8 3v18",
   dots: "M5 12h.01M12 12h.01M19 12h.01",
 };
 const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
@@ -7455,6 +7456,20 @@ const MODULES: Module[] = [
     ],
   },
   {
+    k: "lms", label: "Trainings", icon: "book",
+    scopes: [
+      { k: "catalog", label: "Catalog", views: [{ k: "all", label: "All Courses" }]},
+      { k: "mydata", label: "My Data", views: [
+        { k: "courses", label: "My Courses" },
+        { k: "asmt", label: "Assessments" },
+      ]},
+      { k: "manage", label: "Manage", adminOnly: true, views: [
+        { k: "courses", label: "Manage Courses", adminOnly: true },
+        { k: "report", label: "Team Progress", adminOnly: true },
+      ]},
+    ],
+  },
+  {
     k: "reports", label: "Reports", icon: "users",
     scopes: [
       { k: "mine", label: "My Reports", views: [
@@ -7703,6 +7718,12 @@ export default function Attendance() {
       case "approvals/joiners/all":  return <div className="att-wrap att-stack"><JoinersTab /></div>;
       case "approvals/setup/all":    return <div className="att-wrap att-stack"><NeedsSetupTab me={me} /></div>;
       case "me/me/profile":          return <MeScreen me={me} />;
+      // ---- Trainings ----
+      case "lms/catalog/all":       return <div className="att-wrap att-stack"><LmsCatalog me={me} mine={false} /></div>;
+      case "lms/mydata/courses":    return <div className="att-wrap att-stack"><LmsCatalog me={me} mine={true} /></div>;
+      case "lms/mydata/asmt":       return <div className="att-wrap att-stack"><LmsMyAssessments me={me} /></div>;
+      case "lms/manage/courses":    return <div className="att-wrap att-stack"><LmsManage me={me} /></div>;
+      case "lms/manage/report":     return <div className="att-wrap att-stack"><LmsProgressReport /></div>;
       // ---- Reports ----
       case "reports/mine/me":       return <MyReportTab me={me} />;
       case "reports/mine/pay":      return <MyPayTab me={me} />;
