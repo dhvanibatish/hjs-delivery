@@ -455,6 +455,41 @@ const CSS = `
 .hjsatt .att-rich .rt-ul { margin: 6px 0 0 18px; }
 .hjsatt .att-rich .rt-ul li { font-size: 14px; margin-top: 4px; color: #475467;
   list-style: disc; line-height: 1.5; white-space: normal; }
+.hjsatt .hjs-cert { position: relative; width: 1123px; height: 794px; background: #fff;
+  font-family: Georgia, "Times New Roman", serif; overflow: hidden;
+  border: 14px solid #21996e; box-sizing: border-box; }
+.hjsatt .hjs-cert .c { position: absolute; width: 250px; height: 150px; background: #21996e; }
+.hjsatt .hjs-cert .c.tl { top: 0; left: 0; clip-path: polygon(0 0, 100% 0, 78% 46%, 0 46%); }
+.hjsatt .hjs-cert .c.br { bottom: 0; right: 0; clip-path: polygon(22% 54%, 100% 54%, 100% 100%, 0 100%); }
+.hjsatt .hjs-cert .inner { position: relative; z-index: 2; height: 100%;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 60px 90px; }
+.hjsatt .hjs-cert .logo { width: 54px; height: 54px; object-fit: contain; margin-bottom: 14px; }
+.hjsatt .hjs-cert h1 { font-size: 50px; font-style: italic; color: #4a7c62;
+  font-weight: 400; margin: 0 0 26px; }
+.hjsatt .hjs-cert .sub { font-size: 17px; letter-spacing: .22em; color: #1d2939;
+  text-transform: uppercase; margin: 0; }
+.hjsatt .hjs-cert .who { font-size: 40px; font-weight: 700; color: #101828;
+  margin: 26px 0 10px; border-bottom: 2px solid #d7dde5; padding: 0 40px 12px;
+  min-width: 460px; }
+.hjsatt .hjs-cert .for { font-size: 16px; color: #475467; margin: 20px 0 6px; }
+.hjsatt .hjs-cert .course { font-size: 22px; font-weight: 700; color: #21996e; margin: 0; }
+.hjsatt .hjs-cert .feet { display: flex; align-items: flex-end; justify-content: space-between;
+  width: 100%; margin-top: 62px; }
+.hjsatt .hjs-cert .feet div { min-width: 190px; }
+.hjsatt .hjs-cert .feet b { display: block; font-size: 19px; color: #101828; }
+.hjsatt .hjs-cert .feet span { display: block; font-size: 15px; color: #667085;
+  border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
+.hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
+
+.hjsatt .att-cert-cta { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 13px 15px; border-radius: 10px; background: #f6fef9;
+  border: 1px solid #b7ebc9; }
+.hjsatt .att-cert-cta b { color: #16a34a; }
+.hjsatt .att-certwrap { overflow: auto; background: #f2f4f7; padding: 12px;
+  border-radius: 10px; }
+.hjsatt .att-certwrap .hjs-cert { transform: scale(.52); transform-origin: top left;
+  margin-bottom: -381px; margin-right: -539px; }
 .hjsatt .att-score { font-size: 34px; font-weight: 800; }
 .hjsatt .att-score.ok { color: #16a34a; }
 .hjsatt .att-score.no { color: #dc2626; }
@@ -7482,6 +7517,46 @@ const driveEmbed = (url: string) => {
   return url;
 };
 
+// Certificate ka CSS — screen aur print dono jagah same
+const CERT_CSS = `
+.hjs-cert { position: relative; width: 1123px; height: 794px; background: #fff;
+  font-family: Georgia, "Times New Roman", serif; overflow: hidden;
+  border: 14px solid #21996e; box-sizing: border-box; }
+.hjs-cert .c { position: absolute; width: 250px; height: 150px; background: #21996e; }
+.hjs-cert .c.tl { top: 0; left: 0; clip-path: polygon(0 0, 100% 0, 78% 46%, 0 46%); }
+.hjs-cert .c.br { bottom: 0; right: 0; clip-path: polygon(22% 54%, 100% 54%, 100% 100%, 0 100%); }
+.hjs-cert .inner { position: relative; z-index: 2; height: 100%;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 60px 90px; }
+.hjs-cert .logo { width: 54px; height: 54px; object-fit: contain; margin-bottom: 14px; }
+.hjs-cert h1 { font-size: 50px; font-style: italic; color: #4a7c62;
+  font-weight: 400; margin: 0 0 26px; }
+.hjs-cert .sub { font-size: 17px; letter-spacing: .22em; color: #1d2939;
+  text-transform: uppercase; margin: 0; }
+.hjs-cert .who { font-size: 40px; font-weight: 700; color: #101828;
+  margin: 26px 0 10px; border-bottom: 2px solid #d7dde5; padding: 0 40px 12px;
+  min-width: 460px; }
+.hjs-cert .for { font-size: 16px; color: #475467; margin: 20px 0 6px; }
+.hjs-cert .course { font-size: 22px; font-weight: 700; color: #21996e; margin: 0; }
+.hjs-cert .feet { display: flex; align-items: flex-end; justify-content: space-between;
+  width: 100%; margin-top: 62px; }
+.hjs-cert .feet div { min-width: 190px; }
+.hjs-cert .feet b { display: block; font-size: 19px; color: #101828; }
+.hjs-cert .feet span { display: block; font-size: 15px; color: #667085;
+  border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
+.hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
+`;
+
+// Drive ka share link seedha <img> mein nahi chalta — thumbnail URL banao
+const driveImg = (url: string) => {
+  if (!url) return "";
+  const f = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (f) return `https://drive.google.com/thumbnail?id=${f[1]}&sz=w800`;
+  const o = url.match(/[?&]id=([^&]+)/);
+  if (o && /drive\.google/.test(url)) return `https://drive.google.com/thumbnail?id=${o[1]}&sz=w800`;
+  return url;
+};
+
 const KIND_LABEL: Record<string, string> = {
   video: "Video", doc: "Document", link: "Link",
 };
@@ -7519,6 +7594,7 @@ function LmsCatalog({ me, mine }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [items, setItems] = useState<Record<string, any[]>>({});
   const [done, setDone] = useState<Set<string>>(new Set());
+  const [doneAt, setDoneAt] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(true);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<any>(null);
@@ -7528,7 +7604,7 @@ function LmsCatalog({ me, mine }: any) {
     const [c, i, p] = await Promise.all([
       supabase.from("lms_courses").select("*").eq("active", true).order("seq"),
       supabase.from("lms_items").select("*").order("seq"),
-      supabase.from("lms_progress").select("item_id").eq("employee_id", me.id),
+      supabase.from("lms_progress").select("item_id, completed_at").eq("employee_id", me.id),
     ]);
     setRows(c.data || []);
     const by: Record<string, any[]> = {};
@@ -7537,6 +7613,9 @@ function LmsCatalog({ me, mine }: any) {
     });
     setItems(by);
     setDone(new Set((p.data || []).map((x: any) => x.item_id)));
+    const dm: Record<string, string> = {};
+    (p.data || []).forEach((x: any) => { dm[x.item_id] = x.completed_at; });
+    setDoneAt(dm);
     setBusy(false);
   };
   useEffect(() => { load(); }, []);
@@ -7580,7 +7659,7 @@ function LmsCatalog({ me, mine }: any) {
             <button className="att-ccard" key={c.id} onClick={() => setOpen(c)}>
               <div className="cover">
                 {c.cover_url
-                  ? <img src={c.cover_url} alt="" />
+                  ? <img src={driveImg(c.cover_url)} alt="" />
                   : <span className="ph">{c.title.slice(0, 2).toUpperCase()}</span>}
               </div>
               <div className="body">
@@ -7599,24 +7678,29 @@ function LmsCatalog({ me, mine }: any) {
 
       {open && (
         <LmsCourseSheet me={me} course={open} items={items[open.id] || []}
-          done={done} onClose={() => setOpen(null)}
+          done={done} doneAt={doneAt} onClose={() => setOpen(null)}
           onChange={load} />
       )}
     </>
   );
 }
 
-function LmsCourseSheet({ me, course, items, done, onClose, onChange }: any) {
+function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: any) {
   const [play, setPlay] = useState<any>(items[0] || null);
   const [busy, setBusy] = useState(false);
   const [asmts, setAsmts] = useState<any[]>([]);
   const [quiz, setQuiz] = useState<any>(null);
+  const [tries, setTries] = useState<any[]>([]);
+  const [cert, setCert] = useState(false);
 
-  useEffect(() => {
+  const loadAsmt = () => {
     supabase.from("lms_assessments").select("*")
       .eq("course_id", course.id).eq("active", true).order("seq")
       .then(({ data }) => setAsmts(data || []));
-  }, [course.id]);
+    supabase.from("lms_attempts").select("*").eq("employee_id", me.id)
+      .then(({ data }) => setTries(data || []));
+  };
+  useEffect(loadAsmt, [course.id]);
 
   const nDone = items.filter((x: any) => done.has(x.id)).length;
   const pct = items.length ? Math.round((nDone / items.length) * 100) : 0;
@@ -7645,6 +7729,18 @@ function LmsCourseSheet({ me, course, items, done, onClose, onChange }: any) {
           <div className="bar"><span style={{ width: `${pct}%` }} /></div>
           <span className="att-muted">{nDone} of {items.length} done · {pct}%</span>
         </div>
+
+        {items.length > 0 && nDone === items.length && (
+          <div className="att-cert-cta">
+            <div>
+              <b>Course completed</b>
+              <p className="att-muted">Your certificate is ready.</p>
+            </div>
+            <button className="att-btn sm" onClick={() => setCert(true)}>
+              View certificate
+            </button>
+          </div>
+        )}
 
         {course.overview && (
           <details className="att-ovw" open>
@@ -7717,7 +7813,68 @@ function LmsCourseSheet({ me, course, items, done, onClose, onChange }: any) {
         )}
       </div>
 
-      {quiz && <LmsQuiz a={quiz} onClose={() => setQuiz(null)} />}
+      {quiz && <LmsQuiz a={quiz} onClose={() => { setQuiz(null); loadAsmt(); }} />}
+      {cert && (
+        <LmsCertificate me={me} course={course} onClose={() => setCert(false)}
+          date={items.map((x: any) => doneAt?.[x.id]).filter(Boolean).sort().slice(-1)[0]}
+          grade={(() => {
+            const ids = asmts.map((a: any) => a.id);
+            const mine = tries.filter((t: any) => ids.includes(t.assessment_id) && t.total > 0);
+            if (!mine.length) return null;
+            const best: Record<string, number> = {};
+            mine.forEach((t: any) => {
+              const p = (Number(t.score) / Number(t.total)) * 100;
+              best[t.assessment_id] = Math.max(best[t.assessment_id] ?? 0, p);
+            });
+            const v = Object.values(best);
+            return Math.round(v.reduce((a, b) => a + b, 0) / v.length);
+          })()} />
+      )}
+    </Sheet>
+  );
+}
+
+/* ---------------- certificate ---------------- */
+
+function LmsCertificate({ me, course, date, grade, onClose }: any) {
+  const print = () => {
+    const el = document.getElementById("hjs-cert");
+    if (!el) return;
+    const w = window.open("", "_blank", "width=1150,height=820");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><title>Certificate</title>
+      <style>
+        @page { size: A4 landscape; margin: 0; }
+        body { margin: 0; font-family: Georgia, "Times New Roman", serif; }
+        ${CERT_CSS}
+      </style></head><body>${el.outerHTML}</body></html>`);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 350);
+  };
+
+  return (
+    <Sheet title="Certificate" onClose={onClose}>
+      <div className="att-stack">
+        <div className="att-certwrap">
+          <div className="hjs-cert" id="hjs-cert">
+            <span className="c tl" /><span className="c br" />
+            <div className="inner">
+              <img className="logo" src="/favicon.png" alt="" />
+              <h1>Certificate of Achievement</h1>
+              <p className="sub">This certificate is awarded to</p>
+              <p className="who">{me.full_name}</p>
+              <p className="for">for successfully completing the course</p>
+              <p className="course">{course.title}</p>
+              <div className="feet">
+                <div><b>{date ? fmtDateY(date) : "—"}</b><span>Date</span></div>
+                <div className="seal">★</div>
+                <div><b>{grade == null ? "Completed" : `${grade}%`}</b><span>Grade</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button className="att-btn" onClick={print}>Download / Print</button>
+      </div>
     </Sheet>
   );
 }
