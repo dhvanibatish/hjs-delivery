@@ -399,9 +399,10 @@ const CSS = `
   background: #fff; border: 1px solid #e6e8ec; border-radius: 12px; overflow: hidden;
   cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 .hjsatt .att-ccard:hover { border-color: #2563eb; box-shadow: 0 2px 10px rgba(16,24,40,.07); }
-.hjsatt .att-ccard .cover { height: 108px; background: #eef1f6; display: flex;
+.hjsatt .att-ccard .cover { aspect-ratio: 5 / 2; background: #f4f6f9; display: flex;
   align-items: center; justify-content: center; overflow: hidden; }
-.hjsatt .att-ccard .cover img { width: 100%; height: 100%; object-fit: cover; }
+/* banner-type covers hain, isliye contain — kuch katta nahi */
+.hjsatt .att-ccard .cover img { width: 100%; height: 100%; object-fit: contain; }
 .hjsatt .att-ccard .cover .ph { font-size: 26px; font-weight: 800; color: #98a2b3; }
 .hjsatt .att-ccard .body { padding: 11px 13px; flex: 1; }
 .hjsatt .att-ccard .body b { display: block; font-size: 14.5px; white-space: normal; }
@@ -483,8 +484,8 @@ const CSS = `
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
 .hjsatt .att-coverprev { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
-.hjsatt .att-coverprev img { width: 150px; height: 84px; object-fit: cover;
-  border-radius: 8px; border: 1px solid #e6e8ec; background: #eef1f6; }
+.hjsatt .att-coverprev img { width: 160px; aspect-ratio: 5 / 2; object-fit: contain;
+  border-radius: 8px; border: 1px solid #e6e8ec; background: #f4f6f9; }
 
 .hjsatt .att-cert-cta { display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 13px 15px; border-radius: 10px; background: #f6fef9;
