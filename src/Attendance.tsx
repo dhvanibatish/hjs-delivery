@@ -440,6 +440,21 @@ const CSS = `
 .hjsatt .att-opt.on .ltr { background: #2563eb; color: #fff; }
 .hjsatt .att-opt .txt { white-space: normal; font-size: 14.5px; }
 
+.hjsatt .att-ovw { border: 1px solid #e6e8ec; border-radius: 10px; background: #fff; }
+.hjsatt .att-ovw > summary { padding: 11px 14px; cursor: pointer; font-weight: 700;
+  font-size: 14px; list-style: none; }
+.hjsatt .att-ovw > summary::-webkit-details-marker { display: none; }
+.hjsatt .att-ovw > summary::before { content: "▸"; margin-right: 7px; color: #98a2b3; }
+.hjsatt .att-ovw[open] > summary::before { content: "▾"; }
+.hjsatt .att-ovw[open] > summary { border-bottom: 1px solid #eef0f3; }
+.hjsatt .att-rich { padding: 4px 16px 16px; }
+.hjsatt .att-rich .rt-h { font-size: 15px; font-weight: 750; margin-top: 15px; color: #101828; }
+.hjsatt .att-rich .rt-p { font-size: 14px; margin-top: 7px; white-space: normal;
+  color: #475467; line-height: 1.55; }
+.hjsatt .att-rich .rt-n { font-size: 14px; font-weight: 700; margin-top: 11px; color: #344054; }
+.hjsatt .att-rich .rt-ul { margin: 6px 0 0 18px; }
+.hjsatt .att-rich .rt-ul li { font-size: 14px; margin-top: 4px; color: #475467;
+  list-style: disc; line-height: 1.5; white-space: normal; }
 .hjsatt .att-score { font-size: 34px; font-weight: 800; }
 .hjsatt .att-score.ok { color: #16a34a; }
 .hjsatt .att-score.no { color: #dc2626; }
@@ -7471,6 +7486,35 @@ const KIND_LABEL: Record<string, string> = {
   video: "Video", doc: "Document", link: "Link",
 };
 
+// Overview ke liye chhota sa formatter.
+//   ## Heading      -> heading
+//   - bullet        -> bullet
+//   1. Something    -> numbered heading (podcast structure jaisa)
+//   baaki           -> paragraph
+const Rich = ({ text }: any) => {
+  if (!text) return null;
+  const lines = String(text).split("\n");
+  const out: any[] = [];
+  let bullets: string[] = [];
+  const flush = (k: number) => {
+    if (!bullets.length) return;
+    out.push(<ul className="rt-ul" key={`u${k}`}>{bullets.map((b, i) =>
+      <li key={i}>{b}</li>)}</ul>);
+    bullets = [];
+  };
+  lines.forEach((raw, k) => {
+    const t = raw.trim();
+    if (!t) { flush(k); return; }
+    if (/^#{1,6}\s/.test(t)) { flush(k); out.push(<h4 className="rt-h" key={k}>{t.replace(/^#+\s/, "")}</h4>); return; }
+    if (/^[-*•]\s/.test(t)) { bullets.push(t.replace(/^[-*•]\s/, "")); return; }
+    if (/^\d+[.)]\s/.test(t)) { flush(k); out.push(<p className="rt-n" key={k}>{t}</p>); return; }
+    flush(k);
+    out.push(<p className="rt-p" key={k}>{t}</p>);
+  });
+  flush(9999);
+  return <div className="att-rich">{out}</div>;
+};
+
 function LmsCatalog({ me, mine }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [items, setItems] = useState<Record<string, any[]>>({});
@@ -7601,6 +7645,13 @@ function LmsCourseSheet({ me, course, items, done, onClose, onChange }: any) {
           <div className="bar"><span style={{ width: `${pct}%` }} /></div>
           <span className="att-muted">{nDone} of {items.length} done · {pct}%</span>
         </div>
+
+        {course.overview && (
+          <details className="att-ovw" open>
+            <summary>Overview</summary>
+            <Rich text={course.overview} />
+          </details>
+        )}
 
         {play && (
           <div className="att-player">
@@ -7902,6 +7953,7 @@ function LmsCourseForm({ row, onClose, onSaved }: any) {
     if (!f.title.trim()) return setErr("Title is required.");
     setBusy(true); setErr("");
     const p = { title: f.title.trim(), description: f.description || null,
+      overview: f.overview || null,
       cover_url: f.cover_url || null, seq: Number(f.seq) || 0, active: !!f.active };
     const { error } = f.id
       ? await supabase.from("lms_courses").update(p).eq("id", f.id)
@@ -7929,6 +7981,13 @@ function LmsCourseForm({ row, onClose, onSaved }: any) {
         <div><label>Cover image URL</label>
           <input value={f.cover_url || ""} placeholder="https://…"
             onChange={(e) => setF({ ...f, cover_url: e.target.value })} /></div>
+        <div><label>Overview</label>
+          <textarea rows={10} value={f.overview || ""}
+            placeholder={"## Guests\n- Saket Agarwal — Co-Founder\n\n## Key Topics\n- ..."}
+            onChange={(e) => setF({ ...f, overview: e.target.value })} />
+          <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            ## se heading, - se bullet, 1. se numbered. Baaki normal paragraph.
+          </p></div>
         <div className="att-row2">
           <div><label>Order</label>
             <input type="number" value={f.seq}
