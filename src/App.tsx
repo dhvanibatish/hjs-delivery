@@ -2603,19 +2603,6 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     [deliveries],
   );
 
-  /* Adoption (Dashboard) view ka apna base — deleted ke alawa SAB.
-     MBC aur Cancelled / Duplicate / Renewal bhi ismein aati hain, kyunki
-     board ka "Total Deliveries" bhi unhe ginta hai aur dono number match
-     hone chahiye. In pe bhi stages chalti hain (New → Talked → ...),
-     isliye inka response time normal tareeke se nikal aata hai. */
-  const liveAll = useMemo(
-    () =>
-      deliveries.filter(
-        (d) => d.stage !== 'deleted' && d._raw && Array.isArray(d._raw.app_log),
-      ),
-    [deliveries],
-  );
-
   const inRange = useMemo(() => {
     const [s, e] = bounds;
     return live.filter((d) => {
@@ -2630,18 +2617,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
      ki SLA uspe lagti hi nahi — isliye in do views se bahar. */
   const rows = useMemo(() => inRange.map(slaAnalyze).filter((a) => !a.mbc), [inRange]);
 
-  /* Adoption view ka analyzed set — koi filter nahi, sirf date + store. */
-  const adoptData = useMemo(() => {
-    const [s, e] = bounds;
-    return liveAll
-      .filter((d) => {
-        const cd = dayStr(createdTs(d));
-        if (cd < s || cd > e) return false;
-        if (store !== 'ALL' && d.branch !== store) return false;
-        return true;
-      })
-      .map(slaAnalyze);
-  }, [liveAll, bounds, store]);
+  /* Adoption view ka set — Stores/Boys jaisa hi, bas MBC bhi shaamil.
+     Cancelled / Duplicate / Renewal yahan bhi nahi aatin (wo `live` filter
+     mein pehle hi hat chuki hain). MBC isliye hai kyunki uspe bhi stages
+     chalti hain aur response time nikalta hai — bas store ki delivery SLA
+     nahi lagti, jo Stores view ka mamla hai. */
+  const adoptData = useMemo(() => inRange.map(slaAnalyze), [inRange]);
 
   /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
      order "Aaj" filter mein chhup jaata to report jhooth bolti. */
@@ -3278,7 +3259,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 3,
                 }}
               >
-                {adoptRows.length} store · MBC aur cancelled entries milakar
+                {adoptRows.length} store · MBC milakar, cancelled chhod kar
               </div>
             </span>
             <span style={{ textAlign: 'right' }}>
@@ -3315,7 +3296,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Orders"
                     center
                     div
-                    info="Is date range ke saare orders — MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries bhi. Isliye ye number board ke Total Deliveries se match karta hai."
+                    info="Is date range ke orders, MBC (customer khud le jaata hai) sameth. Cancelled / duplicate / renewal entries isme nahi aatin. Stores view se ye number zyada hoga kyunki wahan MBC bhi bahar hai."
                   />
                   <SlaTh label="Delivered" center />
                   <SlaTh
