@@ -2393,7 +2393,8 @@ const SLA_KIND_LABEL = {
   r30: 'Response 10–30 min',
   r30p: 'Response >30 min',
   closed: 'Cancelled / Duplicate / Renewal',
-  total: 'Saare orders (cancelled sameth)',
+  total: 'Saare orders',
+  pending: 'Pending',
 };
 
 /* ── ek order ka poora SLA picture ── */
@@ -3291,7 +3292,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 3,
                 }}
               >
-                {adoptRows.length} store · Total mein cancelled bhi, Orders mein nahi
+                {adoptRows.length} store · Orders mein cancelled bhi shaamil
               </div>
             </span>
             <span style={{ textAlign: 'right' }}>
@@ -3315,8 +3316,10 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 4,
                 }}
               >
-                {adoptOverall.delivered} delivered of {adoptOverall.total} orders
-                {closedRows.length > 0 && ` · ${closedRows.length} cancelled`}
+                {adoptOverall.delivered} delivered · {adoptOverall.pending} pending
+                {' · '}
+                {closedRows.length} cancelled · of{' '}
+                {adoptOverall.total + closedRows.length} orders
               </div>
             </span>
           </div>
@@ -3326,22 +3329,25 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 <tr>
                   <SlaTh label="Store" />
                   <SlaTh
-                    label="Total"
-                    center
-                    div
-                    info="Is duration mein aayi SAARI entries — Orders + Cancelled dono milakar. Ye number board ke Total Deliveries se match karta hai. Aage ke saare column isi mein se toote hue hain."
-                  />
-                  <SlaTh
                     label="Orders"
                     center
                     div
-                    info="Is date range ke orders, MBC (customer khud le jaata hai) sameth. Cancelled / duplicate / renewal entries isme nahi aatin. Stores view se ye number zyada hoga kyunki wahan MBC bhi bahar hai."
+                    info="Is duration mein aayi SAARI entries — delivered, pending aur cancelled sab milakar. Ye number board ke Total Deliveries se match karta hai."
                   />
-                  <SlaTh label="Delivered" center />
+                  <SlaTh
+                    label="Delivered"
+                    center
+                    info="Inme se kitne Item Delivered ho chuke."
+                  />
+                  <SlaTh
+                    label="Pending"
+                    center
+                    info="Jo abhi tak deliver nahi hue aur cancel bhi nahi hue — abhi pipeline mein hain (New / Contacted / Scheduled / Out for Delivery)."
+                  />
                   <SlaTh
                     label="Cancelled"
                     center
-                    info="Is duration mein kitni entries Cancelled / Duplicate / Renewal mark hui. Ye Orders ke total mein NAHI ginte — SLA in pe lagti hi nahi. Number pe click karke list dekh sakte ho."
+                    info="Inme se kitni entries Cancelled / Duplicate / Renewal mark hui. In pe SLA lagti hi nahi. Number pe click karke list dekh sakte ho."
                   />
                   <SlaTh
                     label="≤10 min"
@@ -3428,6 +3434,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                       <tr key={st}>
                         <td className="dash-store">{branchLabel(st)}</td>
                         {(() => {
+                          /* Orders = SLA wale + cancelled, yaani sab. Isse
+                             Delivered + Cancelled + baaki ka jod poora ban
+                             jaata hai aur koi gap nahi dikhta. */
                           const gt = s.total + closedOf(st);
                           return (
                             <td
@@ -3436,7 +3445,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                                 textAlign: 'center',
                                 borderLeft: '1px solid ' + T.line,
                                 fontWeight: 800,
-                                ...(gt ? { color: T.ink } : {}),
+                                ...(gt ? { color: T.green } : {}),
                               }}
                               onClick={() =>
                                 gt &&
@@ -3447,8 +3456,27 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                             </td>
                           );
                         })()}
-                        {cell('all', s.total, T.green, true)}
                         {cell('delivered', s.delivered, T.green)}
+                        {(() => {
+                          const pn = s.pending;
+                          return (
+                            <td
+                              className={pn ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{ textAlign: 'center', ...(pn ? { color: T.blue } : {}) }}
+                              onClick={() =>
+                                pn &&
+                                toggleSel({
+                                  kind: 'pending',
+                                  store: st,
+                                  person: null,
+                                  adopt: true,
+                                })
+                              }
+                            >
+                              {pn}
+                            </td>
+                          );
+                        })()}
                         {(() => {
                           const cn = closedOf(st);
                           return (
