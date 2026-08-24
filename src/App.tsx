@@ -2392,6 +2392,7 @@ const SLA_KIND_LABEL = {
   r10: 'Response ≤10 min',
   r30: 'Response 10–30 min',
   r30p: 'Response >30 min',
+  closed: 'Cancelled / Duplicate / Renewal',
 };
 
 /* ── ek order ka poora SLA picture ── */
@@ -2624,6 +2625,25 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
      nahi lagti, jo Stores view ka mamla hai. */
   const adoptData = useMemo(() => inRange.map(slaAnalyze), [inRange]);
 
+  /* Cancelled / Duplicate / Renewal — ye SLA se bahar hain (`live` unhe
+     pehle hi hata deta hai), par store-wise kitni aayi ye dikhna chahiye.
+     Isliye alag se nikalte hain: sirf date + store filter, aur app_log ki
+     shart bhi nahi (closed entry ka log adhoora ho sakta hai). */
+  const closedRows = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries
+      .filter((d) => {
+        if (d.stage !== 'cancelled' && d.stage !== 'duplicate' && d.stage !== 'renewal')
+          return false;
+        const cd = dayStr(createdTs(d));
+        if (cd < s || cd > e) return false;
+        if (store !== 'ALL' && d.branch !== store) return false;
+        return true;
+      })
+      .map(slaAnalyze);
+  }, [deliveries, bounds, store]);
+  const closedOf = (st) => closedRows.filter((a) => a.branch === st).length;
+
   /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
      order "Aaj" filter mein chhup jaata to report jhooth bolti. */
   const overdueAll = useMemo(
@@ -2728,15 +2748,24 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
        drill bhi usi set se aana chahiye — warna list ka count number se
        kam nikalta hai. */
     let list =
-      sel.kind === 'overdue' ? overdueAll : sel.adopt ? adoptData : rows;
+      sel.kind === 'closed'
+        ? closedRows
+        : sel.kind === 'overdue'
+          ? overdueAll
+          : sel.adopt
+            ? adoptData
+            : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
     if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
-    const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
+    const fn =
+      sel.kind === 'overdue' || sel.kind === 'closed'
+        ? () => true
+        : pick[sel.kind] || (() => true);
     return list
       .filter(fn)
       .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
     // eslint-disable-next-line
-  }, [rows, adoptData, overdueAll, sel]);
+  }, [rows, adoptData, closedRows, overdueAll, sel]);
 
   /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
@@ -3300,6 +3329,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   />
                   <SlaTh label="Delivered" center />
                   <SlaTh
+                    label="Cancelled"
+                    center
+                    info="Is duration mein kitni entries Cancelled / Duplicate / Renewal mark hui. Ye Orders ke total mein NAHI ginte — SLA in pe lagti hi nahi. Number pe click karke list dekh sakte ho."
+                  />
+                  <SlaTh
                     label="≤10 min"
                     center
                     div
@@ -3337,7 +3371,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <tbody>
                 {adoptRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="dash-empty">
+                    <td colSpan={10} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3385,6 +3419,25 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                         <td className="dash-store">{branchLabel(st)}</td>
                         {cell('all', s.total, T.green, true)}
                         {cell('delivered', s.delivered, T.green)}
+                        {(() => {
+                          const cn = closedOf(st);
+                          return (
+                            <td
+                              className={cn ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{ textAlign: 'center', ...(cn ? { color: T.red } : {}) }}
+                              onClick={() =>
+                                cn &&
+                                toggleSel({
+                                  kind: 'closed',
+                                  store: st,
+                                  person: null,
+                                })
+                              }
+                            >
+                              {cn}
+                            </td>
+                          );
+                        })()}
                         {bucket('r10', s.resp10, true)}
                         {bucket('r30', s.resp30)}
                         {bucket('r30p', s.resp30p, false, T.red)}
