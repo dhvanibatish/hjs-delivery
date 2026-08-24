@@ -4206,7 +4206,8 @@ function Header({
         day: 'numeric',
         month: 'long',
     });
-    const mgr = session.branch === 'ALL' ? null : STORE_MANAGERS[session.branch];
+    const shownBranch = branchView || session.branch;
+    const mgr = shownBranch === 'ALL' ? null : STORE_MANAGERS[shownBranch];
     return (
         <div
             style={{
