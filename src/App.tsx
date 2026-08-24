@@ -2393,6 +2393,7 @@ const SLA_KIND_LABEL = {
   r30: 'Response 10–30 min',
   r30p: 'Response >30 min',
   closed: 'Cancelled / Duplicate / Renewal',
+  total: 'Saare orders (cancelled sameth)',
 };
 
 /* ── ek order ka poora SLA picture ── */
@@ -2748,17 +2749,19 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
        drill bhi usi set se aana chahiye — warna list ka count number se
        kam nikalta hai. */
     let list =
-      sel.kind === 'closed'
-        ? closedRows
-        : sel.kind === 'overdue'
-          ? overdueAll
-          : sel.adopt
-            ? adoptData
-            : rows;
+      sel.kind === 'total'
+        ? [...adoptData, ...closedRows]
+        : sel.kind === 'closed'
+          ? closedRows
+          : sel.kind === 'overdue'
+            ? overdueAll
+            : sel.adopt
+              ? adoptData
+              : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
     if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
     const fn =
-      sel.kind === 'overdue' || sel.kind === 'closed'
+      sel.kind === 'overdue' || sel.kind === 'closed' || sel.kind === 'total'
         ? () => true
         : pick[sel.kind] || (() => true);
     return list
@@ -3288,7 +3291,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 3,
                 }}
               >
-                {adoptRows.length} store · MBC milakar, cancelled chhod kar
+                {adoptRows.length} store · Total mein cancelled bhi, Orders mein nahi
               </div>
             </span>
             <span style={{ textAlign: 'right' }}>
@@ -3313,6 +3316,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 }}
               >
                 {adoptOverall.delivered} delivered of {adoptOverall.total} orders
+                {closedRows.length > 0 && ` · ${closedRows.length} cancelled`}
               </div>
             </span>
           </div>
@@ -3321,6 +3325,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <thead>
                 <tr>
                   <SlaTh label="Store" />
+                  <SlaTh
+                    label="Total"
+                    center
+                    div
+                    info="Is duration mein aayi SAARI entries — Orders + Cancelled dono milakar. Ye number board ke Total Deliveries se match karta hai. Aage ke saare column isi mein se toote hue hain."
+                  />
                   <SlaTh
                     label="Orders"
                     center
@@ -3371,7 +3381,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <tbody>
                 {adoptRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="dash-empty">
+                    <td colSpan={11} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3417,6 +3427,26 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     return (
                       <tr key={st}>
                         <td className="dash-store">{branchLabel(st)}</td>
+                        {(() => {
+                          const gt = s.total + closedOf(st);
+                          return (
+                            <td
+                              className={gt ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{
+                                textAlign: 'center',
+                                borderLeft: '1px solid ' + T.line,
+                                fontWeight: 800,
+                                ...(gt ? { color: T.ink } : {}),
+                              }}
+                              onClick={() =>
+                                gt &&
+                                toggleSel({ kind: 'total', store: st, person: null })
+                              }
+                            >
+                              {gt}
+                            </td>
+                          );
+                        })()}
                         {cell('all', s.total, T.green, true)}
                         {cell('delivered', s.delivered, T.green)}
                         {(() => {
