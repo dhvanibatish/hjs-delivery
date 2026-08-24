@@ -2327,6 +2327,23 @@ function slaFirst(cycle, stage) {
   for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
   return null;
 }
+/* Response ka timestamp — pehla event jo 'talked' ya usse AAGE ka ho.
+   Kuch entries seedha Scheduled/Delivered pe move hoti hain (ya purani hain
+   jab log adhoora tha) — unme 'talked' ka event hota hi nahi. Pehle aise
+   order ka respMins null reh jaata tha aur wo kisi bucket mein nahi girta,
+   isliye ≤10 + 10-30 + >30 ka jod Delivered se bahut kam dikhta tha.
+   Agar order Scheduled/Dispatched/Delivered pe pahunch gaya hai to response
+   us waqt ya usse pehle ho hi chuka tha. cycle ts ke hisaab se sorted hai,
+   isliye pehla qualifying event hi sabse pehla hai. Closed events
+   (cancelled/duplicate/renewal) ka stageIndex -1 hota hai — wo skip. */
+function slaResponded(cycle) {
+  const min = stageIndex('talked');
+  for (const e of cycle) {
+    const i = stageIndex(e.stage);
+    if (i >= min) return new Date(e.ts);
+  }
+  return null;
+}
 /* MBC = customer khud le jaata hai — Scheduled se seedha Delivered.
    Ispe "Out for Delivery skip hua" count nahi hona chahiye. */
 function slaIsMbc(x, cycle) {
@@ -2391,7 +2408,7 @@ function slaAnalyze(x) {
   const delAt = delivered ? new Date(deliveredTs(x)) : null;
 
   /* SLA 1 — Response */
-  const talkedAt = slaFirst(cycle, 'talked');
+  const talkedAt = slaResponded(cycle);
   const respDeadline = okStart ? slaBizAdd(created, SLA_RESPONSE_MIN) : null;
   const respEnd = talkedAt || now;
   const respBreach = !!(respDeadline && respEnd > respDeadline);
@@ -2420,9 +2437,10 @@ function slaAnalyze(x) {
   const need = ['talked', 'scheduled', 'dispatched'];
   const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
 
-  /* Manager response — entry aane se agli stage (Talked to Customer) tak.
-     Jo order abhi Talked pe pahuncha hi nahi, uska respHrs null (average
-     mein count nahi hoga — wo Response Breach column mein pakda jaata hai). */
+  /* Manager response — entry aane se customer se baat hone tak.
+     Jo order abhi kisi bhi aage wali stage pe pahuncha hi nahi, uska
+     respHrs null (average mein count nahi hoga — wo Response Breach
+     column mein pakda jaata hai). */
   const respHrs = okStart && talkedAt ? span(created, talkedAt) : null;
 
   /* Delivery person ka hissa — Out for Delivery se Delivered tak */
@@ -2549,7 +2567,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
-  const [view, setView] = useState('stores'); // stores | boys
+  const [view, setView] = useState('stores'); // stores | boys | adopt
   const [sel, setSel] = useState(null); // null = drill band
   const [alertOn, setAlertOn] = useState(null);
 
@@ -2585,6 +2603,19 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     [deliveries],
   );
 
+  /* Adoption (Dashboard) view ka apna base — deleted ke alawa SAB.
+     MBC aur Cancelled / Duplicate / Renewal bhi ismein aati hain, kyunki
+     board ka "Total Deliveries" bhi unhe ginta hai aur dono number match
+     hone chahiye. In pe bhi stages chalti hain (New → Talked → ...),
+     isliye inka response time normal tareeke se nikal aata hai. */
+  const liveAll = useMemo(
+    () =>
+      deliveries.filter(
+        (d) => d.stage !== 'deleted' && d._raw && Array.isArray(d._raw.app_log),
+      ),
+    [deliveries],
+  );
+
   const inRange = useMemo(() => {
     const [s, e] = bounds;
     return live.filter((d) => {
@@ -2595,9 +2626,22 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     });
   }, [live, bounds, store]);
 
-  /* MBC = customer khud le jaata hai — store ki SLA uspe lagti hi nahi,
-     isliye poori report se bahar (Total mein bhi nahi). */
+  /* Stores / Delivery boys views: MBC = customer khud le jaata hai, store
+     ki SLA uspe lagti hi nahi — isliye in do views se bahar. */
   const rows = useMemo(() => inRange.map(slaAnalyze).filter((a) => !a.mbc), [inRange]);
+
+  /* Adoption view ka analyzed set — koi filter nahi, sirf date + store. */
+  const adoptData = useMemo(() => {
+    const [s, e] = bounds;
+    return liveAll
+      .filter((d) => {
+        const cd = dayStr(createdTs(d));
+        if (cd < s || cd > e) return false;
+        if (store !== 'ALL' && d.branch !== store) return false;
+        return true;
+      })
+      .map(slaAnalyze);
+  }, [liveAll, bounds, store]);
 
   /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
      order "Aaj" filter mein chhup jaata to report jhooth bolti. */
@@ -2642,7 +2686,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       total: list.length,
       delivered: dl.length,
       pending: list.length - dl.length,
-      /* Response speed buckets — entry se "Talked to Customer" tak, business
+      /* Jitne orders pe response ho chuka hai. Ye teeno buckets ka asli
+         denominator hai — total ka nahi. Pehle % total pe nikalta tha,
+         isliye teeno % ka jod kabhi 100 tak pahunchta hi nahi tha. */
+      responded: list.filter((a) => a.respMins != null).length,
+      /* Response speed buckets — entry se customer se baat hone tak, business
          minutes mein. Jin orders pe abhi baat hui hi nahi (respMins null) wo
          kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain.
          Buckets EXCLUSIVE hain: jo ≤10 min mein ho gaya wo 10–30 mein nahi
@@ -2672,14 +2720,18 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
   };
 
   const overall = statOf(rows, overdueAll);
+  const adoptOverall = statOf(adoptData, overdueAll);
+  /* Adoption view ke cards bhi usi set pe chalein — warna upar ke card ka
+     Total aur neeche table ka Total alag-alag dikhte. */
+  const cardStat = view === 'adopt' ? adoptOverall : overall;
 
   const cards = [
-    { kind: 'all', label: 'Total', n: overall.total, icon: Package, color: T.slate, soft: T.slateSoft },
-    { kind: 'delivered', label: 'Delivered', n: overall.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
-    { kind: 'resp', label: 'Response breach', n: overall.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
-    { kind: 'eta', label: 'ETA breach', n: overall.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
-    { kind: 'del', label: 'Delivery breach', n: overall.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { kind: 'overdue', label: 'Overdue', n: overall.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+    { kind: 'all', label: 'Total', n: cardStat.total, icon: Package, color: T.slate, soft: T.slateSoft },
+    { kind: 'delivered', label: 'Delivered', n: cardStat.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { kind: 'resp', label: 'Response breach', n: cardStat.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
+    { kind: 'eta', label: 'ETA breach', n: cardStat.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
+    { kind: 'del', label: 'Delivery breach', n: cardStat.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'overdue', label: 'Overdue', n: cardStat.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
   ];
 
   /* delivery boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
@@ -2691,7 +2743,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
 
   const drill = useMemo(() => {
     if (!sel) return [];
-    let list = sel.kind === 'overdue' ? overdueAll : rows;
+    /* Adoption view ke number MBC/closed ke saath bane hain, isliye unka
+       drill bhi usi set se aana chahiye — warna list ka count number se
+       kam nikalta hai. */
+    let list =
+      sel.kind === 'overdue' ? overdueAll : sel.adopt ? adoptData : rows;
     if (sel.store) list = list.filter((a) => a.branch === sel.store);
     if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
     const fn = sel.kind === 'overdue' ? () => true : pick[sel.kind] || (() => true);
@@ -2699,7 +2755,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       .filter(fn)
       .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
     // eslint-disable-next-line
-  }, [rows, overdueAll, sel]);
+  }, [rows, adoptData, overdueAll, sel]);
 
   /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
   const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
@@ -2712,10 +2768,16 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     }))
     .filter((r) => r.s.total > 0 || r.s.overdue > 0);
 
-  /* Adoption view — sirf jinke is duration mein orders hain, volume descending */
-  const adoptRows = storeStats
+  /* Adoption view — apna set (MBC + closed shaamil), volume descending */
+  const adoptRows = DASH_STORES.filter((st) => store === 'ALL' || store === st)
+    .map((st) => ({
+      st,
+      s: statOf(
+        adoptData.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+    }))
     .filter((r) => r.s.total > 0)
-    .slice()
     .sort((a, b) => b.s.total - a.s.total);
 
   /* delivery boy wise — person + store ke hisaab se group */
@@ -2809,7 +2871,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 <SlaTh label="Stage" />
                 <SlaTh
                   label="Response"
-                  info={`Entry aane se "Talked to Customer" tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
+                  info={`Entry aane se customer se baat hone tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
                 />
                 <SlaTh
                   label="Promise"
@@ -2978,7 +3040,15 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 ...(on ? { borderColor: c.color } : {}),
                 ...(c.n ? {} : { cursor: 'default' }),
               }}
-              onClick={() => c.n && toggleSel({ kind: c.kind, store: null, person: null })}
+              onClick={() =>
+                c.n &&
+                toggleSel({
+                  kind: c.kind,
+                  store: null,
+                  person: null,
+                  adopt: view === 'adopt',
+                })
+              }
             >
               <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
                 <c.icon size={16} />
@@ -3019,19 +3089,19 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Total"
                     center
                     div
-                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin — un pe store ki SLA lagti hi nahi."
+                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin — un pe store ki SLA lagti hi nahi. Ye number Dashboard view se kam hoga."
                   />
                   <SlaTh label="Delivered" center />
                   <SlaTh
                     label="Avg Time"
                     center
                     div
-                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
+                    info={`Entry aane se customer se baat hone tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
                   />
                   <SlaTh
                     label="Breach"
                     center
-                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar "Talked to Customer" pe move nahi hue. Ye store manager ki zimmedari hai.`}
+                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi kar paye. Ye store manager ki zimmedari hai.`}
                   />
                   <SlaTh
                     label="Avg Breach Time"
@@ -3208,7 +3278,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 3,
                 }}
               >
-                {adoptRows.length} store · MBC aur cancelled entries chhod kar
+                {adoptRows.length} store · MBC aur cancelled entries milakar
               </div>
             </span>
             <span style={{ textAlign: 'right' }}>
@@ -3217,12 +3287,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   fontSize: 28,
                   fontWeight: 800,
                   lineHeight: 1,
-                  color: slaAdoptColor(overall.adoption),
+                  color: slaAdoptColor(adoptOverall.adoption),
                 }}
               >
-                {overall.adoption == null
+                {adoptOverall.adoption == null
                   ? '—'
-                  : overall.adoption.toFixed(1) + '%'}
+                  : adoptOverall.adoption.toFixed(1) + '%'}
               </div>
               <div
                 style={{
@@ -3232,7 +3302,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   marginTop: 4,
                 }}
               >
-                {overall.delivered} delivered of {overall.total} orders
+                {adoptOverall.delivered} delivered of {adoptOverall.total} orders
               </div>
             </span>
           </div>
@@ -3245,30 +3315,30 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Orders"
                     center
                     div
-                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin."
+                    info="Is date range ke saare orders — MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries bhi. Isliye ye number board ke Total Deliveries se match karta hai."
                   />
                   <SlaTh label="Delivered" center />
                   <SlaTh
                     label="≤10 min"
                     center
                     div
-                    info={`Kitne orders mein entry aane ke 10 business minutes ke andar "Talked to Customer" bhar diya gaya. Neeche % total orders ka hai.`}
+                    info={`Kitne orders mein entry aane ke 10 business minutes ke andar customer se baat ho gayi. Neeche % un orders ka hai jinpe response ho chuka hai — teeno bucket ka jod 100% aata hai.`}
                   />
                   <SlaTh
                     label="10–30 min"
                     center
-                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar "Talked to Customer" pe move hue. ≤10 min wale ismein NAHI aate — dono column alag orders dikhate hain, aur inka jod = SLA ke andar wale kul orders.`}
+                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar respond hue. ≤10 min wale ismein NAHI aate — teeno column alag orders dikhate hain.`}
                   />
                   <SlaTh
                     label=">30 min"
                     center
-                    info={`Jo orders ${SLA_RESPONSE_MIN} business minutes ki deadline ke BAAD "Talked to Customer" pe move hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
+                    info={`Jo orders ${SLA_RESPONSE_MIN} business minutes ki deadline ke BAAD respond hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
                   />
                   <SlaTh
                     label="Response TAT"
                     center
                     div
-                    info={`Entry aane se "Talked to Customer" tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai.`}
+                    info={`Entry aane se customer se baat hone tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai. Ismein pending orders bhi shaamil hain, isliye ye Delivery TAT se zyada ho sakta hai.`}
                   />
                   <SlaTh
                     label="Delivery TAT"
@@ -3292,9 +3362,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                   </tr>
                 ) : (
                   adoptRows.map(({ st, s }) => {
-                    const cell = cellFor({ store: st, person: null });
+                    const cell = cellFor({ store: st, person: null, adopt: true });
+                    /* % un orders pe jinpe response ho chuka hai — total pe
+                       nahi. Teeno bucket ka jod ab 100% aata hai. */
                     const pctOf = (n) =>
-                      s.total ? Math.round((n / s.total) * 100) : 0;
+                      s.responded ? Math.round((n / s.responded) * 100) : 0;
                     const ac = slaAdoptColor(s.adoption);
                     /* bucket cell — number + neeche chhota % */
                     const bucket = (kind, n, div, color) => (
@@ -3306,7 +3378,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                           ...(n ? { color: color || T.green } : {}),
                         }}
                         onClick={() =>
-                          n && toggleSel({ kind, store: st, person: null })
+                          n &&
+                          toggleSel({
+                            kind,
+                            store: st,
+                            person: null,
+                            adopt: true,
+                          })
                         }
                       >
                         {n}
