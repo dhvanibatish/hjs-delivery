@@ -2204,7 +2204,6 @@ function MatrixTab({ me }: any) {
   const [q, setQ] = useState("");
   // cell click -> us din ki detail + location
   const [empByCode, setEmpByCode] = useState<Record<string, any>>({});
-  const [logByKey, setLogByKey] = useState<Record<string, any>>({});
   const [pick, setPick] = useState<any>(null);
   const [pickEmp, setPickEmp] = useState<any>(null);
 
@@ -2218,31 +2217,17 @@ function MatrixTab({ me }: any) {
     setDates(all);
 
     if (approver) {
-      const [{ data }, em, lgs] = await Promise.all([
-        supabase.rpc("muster_roll", { p_month: from }).range(0, 199999),
+      const [{ data }, em] = await Promise.all([
+        supabase.rpc("muster_roll_json", { p_month: from }),
         supabase.from("employees")
           .select("id, emp_code, full_name, shift_start, shift_end, week_off_days"),
-        supabase.from("attendance_logs").select("*")
-          .gte("work_date", from).lte("work_date", to).range(0, 199999),
       ]);
-      const byEmp: Record<string, any> = {};
-      (data || []).forEach((r: any) => {
-        byEmp[r.emp_code] = byEmp[r.emp_code] || { code: r.emp_code, name: r.full_name, marks: {} };
-        byEmp[r.emp_code].marks[r.d] = r.mark;
-      });
-      setRows(Object.values(byEmp));
+      setRows((data || []).map((r: any) => ({
+        code: r.emp_code, name: r.full_name, marks: r.marks || {} })));
 
       const byCode: Record<string, any> = {};
-      const codeById: Record<string, string> = {};
-      (em.data || []).forEach((e: any) => { byCode[e.emp_code] = e; codeById[e.id] = e.emp_code; });
+      (em.data || []).forEach((e: any) => { byCode[e.emp_code] = e; });
       setEmpByCode(byCode);
-
-      const lk: Record<string, any> = {};
-      (lgs.data || []).forEach((x: any) => {
-        const c = codeById[x.employee_id];
-        if (c) lk[`${c}|${x.work_date}`] = x;
-      });
-      setLogByKey(lk);
     } else {
       const [lg, lv, hl] = await Promise.all([
         supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
@@ -2265,9 +2250,6 @@ function MatrixTab({ me }: any) {
       });
       setRows([{ code: me.emp_code, name: me.full_name, marks }]);
       setEmpByCode({ [me.emp_code]: me });
-      const lk: Record<string, any> = {};
-      (lg.data || []).forEach((x: any) => { lk[`${me.emp_code}|${x.work_date}`] = x; });
-      setLogByKey(lk);
     }
     setBusy(false);
   };
@@ -2281,13 +2263,16 @@ function MatrixTab({ me }: any) {
     A: "Absent", W: "Week off", F: "Holiday",
   };
 
-  const openDay = (code: string, d: string, mark: string) => {
+  const openDay = async (code: string, d: string, mark: string) => {
     if (!mark) return;
     const emp = empByCode[code];
     if (!emp) return;
     setPickEmp(emp);
-    setPick({ d, mark, label: MARK_LABEL[mark] || `${mark} leave`,
-      log: logByKey[`${code}|${d}`] });
+    setPick({ d, mark, label: MARK_LABEL[mark] || `${mark} leave`, log: null });
+    // us ek din ka log yahin la lo — poore mahine ka pehle se laane ki zaroorat nahi
+    const { data } = await supabase.from("attendance_logs").select("*")
+      .eq("employee_id", emp.id).eq("work_date", d).maybeSingle();
+    setPick((p: any) => (p && p.d === d ? { ...p, log: data || null } : p));
   };
 
   const tally = (m: Record<string, string>) => {
@@ -5237,9 +5222,10 @@ function ReportsTab({ isAdmin = false }: any) {
     (async () => {
       setBusy(true);
       const fn = kind === "muster" ? "muster_roll" : kind === "late" ? "late_report" : "absence_report";
-      // muster roll ~87 x 31 rows deta hai; default 1000 ki cap se naam kat jaate the
-      const { data: d } = await supabase.rpc(fn, { p_month: `${month}-01` })
-        .range(0, 199999);
+      // muster roll ab har bande ka ek hi row deta hai (marks JSON mein),
+      // warna 87 x 31 rows server ki 1000 wali cap se kat jaate the
+      const rpcName = kind === "muster" ? "muster_roll_json" : fn;
+      const { data: d } = await supabase.rpc(rpcName, { p_month: `${month}-01` });
       setData(d || []); setBusy(false);
     })();
   }, [kind, month]);
@@ -5247,12 +5233,13 @@ function ReportsTab({ isAdmin = false }: any) {
   const muster = useMemo(() => {
     if (kind !== "muster") return null;
     const byEmp: Record<string, any> = {};
-    const dates: string[] = [];
+    const dset = new Set<string>();
     data.forEach((r: any) => {
-      if (!dates.includes(r.d)) dates.push(r.d);
-      byEmp[r.emp_code] = byEmp[r.emp_code] || { name: r.full_name, marks: {} };
-      byEmp[r.emp_code].marks[r.d] = r.mark;
+      const marks = r.marks || {};
+      byEmp[r.emp_code] = { name: r.full_name, marks };
+      Object.keys(marks).forEach((d) => dset.add(d));
     });
+    const dates: string[] = Array.from(dset);
     // har bande ka apna total
     Object.values(byEmp).forEach((v: any) => {
       const t: Record<string, number> = {};
