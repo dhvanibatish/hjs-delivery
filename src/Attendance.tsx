@@ -2219,11 +2219,11 @@ function MatrixTab({ me }: any) {
 
     if (approver) {
       const [{ data }, em, lgs] = await Promise.all([
-        supabase.rpc("muster_roll", { p_month: from }),
+        supabase.rpc("muster_roll", { p_month: from }).range(0, 199999),
         supabase.from("employees")
           .select("id, emp_code, full_name, shift_start, shift_end, week_off_days"),
         supabase.from("attendance_logs").select("*")
-          .gte("work_date", from).lte("work_date", to),
+          .gte("work_date", from).lte("work_date", to).range(0, 199999),
       ]);
       const byEmp: Record<string, any> = {};
       (data || []).forEach((r: any) => {
@@ -5237,7 +5237,9 @@ function ReportsTab({ isAdmin = false }: any) {
     (async () => {
       setBusy(true);
       const fn = kind === "muster" ? "muster_roll" : kind === "late" ? "late_report" : "absence_report";
-      const { data: d } = await supabase.rpc(fn, { p_month: `${month}-01` });
+      // muster roll ~87 x 31 rows deta hai; default 1000 ki cap se naam kat jaate the
+      const { data: d } = await supabase.rpc(fn, { p_month: `${month}-01` })
+        .range(0, 199999);
       setData(d || []); setBusy(false);
     })();
   }, [kind, month]);
