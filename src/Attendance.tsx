@@ -483,6 +483,10 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-crumb { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.hjsatt .att-row.lock { opacity: .55; cursor: not-allowed; }
+.hjsatt .att-row.lock:hover { background: transparent; }
+
 .hjsatt .att-modhd { display: flex; align-items: center; justify-content: space-between;
   gap: 10px; padding: 9px 14px; background: #f7f9fb; border-top: 1px solid #eef0f3;
   border-bottom: 1px solid #eef0f3; }
@@ -7632,6 +7636,14 @@ function LmsCatalog({ me, mine }: any) {
     .filter((c) => !q || `${c.title} ${c.description || ""}`.toLowerCase().includes(q.toLowerCase()))
     .filter((c) => !mine || stat(c).n > 0);
 
+  if (open) {
+    return (
+      <LmsCoursePage me={me} course={open} items={items[open.id] || []}
+        done={done} doneAt={doneAt} onClose={() => setOpen(null)}
+        onChange={load} />
+    );
+  }
+
   return (
     <>
       <div className="att-between">
@@ -7676,17 +7688,13 @@ function LmsCatalog({ me, mine }: any) {
         })}
       </div>
 
-      {open && (
-        <LmsCourseSheet me={me} course={open} items={items[open.id] || []}
-          done={done} doneAt={doneAt} onClose={() => setOpen(null)}
-          onChange={load} />
-      )}
     </>
   );
 }
 
-function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: any) {
-  const [play, setPlay] = useState<any>(items[0] || null);
+function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: any) {
+  const [play, setPlay] = useState<any>(
+    items.find((x: any) => !done.has(x.id)) || items[0] || null);
   const [busy, setBusy] = useState(false);
   const [asmts, setAsmts] = useState<any[]>([]);
   const [quiz, setQuiz] = useState<any>(null);
@@ -7718,8 +7726,19 @@ function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: 
     setBusy(false);
   };
 
+  // ek chapter tabhi khulega jab usse pehle wale sab ho chuke hon.
+  // admin (HR wagairah) ke liye lock nahi — unhe sab kuch dekhna hota hai.
+  const noLock = me.role === "admin";
+  const firstOpen = items.findIndex((x: any) => !done.has(x.id));
+  const isLocked = (i: number) => !noLock && firstOpen !== -1 && i > firstOpen;
+
   return (
-    <Sheet title={course.title} onClose={onClose}>
+    <>
+      <div className="att-crumb">
+        <button className="att-btn sm line" onClick={onClose}>{"\u2190"} All courses</button>
+        <h3 className="att-h2" style={{ margin: 0 }}>{course.title}</h3>
+      </div>
+
       <div className="att-stack">
         {course.description && (
           <p className="att-muted" style={{ whiteSpace: "normal" }}>{course.description}</p>
@@ -7804,17 +7823,21 @@ function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: 
                 )}
                 {g.list.map((x: any) => {
                   n += 1;
+                  const idx = items.findIndex((y: any) => y.id === x.id);
+                  const lock = isLocked(idx);
                   return (
-                    <div className={`att-row clk ${play?.id === x.id ? "on" : ""}`} key={x.id}
-                      onClick={() => setPlay(x)}>
+                    <div className={`att-row ${lock ? "lock" : "clk"} ${play?.id === x.id ? "on" : ""}`}
+                      key={x.id}
+                      title={lock ? "Pehle wala chapter poora karo" : undefined}
+                      onClick={() => { if (!lock) setPlay(x); }}>
                       <span className={`att-num ${done.has(x.id) ? "ok" : ""}`}>
-                        {done.has(x.id) ? "✓" : n}
+                        {done.has(x.id) ? "\u2713" : lock ? "\u{1F512}" : n}
                       </span>
                       <div className="grow">
                         <p><b>{x.title}</b></p>
                         <p className="att-muted">
-                          {KIND_LABEL[x.kind] || x.kind}
-                          {x.duration_min ? ` · ${x.duration_min} min` : ""}
+                          {lock ? "Locked" : (KIND_LABEL[x.kind] || x.kind)}
+                          {!lock && x.duration_min ? ` · ${x.duration_min} min` : ""}
                         </p>
                       </div>
                     </div>
@@ -7834,7 +7857,11 @@ function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: 
                   <p><b>{a.title}</b></p>
                   <p className="att-muted">{a.duration_min} min · pass {a.pass_percent}%</p>
                 </div>
-                <button className="att-btn sm" onClick={() => setQuiz(a)}>Start</button>
+                <button className="att-btn sm" disabled={!noLock && firstOpen !== -1}
+                  title={!noLock && firstOpen !== -1 ? "Pehle saare chapters poore karo" : undefined}
+                  onClick={() => setQuiz(a)}>
+                  {!noLock && firstOpen !== -1 ? "\u{1F512} Locked" : "Start"}
+                </button>
               </div>
             ))}
           </div>
@@ -7858,7 +7885,7 @@ function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: 
             return Math.round(v.reduce((a, b) => a + b, 0) / v.length);
           })()} />
       )}
-    </Sheet>
+    </>
   );
 }
 
