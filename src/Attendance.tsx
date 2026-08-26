@@ -8755,89 +8755,200 @@ function LmsQuestionsSheet({ a, onClose }: any) {
 /* ---------------- admin: who finished what ---------------- */
 
 function LmsProgressReport() {
-  const [rows, setRows] = useState<any[]>([]);
+  const [emps, setEmps] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [prog, setProg] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState<"emp" | "course">("emp");
+  const [cell, setCell] = useState<any>(null);   // { emp, course }
+  const [pick, setPick] = useState<any>(null);   // ek course ka breakdown
 
   useEffect(() => {
     (async () => {
-      const [emps, courses, items, prog] = await Promise.all([
-        supabase.from("employees").select("id, emp_code, full_name").eq("active", true),
+      const [e, c, i, p] = await Promise.all([
+        supabase.from("employees").select("id, emp_code, full_name")
+          .eq("active", true).order("full_name"),
         supabase.from("lms_courses").select("id, title").eq("active", true).order("seq"),
-        supabase.from("lms_items").select("id, course_id"),
-        supabase.from("lms_progress").select("employee_id, item_id"),
+        supabase.from("lms_items").select("id, course_id, title, module_name, seq").order("seq"),
+        supabase.from("lms_progress").select("employee_id, item_id, completed_at")
+          .range(0, 199999),
       ]);
-      const perCourse: Record<string, number> = {};
-      const itemCourse: Record<string, string> = {};
-      (items.data || []).forEach((x: any) => {
-        perCourse[x.course_id] = (perCourse[x.course_id] || 0) + 1;
-        itemCourse[x.id] = x.course_id;
-      });
-      const byEmp: Record<string, Record<string, number>> = {};
-      (prog.data || []).forEach((p: any) => {
-        const c = itemCourse[p.item_id];
-        if (!c) return;
-        byEmp[p.employee_id] = byEmp[p.employee_id] || {};
-        byEmp[p.employee_id][c] = (byEmp[p.employee_id][c] || 0) + 1;
-      });
-      setRows((emps.data || []).map((e: any) => ({
-        ...e,
-        courses: (courses.data || []).map((c: any) => ({
-          id: c.id, title: c.title,
-          n: byEmp[e.id]?.[c.id] || 0, total: perCourse[c.id] || 0,
-        })),
-      })).sort((a: any, b: any) => a.full_name.localeCompare(b.full_name)));
+      setEmps(e.data || []); setCourses(c.data || []);
+      setItems(i.data || []); setProg(p.data || []);
       setBusy(false);
     })();
   }, []);
 
-  const shown = rows.filter((r) =>
+  const itemsOf = (cid: string) => items.filter((x) => x.course_id === cid);
+  const doneSet = useMemo(() => {
+    const m: Record<string, Set<string>> = {};
+    prog.forEach((p) => {
+      (m[p.employee_id] = m[p.employee_id] || new Set()).add(p.item_id);
+    });
+    return m;
+  }, [prog]);
+  const nDone = (empId: string, cid: string) =>
+    itemsOf(cid).filter((x) => doneSet[empId]?.has(x.id)).length;
+
+  const shownEmps = emps.filter((r) =>
     !q || `${r.full_name} ${r.emp_code}`.toLowerCase().includes(q.toLowerCase()));
-  const heads = rows[0]?.courses || [];
 
   return (
     <>
       <div className="att-between">
         <h3 className="att-h2">Team Progress</h3>
-        <button className="att-btn sm line" disabled={!shown.length}
-          onClick={() => downloadCsv(shown.map((r) => {
+        <button className="att-btn sm line" disabled={!shownEmps.length}
+          onClick={() => downloadCsv(shownEmps.map((r) => {
             const o: any = { Code: r.emp_code, Name: r.full_name };
-            r.courses.forEach((c: any) => { o[c.title] = `${c.n}/${c.total}`; });
+            courses.forEach((c) => { o[c.title] = `${nDone(r.id, c.id)}/${itemsOf(c.id).length}`; });
             return o;
           }), "HJS_training_progress.csv")}>CSV</button>
       </div>
 
-      <Search placeholder="Search by name or code" value={q} onChange={setQ}
-        style={{ marginTop: 10 }} />
+      <div className="att-seg" style={{ marginTop: 10 }}>
+        <button className={tab === "emp" ? "on" : ""}
+          onClick={() => setTab("emp")}>By employee</button>
+        <button className={tab === "course" ? "on" : ""}
+          onClick={() => setTab("course")}>By course</button>
+      </div>
 
       {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
 
-      {!busy && (
-        <div className="att-scroll" style={{ marginTop: 10 }}>
-          <table className="att-table">
-            <thead>
-              <tr>
-                <th className="name">Employee</th>
-                {heads.map((c: any) => <th key={c.id}>{c.title}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r) => (
-                <tr key={r.id}>
-                  <td className="name"><b>{r.emp_code}</b> · {r.full_name}</td>
-                  {r.courses.map((c: any) => (
-                    <td key={c.id} style={{ textAlign: "center" }}>
-                      <span className={`att-mark ${c.total && c.n === c.total ? "m-P"
-                        : c.n ? "m-L" : "m-A"}`}>
-                        {c.total ? `${c.n}/${c.total}` : "—"}
-                      </span>
-                    </td>
-                  ))}
+      {!busy && tab === "emp" && (
+        <>
+          <Search placeholder="Search by name or code" value={q} onChange={setQ}
+            style={{ marginTop: 10 }} />
+          <p className="att-muted" style={{ marginTop: 8 }}>
+            Kisi bhi number par click karo — kya ho gaya, kya baaki hai wo dikh jayega.
+          </p>
+          <div className="att-scroll" style={{ marginTop: 8 }}>
+            <table className="att-table">
+              <thead>
+                <tr>
+                  <th className="name">Employee</th>
+                  {courses.map((c) => <th key={c.id}>{c.title}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {shownEmps.map((r) => (
+                  <tr key={r.id}>
+                    <td className="name"><b>{r.emp_code}</b> · {r.full_name}</td>
+                    {courses.map((c) => {
+                      const tot = itemsOf(c.id).length;
+                      const n = nDone(r.id, c.id);
+                      return (
+                        <td key={c.id} style={{ textAlign: "center",
+                          cursor: tot ? "pointer" : "default" }}
+                          onClick={() => tot && setCell({ emp: r, course: c })}>
+                          <span className={`att-mark ${tot && n === tot ? "m-P"
+                            : n ? "m-L" : "m-A"}`}>
+                            {tot ? `${n}/${tot}` : "—"}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {!busy && tab === "course" && (
+        <div className="att-list" style={{ marginTop: 10 }}>
+          <div className="att-hd"><b>Courses</b><span className="att-muted">{courses.length}</span></div>
+          {courses.length === 0 && <p className="att-empty">No courses yet.</p>}
+          {courses.map((c) => {
+            const tot = itemsOf(c.id).length;
+            const full = emps.filter((e) => tot && nDone(e.id, c.id) === tot).length;
+            const started = emps.filter((e) => {
+              const n = nDone(e.id, c.id);
+              return n > 0 && n < tot;
+            }).length;
+            const none = emps.length - full - started;
+            return (
+              <div className="att-row clk" key={c.id} onClick={() => setPick(c)}>
+                <div className="grow">
+                  <p><b>{c.title}</b></p>
+                  <p className="att-muted">
+                    {tot} chapter{tot === 1 ? "" : "s"} · {full} done ·
+                    {" "}{started} in progress · {none} not started
+                  </p>
+                </div>
+                <span className="att-pill p-Present">{full}/{emps.length}</span>
+              </div>
+            );
+          })}
         </div>
+      )}
+
+      {cell && (
+        <Sheet title={cell.emp.full_name} onClose={() => setCell(null)}>
+          <div className="att-stack">
+            <p className="att-muted">{cell.course.title}</p>
+            <div className="att-list">
+              {itemsOf(cell.course.id).map((x, i) => {
+                const ok = doneSet[cell.emp.id]?.has(x.id);
+                return (
+                  <div className="att-row" key={x.id}>
+                    <span className={`att-num ${ok ? "ok" : ""}`}>{ok ? "\u2713" : i + 1}</span>
+                    <div className="grow">
+                      <p><b>{x.title}</b></p>
+                      <p className="att-muted">{x.module_name || "—"}</p>
+                    </div>
+                    <span className={`att-pill ${ok ? "p-Present" : "p-Absent"}`}>
+                      {ok ? "Done" : "Pending"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Sheet>
+      )}
+
+      {pick && (
+        <Sheet title={pick.title} onClose={() => setPick(null)}>
+          <div className="att-stack">
+            <p className="att-muted">
+              {itemsOf(pick.id).length} chapters · {emps.length} employees
+            </p>
+            <button className="att-btn sm line"
+              onClick={() => downloadCsv(emps.map((e) => ({
+                Code: e.emp_code, Name: e.full_name,
+                Done: nDone(e.id, pick.id),
+                Total: itemsOf(pick.id).length,
+                Status: nDone(e.id, pick.id) === itemsOf(pick.id).length
+                  ? "Completed" : nDone(e.id, pick.id) ? "In progress" : "Not started",
+              })), `HJS_${pick.title.replace(/\W+/g, "_")}.csv`)}>CSV</button>
+
+            <div className="att-list">
+              <div className="att-hd"><b>Who is left</b></div>
+              {emps
+                .map((e) => ({ e, n: nDone(e.id, pick.id) }))
+                .sort((a, b) => a.n - b.n || a.e.full_name.localeCompare(b.e.full_name))
+                .map(({ e, n }) => {
+                  const tot = itemsOf(pick.id).length;
+                  return (
+                    <div className="att-row clk" key={e.id}
+                      onClick={() => setCell({ emp: e, course: pick })}>
+                      <div className="grow">
+                        <p><b>{e.emp_code}</b> · {e.full_name}</p>
+                        <p className="att-muted">{n} of {tot} done</p>
+                      </div>
+                      <span className={`att-pill ${tot && n === tot ? "p-Present"
+                        : n ? "p-Late" : "p-Absent"}`}>
+                        {tot && n === tot ? "Completed" : n ? "In progress" : "Not started"}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </Sheet>
       )}
     </>
   );
