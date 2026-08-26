@@ -483,6 +483,12 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-modhd { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 9px 14px; background: #f7f9fb; border-top: 1px solid #eef0f3;
+  border-bottom: 1px solid #eef0f3; }
+.hjsatt .att-modhd b { font-size: 13.5px; }
+.hjsatt .att-modhd span { font-size: 12.5px; }
+
 .hjsatt .att-coverprev { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
 .hjsatt .att-coverprev img { width: 160px; aspect-ratio: 5 / 2; object-fit: contain;
   border-radius: 8px; border: 1px solid #e6e8ec; background: #f4f6f9; }
@@ -7774,21 +7780,49 @@ function LmsCourseSheet({ me, course, items, done, doneAt, onClose, onChange }: 
         <div className="att-list">
           <div className="att-hd"><b>Chapters</b><span className="att-muted">{items.length}</span></div>
           {items.length === 0 && <p className="att-empty">No content added yet.</p>}
-          {items.map((x: any, i: number) => (
-            <div className={`att-row clk ${play?.id === x.id ? "on" : ""}`} key={x.id}
-              onClick={() => setPlay(x)}>
-              <span className={`att-num ${done.has(x.id) ? "ok" : ""}`}>
-                {done.has(x.id) ? "✓" : i + 1}
-              </span>
-              <div className="grow">
-                <p><b>{x.title}</b></p>
-                <p className="att-muted">
-                  {KIND_LABEL[x.kind] || x.kind}
-                  {x.duration_min ? ` · ${x.duration_min} min` : ""}
-                </p>
+          {(() => {
+            // module_name ke hisaab se group; jinka module nahi hai wo seedhe list mein
+            const groups: any[] = [];
+            items.forEach((x: any) => {
+              const g = groups.find((y) => y.name === (x.module_name || ""));
+              if (g) g.list.push(x);
+              else groups.push({ name: x.module_name || "", list: [x] });
+            });
+            let n = 0;
+            return groups.map((g, gi) => (
+              <div key={gi}>
+                {g.name && (
+                  <div className="att-modhd">
+                    <b>{g.name}</b>
+                    <span className="att-muted">
+                      {g.list.filter((x: any) => done.has(x.id)).length}/{g.list.length}
+                      {g.list.some((x: any) => x.duration_min)
+                        ? ` · ${g.list.reduce((a: number, x: any) => a + (x.duration_min || 0), 0)} min`
+                        : ""}
+                    </span>
+                  </div>
+                )}
+                {g.list.map((x: any) => {
+                  n += 1;
+                  return (
+                    <div className={`att-row clk ${play?.id === x.id ? "on" : ""}`} key={x.id}
+                      onClick={() => setPlay(x)}>
+                      <span className={`att-num ${done.has(x.id) ? "ok" : ""}`}>
+                        {done.has(x.id) ? "✓" : n}
+                      </span>
+                      <div className="grow">
+                        <p><b>{x.title}</b></p>
+                        <p className="att-muted">
+                          {KIND_LABEL[x.kind] || x.kind}
+                          {x.duration_min ? ` · ${x.duration_min} min` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
 
         {asmts.length > 0 && (
@@ -8203,6 +8237,7 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
     setBusy(true); setErr("");
     const p = { course_id: course.id, title: f.title.trim(), url: f.url.trim(),
       kind: f.kind || "video", seq: Number(f.seq) || 0,
+      module_name: f.module_name?.trim() || null,
       duration_min: f.duration_min ? Number(f.duration_min) : null };
     const { error } = f.id
       ? await supabase.from("lms_items").update(p).eq("id", f.id)
@@ -8231,6 +8266,12 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
                 onChange={(e) => setF({ ...f, url: e.target.value })} />
               <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
                 Drive file "Anyone with the link — Viewer" honi chahiye, warna staff ko access maangna padega.
+              </p></div>
+            <div><label>Module (optional)</label>
+              <input value={f.module_name || ""} placeholder="e.g. Policy &amp; Compliances"
+                onChange={(e) => setF({ ...f, module_name: e.target.value })} />
+              <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Same naam wale chapters ek group mein aa jayenge. Khali chhodo to seedhe list mein.
               </p></div>
             <div className="att-row2">
               <div><label>Type</label>
@@ -8265,6 +8306,7 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
               <div className="grow">
                 <p><b>{x.title}</b></p>
                 <p className="att-muted">
+                  {x.module_name ? `${x.module_name} · ` : ""}
                   {KIND_LABEL[x.kind] || x.kind}{x.duration_min ? ` · ${x.duration_min} min` : ""}
                 </p>
               </div>
