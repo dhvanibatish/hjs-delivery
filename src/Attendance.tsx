@@ -311,15 +311,13 @@ const CSS = `
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
 .hjsatt .m-X { color: #2563eb; }
 
-.hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: rgba(16,24,40,.45);
-  display: flex; align-items: flex-end; justify-content: center; }
-.hjsatt .att-sheet > div { width: 100%; max-width: 640px; background: #f7f8fa;
-  border-radius: 14px 14px 0 0; padding: 16px 14px calc(18px + env(safe-area-inset-bottom));
-  max-height: 92%; overflow-y: auto; }
-@media (min-width: 900px) {
-  .hjsatt .att-sheet { align-items: center; }
-  .hjsatt .att-sheet > div { border-radius: 14px; max-height: 88%; }
-}
+/* sheet ab popup nahi — poori screen ka page hai */
+.hjsatt .att-sheet { position: fixed; inset: 0; z-index: 40; background: #f7f8fa;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.hjsatt .att-sheet > div { width: 100%; max-width: 980px; margin: 0 auto;
+  padding: 0 14px calc(34px + env(safe-area-inset-bottom)); }
+.hjsatt .att-shead { position: sticky; top: 0; z-index: 3; background: #f7f8fa;
+  padding: 13px 0 11px; margin-bottom: 13px; border-bottom: 1px solid #e5e7eb; }
 
 /* ---------- attendance summary ---------- */
 .hjsatt .att-daterow { display: flex; align-items: center; justify-content: space-between;
@@ -483,6 +481,10 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-answer { margin-top: 9px; padding: 12px 14px; border-radius: 9px;
+  background: #f7f8fa; border: 1px solid #eef0f3; font-size: 14.5px;
+  white-space: pre-wrap; line-height: 1.55; color: #344054; }
+
 .hjsatt .att-optrow { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
 .hjsatt .att-optrow input { flex: 1 1 auto; }
 .hjsatt .att-optpick { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
@@ -500,6 +502,7 @@ const CSS = `
 .hjsatt .att-scorebar b { font-size: 17px; }
 .hjsatt .att-scorebar.ok { background: #f6fef9; border: 1px solid #b7ebc9; color: #16a34a; }
 .hjsatt .att-scorebar.no { background: #fffbfa; border: 1px solid #f5c6c2; color: #dc2626; }
+.hjsatt .att-scorebar.wait { background: #fffcf5; border: 1px solid #f2d9a7; color: #b54708; }
 .hjsatt .att-qinfo { border: 1px solid #e6e8ec; border-radius: 10px; background: #fff; }
 .hjsatt .att-qrow { display: flex; align-items: flex-start; gap: 14px;
   padding: 11px 15px; border-bottom: 1px solid #f2f4f7; font-size: 14.5px; }
@@ -1204,11 +1207,11 @@ function Section({ title, sub, chips, count, children, open: o0 }: any) {
 }
 
 const Sheet = ({ title, onClose, children }: any) => (
-  <div className="att-sheet" onClick={onClose}>
-    <div onClick={(e) => e.stopPropagation()}>
-      <div className="att-between" style={{ marginBottom: 13 }}>
+  <div className="att-sheet">
+    <div>
+      <div className="att-between att-shead">
         <b className="att-h1" style={{ fontSize: 18 }}>{title}</b>
-        <button className="att-muted" onClick={onClose}>Close</button>
+        <button className="att-btn sm line" onClick={onClose}>{"\u2190"} Back</button>
       </div>
       {children}
     </div>
@@ -7973,7 +7976,7 @@ function LmsCertificate({ me, course, date, grade, onClose }: any) {
 
 function LmsQuiz({ a, me, onClose }: any) {
   const [qs, setQs] = useState<any[]>([]);
-  const [ans, setAns] = useState<Record<string, number>>({});
+  const [ans, setAns] = useState<Record<string, any>>({});
   const [busy, setBusy] = useState(true);
   const [res, setRes] = useState<any>(null);
   const [tries, setTries] = useState<any[]>([]);
@@ -8032,7 +8035,10 @@ function LmsQuiz({ a, me, onClose }: any) {
 
   const mm = String(Math.floor(Math.max(left, 0) / 60)).padStart(2, "0");
   const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
-  const answered = Object.keys(ans).length;
+  const answered = Object.keys(ans).filter((k) => {
+    const v = ans[k];
+    return typeof v === "number" ? true : String(v || "").trim() !== "";
+  }).length;
 
   const Row = ({ label, children }: any) => (
     <div className="att-qrow">
@@ -8043,9 +8049,11 @@ function LmsQuiz({ a, me, onClose }: any) {
 
   /* ---- summary / result screen ---- */
   if (!started) {
-    const shown = res
-      ? { score: res.score, total: res.total, passed: res.passed }
-      : best ? { score: best.score, total: best.total, passed: best.passed } : null;
+    const src = res || best;
+    const shown = src
+      ? { score: src.score, total: src.total, passed: src.passed,
+          pending: src.needs_review === true || src.passed == null }
+      : null;
 
     return (
       <Sheet title={a.title} onClose={onClose}>
@@ -8053,16 +8061,21 @@ function LmsQuiz({ a, me, onClose }: any) {
           <Note>{err}</Note>
 
           {shown && (
-            <div className={`att-scorebar ${shown.passed ? "ok" : "no"}`}>
-              <b>Score: {Number(shown.score)} / {Number(shown.total)}</b>
-              <span>{shown.passed ? "Cleared" : "Not cleared"}</span>
+            <div className={`att-scorebar ${shown.pending ? "wait"
+              : shown.passed ? "ok" : "no"}`}>
+              <b>{shown.pending
+                ? "Answer submitted"
+                : `Score: ${Number(shown.score)} / ${Number(shown.total)}`}</b>
+              <span>{shown.pending ? "Awaiting review"
+                : shown.passed ? "Cleared" : "Not cleared"}</span>
             </div>
           )}
 
           <div className="att-qinfo">
             <Row label="Type">Online</Row>
             <Row label="Status">
-              {cleared ? "Cleared" : used ? "Not cleared" : "Not attempted"}
+              {shown?.pending ? "Awaiting review"
+                : cleared ? "Cleared" : used ? "Not cleared" : "Not attempted"}
             </Row>
             <Row label="Duration">{a.duration_min} minutes</Row>
             {shown && <Row label="Marks">
@@ -8088,8 +8101,9 @@ function LmsQuiz({ a, me, onClose }: any) {
                     <p><b>{Number(t.score)} / {Number(t.total)}</b></p>
                     <p className="att-muted">{fmtDate(t.submitted_at)}</p>
                   </div>
-                  <span className={`att-pill ${t.passed ? "p-Present" : "p-Absent"}`}>
-                    {t.passed ? "Pass" : "Fail"}
+                  <span className={`att-pill ${t.needs_review || t.passed == null ? "p-Late"
+                    : t.passed ? "p-Present" : "p-Absent"}`}>
+                    {t.needs_review || t.passed == null ? "In review" : t.passed ? "Pass" : "Fail"}
                   </span>
                 </div>
               ))}
@@ -8147,17 +8161,29 @@ function LmsQuiz({ a, me, onClose }: any) {
 
         {qs.map((q: any, i: number) => (
           <div className="att-qcard" key={q.id}>
-            <p className="q"><b>{i + 1}.</b> {q.question}</p>
-            <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
-              {(q.options || []).map((o: string, k: number) => (
-                <button key={k}
-                  className={`att-opt ${ans[q.id] === k ? "on" : ""}`}
-                  onClick={() => setAns({ ...ans, [q.id]: k })}>
-                  <span className="ltr">{String.fromCharCode(65 + k)}</span>
-                  <span className="txt">{o}</span>
-                </button>
-              ))}
-            </div>
+            <p className="q">
+              <b>{i + 1}.</b> {q.question}
+              <span className="att-muted" style={{ fontWeight: 400 }}>
+                {"  "}({q.marks} mark{Number(q.marks) === 1 ? "" : "s"})
+              </span>
+            </p>
+            {q.kind === "text" ? (
+              <textarea rows={5} style={{ marginTop: 10 }}
+                placeholder="Apna jawab yahan likho"
+                value={ans[q.id] || ""}
+                onChange={(e) => setAns({ ...ans, [q.id]: e.target.value })} />
+            ) : (
+              <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
+                {(q.options || []).map((o: string, k: number) => (
+                  <button key={k}
+                    className={`att-opt ${ans[q.id] === k ? "on" : ""}`}
+                    onClick={() => setAns({ ...ans, [q.id]: k })}>
+                    <span className="ltr">{String.fromCharCode(65 + k)}</span>
+                    <span className="txt">{o}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
 
@@ -8637,17 +8663,21 @@ function LmsQuestionsSheet({ a, onClose }: any) {
   const opts: string[] = f?.options || ["", "", "", ""];
 
   const save = async () => {
+    const kind = f.kind || "mcq";
     const clean = opts.map((o) => (o || "").trim()).filter(Boolean);
     if (!f.question?.trim()) return setErr("Question is required.");
-    if (clean.length < 2) return setErr("Kam se kam 2 options chahiye.");
-    if (f.correct_index == null || f.correct_index >= clean.length)
-      return setErr("Sahi jawab chuno.");
+    if (kind === "mcq") {
+      if (clean.length < 2) return setErr("Kam se kam 2 options chahiye.");
+      if (f.correct_index == null || f.correct_index >= clean.length)
+        return setErr("Sahi jawab chuno.");
+    }
     setBusy(true); setErr("");
     const p = {
       assessment_id: a.id,
       question: f.question.trim(),
-      options: clean,
-      correct_index: Number(f.correct_index),
+      kind,
+      options: kind === "mcq" ? clean : null,
+      correct_index: kind === "mcq" ? Number(f.correct_index) : null,
       marks: Number(f.marks) || 1,
       seq: Number(f.seq) || 0,
     };
@@ -8683,24 +8713,38 @@ function LmsQuestionsSheet({ a, onClose }: any) {
               <textarea rows={3} value={f.question || ""}
                 onChange={(e) => setF({ ...f, question: e.target.value })} /></div>
 
-            <div>
-              <label>Options — sahi jawab pe tick karo</label>
-              {opts.map((o, i) => (
-                <div className="att-optrow" key={i}>
-                  <button className={`att-optpick ${f.correct_index === i ? "on" : ""}`}
-                    title="Sahi jawab"
-                    onClick={() => setF({ ...f, correct_index: i })}>
-                    {String.fromCharCode(65 + i)}
-                  </button>
-                  <input value={o} placeholder={`Option ${String.fromCharCode(65 + i)}`}
-                    onChange={(e) => setOpt(i, e.target.value)} />
-                </div>
-              ))}
-              <button className="att-btn sm line" style={{ marginTop: 8 }}
-                onClick={() => setF({ ...f, options: [...opts, ""] })}>
-                + Option
-              </button>
-            </div>
+            <div><label>Answer type</label>
+              <select value={f.kind || "mcq"}
+                onChange={(e) => setF({ ...f, kind: e.target.value })}>
+                <option value="mcq">Multiple choice — apne aap check hoga</option>
+                <option value="text">Written answer — admin marks dega</option>
+              </select></div>
+
+            {(f.kind || "mcq") === "mcq" ? (
+              <div>
+                <label>Options — sahi jawab pe tick karo</label>
+                {opts.map((o, i) => (
+                  <div className="att-optrow" key={i}>
+                    <button className={`att-optpick ${f.correct_index === i ? "on" : ""}`}
+                      title="Sahi jawab"
+                      onClick={() => setF({ ...f, correct_index: i })}>
+                      {String.fromCharCode(65 + i)}
+                    </button>
+                    <input value={o} placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                      onChange={(e) => setOpt(i, e.target.value)} />
+                  </div>
+                ))}
+                <button className="att-btn sm line" style={{ marginTop: 8 }}
+                  onClick={() => setF({ ...f, options: [...opts, ""] })}>
+                  + Option
+                </button>
+              </div>
+            ) : (
+              <p className="att-muted">
+                Staff ek box mein jawab likhega. Submit hone ke baad admin ko
+                Grading tab mein aakar marks dene honge.
+              </p>
+            )}
 
             <div className="att-row2">
               <div><label>Marks</label>
@@ -8719,7 +8763,8 @@ function LmsQuestionsSheet({ a, onClose }: any) {
         ) : (
           <div className="att-between">
             <button className="att-btn sm" onClick={() => { setF({
-              seq: rows.length, marks: 1, correct_index: 0, options: ["", "", "", ""] }); toForm(); }}>
+              seq: rows.length, marks: 1, kind: "mcq",
+              correct_index: 0, options: ["", "", "", ""] }); toForm(); }}>
               + Add question
             </button>
             <span className="att-muted">Total {total} marks</span>
@@ -8734,7 +8779,9 @@ function LmsQuestionsSheet({ a, onClose }: any) {
               <div className="grow">
                 <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
                 <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                  {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
+                  {q.kind === "text"
+                    ? "Written answer"
+                    : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
                   {" · "}{q.marks} mark{Number(q.marks) === 1 ? "" : "s"}
                 </p>
               </div>
@@ -8747,6 +8794,208 @@ function LmsQuestionsSheet({ a, onClose }: any) {
             </div>
           ))}
         </div>
+      </div>
+    </Sheet>
+  );
+}
+
+
+/* ---------------- admin: written answers grade karo ---------------- */
+
+function LmsGrading() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [open, setOpen] = useState<any>(null);
+  const [showDone, setShowDone] = useState(false);
+
+  const load = async () => {
+    setBusy(true);
+    const at = await supabase.from("lms_attempts").select("*")
+      .not("submitted_at", "is", null)
+      .order("submitted_at", { ascending: false }).range(0, 4999);
+    const list = at.data || [];
+    const aIds = Array.from(new Set(list.map((x: any) => x.assessment_id)));
+    const eIds = Array.from(new Set(list.map((x: any) => x.employee_id)));
+    const [asm, emp, crs] = await Promise.all([
+      supabase.from("lms_assessments").select("*").in("id", aIds.length ? aIds : [""]),
+      supabase.from("employees").select("id, emp_code, full_name")
+        .in("id", eIds.length ? eIds : [""]),
+      supabase.from("lms_courses").select("id, title"),
+    ]);
+    const am: Record<string, any> = {};
+    (asm.data || []).forEach((x: any) => { am[x.id] = x; });
+    const em: Record<string, any> = {};
+    (emp.data || []).forEach((x: any) => { em[x.id] = x; });
+    const cm: Record<string, any> = {};
+    (crs.data || []).forEach((x: any) => { cm[x.id] = x; });
+    setRows(list.map((x: any) => ({
+      ...x, a: am[x.assessment_id], e: em[x.employee_id],
+      c: cm[am[x.assessment_id]?.course_id],
+    })));
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const pending = rows.filter((r) => r.needs_review || r.passed == null);
+  const shown = showDone ? rows : pending;
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">Grading</h3>
+        <span className="att-muted">{pending.length} pending</span>
+      </div>
+
+      <div className="att-seg" style={{ marginTop: 10 }}>
+        <button className={showDone ? "" : "on"} onClick={() => setShowDone(false)}>
+          Pending ({pending.length})
+        </button>
+        <button className={showDone ? "on" : ""} onClick={() => setShowDone(true)}>
+          All attempts ({rows.length})
+        </button>
+      </div>
+
+      {busy && <p className="att-muted" style={{ marginTop: 10 }}>Loading…</p>}
+
+      <div className="att-list" style={{ marginTop: 10 }}>
+        {!busy && shown.length === 0 && (
+          <p className="att-empty">
+            {showDone ? "No attempts yet." : "Sab kuch graded hai."}
+          </p>
+        )}
+        {shown.map((r) => (
+          <div className="att-row clk" key={r.id} onClick={() => setOpen(r)}>
+            <div className="grow">
+              <p><b>{r.e?.emp_code}</b> · {r.e?.full_name}</p>
+              <p className="att-muted">
+                {r.a?.title || "Assessment"}
+                {r.c ? ` · ${r.c.title}` : ""}
+                {r.submitted_at ? ` · ${fmtDate(r.submitted_at)}` : ""}
+              </p>
+            </div>
+            <span className={`att-pill ${r.needs_review || r.passed == null ? "p-Late"
+              : r.passed ? "p-Present" : "p-Absent"}`}>
+              {r.needs_review || r.passed == null
+                ? "Review" : `${Number(r.score)}/${Number(r.total)}`}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {open && (
+        <LmsGradeSheet r={open}
+          onClose={() => setOpen(null)}
+          onSaved={() => { setOpen(null); load(); }} />
+      )}
+    </>
+  );
+}
+
+function LmsGradeSheet({ r, onClose, onSaved }: any) {
+  const [qs, setQs] = useState<any[]>([]);
+  const [marks, setMarks] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("lms_questions").select("*")
+        .eq("assessment_id", r.assessment_id).order("seq");
+      setQs(data || []);
+      const m: Record<string, string> = {};
+      (data || []).forEach((q: any) => {
+        if (q.kind === "text") {
+          const cur = r.awarded?.[q.id];
+          m[q.id] = cur == null ? "" : String(cur);
+        }
+      });
+      setMarks(m);
+      setBusy(false);
+    })();
+  }, [r.id]);
+
+  const textQs = qs.filter((q) => q.kind === "text");
+  const mcqScore = qs.filter((q) => q.kind !== "text")
+    .reduce((n, q) => n + (String(r.answers?.[q.id]) === String(q.correct_index)
+      ? Number(q.marks) : 0), 0);
+  const given = textQs.reduce((n, q) => n + (Number(marks[q.id]) || 0), 0);
+
+  const save = async () => {
+    for (const q of textQs) {
+      const v = Number(marks[q.id]);
+      if (marks[q.id] === "" || isNaN(v)) return setErr("Har written answer ko marks do.");
+      if (v < 0 || v > Number(q.marks)) return setErr(`Marks 0 se ${q.marks} ke beech hone chahiye.`);
+    }
+    setBusy(true); setErr("");
+    const payload: Record<string, number> = {};
+    textQs.forEach((q) => { payload[q.id] = Number(marks[q.id]); });
+    const { error } = await supabase.rpc("lms_quiz_grade",
+      { p_attempt: r.id, p_awarded: payload });
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setBusy(false); onSaved();
+  };
+
+  return (
+    <Sheet title={`${r.e?.full_name || "Attempt"} · ${r.a?.title || ""}`} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+
+        <div className="att-qinfo">
+          <div className="att-qrow"><span>Submitted</span>
+            <div>{r.submitted_at ? fmtDateY(r.submitted_at) : "—"}</div></div>
+          <div className="att-qrow"><span>MCQ score</span>
+            <div>{mcqScore} marks</div></div>
+          <div className="att-qrow"><span>Written marks</span>
+            <div>{given} of {textQs.reduce((n, q) => n + Number(q.marks), 0)}</div></div>
+          <div className="att-qrow"><span>Total</span>
+            <div><b>{mcqScore + given}</b> / {Number(r.total)} · pass {r.a?.pass_percent}%</div></div>
+        </div>
+
+        {busy && <p className="att-muted">Loading…</p>}
+
+        {qs.map((q, i) => {
+          const ansv = r.answers?.[q.id];
+          const isText = q.kind === "text";
+          const right = !isText && String(ansv) === String(q.correct_index);
+          return (
+            <div className="att-qcard" key={q.id}>
+              <p className="q"><b>{i + 1}.</b> {q.question}
+                <span className="att-muted" style={{ fontWeight: 400 }}>
+                  {"  "}({q.marks} mark{Number(q.marks) === 1 ? "" : "s"})
+                </span>
+              </p>
+
+              {isText ? (
+                <>
+                  <div className="att-answer">{ansv || <i>No answer</i>}</div>
+                  <div className="att-optrow" style={{ marginTop: 10 }}>
+                    <input type="number" min={0} max={Number(q.marks)} step="0.5"
+                      style={{ maxWidth: 120 }}
+                      placeholder={`0 - ${q.marks}`}
+                      value={marks[q.id] ?? ""}
+                      onChange={(e) => setMarks({ ...marks, [q.id]: e.target.value })} />
+                    <span className="att-muted">out of {q.marks}</span>
+                  </div>
+                </>
+              ) : (
+                <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
+                  Answer: {ansv == null ? "—"
+                    : `${String.fromCharCode(65 + Number(ansv))}. ${(q.options || [])[Number(ansv)]}`}
+                  {" · "}
+                  <b style={{ color: right ? "#16a34a" : "#dc2626" }}>
+                    {right ? "Correct" : "Incorrect"}
+                  </b>
+                </p>
+              )}
+            </div>
+          );
+        })}
+
+        {textQs.length > 0 && (
+          <button className="att-btn" disabled={busy} onClick={save}>
+            Save marks
+          </button>
+        )}
       </div>
     </Sheet>
   );
@@ -9026,6 +9275,7 @@ const MODULES: Module[] = [
       { k: "manage", label: "Manage", adminOnly: true, views: [
         { k: "courses", label: "Manage Courses", adminOnly: true },
         { k: "report", label: "Team Progress", adminOnly: true },
+        { k: "grade", label: "Grading", adminOnly: true },
       ]},
     ],
   },
@@ -9284,6 +9534,7 @@ export default function Attendance() {
       case "lms/mydata/asmt":       return <div className="att-wrap att-stack"><LmsMyAssessments me={me} /></div>;
       case "lms/manage/courses":    return <div className="att-wrap att-stack"><LmsManage me={me} /></div>;
       case "lms/manage/report":     return <div className="att-wrap att-stack"><LmsProgressReport /></div>;
+      case "lms/manage/grade":     return <div className="att-wrap att-stack"><LmsGrading /></div>;
       // ---- Reports ----
       case "reports/mine/me":       return <MyReportTab me={me} />;
       case "reports/mine/pay":      return <MyPayTab me={me} />;
