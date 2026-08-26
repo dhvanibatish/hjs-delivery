@@ -7585,6 +7585,17 @@ const driveImg = (url: string) => {
   return url;
 };
 
+// edit dabane par form upar khulta hai; agar user neeche scroll kiya ho
+// to usse dikhta hi nahi. Isliye form tak le jao.
+const toForm = () => setTimeout(() => {
+  document.getElementById("lms-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+}, 60);
+
+// chapter click karne par player upar hota hai — wahan tak le jao
+const toPlayer = () => setTimeout(() => {
+  document.getElementById("lms-player")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}, 60);
+
 const KIND_LABEL: Record<string, string> = {
   video: "Video", doc: "Document", link: "Link",
 };
@@ -7793,7 +7804,7 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
         )}
 
         {play && (
-          <div className="att-player">
+          <div className="att-player" id="lms-player">
             <iframe src={driveEmbed(play.url)} title={play.title}
               allow="autoplay; encrypted-media" allowFullScreen />
           </div>
@@ -7853,7 +7864,7 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
                     <div className={`att-row ${lock ? "lock" : "clk"} ${play?.id === x.id ? "on" : ""}`}
                       key={x.id}
                       title={lock ? "Pehle wala chapter poora karo" : undefined}
-                      onClick={() => { if (!lock) setPlay(x); }}>
+                      onClick={() => { if (!lock) { setPlay(x); toPlayer(); } }}>
                       <span className={`att-num ${done.has(x.id) ? "ok" : ""}`}>
                         {done.has(x.id) ? "\u2713" : lock ? "\u{1F512}" : n}
                       </span>
@@ -8415,7 +8426,7 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
         <Note>{err}</Note>
 
         {f ? (
-          <div className="att-stack att-card">
+          <div className="att-stack att-card" id="lms-form">
             <div><label>Title</label>
               <input value={f.title || ""} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
             <div><label>Google Drive / YouTube link</label>
@@ -8468,7 +8479,8 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
                 </p>
               </div>
               <div className="att-flex">
-                <button className="att-btn sm line" onClick={() => setF(x)}>Edit</button>
+                <button className="att-btn sm line"
+                  onClick={() => { setF(x); toForm(); }}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(x.id)}>Delete</button>
               </div>
@@ -8535,7 +8547,7 @@ function LmsAsmtSheet({ course, onClose }: any) {
         <Note>{err}</Note>
 
         {f ? (
-          <div className="att-stack att-card">
+          <div className="att-stack att-card" id="lms-form">
             <div><label>Title</label>
               <input value={f.title || ""}
                 onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
@@ -8594,7 +8606,8 @@ function LmsAsmtSheet({ course, onClose }: any) {
               </div>
               <div className="att-flex">
                 <button className="att-btn sm line" onClick={() => setOpenQ(a)}>Questions</button>
-                <button className="att-btn sm line" onClick={() => setF(a)}>Edit</button>
+                <button className="att-btn sm line"
+                  onClick={() => { setF(a); toForm(); }}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(a.id)}>Delete</button>
               </div>
@@ -8665,7 +8678,7 @@ function LmsQuestionsSheet({ a, onClose }: any) {
         <Note>{err}</Note>
 
         {f ? (
-          <div className="att-stack att-card">
+          <div className="att-stack att-card" id="lms-form">
             <div><label>Question</label>
               <textarea rows={3} value={f.question || ""}
                 onChange={(e) => setF({ ...f, question: e.target.value })} /></div>
@@ -8705,8 +8718,8 @@ function LmsQuestionsSheet({ a, onClose }: any) {
           </div>
         ) : (
           <div className="att-between">
-            <button className="att-btn sm" onClick={() => setF({
-              seq: rows.length, marks: 1, correct_index: 0, options: ["", "", "", ""] })}>
+            <button className="att-btn sm" onClick={() => { setF({
+              seq: rows.length, marks: 1, correct_index: 0, options: ["", "", "", ""] }); toForm(); }}>
               + Add question
             </button>
             <span className="att-muted">Total {total} marks</span>
@@ -8727,7 +8740,7 @@ function LmsQuestionsSheet({ a, onClose }: any) {
               </div>
               <div className="att-flex">
                 <button className="att-btn sm line"
-                  onClick={() => setF({ ...q, options: q.options || [] })}>Edit</button>
+                  onClick={() => { setF({ ...q, options: q.options || [] }); toForm(); }}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(q.id)}>Delete</button>
               </div>
