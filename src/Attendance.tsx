@@ -483,6 +483,30 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-optrow { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
+.hjsatt .att-optrow input { flex: 1 1 auto; }
+.hjsatt .att-optpick { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+  border: 1px solid #e6e8ec; background: #fff; color: #667085;
+  font-weight: 750; font-size: 13px; cursor: pointer; }
+.hjsatt .att-optpick:hover { border-color: #c3cddb; }
+.hjsatt .att-optpick.on { background: #16a34a; border-color: #16a34a; color: #fff; }
+
+.hjsatt .att-qsticky { position: sticky; top: 0; z-index: 3; background: #fff;
+  padding: 8px 0; border-bottom: 1px solid #eef0f3; }
+.hjsatt .att-qcard { border: 1px solid #e6e8ec; border-radius: 10px; padding: 14px; background: #fff; }
+.hjsatt .att-qcard .q { font-size: 15.5px; font-weight: 650; white-space: normal; line-height: 1.45; }
+.hjsatt .att-scorebar { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 13px 15px; border-radius: 10px; }
+.hjsatt .att-scorebar b { font-size: 17px; }
+.hjsatt .att-scorebar.ok { background: #f6fef9; border: 1px solid #b7ebc9; color: #16a34a; }
+.hjsatt .att-scorebar.no { background: #fffbfa; border: 1px solid #f5c6c2; color: #dc2626; }
+.hjsatt .att-qinfo { border: 1px solid #e6e8ec; border-radius: 10px; background: #fff; }
+.hjsatt .att-qrow { display: flex; align-items: flex-start; gap: 14px;
+  padding: 11px 15px; border-bottom: 1px solid #f2f4f7; font-size: 14.5px; }
+.hjsatt .att-qrow:last-child { border-bottom: 0; }
+.hjsatt .att-qrow > span { flex: 0 0 168px; color: #667085; font-size: 13px; }
+.hjsatt .att-qrow > div { flex: 1 1 auto; }
+
 .hjsatt .att-crumb { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .hjsatt .att-row.lock { opacity: .55; cursor: not-allowed; }
 .hjsatt .att-row.lock:hover { background: transparent; }
@@ -7868,7 +7892,7 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
         )}
       </div>
 
-      {quiz && <LmsQuiz a={quiz} onClose={() => { setQuiz(null); loadAsmt(); }} />}
+      {quiz && <LmsQuiz a={quiz} me={me} onClose={() => { setQuiz(null); loadAsmt(); }} />}
       {cert && (
         <LmsCertificate me={me} course={course} onClose={() => setCert(false)}
           date={items.map((x: any) => doneAt?.[x.id]).filter(Boolean).sort().slice(-1)[0]}
@@ -7936,21 +7960,40 @@ function LmsCertificate({ me, course, date, grade, onClose }: any) {
 
 /* ---------------- quiz ---------------- */
 
-function LmsQuiz({ a, onClose }: any) {
+function LmsQuiz({ a, me, onClose }: any) {
   const [qs, setQs] = useState<any[]>([]);
   const [ans, setAns] = useState<Record<string, number>>({});
-  const [i, setI] = useState(0);
   const [busy, setBusy] = useState(true);
   const [res, setRes] = useState<any>(null);
+  const [tries, setTries] = useState<any[]>([]);
+  const [review, setReview] = useState<any[]>([]);
+  const [showAns, setShowAns] = useState(false);
   const [err, setErr] = useState("");
   const [left, setLeft] = useState((a.duration_min || 10) * 60);
+  const [started, setStarted] = useState(false);
 
-  useEffect(() => {
-    supabase.rpc("lms_quiz_start", { p_assessment: a.id }).then(({ data, error }) => {
-      if (error) setErr(error.message);
-      setQs(data || []); setBusy(false);
-    });
-  }, [a.id]);
+  const used = tries.length;
+  const maxA = a.max_attempts ?? 1;
+  const leftA = Math.max(0, maxA - used);
+  const best = tries.filter((t: any) => t.total > 0)
+    .sort((x: any, y: any) => Number(y.score) - Number(x.score))[0] || null;
+  const cleared = tries.some((t: any) => t.passed);
+
+  const loadAll = async () => {
+    setBusy(true);
+    const [q, at] = await Promise.all([
+      supabase.rpc("lms_quiz_start", { p_assessment: a.id }),
+      supabase.from("lms_attempts").select("*")
+        .eq("assessment_id", a.id).eq("employee_id", me.id)
+        .not("submitted_at", "is", null)
+        .order("submitted_at", { ascending: false }),
+    ]);
+    if (q.error) setErr(q.error.message);
+    setQs(q.data || []);
+    setTries(at.data || []);
+    setBusy(false);
+  };
+  useEffect(() => { loadAll(); }, [a.id]);
 
   const submit = async () => {
     setBusy(true); setErr("");
@@ -7958,78 +8001,162 @@ function LmsQuiz({ a, onClose }: any) {
       { p_assessment: a.id, p_answers: ans });
     if (error) { setErr(error.message); setBusy(false); return; }
     setRes((data || [])[0] || null);
-    setBusy(false);
+    setStarted(false);
+    await loadAll();
   };
 
-  // timer — waqt khatam to apne aap jama ho jayega
+  // timer sirf tab chale jab quiz khula ho
   useEffect(() => {
-    if (res || busy) return;
+    if (!started || res || busy) return;
     if (left <= 0) { submit(); return; }
     const t = setTimeout(() => setLeft(left - 1), 1000);
     return () => clearTimeout(t);
-  }, [left, res, busy]);
+  }, [left, started, res, busy]);
+
+  const openAnswers = async () => {
+    const { data } = await supabase.rpc("lms_quiz_review", { p_assessment: a.id });
+    setReview(data || []);
+    setShowAns(true);
+  };
 
   const mm = String(Math.floor(Math.max(left, 0) / 60)).padStart(2, "0");
   const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
-  const q = qs[i];
   const answered = Object.keys(ans).length;
 
-  return (
-    <Sheet title={a.title} onClose={onClose}>
-      <Note>{err}</Note>
+  const Row = ({ label, children }: any) => (
+    <div className="att-qrow">
+      <span>{label}</span>
+      <div>{children}</div>
+    </div>
+  );
 
-      {res ? (
-        <div className="att-stack" style={{ textAlign: "center" }}>
-          <div className={`att-score ${res.passed ? "ok" : "no"}`}>
-            {Number(res.score)} / {Number(res.total)}
-          </div>
-          <b style={{ fontSize: 17, color: res.passed ? "#16a34a" : "#dc2626" }}>
-            {res.passed ? "Passed" : "Not passed"}
-          </b>
-          <p className="att-muted">Pass mark {a.pass_percent}%</p>
-          <button className="att-btn" onClick={onClose}>Done</button>
-        </div>
-      ) : busy ? (
-        <p className="att-muted">Loading…</p>
-      ) : qs.length === 0 ? (
-        <p className="att-empty">No questions in this assessment yet.</p>
-      ) : (
+  /* ---- summary / result screen ---- */
+  if (!started) {
+    const shown = res
+      ? { score: res.score, total: res.total, passed: res.passed }
+      : best ? { score: best.score, total: best.total, passed: best.passed } : null;
+
+    return (
+      <Sheet title={a.title} onClose={onClose}>
         <div className="att-stack">
-          <div className="att-between">
-            <span className="att-muted">Question {i + 1} of {qs.length}</span>
-            <span className={`att-pill ${left < 60 ? "p-Absent" : "p-Late"}`}>{mm}:{ss}</span>
+          <Note>{err}</Note>
+
+          {shown && (
+            <div className={`att-scorebar ${shown.passed ? "ok" : "no"}`}>
+              <b>Score: {Number(shown.score)} / {Number(shown.total)}</b>
+              <span>{shown.passed ? "Cleared" : "Not cleared"}</span>
+            </div>
+          )}
+
+          <div className="att-qinfo">
+            <Row label="Type">Online</Row>
+            <Row label="Status">
+              {cleared ? "Cleared" : used ? "Not cleared" : "Not attempted"}
+            </Row>
+            <Row label="Duration">{a.duration_min} minutes</Row>
+            {shown && <Row label="Marks">
+              <b style={{ color: shown.passed ? "#16a34a" : "#dc2626" }}>
+                {Number(shown.score)}</b> / {Number(shown.total)}
+            </Row>}
+            <Row label="Pass percentage">{a.pass_percent}%</Row>
+            <Row label="Attempts taken">{used}</Row>
+            <Row label="Attempts left">{leftA}</Row>
+            <Row label="Allowed attempts">{maxA}</Row>
+            <Row label="Show correct answers">
+              {a.show_answers ? "on passing the test" : "No"}
+            </Row>
           </div>
 
-          <div className="att-prog">
-            <div className="bar"><span style={{ width: `${((i + 1) / qs.length) * 100}%` }} /></div>
-          </div>
+          {tries.length > 0 && (
+            <div className="att-list">
+              <div className="att-hd"><b>Attempts</b><span className="att-muted">{tries.length}</span></div>
+              {tries.map((t: any, i: number) => (
+                <div className="att-row" key={t.id}>
+                  <span className="att-num">{tries.length - i}</span>
+                  <div className="grow">
+                    <p><b>{Number(t.score)} / {Number(t.total)}</b></p>
+                    <p className="att-muted">{fmtDate(t.submitted_at)}</p>
+                  </div>
+                  <span className={`att-pill ${t.passed ? "p-Present" : "p-Absent"}`}>
+                    {t.passed ? "Pass" : "Fail"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
-          <p style={{ fontWeight: 650, whiteSpace: "normal", fontSize: 15.5 }}>{q.question}</p>
+          {showAns && review.length > 0 && (
+            <div className="att-list">
+              <div className="att-hd"><b>Correct answers</b></div>
+              {review.map((q: any, i: number) => (
+                <div className="att-row" key={q.id}>
+                  <span className="att-num ok">{i + 1}</span>
+                  <div className="grow">
+                    <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
+                    <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                      {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
-          <div className="att-stack" style={{ gap: 8 }}>
-            {(q.options || []).map((o: string, k: number) => (
-              <button key={k}
-                className={`att-opt ${ans[q.id] === k ? "on" : ""}`}
-                onClick={() => setAns({ ...ans, [q.id]: k })}>
-                <span className="ltr">{String.fromCharCode(65 + k)}</span>
-                <span className="txt">{o}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="att-between">
-            <button className="att-btn sm line" disabled={i === 0}
-              onClick={() => setI(i - 1)}>Back</button>
-            {i < qs.length - 1 ? (
-              <button className="att-btn sm" onClick={() => setI(i + 1)}>Next</button>
-            ) : (
-              <button className="att-btn sm" disabled={busy} onClick={submit}>
-                Submit ({answered}/{qs.length})
+          <div className="att-flex">
+            {leftA > 0 && !busy && qs.length > 0 && (
+              <button className="att-btn" onClick={() => {
+                setAns({}); setRes(null); setLeft((a.duration_min || 10) * 60); setStarted(true);
+              }}>
+                {used ? "Re-attempt" : "Start assessment"}
               </button>
             )}
+            {cleared && a.show_answers && !showAns && (
+              <button className="att-btn line" onClick={openAnswers}>Show correct answers</button>
+            )}
           </div>
+
+          {leftA === 0 && !cleared && (
+            <p className="att-muted">No attempts left. Please contact HR.</p>
+          )}
         </div>
-      )}
+      </Sheet>
+    );
+  }
+
+  /* ---- form: saare sawaal ek saath ---- */
+  return (
+    <Sheet title={a.title} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+
+        <div className="att-between att-qsticky">
+          <span className="att-muted">{answered} of {qs.length} answered</span>
+          <span className={`att-pill ${left < 60 ? "p-Absent" : "p-Late"}`}>{mm}:{ss}</span>
+        </div>
+
+        {qs.map((q: any, i: number) => (
+          <div className="att-qcard" key={q.id}>
+            <p className="q"><b>{i + 1}.</b> {q.question}</p>
+            <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
+              {(q.options || []).map((o: string, k: number) => (
+                <button key={k}
+                  className={`att-opt ${ans[q.id] === k ? "on" : ""}`}
+                  onClick={() => setAns({ ...ans, [q.id]: k })}>
+                  <span className="ltr">{String.fromCharCode(65 + k)}</span>
+                  <span className="txt">{o}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <button className="att-btn" disabled={busy} onClick={submit}>
+          Submit ({answered}/{qs.length})
+        </button>
+        {answered < qs.length && (
+          <p className="att-muted">Bina jawab wale sawaal galat gine jaayenge.</p>
+        )}
+      </div>
     </Sheet>
   );
 }
@@ -8101,6 +8228,7 @@ function LmsManage({ me }: any) {
   const [busy, setBusy] = useState(true);
   const [edit, setEdit] = useState<any>(null);
   const [openC, setOpenC] = useState<any>(null);
+  const [openA, setOpenA] = useState<any>(null);
 
   const load = async () => {
     setBusy(true);
@@ -8141,6 +8269,7 @@ function LmsManage({ me }: any) {
             </div>
             <div className="att-flex">
               <button className="att-btn sm line" onClick={() => setOpenC(c)}>Chapters</button>
+              <button className="att-btn sm line" onClick={() => setOpenA(c)}>Assessments</button>
               <button className="att-btn sm line" onClick={() => setEdit(c)}>Edit</button>
             </div>
           </div>
@@ -8151,6 +8280,7 @@ function LmsManage({ me }: any) {
         onSaved={() => { setEdit(null); load(); }} />}
       {openC && <LmsItemsSheet course={openC} rows={items[openC.id] || []}
         onClose={() => setOpenC(null)} onSaved={load} />}
+      {openA && <LmsAsmtSheet course={openA} onClose={() => setOpenA(null)} />}
     </>
   );
 }
@@ -8341,6 +8471,265 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
                 <button className="att-btn sm line" onClick={() => setF(x)}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(x.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+
+/* ---------------- admin: assessments + questions ---------------- */
+
+function LmsAsmtSheet({ course, onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [qcount, setQcount] = useState<Record<string, number>>({});
+  const [f, setF] = useState<any>(null);
+  const [openQ, setOpenQ] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    const [a, q] = await Promise.all([
+      supabase.from("lms_assessments").select("*").eq("course_id", course.id).order("seq"),
+      supabase.from("lms_questions").select("id, assessment_id"),
+    ]);
+    setRows(a.data || []);
+    const c: Record<string, number> = {};
+    (q.data || []).forEach((x: any) => { c[x.assessment_id] = (c[x.assessment_id] || 0) + 1; });
+    setQcount(c);
+  };
+  useEffect(() => { load(); }, [course.id]);
+
+  const save = async () => {
+    if (!f.title?.trim()) return setErr("Title is required.");
+    setBusy(true); setErr("");
+    const p = {
+      course_id: course.id,
+      title: f.title.trim(),
+      duration_min: Number(f.duration_min) || 10,
+      pass_percent: Number(f.pass_percent) || 60,
+      max_attempts: Number(f.max_attempts) || 1,
+      show_answers: !!f.show_answers,
+      seq: Number(f.seq) || 0,
+      active: !!f.active,
+    };
+    const { error } = f.id
+      ? await supabase.from("lms_assessments").update(p).eq("id", f.id)
+      : await supabase.from("lms_assessments").insert(p);
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setF(null); setBusy(false); await load();
+  };
+
+  const kill = async (id: string) => {
+    if (!window.confirm("Delete this assessment and all its questions?")) return;
+    await supabase.from("lms_assessments").delete().eq("id", id);
+    await load();
+  };
+
+  return (
+    <Sheet title={`Assessments · ${course.title}`} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+
+        {f ? (
+          <div className="att-stack att-card">
+            <div><label>Title</label>
+              <input value={f.title || ""}
+                onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
+            <div className="att-row2">
+              <div><label>Duration (minutes)</label>
+                <input type="number" value={f.duration_min ?? 10}
+                  onChange={(e) => setF({ ...f, duration_min: e.target.value })} /></div>
+              <div><label>Pass percentage</label>
+                <input type="number" value={f.pass_percent ?? 60}
+                  onChange={(e) => setF({ ...f, pass_percent: e.target.value })} /></div>
+            </div>
+            <div className="att-row2">
+              <div><label>Allowed attempts</label>
+                <input type="number" min={1} value={f.max_attempts ?? 1}
+                  onChange={(e) => setF({ ...f, max_attempts: e.target.value })} /></div>
+              <div><label>Order</label>
+                <input type="number" value={f.seq ?? 0}
+                  onChange={(e) => setF({ ...f, seq: e.target.value })} /></div>
+            </div>
+            <label className="att-check">
+              <input type="checkbox" checked={!!f.show_answers}
+                onChange={(e) => setF({ ...f, show_answers: e.target.checked })} />
+              <span>Pass karne par sahi jawab dikhao</span>
+            </label>
+            <label className="att-check">
+              <input type="checkbox" checked={!!f.active}
+                onChange={(e) => setF({ ...f, active: e.target.checked })} />
+              <span>Staff ko dikhe</span>
+            </label>
+            <div className="att-flex">
+              <button className="att-btn sm" disabled={busy} onClick={save}>Save</button>
+              <button className="att-btn sm line" onClick={() => { setF(null); setErr(""); }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button className="att-btn sm" onClick={() => setF({
+            seq: rows.length, duration_min: 10, pass_percent: 60,
+            max_attempts: 1, show_answers: true, active: true })}>
+            + Add assessment
+          </button>
+        )}
+
+        <div className="att-list">
+          {rows.length === 0 && <p className="att-empty">No assessments yet.</p>}
+          {rows.map((a) => (
+            <div className="att-row" key={a.id}>
+              <div className="grow">
+                <p><b>{a.title}</b>
+                  {!a.active && <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>hidden</span>}
+                </p>
+                <p className="att-muted">
+                  {qcount[a.id] || 0} question{(qcount[a.id] || 0) === 1 ? "" : "s"} ·
+                  {" "}{a.duration_min} min · pass {a.pass_percent}% ·
+                  {" "}{a.max_attempts} attempt{a.max_attempts === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="att-flex">
+                <button className="att-btn sm line" onClick={() => setOpenQ(a)}>Questions</button>
+                <button className="att-btn sm line" onClick={() => setF(a)}>Edit</button>
+                <button className="att-btn sm line" style={{ color: "#dc2626" }}
+                  onClick={() => kill(a.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {openQ && <LmsQuestionsSheet a={openQ} onClose={() => { setOpenQ(null); load(); }} />}
+    </Sheet>
+  );
+}
+
+function LmsQuestionsSheet({ a, onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    const { data } = await supabase.from("lms_questions").select("*")
+      .eq("assessment_id", a.id).order("seq");
+    setRows(data || []);
+  };
+  useEffect(() => { load(); }, [a.id]);
+
+  const opts: string[] = f?.options || ["", "", "", ""];
+
+  const save = async () => {
+    const clean = opts.map((o) => (o || "").trim()).filter(Boolean);
+    if (!f.question?.trim()) return setErr("Question is required.");
+    if (clean.length < 2) return setErr("Kam se kam 2 options chahiye.");
+    if (f.correct_index == null || f.correct_index >= clean.length)
+      return setErr("Sahi jawab chuno.");
+    setBusy(true); setErr("");
+    const p = {
+      assessment_id: a.id,
+      question: f.question.trim(),
+      options: clean,
+      correct_index: Number(f.correct_index),
+      marks: Number(f.marks) || 1,
+      seq: Number(f.seq) || 0,
+    };
+    const { error } = f.id
+      ? await supabase.from("lms_questions").update(p).eq("id", f.id)
+      : await supabase.from("lms_questions").insert(p);
+    if (error) { setErr(error.message); setBusy(false); return; }
+    setF(null); setBusy(false); await load();
+  };
+
+  const kill = async (id: string) => {
+    if (!window.confirm("Delete this question?")) return;
+    await supabase.from("lms_questions").delete().eq("id", id);
+    await load();
+  };
+
+  const setOpt = (i: number, v: string) => {
+    const next = [...opts];
+    next[i] = v;
+    setF({ ...f, options: next });
+  };
+
+  const total = rows.reduce((n, r) => n + Number(r.marks || 0), 0);
+
+  return (
+    <Sheet title={`Questions · ${a.title}`} onClose={onClose}>
+      <div className="att-stack">
+        <Note>{err}</Note>
+
+        {f ? (
+          <div className="att-stack att-card">
+            <div><label>Question</label>
+              <textarea rows={3} value={f.question || ""}
+                onChange={(e) => setF({ ...f, question: e.target.value })} /></div>
+
+            <div>
+              <label>Options — sahi jawab pe tick karo</label>
+              {opts.map((o, i) => (
+                <div className="att-optrow" key={i}>
+                  <button className={`att-optpick ${f.correct_index === i ? "on" : ""}`}
+                    title="Sahi jawab"
+                    onClick={() => setF({ ...f, correct_index: i })}>
+                    {String.fromCharCode(65 + i)}
+                  </button>
+                  <input value={o} placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                    onChange={(e) => setOpt(i, e.target.value)} />
+                </div>
+              ))}
+              <button className="att-btn sm line" style={{ marginTop: 8 }}
+                onClick={() => setF({ ...f, options: [...opts, ""] })}>
+                + Option
+              </button>
+            </div>
+
+            <div className="att-row2">
+              <div><label>Marks</label>
+                <input type="number" value={f.marks ?? 1}
+                  onChange={(e) => setF({ ...f, marks: e.target.value })} /></div>
+              <div><label>Order</label>
+                <input type="number" value={f.seq ?? 0}
+                  onChange={(e) => setF({ ...f, seq: e.target.value })} /></div>
+            </div>
+
+            <div className="att-flex">
+              <button className="att-btn sm" disabled={busy} onClick={save}>Save</button>
+              <button className="att-btn sm line" onClick={() => { setF(null); setErr(""); }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className="att-between">
+            <button className="att-btn sm" onClick={() => setF({
+              seq: rows.length, marks: 1, correct_index: 0, options: ["", "", "", ""] })}>
+              + Add question
+            </button>
+            <span className="att-muted">Total {total} marks</span>
+          </div>
+        )}
+
+        <div className="att-list">
+          {rows.length === 0 && <p className="att-empty">No questions yet.</p>}
+          {rows.map((q, i) => (
+            <div className="att-row" key={q.id}>
+              <span className="att-num">{i + 1}</span>
+              <div className="grow">
+                <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
+                <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                  {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
+                  {" · "}{q.marks} mark{Number(q.marks) === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="att-flex">
+                <button className="att-btn sm line"
+                  onClick={() => setF({ ...q, options: q.options || [] })}>Edit</button>
+                <button className="att-btn sm line" style={{ color: "#dc2626" }}
+                  onClick={() => kill(q.id)}>Delete</button>
               </div>
             </div>
           ))}
