@@ -6085,7 +6085,6 @@ function StyleTag() {
       .track-wrap { min-height: 100vh; background: ${T.beige}; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
-      .track-body.track-wide { max-width: 1380px; padding: 24px 30px 60px; }
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
@@ -6144,7 +6143,7 @@ function StyleTag() {
       .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
       .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .matrix { border-collapse: separate; border-spacing: 0; width: auto; font-size: 14.5px; }
+      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
       .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
       .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
       .mx-hclick { cursor: pointer; }
