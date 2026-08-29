@@ -5964,9 +5964,9 @@ function StyleTag() {
       .req-note { font-size: 11.5px; font-weight: 600; color: ${T.amber}; background: ${T.amberSoft}; border-radius: 9px; padding: 8px 11px; margin-top: -6px; line-height: 1.45; }
       .tp-preview { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 800; color: ${T.green}; margin-top: 6px; }
       .mbc-divider { font-size: 11.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .4px; padding-top: 4px; border-top: 1px dashed ${T.line}; margin-top: 2px; }
-      .tp12 { display: flex; align-items: center; gap: 6px; }
-      .tp12 .inp { flex: 1 1 0; min-width: 0; padding: 11px 4px 11px 10px; text-align: center; text-align-last: center; cursor: pointer; }
-      .tp12 .inp:last-child { flex: 0 0 92px; }
+      .tp12 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .tp12 .inp { flex: 1 1 70px; min-width: 70px; padding: 11px 6px; text-align: center; text-align-last: center; cursor: pointer; }
+      .tp12 .inp:last-child { flex: 0 1 82px; min-width: 76px; }
       .tp12-sep { font-weight: 800; color: ${T.inkSoft}; flex: 0 0 auto; }
       .photo-up { border: 1px dashed ${T.line}; border-radius: 12px; padding: 12px; background: ${T.cream}; }
       .photo-up-label { font-size: 12px; font-weight: 700; color: ${T.ink}; margin-bottom: 9px; }
