@@ -1165,12 +1165,12 @@ export default function App({
     // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
     const hosted = !!extSession;
     // console ka "Sales Pickup" tab — sirf matrix page, koi login nahi
-        if (route === 'sales')
-      return (
-        <div className="hjs-pickups">
-          <PickupSalesPage />
-        </div>
-      );
+        if (route === 'sales')
+            return (
+            <div className="hjs-pickups">
+            <PickupSalesPage />
+            </div>
+            );
     // Tracking routes (Netlify SPA — query params + optional /track path):
     //      /track                                → sales: number se saari deliveries + timeline
     //      /track?inv=CHD/...          → customer: single invoice (phone verify)
@@ -1709,10 +1709,6 @@ export default function App({
                             count={viewItems.length}
                             viewMode={viewMode}
                             onViewMode={setViewMode}
-                        vFrom={vFrom}
-                        vTo={vTo}
-                        onVFrom={setVFrom}
-                        onVTo={setVTo}
                             vFrom={vFrom}
                             vTo={vTo}
                             onVFrom={setVFrom}
@@ -1853,10 +1849,6 @@ export default function App({
                             count={viewItems.length}
                             viewMode={viewMode}
                             onViewMode={setViewMode}
-                        vFrom={vFrom}
-                        vTo={vTo}
-                        onVFrom={setVFrom}
-                        onVTo={setVTo}
                             vFrom={vFrom}
                             vTo={vTo}
                             onVFrom={setVFrom}
@@ -7495,6 +7487,12 @@ function StyleTag() {
             .track-wrap { min-height: 100vh; background: ${T.beige}; }
             .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
             .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
+            /* Sales matrix page ko poori chaudai chahiye. Ye rule delivery se copy
+               karte waqt chhoot gaya tha, isliye matrix 560px mein sikud kar
+               bikhra hua dikhta tha. */
+            .track-body.track-wide { max-width: 1100px; }
+            /* sales ke date input pe green calendar icon */
+            .mx-date::-webkit-calendar-picker-indicator { opacity: 1; width: 18px; height: 18px; cursor: pointer; background-repeat: no-repeat; background-position: center; background-size: 18px 18px; background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%232E7D32'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20width='18'%20height='18'%20x='3'%20y='4'%20rx='2'/%3E%3Cline%20x1='16'%20x2='16'%20y1='2'%20y2='6'/%3E%3Cline%20x1='8'%20x2='8'%20y1='2'%20y2='6'/%3E%3Cline%20x1='3'%20x2='21'%20y1='10'%20y2='10'/%3E%3C/svg%3E"); }
             .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
             .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
             .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
