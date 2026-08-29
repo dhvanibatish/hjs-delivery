@@ -1793,7 +1793,7 @@ export default function App({
             lang={lang}
             onLang={switchLang}
           />
-          <main style={{ padding: '26px 30px 60px', flex: 1 }}>
+          <main style={{ padding: '26px 30px 60px', flex: 1, maxWidth: 1380, width: '100%', margin: '0 auto' }}>
             {session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
                 deliveries={allStoresData}
@@ -3731,16 +3731,18 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                   ))}
-                  {b.photo && b.photo !== 'null' && (
-                    <a
-                      className="kv-photo"
-                      href={b.photo}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <img src={b.photo} alt="photo" />
-                    </a>
-                  )}
+                  {b.photo && b.photo !== 'null' &&
+                    String(b.photo).split(',').map((u) => u.trim()).filter(Boolean).map((u, i) => (
+                      <a
+                        className="kv-photo"
+                        href={u}
+                        target="_blank"
+                        rel="noreferrer"
+                        key={u + i}
+                      >
+                        <img src={u} alt="photo" />
+                      </a>
+                    ))}
                 </div>
               ) : (
                 <div className="block-next-note">
@@ -4094,10 +4096,6 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 <Field label="Actual pickup date *">
                   <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
                 </Field>
-                <Field label="Pickup charges collected (₹)">
-                  <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.charges}
-                    onChange={(e) => set('charges', e.target.value.replace(/[^0-9]/g, ''))} />
-                </Field>
                 <Field label="Pending amount collected (₹)">
                   <input className="inp" type="text" inputMode="numeric" placeholder="0" value={f.pendingCollected}
                     onChange={(e) => set('pendingCollected', e.target.value.replace(/[^0-9]/g, ''))} />
@@ -4321,55 +4319,72 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
   const camRef = React.useRef(null);
   const fileRef = React.useRef(null);
 
+  // value ab ek ya zyada URLs ho sakta hai — comma se jode hue.
+  const urls = String(value || '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+
   const handle = async (e) => {
-    const file = e.target.files && e.target.files[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = ''; // same file dobara chun sakein
-    if (!file) return;
+    if (!files.length) return;
     setErr('');
     setBusy(true);
     try {
-      const url = await sbUploadPhoto(invoiceNumber, kind, file);
-      onChange(url);
+      const uploaded = [];
+      for (const file of files) {
+        const url = await sbUploadPhoto(invoiceNumber, kind, file);
+        uploaded.push(url);
+      }
+      onChange([...urls, ...uploaded].join(','));
     } catch (er) {
       setErr('Upload fail hua, dobara try karo');
     }
     setBusy(false);
   };
 
+  const removeOne = (u) => {
+    onChange(urls.filter((x) => x !== u).join(','));
+  };
+
   return (
     <div className="photo-up">
       <div className="photo-up-label">{label}</div>
-      {value ? (
-        <div className="photo-preview">
-          <img src={value} alt={label} />
-          <button
-            className="photo-remove"
-            onClick={() => onChange('')}
-            type="button"
-          >
-            <X size={13} /> Hatao
-          </button>
-        </div>
-      ) : (
-        <div className="photo-btns">
-          <button
-            type="button"
-            className="photo-btn"
-            onClick={() => camRef.current && camRef.current.click()}
-            disabled={busy}
-          >
-            <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
-          </button>
-          <button
-            type="button"
-            className="photo-btn alt"
-            onClick={() => fileRef.current && fileRef.current.click()}
-            disabled={busy}
-          >
-            <Upload size={15} /> Device se
-          </button>
+      {urls.length > 0 && (
+        <div className="photo-preview-grid">
+          {urls.map((u, i) => (
+            <div className="photo-preview" key={u + i}>
+              <img src={u} alt={label} />
+              <button
+                className="photo-remove"
+                onClick={() => removeOne(u)}
+                type="button"
+              >
+                <X size={13} /> Hatao
+              </button>
+            </div>
+          ))}
         </div>
       )}
+      <div className="photo-btns">
+        <button
+          type="button"
+          className="photo-btn"
+          onClick={() => camRef.current && camRef.current.click()}
+          disabled={busy}
+        >
+          <Camera size={15} /> {busy ? 'Upload ho raha…' : 'Camera'}
+        </button>
+        <button
+          type="button"
+          className="photo-btn alt"
+          onClick={() => fileRef.current && fileRef.current.click()}
+          disabled={busy}
+        >
+          <Upload size={15} /> {urls.length ? 'Aur photo jodo' : 'Device se'}
+        </button>
+      </div>
       <input
         ref={camRef}
         type="file"
@@ -4382,6 +4397,7 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
         ref={fileRef}
         type="file"
         accept="image/*"
+        multiple
         style={{ display: 'none' }}
         onChange={handle}
       />
@@ -5954,7 +5970,9 @@ function StyleTag() {
       .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .photo-btn.alt { background: #fff; color: ${T.green}; }
       .photo-btn:disabled { opacity: .6; cursor: default; }
+      .photo-preview-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 8px; margin-bottom: 9px; }
       .photo-preview { position: relative; }
+      .photo-preview-grid .photo-preview img { max-height: 120px; }
       .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
       .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
@@ -6067,9 +6085,6 @@ function StyleTag() {
       .track-wrap { min-height: 100vh; background: ${T.beige}; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
-      /* matrix / list wale wide views ke liye — poori screen use karo */
-      .track-body.track-wide { max-width: 1380px; padding: 24px 24px 60px; }
-      @media (max-width: 900px) { .track-body.track-wide { max-width: 100%; padding: 18px 12px 50px; } }
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
