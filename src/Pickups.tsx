@@ -1793,7 +1793,7 @@ export default function App({
             lang={lang}
             onLang={switchLang}
           />
-          <main style={{ padding: '26px 30px 60px', flex: 1, maxWidth: 1380, width: '100%', margin: '0 auto' }}>
+          <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
                 deliveries={allStoresData}
@@ -3731,14 +3731,17 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                   {b.rows.map(([k, v]) => (
                     <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                   ))}
-                  {b.photo && b.photo !== 'null' &&
-                    String(b.photo).split(',').map((u) => u.trim()).filter(Boolean).map((u, i) => (
+                  {String(b.photo || '')
+                    .split(',')
+                    .map((u) => u.trim())
+                    .filter((u) => u && u !== 'null')
+                    .map((u, i) => (
                       <a
                         className="kv-photo"
+                        key={`${u}-${i}`}
                         href={u}
                         target="_blank"
                         rel="noreferrer"
-                        key={u + i}
                       >
                         <img src={u} alt="photo" />
                       </a>
@@ -4318,12 +4321,11 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
   const [err, setErr] = useState('');
   const camRef = React.useRef(null);
   const fileRef = React.useRef(null);
-
-  // value ab ek ya zyada URLs ho sakta hai — comma se jode hue.
+  // ek se zyada photo — sab ek hi field mein comma-separated store hoti hain
   const urls = String(value || '')
     .split(',')
     .map((u) => u.trim())
-    .filter(Boolean);
+    .filter((u) => u && u !== 'null');
 
   const handle = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -4331,34 +4333,36 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
     if (!files.length) return;
     setErr('');
     setBusy(true);
-    try {
-      const uploaded = [];
-      for (const file of files) {
-        const url = await sbUploadPhoto(invoiceNumber, kind, file);
-        uploaded.push(url);
+    const done = [];
+    let failed = 0;
+    for (const file of files) {
+      try {
+        done.push(await sbUploadPhoto(invoiceNumber, kind, file));
+      } catch (er) {
+        failed += 1;
       }
-      onChange([...urls, ...uploaded].join(','));
-    } catch (er) {
-      setErr('Upload fail hua, dobara try karo');
     }
+    if (done.length) onChange([...urls, ...done].join(','));
+    if (failed) setErr(`${failed} photo upload nahi hui, dobara try karo`);
     setBusy(false);
   };
 
-  const removeOne = (u) => {
-    onChange(urls.filter((x) => x !== u).join(','));
-  };
+  const removeAt = (i) => onChange(urls.filter((_, x) => x !== i).join(','));
 
   return (
     <div className="photo-up">
-      <div className="photo-up-label">{label}</div>
+      <div className="photo-up-label">
+        {label}
+        {urls.length > 1 ? ` · ${urls.length} photos` : ''}
+      </div>
       {urls.length > 0 && (
-        <div className="photo-preview-grid">
+        <div className="photo-grid">
           {urls.map((u, i) => (
-            <div className="photo-preview" key={u + i}>
+            <div className="photo-preview" key={`${u}-${i}`}>
               <img src={u} alt={label} />
               <button
                 className="photo-remove"
-                onClick={() => removeOne(u)}
+                onClick={() => removeAt(i)}
                 type="button"
               >
                 <X size={13} /> Hatao
@@ -4367,7 +4371,7 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
           ))}
         </div>
       )}
-      <div className="photo-btns">
+      <div className="photo-btns" style={urls.length ? { marginTop: 10 } : undefined}>
         <button
           type="button"
           className="photo-btn"
@@ -4382,7 +4386,7 @@ function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
           onClick={() => fileRef.current && fileRef.current.click()}
           disabled={busy}
         >
-          <Upload size={15} /> {urls.length ? 'Aur photo jodo' : 'Device se'}
+          <Upload size={15} /> {urls.length ? 'Aur photo' : 'Device se'}
         </button>
       </div>
       <input
@@ -5970,9 +5974,10 @@ function StyleTag() {
       .photo-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid ${T.green}; background: ${T.green}; color: #fff; border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .photo-btn.alt { background: #fff; color: ${T.green}; }
       .photo-btn:disabled { opacity: .6; cursor: default; }
-      .photo-preview-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 8px; margin-bottom: 9px; }
+      .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 9px; }
       .photo-preview { position: relative; }
-      .photo-preview-grid .photo-preview img { max-height: 120px; }
+      .photo-grid .photo-preview img { max-height: 150px; }
+      .photo-grid .photo-remove { padding: 4px 8px; font-size: 11px; top: 6px; right: 6px; }
       .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
       .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
@@ -6085,6 +6090,8 @@ function StyleTag() {
       .track-wrap { min-height: 100vh; background: ${T.beige}; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
+      .track-body.track-wide { max-width: 1380px; padding: 24px 24px 60px; }
+      @media (max-width: 900px) { .track-body.track-wide { max-width: 100%; padding: 18px 12px 50px; } }
       .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
       .track-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin: 0; color: ${T.ink}; }
       .track-sub { font-size: 13.5px; color: ${T.inkSoft}; margin: -6px 0 4px; line-height: 1.5; }
