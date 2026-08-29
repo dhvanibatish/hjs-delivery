@@ -6144,7 +6144,7 @@ function StyleTag() {
       .mx-arrow { color: ${T.inkSoft}; font-weight: 700; }
       .mx-caption { font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; margin-bottom: 12px; }
       .matrix-wrap { overflow-x: auto; border: 1px solid ${T.line}; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(20,57,43,.04); }
-      .matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14.5px; }
+      .matrix { border-collapse: separate; border-spacing: 0; width: auto; font-size: 14.5px; }
       .matrix th, .matrix td { padding: 15px 16px; text-align: center; white-space: nowrap; }
       .matrix thead th { font-size: 12.5px; font-weight: 800; color: ${T.green}; text-transform: uppercase; letter-spacing: .5px; background: ${T.mint}; border-bottom: 1px solid ${T.line}; }
       .mx-hclick { cursor: pointer; }
