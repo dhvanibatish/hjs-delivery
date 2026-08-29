@@ -145,72 +145,72 @@ async function sbTrack(invoice, phone) {
       kar dete hain (lambi side max 1600px). 3 MB → ~250 KB, dikhne mein farak
       nahi padta. Kuch galat ho jaye to original file hi chali jaati hai. */
 function decodeToImage(file) {
-    return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode-failed')); };
-        img.src = url;
-    });
+        return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode-failed')); };
+                img.src = url;
+        });
 }
 async function shrinkImage(file, maxDim = 1600, quality = 0.7) {
-    try {
-        if (!file) return file;
-        const type = (file.type || '').toLowerCase();
-        const isHeic = /heic|heif/.test(type) || /\.hei[cf]$/i.test(file.name || '');
-        if (!isHeic && type && /^image\//.test(type) && file.size < 300 * 1024) {
-            return file;
-        }
-        let iw, ih, drawable;
-        try {
-            const bmp = await createImageBitmap(file);
-            iw = bmp.width; ih = bmp.height; drawable = bmp;
-        } catch (_) {
-            const img = await decodeToImage(file);
-            iw = img.naturalWidth || img.width;
-            ih = img.naturalHeight || img.height;
-            drawable = img;
-        }
-        if (!iw || !ih) return file;
-        const scale = Math.min(1, maxDim / Math.max(iw, ih));
-        const w = Math.round(iw * scale);
-        const h = Math.round(ih * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d').drawImage(drawable, 0, 0, w, h);
-        const blob = await new Promise((res) =>
-            canvas.toBlob(res, 'image/jpeg', quality),
-        );
-        if (!blob) return file;
-        if (!isHeic && blob.size >= file.size) return file;
-        return blob;
-    } catch (_) {
-        return file;
-    }
+        try {
+                if (!file) return file;
+                const type = (file.type || '').toLowerCase();
+                const isHeic = /heic|heif/.test(type) || /\.hei[cf]$/i.test(file.name || '');
+                if (!isHeic && type && /^image\//.test(type) && file.size < 300 * 1024) {
+                        return file;
+                }
+                let iw, ih, drawable;
+                try {
+                        const bmp = await createImageBitmap(file);
+                        iw = bmp.width; ih = bmp.height; drawable = bmp;
+                } catch (_) {
+                        const img = await decodeToImage(file);
+                        iw = img.naturalWidth || img.width;
+                        ih = img.naturalHeight || img.height;
+                        drawable = img;
+                }
+                if (!iw || !ih) return file;
+                const scale = Math.min(1, maxDim / Math.max(iw, ih));
+                const w = Math.round(iw * scale);
+                const h = Math.round(ih * scale);
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(drawable, 0, 0, w, h);
+                const blob = await new Promise((res) =>
+                        canvas.toBlob(res, 'image/jpeg', quality),
+                );
+                if (!blob) return file;
+                if (!isHeic && blob.size >= file.size) return file;
+                return blob;
+        } catch (_) {
+                return file;
+        }
 }
 async function sbUploadPhoto(invoiceNumber, kind, file) {
-    const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
-    const small = await shrinkImage(file);
-    const type = (file.type || '').toLowerCase();
-    const wasHeic = /heic|heif/.test(type) || /\.hei[cf]$/i.test(file.name || '');
-    const shrunk = small !== file || wasHeic;
-    const ext = shrunk ? 'jpg' : (file.name && file.name.split('.').pop()) || 'jpg';
-    const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
-    const res = await fetch(
-        `${CONFIG.url}/storage/v1/object/pickup-photos/${path}`,
-        {
-            method: 'POST',
-            headers: {
-                ...HDRS(),
-                'Content-Type': shrunk ? 'image/jpeg' : file.type || 'image/jpeg',
-                'x-upsert': 'true',
-            },
-            body: small,
-        },
-    );
-    if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
-    return `${CONFIG.url}/storage/v1/object/public/pickup-photos/${path}`;
+        const safe = String(invoiceNumber || 'inv').replace(/[^a-zA-Z0-9]+/g, '-');
+        const small = await shrinkImage(file);
+        const type = (file.type || '').toLowerCase();
+        const wasHeic = /heic|heif/.test(type) || /\.hei[cf]$/i.test(file.name || '');
+        const shrunk = small !== file || wasHeic;
+        const ext = shrunk ? 'jpg' : (file.name && file.name.split('.').pop()) || 'jpg';
+        const path = `${safe}_${kind}_${Date.now()}.${ext}`.toLowerCase();
+        const res = await fetch(
+                `${CONFIG.url}/storage/v1/object/pickup-photos/${path}`,
+                {
+                        method: 'POST',
+                        headers: {
+                                ...HDRS(),
+                                'Content-Type': shrunk ? 'image/jpeg' : file.type || 'image/jpeg',
+                                'x-upsert': 'true',
+                        },
+                        body: small,
+                },
+        );
+        if (!res.ok) throw new Error(`upload ${res.status} ${await res.text()}`);
+        return `${CONFIG.url}/storage/v1/object/public/pickup-photos/${path}`;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -4206,8 +4206,8 @@ function Header({
         day: 'numeric',
         month: 'long',
     });
-    const shownBranch = branchView || session.branch;
-    const mgr = shownBranch === 'ALL' ? null : STORE_MANAGERS[shownBranch];
+        const shownBranch = branchView || session.branch;
+        const mgr = shownBranch === 'ALL' ? null : STORE_MANAGERS[shownBranch];
     return (
         <div
             style={{
@@ -5131,22 +5131,22 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
                                     {b.rows.map(([k, v]) => (
                                         <KV key={k} label={k} value={v} full={k === 'Remarks'} />
                                     ))}
-                                    {b.photo &&
-                                        b.photo !== 'null' &&
-                                        String(b.photo)
-                                            .split('|')
-                                            .filter(Boolean)
-                                            .map((ph, i) => (
-                                                <a
-                                                    key={ph + i}
-                                                    className="kv-photo"
-                                                    href={ph}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                >
-                                                    <img src={ph} alt={`photo ${i + 1}`} />
-                                                </a>
-                                            ))}
+                                                                        {b.photo &&
+                                                                                b.photo !== 'null' &&
+                                                                                String(b.photo)
+                                                                                        .split('|')
+                                                                                        .filter(Boolean)
+                                                                                        .map((ph, i) => (
+                                                                                                <a
+                                                                                                        key={ph + i}
+                                                                                                        className="kv-photo"
+                                                                                                        href={ph}
+                                                                                                        target="_blank"
+                                                                                                        rel="noreferrer"
+                                                                                                >
+                                                                                                        <img src={ph} alt={`photo ${i + 1}`} />
+                                                                                                </a>
+                                                                                        ))}
                                 </div>
                             ) : (
                                 <div className="block-next-note">
@@ -5718,94 +5718,94 @@ function Check1({ checked, onChange, label }) {
 /* Photo upload — camera se click ya device se choose. Supabase Storage pe
       upload hoke URL onChange se milta hai. */
 function PhotoUpload({ label, invoiceNumber, kind, value, onChange }) {
-    const [busy, setBusy] = useState(false);
-    const [err, setErr] = useState('');
-    const camRef = React.useRef(null);
-    const fileRef = React.useRef(null);
-    // value = pipe-joined URLs (multiple photos)
-    const urls = value ? String(value).split('|').filter(Boolean) : [];
+        const [busy, setBusy] = useState(false);
+        const [err, setErr] = useState('');
+        const camRef = React.useRef(null);
+        const fileRef = React.useRef(null);
+        // value = pipe-joined URLs (multiple photos)
+        const urls = value ? String(value).split('|').filter(Boolean) : [];
 
-    const handle = async (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (!files.length) return;
-        setErr('');
-        setBusy(true);
-        const added = [];
-        let failed = 0;
-        for (const file of files) {
-            try {
-                const url = await sbUploadPhoto(invoiceNumber, kind, file);
-                added.push(url);
-            } catch (er) {
-                failed++;
-            }
-        }
-        if (added.length) onChange([...urls, ...added].join('|'));
-        if (failed) setErr(`${failed} photo upload nahi hui — dobara try karo`);
-        setBusy(false);
-    };
+        const handle = async (e) => {
+                const files = Array.from(e.target.files || []);
+                e.target.value = '';
+                if (!files.length) return;
+                setErr('');
+                setBusy(true);
+                const added = [];
+                let failed = 0;
+                for (const file of files) {
+                        try {
+                                const url = await sbUploadPhoto(invoiceNumber, kind, file);
+                                added.push(url);
+                        } catch (er) {
+                                failed++;
+                        }
+                }
+                if (added.length) onChange([...urls, ...added].join('|'));
+                if (failed) setErr(`${failed} photo upload nahi hui — dobara try karo`);
+                setBusy(false);
+        };
 
-    const removeAt = (i) => {
-        const next = urls.filter((_, idx) => idx !== i);
-        onChange(next.join('|'));
-    };
+        const removeAt = (i) => {
+                const next = urls.filter((_, idx) => idx !== i);
+                onChange(next.join('|'));
+        };
 
-    return (
-        <div className="photo-up">
-            <div className="photo-up-label">
-                {label}
-                {urls.length > 0 && <span className="photo-count"> · {urls.length}</span>}
-            </div>
-            {urls.length > 0 && (
-                <div className="photo-grid">
-                    {urls.map((u, i) => (
-                        <div className="photo-thumb" key={u + i}>
-                            <img src={u} alt={`${label} ${i + 1}`} />
-                            <button className="photo-x" onClick={() => removeAt(i)} type="button" title="Hatao">
-                                <X size={12} />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-            <div className="photo-btns">
-                <button
-                    type="button"
-                    className="photo-btn"
-                    onClick={() => camRef.current && camRef.current.click()}
-                    disabled={busy}
-                >
-                    <Camera size={15} /> {busy ? 'Upload ho raha…' : urls.length ? 'Aur photo' : 'Camera'}
-                </button>
-                <button
-                    type="button"
-                    className="photo-btn alt"
-                    onClick={() => fileRef.current && fileRef.current.click()}
-                    disabled={busy}
-                >
-                    <Upload size={15} /> Device se
-                </button>
-            </div>
-            <input
-                ref={camRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                style={{ display: 'none' }}
-                onChange={handle}
-            />
-            <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handle}
-            />
-            {err && <div className="req-note">{err}</div>}
-        </div>
-    );
+        return (
+                <div className="photo-up">
+                        <div className="photo-up-label">
+                                {label}
+                                {urls.length > 0 && <span className="photo-count"> · {urls.length}</span>}
+                        </div>
+                        {urls.length > 0 && (
+                                <div className="photo-grid">
+                                        {urls.map((u, i) => (
+                                                <div className="photo-thumb" key={u + i}>
+                                                        <img src={u} alt={`${label} ${i + 1}`} />
+                                                        <button className="photo-x" onClick={() => removeAt(i)} type="button" title="Hatao">
+                                                                <X size={12} />
+                                                        </button>
+                                                </div>
+                                        ))}
+                                </div>
+                        )}
+                        <div className="photo-btns">
+                                <button
+                                        type="button"
+                                        className="photo-btn"
+                                        onClick={() => camRef.current && camRef.current.click()}
+                                        disabled={busy}
+                                >
+                                        <Camera size={15} /> {busy ? 'Upload ho raha…' : urls.length ? 'Aur photo' : 'Camera'}
+                                </button>
+                                <button
+                                        type="button"
+                                        className="photo-btn alt"
+                                        onClick={() => fileRef.current && fileRef.current.click()}
+                                        disabled={busy}
+                                >
+                                        <Upload size={15} /> Device se
+                                </button>
+                        </div>
+                        <input
+                                ref={camRef}
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                style={{ display: 'none' }}
+                                onChange={handle}
+                        />
+                        <input
+                                ref={fileRef}
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                style={{ display: 'none' }}
+                                onChange={handle}
+                        />
+                        {err && <div className="req-note">{err}</div>}
+                </div>
+        );
 }
 function Toast({ msg }) {
     return (
@@ -7228,7 +7228,7 @@ function StyleTag() {
         <style>{`
             @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
             * { box-sizing: border-box; }
-            html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+            html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: light; }
             body { color: ${T.ink}; background: ${T.beige}; }
             #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
 
@@ -7375,11 +7375,11 @@ function StyleTag() {
             .photo-preview { position: relative; }
             .photo-preview img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 10px; display: block; border: 1px solid ${T.line}; }
             .photo-remove { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(20,32,26,.82); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; }
-            .photo-count { color: ${T.green}; font-weight: 800; }
-            .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
-            .photo-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; aspect-ratio: 1 / 1; }
-            .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-            .photo-x { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: rgba(20,32,26,.85); color: #fff; border: none; border-radius: 7px; cursor: pointer; }
+                        .photo-count { color: ${T.green}; font-weight: 800; }
+                        .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+                        .photo-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; aspect-ratio: 1 / 1; }
+                        .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+                        .photo-x { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: rgba(20,32,26,.85); color: #fff; border: none; border-radius: 7px; cursor: pointer; }
             .kv-photo { grid-column: 1 / -1; display: block; border-radius: 10px; overflow: hidden; border: 1px solid ${T.line}; }
             .kv-photo img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
 
@@ -7487,7 +7487,7 @@ function StyleTag() {
             .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
 
             /* ── customer track page ── */
-            .track-wrap { min-height: 100vh; background: ${T.beige}; }
+            .track-wrap { min-height: 100vh; background: ${T.beige}; color-scheme: light; }
             .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
             .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
             .track-card { background: rgba(255,255,255,.9); border: 1px solid ${T.line}; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(20,57,43,.06); display: flex; flex-direction: column; gap: 14px; }
