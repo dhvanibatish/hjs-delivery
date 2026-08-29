@@ -1165,7 +1165,12 @@ export default function App({
     // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
     const hosted = !!extSession;
     // console ka "Sales Pickup" tab — sirf matrix page, koi login nahi
-    if (route === 'sales') return <PickupSalesPage />;
+        if (route === 'sales')
+      return (
+        <div className="hjs-pickups">
+          <PickupSalesPage />
+        </div>
+      );
     // Tracking routes (Netlify SPA — query params + optional /track path):
     //      /track                                → sales: number se saari deliveries + timeline
     //      /track?inv=CHD/...          → customer: single invoice (phone verify)
