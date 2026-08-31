@@ -2230,6 +2230,7 @@ function Dashboard({ deliveries, onOpen }) {
   const [store, setStore] = useState('ALL');
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('store'); // store | item
+  const [upDays, setUpDays] = useState(4); // item view: "next N days" custom
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -2303,7 +2304,7 @@ function Dashboard({ deliveries, onOpen }) {
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
     if (sel.item) list = list.filter((x) => itemNameOf(x) === sel.item);
     let fn;
-    if (sel.kind === 'next4') fn = (x) => inNext(x, 4);
+    if (sel.kind === 'nextN') fn = (x) => inNext(x, upDays);
     else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
     else fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
     return list
@@ -2325,13 +2326,17 @@ function Dashboard({ deliveries, onOpen }) {
   };
   const todayS = todayStr();
   const inNext = (x, days) => {
-    if (x.stage === 'delivered' || isClosedStage(x.stage)) return false;
-    const pd = plannedDate(x);
-    if (!pd) return false;
-    const end = new Date();
-    end.setHours(0, 0, 0, 0);
-    end.setDate(end.getDate() + days);
-    return pd >= todayS && pd <= dayStr(end);
+    try {
+      if (x.stage === 'delivered' || isClosedStage(x.stage)) return false;
+      const pd = plannedDate(x);
+      if (!pd) return false;
+      const end = new Date();
+      end.setHours(0, 0, 0, 0);
+      end.setDate(end.getDate() + days);
+      return pd >= todayS && pd <= dayStr(end);
+    } catch (_) {
+      return false;
+    }
   };
   const itemRows = useMemo(() => {
     const map = {};
@@ -2347,12 +2352,12 @@ function Dashboard({ deliveries, onOpen }) {
         total: g.list.length,
         pending: g.list.filter(metric.pending).length,
         picked: g.list.filter(metric.picked).length,
-        next4: g.list.filter((x) => inNext(x, 4)).length,
+        nextN: g.list.filter((x) => inNext(x, upDays)).length,
         next7: g.list.filter((x) => inNext(x, 7)).length,
       }))
       .sort((a, b) => b.total - a.total);
     // eslint-disable-next-line
-  }, [base]);
+  }, [base, upDays]);
 
   const rangeLabel =
     range === 'today' ? 'Aaj'
@@ -2375,8 +2380,8 @@ function Dashboard({ deliveries, onOpen }) {
             {rows.length} entries
             {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
             {sel.item ? ` · ${sel.item}` : ''} ·{' '}
-            {sel.kind === 'next4'
-              ? 'Next 4 days'
+            {sel.kind === 'nextN'
+              ? `Next ${upDays} days`
               : sel.kind === 'next7'
                 ? 'Next 7 days'
                 : cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
@@ -2403,6 +2408,7 @@ function Dashboard({ deliveries, onOpen }) {
                 ) : (
                   rows.map((x) => {
                     const st = stageMeta(x.stage);
+                    const amt = Number(x.amount);
                     return (
                       <tr key={x.invoice_id} className="dash-row" onClick={() => onOpen(x)}>
                         <td>{x.id}</td>
@@ -2414,7 +2420,7 @@ function Dashboard({ deliveries, onOpen }) {
                             {st.short}
                           </span>
                         </td>
-                        <td>{x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'}</td>
+                        <td>{amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}</td>
                         <td>{niceDate(createdTs(x)) || '—'}</td>
                         <td>{niceDate(plannedDate(x)) || '—'}</td>
                       </tr>
@@ -2564,7 +2570,27 @@ function Dashboard({ deliveries, onOpen }) {
       </div>
       ) : (
       <div className="dash-block">
-        <div className="dash-block-h">Item-wise · {rangeLabel}</div>
+        <div className="dash-block-h" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <span>Item-wise · {rangeLabel}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: T.inkSoft }}>
+            Upcoming window:
+            <select
+              className="dash-inp"
+              style={{ padding: '6px 10px' }}
+              value={upDays}
+              onChange={(e) => setUpDays(Number(e.target.value))}
+            >
+              <option value={2}>Next 2 days</option>
+              <option value={3}>Next 3 days</option>
+              <option value={4}>Next 4 days</option>
+              <option value={5}>Next 5 days</option>
+              <option value={7}>Next 7 days</option>
+              <option value={10}>Next 10 days</option>
+              <option value={15}>Next 15 days</option>
+              <option value={30}>Next 30 days</option>
+            </select>
+          </span>
+        </div>
         <div className="dash-table-wrap">
           <table className="dash-table">
             <thead>
@@ -2573,7 +2599,7 @@ function Dashboard({ deliveries, onOpen }) {
                 <th>Total</th>
                 <th>Pending</th>
                 <th>Picked Up</th>
-                <th>Next 4 days</th>
+                <th>Next {upDays} days</th>
                 <th>Next 7 days</th>
               </tr>
             </thead>
@@ -2602,11 +2628,11 @@ function Dashboard({ deliveries, onOpen }) {
                       {it.picked}
                     </td>
                     <td
-                      className={it.next4 ? 'dash-td-click' : 'dash-td-zero'}
-                      style={it.next4 ? { color: T.amber } : {}}
-                      onClick={() => it.next4 && setSel({ kind: 'next4', item: it.name })}
+                      className={it.nextN ? 'dash-td-click' : 'dash-td-zero'}
+                      style={it.nextN ? { color: T.amber } : {}}
+                      onClick={() => it.nextN && setSel({ kind: 'nextN', item: it.name })}
                     >
-                      {it.next4}
+                      {it.nextN}
                     </td>
                     <td
                       className={it.next7 ? 'dash-td-click' : 'dash-td-zero'}
