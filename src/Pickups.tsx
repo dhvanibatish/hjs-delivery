@@ -2338,10 +2338,22 @@ function DashboardInner({ deliveries, onOpen }) {
   // Har item (jaise BiPAP, Oxygen Concentrator) ke saamne: total, pending,
   // picked up, aur aane waale dinon mein kitni pickup tay hain (next 4/7 din).
   // "Item" = line_items ka pehla saamaan (ek invoice mein zyadatar ek hi hota).
-  const itemNameOf = (x) => {
-    const t = equipmentText(x._raw || {});
-    // "BiPAP × 2" jaise suffix hata do, sirf naam
-    return String(t).split('×')[0].split(',')[0].trim() || 'Not set';
+  // Ek invoice mein multiple items ho sakte hain (jaise "Recliner Bed | Over-bed
+  // table"). Har item ko alag naam mein todo taaki har item apni ek row mein
+  // count ho — invoice ke combined naam se nahi.
+  const itemNamesOf = (x) => {
+    const list = equipmentList(x._raw || {}) || [];
+    const names = list
+      .map((it) => String(it || '').split('×')[0].trim())
+      .filter(Boolean);
+    // duplicate hata do (ek hi invoice mein same item 2 baar ho to ek hi count)
+    const seen = {};
+    const out = [];
+    names.forEach((n) => {
+      const k = n.toLowerCase();
+      if (!seen[k]) { seen[k] = 1; out.push(n); }
+    });
+    return out.length ? out : ['Not set'];
   };
   const todayS = todayStr();
   const inNext = (x, days) => {
@@ -2362,7 +2374,7 @@ function DashboardInner({ deliveries, onOpen }) {
     if (!sel) return [];
     let list = base;
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
-    if (sel.item) list = list.filter((x) => itemNameOf(x) === sel.item);
+    if (sel.item) list = list.filter((x) => itemNamesOf(x).includes(sel.item));
     let fn;
     if (sel.kind === 'nextN') fn = (x) => inNext(x, upDays);
     else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
@@ -2378,9 +2390,11 @@ function DashboardInner({ deliveries, onOpen }) {
   const itemRows = useMemo(() => {
     const map = {};
     base.forEach((x) => {
-      const name = itemNameOf(x);
-      if (!map[name]) map[name] = { name, list: [] };
-      map[name].list.push(x);
+      // ek entry apne har item ki row mein count hoti hai
+      itemNamesOf(x).forEach((name) => {
+        if (!map[name]) map[name] = { name, list: [] };
+        map[name].list.push(x);
+      });
     });
     return Object.values(map)
       .map((g) => ({
