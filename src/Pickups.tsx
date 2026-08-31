@@ -2229,6 +2229,7 @@ function Dashboard({ deliveries, onOpen }) {
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
   const [sel, setSel] = useState(null);
+  const [view, setView] = useState('store'); // store | item
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -2300,7 +2301,11 @@ function Dashboard({ deliveries, onOpen }) {
     if (!sel) return [];
     let list = base;
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
-    const fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
+    if (sel.item) list = list.filter((x) => itemNameOf(x) === sel.item);
+    let fn;
+    if (sel.kind === 'next4') fn = (x) => inNext(x, 4);
+    else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
+    else fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
     return list
       .filter(fn)
       .sort((a, b) => String(createdTs(b) || '').localeCompare(String(createdTs(a) || '')));
@@ -2308,6 +2313,47 @@ function Dashboard({ deliveries, onOpen }) {
   }, [base, sel]);
 
   const cnt = (fn, list) => list.filter(fn).length;
+
+  // ── Item wise ──────────────────────────────────────────────────────
+  // Har item (jaise BiPAP, Oxygen Concentrator) ke saamne: total, pending,
+  // picked up, aur aane waale dinon mein kitni pickup tay hain (next 4/7 din).
+  // "Item" = line_items ka pehla saamaan (ek invoice mein zyadatar ek hi hota).
+  const itemNameOf = (x) => {
+    const t = equipmentText(x._raw || {});
+    // "BiPAP × 2" jaise suffix hata do, sirf naam
+    return String(t).split('×')[0].split(',')[0].trim() || 'Not set';
+  };
+  const todayS = todayStr();
+  const inNext = (x, days) => {
+    if (x.stage === 'delivered' || isClosedStage(x.stage)) return false;
+    const pd = plannedDate(x);
+    if (!pd) return false;
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+    end.setDate(end.getDate() + days);
+    return pd >= todayS && pd <= dayStr(end);
+  };
+  const itemRows = useMemo(() => {
+    const map = {};
+    base.forEach((x) => {
+      const name = itemNameOf(x);
+      if (!map[name]) map[name] = { name, list: [] };
+      map[name].list.push(x);
+    });
+    return Object.values(map)
+      .map((g) => ({
+        name: g.name,
+        list: g.list,
+        total: g.list.length,
+        pending: g.list.filter(metric.pending).length,
+        picked: g.list.filter(metric.picked).length,
+        next4: g.list.filter((x) => inNext(x, 4)).length,
+        next7: g.list.filter((x) => inNext(x, 7)).length,
+      }))
+      .sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line
+  }, [base]);
+
   const rangeLabel =
     range === 'today' ? 'Aaj'
     : range === 'yesterday' ? 'Kal'
@@ -2327,8 +2373,13 @@ function Dashboard({ deliveries, onOpen }) {
         <div className="dash-block">
           <div className="dash-block-h">
             {rows.length} entries
-            {sel.store ? ` · ${branchLabel(sel.store)}` : ''} ·{' '}
-            {cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
+            {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
+            {sel.item ? ` · ${sel.item}` : ''} ·{' '}
+            {sel.kind === 'next4'
+              ? 'Next 4 days'
+              : sel.kind === 'next7'
+                ? 'Next 7 days'
+                : cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
           </div>
           <div className="dash-table-wrap">
             <table className="dash-table">
@@ -2386,6 +2437,20 @@ function Dashboard({ deliveries, onOpen }) {
           <h2 style={{ margin: '2px 0 0' }}>Dashboard</h2>
         </div>
         <div className="dash-filters">
+          <div className="layout-toggle">
+            <button
+              className={view === 'store' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => { setView('store'); setSel(null); }}
+            >
+              <Building2 size={14} /> Store wise
+            </button>
+            <button
+              className={view === 'item' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => { setView('item'); setSel(null); }}
+            >
+              <Package size={14} /> Item wise
+            </button>
+          </div>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
             <option value="today">Aaj</option>
             <option value="yesterday">Kal</option>
@@ -2437,6 +2502,7 @@ function Dashboard({ deliveries, onOpen }) {
         })}
       </div>
 
+      {view === 'store' ? (
       <div className="dash-block">
         <div className="dash-block-h">Store-wise · {rangeLabel}</div>
         <div className="dash-table-wrap">
@@ -2496,6 +2562,66 @@ function Dashboard({ deliveries, onOpen }) {
           </table>
         </div>
       </div>
+      ) : (
+      <div className="dash-block">
+        <div className="dash-block-h">Item-wise · {rangeLabel}</div>
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Total</th>
+                <th>Pending</th>
+                <th>Picked Up</th>
+                <th>Next 4 days</th>
+                <th>Next 7 days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itemRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="dash-empty">Is duration mein koi entry nahi</td>
+                </tr>
+              ) : (
+                itemRows.map((it) => (
+                  <tr key={it.name}>
+                    <td className="dash-store">{it.name}</td>
+                    <td className="dash-td-click" onClick={() => setSel({ kind: 'all', item: it.name })}>
+                      {it.total}
+                    </td>
+                    <td
+                      className={it.pending ? 'dash-td-click' : 'dash-td-zero'}
+                      onClick={() => it.pending && setSel({ kind: 'pending', item: it.name })}
+                    >
+                      {it.pending}
+                    </td>
+                    <td
+                      className={it.picked ? 'dash-td-click' : 'dash-td-zero'}
+                      onClick={() => it.picked && setSel({ kind: 'picked', item: it.name })}
+                    >
+                      {it.picked}
+                    </td>
+                    <td
+                      className={it.next4 ? 'dash-td-click' : 'dash-td-zero'}
+                      style={it.next4 ? { color: T.amber } : {}}
+                      onClick={() => it.next4 && setSel({ kind: 'next4', item: it.name })}
+                    >
+                      {it.next4}
+                    </td>
+                    <td
+                      className={it.next7 ? 'dash-td-click' : 'dash-td-zero'}
+                      onClick={() => it.next7 && setSel({ kind: 'next7', item: it.name })}
+                    >
+                      {it.next7}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
     </div>
   );
 }
@@ -5830,7 +5956,7 @@ function StyleTag() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+      html, body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: light; }
       body { color: ${T.ink}; background: ${T.beige}; }
       #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
 
@@ -6087,7 +6213,7 @@ function StyleTag() {
       .glass-card { width: 100%; max-width: 380px; background: rgba(255,255,255,.75); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; padding: 30px; box-shadow: 0 20px 50px rgba(20,57,43,.14); display: flex; flex-direction: column; gap: 15px; }
 
       /* ── customer track page ── */
-      .track-wrap { min-height: 100vh; background: ${T.beige}; }
+      .track-wrap { min-height: 100vh; background: ${T.beige}; color-scheme: light; }
       .track-topbar { background: #fff; border-bottom: 1px solid ${T.line}; padding: 14px 20px; position: sticky; top: 0; z-index: 10; }
       .track-body { max-width: 560px; margin: 0 auto; padding: 24px 16px 60px; }
       .track-body.track-wide { max-width: 1380px; padding: 24px 24px 60px; }
