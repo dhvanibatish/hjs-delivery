@@ -533,6 +533,8 @@ const CSS = `
   gap: 12px; padding: 13px 15px; border-radius: 10px; background: #f6fef9;
   border: 1px solid #b7ebc9; }
 .hjsatt .att-cert-cta b { color: #16a34a; }
+.hjsatt .att-cert-cta.wait { background: #fffcf5; border-color: #f2d9a7; }
+.hjsatt .att-cert-cta.wait b { color: #b54708; }
 .hjsatt .att-certwrap { overflow: auto; background: #f2f4f7; padding: 12px;
   border-radius: 10px; }
 .hjsatt .att-certwrap .hjs-cert { transform: scale(.52); transform-origin: top left;
@@ -7804,17 +7806,42 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
           <span className="att-muted">{nDone} of {items.length} done · {pct}%</span>
         </div>
 
-        {items.length > 0 && nDone === items.length && (
-          <div className="att-cert-cta">
-            <div>
-              <b>Course completed</b>
-              <p className="att-muted">Your certificate is ready.</p>
+        {items.length > 0 && nDone === items.length && (() => {
+          // course mein assessment hai to sab pass hone chahiye
+          const need = asmts.filter((x: any) => x.active);
+          const cleared = need.filter((x: any) =>
+            tries.some((t: any) => t.assessment_id === x.id && t.passed));
+          const left = need.length - cleared.length;
+          const waiting = need.some((x: any) =>
+            tries.some((t: any) => t.assessment_id === x.id
+              && (t.needs_review || t.passed == null)));
+
+          if (left === 0) {
+            return (
+              <div className="att-cert-cta">
+                <div>
+                  <b>Course completed</b>
+                  <p className="att-muted">Your certificate is ready.</p>
+                </div>
+                <button className="att-btn sm" onClick={() => setCert(true)}>
+                  View certificate
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div className="att-cert-cta wait">
+              <div>
+                <b>Chapters done</b>
+                <p className="att-muted">
+                  {waiting
+                    ? "Assessment review ke baad certificate milega."
+                    : `Certificate ke liye ${left} assessment pass karna baaki hai.`}
+                </p>
+              </div>
             </div>
-            <button className="att-btn sm" onClick={() => setCert(true)}>
-              View certificate
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
         {course.overview && (
           <details className="att-ovw" open>
