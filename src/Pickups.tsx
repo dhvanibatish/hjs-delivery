@@ -2229,17 +2229,20 @@ class DashErrorBoundary extends React.Component {
   render() {
     if (this.state.err) {
       return (
-        <div style={{ padding: 20, fontFamily: FONT }}>
-          <button className="track-back" onClick={() => this.setState({ err: null })}>
-            <ArrowLeft size={16} /> Back
-          </button>
-          <div className="dash-block" style={{ padding: 16 }}>
-            <div style={{ fontWeight: 800, color: T.red, marginBottom: 8 }}>
+        <div style={{ padding: 20 }}>
+          <div style={{ background: '#fff', border: '1px solid #E7E2D6', borderRadius: 14, padding: 16 }}>
+            <div style={{ fontWeight: 800, color: '#B4472E', marginBottom: 8 }}>
               Kuch gadbad ho gayi is view mein
             </div>
-            <div style={{ fontSize: 12.5, color: T.inkSoft, fontFamily: 'monospace', wordBreak: 'break-word' }}>
-              {String(this.state.err && this.state.err.message || this.state.err)}
+            <div style={{ fontSize: 12.5, color: '#657069', fontFamily: 'monospace', wordBreak: 'break-word' }}>
+              {String((this.state.err && this.state.err.message) || this.state.err)}
             </div>
+            <button
+              onClick={() => this.setState({ err: null })}
+              style={{ marginTop: 12, padding: '8px 14px', border: '1px solid #E7E2D6', borderRadius: 10, background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+            >
+              Wapas
+            </button>
           </div>
         </div>
       );
@@ -2331,23 +2334,6 @@ function DashboardInner({ deliveries, onOpen }) {
     { kind: 'nophoto', label: 'Picked up · photo missing', color: T.violet, soft: T.violetSoft },
   ];
 
-  const rows = useMemo(() => {
-    if (!sel) return [];
-    let list = base;
-    if (sel.store) list = list.filter((x) => x.branch === sel.store);
-    if (sel.item) list = list.filter((x) => itemNameOf(x) === sel.item);
-    let fn;
-    if (sel.kind === 'nextN') fn = (x) => inNext(x, upDays);
-    else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
-    else fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
-    return list
-      .filter(fn)
-      .sort((a, b) => String(createdTs(b) || '').localeCompare(String(createdTs(a) || '')));
-    // eslint-disable-next-line
-  }, [base, sel]);
-
-  const cnt = (fn, list) => list.filter(fn).length;
-
   // ── Item wise ──────────────────────────────────────────────────────
   // Har item (jaise BiPAP, Oxygen Concentrator) ke saamne: total, pending,
   // picked up, aur aane waale dinon mein kitni pickup tay hain (next 4/7 din).
@@ -2371,6 +2357,24 @@ function DashboardInner({ deliveries, onOpen }) {
       return false;
     }
   };
+
+  const rows = useMemo(() => {
+    if (!sel) return [];
+    let list = base;
+    if (sel.store) list = list.filter((x) => x.branch === sel.store);
+    if (sel.item) list = list.filter((x) => itemNameOf(x) === sel.item);
+    let fn;
+    if (sel.kind === 'nextN') fn = (x) => inNext(x, upDays);
+    else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
+    else fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) => String(createdTs(b) || '').localeCompare(String(createdTs(a) || '')));
+    // eslint-disable-next-line
+  }, [base, sel]);
+
+  const cnt = (fn, list) => list.filter(fn).length;
+
   const itemRows = useMemo(() => {
     const map = {};
     base.forEach((x) => {
