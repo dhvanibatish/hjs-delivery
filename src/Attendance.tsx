@@ -481,6 +481,11 @@ const CSS = `
   border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
 .hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
 
+.hjsatt .att-check { display: flex; align-items: center; gap: 9px; cursor: pointer;
+  font-size: 14.5px; color: #344054; }
+.hjsatt .att-check input { width: 17px; height: 17px; flex: none; accent-color: #2563eb; }
+.hjsatt .att-check span { user-select: none; }
+
 .hjsatt .att-answer { margin-top: 9px; padding: 12px 14px; border-radius: 9px;
   background: #f7f8fa; border: 1px solid #eef0f3; font-size: 14.5px;
   white-space: pre-wrap; line-height: 1.55; color: #344054; }
@@ -2968,9 +2973,12 @@ function DirectoryTab({ me }: any) {
   };
 
   const bulkRemove = async (hard: boolean) => {
+    let bad = 0;
     for (const id of Array.from(sel)) {
-      await supabase.rpc("delete_employee", { p_emp: id, p_hard: hard });
+      const { error } = await supabase.rpc("delete_employee", { p_emp: id, p_hard: hard });
+      if (error) bad += 1;
     }
+    if (bad) window.alert(`${bad} record delete nahi ho paye.`);
     load();
   };
 
@@ -3426,7 +3434,9 @@ function NoticeTab({ me }: any) {
   };
 
   const remove = async (id: string) => {
-    await supabase.from("announcements").update({ active: false }).eq("id", id);
+    const { error } = await supabase.from("announcements")
+      .update({ active: false }).eq("id", id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
     load();
   };
 
@@ -3640,7 +3650,9 @@ function HolidaysTab({ me }: any) {
     else { setMsg({ err: "", ok: "Added." }); setF({ ...f, name: "" }); load(); }
   };
   const del = async (id: string) => {
-    await supabase.from("holidays").delete().eq("id", id); load();
+    const { error } = await supabase.from("holidays").delete().eq("id", id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
+    load();
   };
   const year = istToday().slice(0, 4);
   const shown = rows.filter((r) => String(r.hol_date).startsWith(year))
@@ -3732,7 +3744,8 @@ function LeavesScreen({ me, tab }: any) {
   useEffect(() => { load(); }, [span, period.y, period.m, range.from, range.to]);
 
   const cancel = async (id: string) => {
-    await supabase.rpc("delete_leave", { p_id: id, p_hard: false });
+    const { error } = await supabase.rpc("delete_leave", { p_id: id, p_hard: false });
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
     load();
   };
 
@@ -4206,10 +4219,11 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   useEffect(() => { load(); }, [mode]);
 
   const decideLeave = async (id: string, st: string) => {
-    setBusy(true);
-    await supabase.from("leaves").update({
+    setBusy(true); setErr("");
+    const { error } = await supabase.from("leaves").update({
       status: st, approved_by: me.id, approved_at: new Date().toISOString(),
     }).eq("id", id);
+    if (error) { setErr(error.message); setBusy(false); return; }
     await load(); setBusy(false);
   };
 
@@ -5161,7 +5175,9 @@ function DesignationSheet({ onClose }: any) {
   };
 
   const toggle = async (r: any) => {
-    await supabase.from("designations").update({ active: !r.active }).eq("id", r.id);
+    const { error } = await supabase.from("designations")
+      .update({ active: !r.active }).eq("id", r.id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
     load();
   };
 
@@ -7751,15 +7767,15 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
   const nDone = items.filter((x: any) => done.has(x.id)).length;
   const pct = items.length ? Math.round((nDone / items.length) * 100) : 0;
 
+  const [perr, setPerr] = useState("");
   const toggle = async (item: any) => {
-    setBusy(true);
-    if (done.has(item.id)) {
-      await supabase.from("lms_progress").delete()
-        .eq("employee_id", me.id).eq("item_id", item.id);
-    } else {
-      await supabase.from("lms_progress")
-        .upsert({ employee_id: me.id, item_id: item.id });
-    }
+    setBusy(true); setPerr("");
+    const { error } = done.has(item.id)
+      ? await supabase.from("lms_progress").delete()
+          .eq("employee_id", me.id).eq("item_id", item.id)
+      : await supabase.from("lms_progress")
+          .upsert({ employee_id: me.id, item_id: item.id });
+    if (error) { setPerr(error.message); setBusy(false); return; }
     await onChange();
     setBusy(false);
   };
@@ -7778,6 +7794,7 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
       </div>
 
       <div className="att-stack">
+        <Note>{perr}</Note>
         {course.description && (
           <p className="att-muted" style={{ whiteSpace: "normal" }}>{course.description}</p>
         )}
@@ -8140,6 +8157,9 @@ function LmsQuiz({ a, me, onClose }: any) {
             )}
           </div>
 
+          {!busy && qs.length === 0 && (
+            <p className="att-muted">Is assessment mein abhi koi question nahi hai.</p>
+          )}
           {leftA === 0 && !cleared && (
             <p className="att-muted">No attempts left. Please contact HR.</p>
           )}
@@ -8345,7 +8365,8 @@ function LmsCourseForm({ row, onClose, onSaved }: any) {
   const kill = async () => {
     if (!window.confirm("Delete this course and all its chapters?")) return;
     setBusy(true);
-    await supabase.from("lms_courses").delete().eq("id", f.id);
+    const { error } = await supabase.from("lms_courses").delete().eq("id", f.id);
+    if (error) { setErr(error.message); setBusy(false); return; }
     setBusy(false); onSaved();
   };
 
@@ -8442,7 +8463,8 @@ function LmsItemsSheet({ course, rows, onClose, onSaved }: any) {
 
   const kill = async (id: string) => {
     if (!window.confirm("Delete this chapter?")) return;
-    await supabase.from("lms_items").delete().eq("id", id);
+    const { error } = await supabase.from("lms_items").delete().eq("id", id);
+    if (error) { setErr(error.message); return; }
     await reload();
   };
 
@@ -8563,7 +8585,8 @@ function LmsAsmtSheet({ course, onClose }: any) {
 
   const kill = async (id: string) => {
     if (!window.confirm("Delete this assessment and all its questions?")) return;
-    await supabase.from("lms_assessments").delete().eq("id", id);
+    const { error } = await supabase.from("lms_assessments").delete().eq("id", id);
+    if (error) { setErr(error.message); return; }
     await load();
   };
 
@@ -8690,7 +8713,8 @@ function LmsQuestionsSheet({ a, onClose }: any) {
 
   const kill = async (id: string) => {
     if (!window.confirm("Delete this question?")) return;
-    await supabase.from("lms_questions").delete().eq("id", id);
+    const { error } = await supabase.from("lms_questions").delete().eq("id", id);
+    if (error) { setErr(error.message); return; }
     await load();
   };
 
@@ -8814,12 +8838,12 @@ function LmsGrading() {
       .not("submitted_at", "is", null)
       .order("submitted_at", { ascending: false }).range(0, 4999);
     const list = at.data || [];
+    if (!list.length) { setRows([]); setBusy(false); return; }
     const aIds = Array.from(new Set(list.map((x: any) => x.assessment_id)));
     const eIds = Array.from(new Set(list.map((x: any) => x.employee_id)));
     const [asm, emp, crs] = await Promise.all([
-      supabase.from("lms_assessments").select("*").in("id", aIds.length ? aIds : [""]),
-      supabase.from("employees").select("id, emp_code, full_name")
-        .in("id", eIds.length ? eIds : [""]),
+      supabase.from("lms_assessments").select("*").in("id", aIds),
+      supabase.from("employees").select("id, emp_code, full_name").in("id", eIds),
       supabase.from("lms_courses").select("id, title"),
     ]);
     const am: Record<string, any> = {};
