@@ -2223,7 +2223,40 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
 /* ═══════════════════════════════════════════ DASHBOARD (all stores · MIS)
    Store-wise daily picture. Cards + table sab clickable → entries neeche
    table mein khulti hain. Sirf head login mein dikhta hai.              */
-function Dashboard({ deliveries, onOpen }) {
+class DashErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ padding: 20, fontFamily: FONT }}>
+          <button className="track-back" onClick={() => this.setState({ err: null })}>
+            <ArrowLeft size={16} /> Back
+          </button>
+          <div className="dash-block" style={{ padding: 16 }}>
+            <div style={{ fontWeight: 800, color: T.red, marginBottom: 8 }}>
+              Kuch gadbad ho gayi is view mein
+            </div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft, fontFamily: 'monospace', wordBreak: 'break-word' }}>
+              {String(this.state.err && this.state.err.message || this.state.err)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function Dashboard(props) {
+  return (
+    <DashErrorBoundary>
+      <DashboardInner {...props} />
+    </DashErrorBoundary>
+  );
+}
+
+function DashboardInner({ deliveries, onOpen }) {
   const [range, setRange] = useState('today'); // today|yesterday|7d|month|all|custom
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
