@@ -2266,7 +2266,9 @@ function DashboardInner({ deliveries, onOpen }) {
   const [store, setStore] = useState('ALL');
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('store'); // store | item
-  const [upDays, setUpDays] = useState(4); // item view: "next N days" custom
+  const [upDays, setUpDays] = useState(4); // item view: first "next N days" column
+  const [upDays2, setUpDays2] = useState(7); // second "next N days" column
+  const [itemQ, setItemQ] = useState(''); // item view: search by item name
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -2377,7 +2379,7 @@ function DashboardInner({ deliveries, onOpen }) {
     if (sel.item) list = list.filter((x) => itemNamesOf(x).includes(sel.item));
     let fn;
     if (sel.kind === 'nextN') fn = (x) => inNext(x, upDays);
-    else if (sel.kind === 'next7') fn = (x) => inNext(x, 7);
+    else if (sel.kind === 'next7') fn = (x) => inNext(x, upDays2);
     else fn = metric[sel.kind] || stageMetric[sel.kind] || (() => true);
     return list
       .filter(fn)
@@ -2396,7 +2398,7 @@ function DashboardInner({ deliveries, onOpen }) {
         map[name].list.push(x);
       });
     });
-    return Object.values(map)
+    const arr = Object.values(map)
       .map((g) => ({
         name: g.name,
         list: g.list,
@@ -2404,11 +2406,13 @@ function DashboardInner({ deliveries, onOpen }) {
         pending: g.list.filter(metric.pending).length,
         picked: g.list.filter(metric.picked).length,
         nextN: g.list.filter((x) => inNext(x, upDays)).length,
-        next7: g.list.filter((x) => inNext(x, 7)).length,
+        next7: g.list.filter((x) => inNext(x, upDays2)).length,
       }))
       .sort((a, b) => b.total - a.total);
+    const q = itemQ.trim().toLowerCase();
+    return q ? arr.filter((r) => r.name.toLowerCase().includes(q)) : arr;
     // eslint-disable-next-line
-  }, [base, upDays]);
+  }, [base, upDays, upDays2, itemQ]);
 
   const rangeLabel =
     range === 'today' ? 'Aaj'
@@ -2434,7 +2438,7 @@ function DashboardInner({ deliveries, onOpen }) {
             {sel.kind === 'nextN'
               ? `Next ${upDays} days`
               : sel.kind === 'next7'
-                ? 'Next 7 days'
+                ? `Next ${upDays2} days`
                 : cards.find((c) => c.kind === sel.kind)?.label || sShort(sel.kind) || 'All'}
           </div>
           <div className="dash-table-wrap">
@@ -2623,23 +2627,13 @@ function DashboardInner({ deliveries, onOpen }) {
       <div className="dash-block">
         <div className="dash-block-h" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <span>Item-wise · {rangeLabel}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: T.inkSoft }}>
-            Upcoming window:
-            <select
-              className="dash-inp"
-              style={{ padding: '6px 10px' }}
-              value={upDays}
-              onChange={(e) => setUpDays(Number(e.target.value))}
-            >
-              <option value={2}>Next 2 days</option>
-              <option value={3}>Next 3 days</option>
-              <option value={4}>Next 4 days</option>
-              <option value={5}>Next 5 days</option>
-              <option value={7}>Next 7 days</option>
-              <option value={10}>Next 10 days</option>
-              <option value={15}>Next 15 days</option>
-              <option value={30}>Next 30 days</option>
-            </select>
+          <span className="sales-search" style={{ maxWidth: 280, minWidth: 180 }}>
+            <Search size={15} color={T.inkSoft} />
+            <input
+              placeholder="Search item…"
+              value={itemQ}
+              onChange={(e) => setItemQ(e.target.value)}
+            />
           </span>
         </div>
         <div className="dash-table-wrap">
@@ -2650,8 +2644,30 @@ function DashboardInner({ deliveries, onOpen }) {
                 <th>Total</th>
                 <th>Pending</th>
                 <th>Picked Up</th>
-                <th>Next {upDays} days</th>
-                <th>Next 7 days</th>
+                <th>
+                  <select
+                    className="col-days"
+                    value={upDays}
+                    onChange={(e) => setUpDays(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {[2, 3, 4, 5, 7, 10, 15, 30].map((d) => (
+                      <option key={d} value={d}>Next {d} days</option>
+                    ))}
+                  </select>
+                </th>
+                <th>
+                  <select
+                    className="col-days"
+                    value={upDays2}
+                    onChange={(e) => setUpDays2(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {[2, 3, 4, 5, 7, 10, 15, 30].map((d) => (
+                      <option key={d} value={d}>Next {d} days</option>
+                    ))}
+                  </select>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -6423,6 +6439,9 @@ function StyleTag() {
       .item-table { table-layout: auto; min-width: 640px; }
       .item-table th:first-child, .item-table td:first-child { min-width: 220px; max-width: 340px; white-space: normal; }
       .item-table th:not(:first-child), .item-table td:not(:first-child) { text-align: center; width: 96px; min-width: 96px; }
+      .item-table th:nth-child(5), .item-table th:nth-child(6), .item-table td:nth-child(5), .item-table td:nth-child(6) { width: 120px; min-width: 120px; }
+      .col-days { border: 1px solid ${T.line}; background: #fff; border-radius: 8px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; font-family: inherit; color: ${T.green}; cursor: pointer; text-transform: none; letter-spacing: 0; max-width: 110px; }
+      .col-days:focus { outline: none; border-color: ${T.green}; }
       .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
       .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
       .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
