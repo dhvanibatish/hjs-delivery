@@ -648,8 +648,8 @@ function equipmentList(r) {
   }
   if (typeof li === 'string' && li.trim() && li !== 'null') {
     return li
-      .split(',')
-      .map((s) => s.trim())
+      .split(/[|,]/)
+      .map((s) => s.split(' x')[0].trim())
       .filter(Boolean);
   }
   if (r.item_name && r.item_name !== 'null') {
