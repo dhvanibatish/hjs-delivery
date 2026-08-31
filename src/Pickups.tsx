@@ -2629,7 +2629,7 @@ function DashboardInner({ deliveries, onOpen }) {
           </span>
         </div>
         <div className="dash-table-wrap">
-          <table className="dash-table">
+          <table className="dash-table item-table">
             <thead>
               <tr>
                 <th>Item</th>
@@ -6406,6 +6406,9 @@ function StyleTag() {
       .dash-block { background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 6px; margin-bottom: 20px; overflow: hidden; }
       .dash-block-h { font-size: 13px; font-weight: 800; color: ${T.ink}; padding: 12px 12px 10px; }
       .dash-table-wrap { overflow-x: auto; }
+      .item-table { table-layout: auto; min-width: 640px; }
+      .item-table th:first-child, .item-table td:first-child { min-width: 220px; max-width: 340px; white-space: normal; }
+      .item-table th:not(:first-child), .item-table td:not(:first-child) { text-align: center; width: 96px; min-width: 96px; }
       .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
       .dash-table th { text-align: left; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; text-transform: uppercase; letter-spacing: .3px; padding: 9px 12px; border-bottom: 1px solid ${T.line}; white-space: nowrap; }
       .dash-table td { padding: 11px 12px; border-bottom: 1px solid ${T.cream}; white-space: nowrap; }
