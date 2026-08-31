@@ -4043,6 +4043,8 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
+  // ek hi request do baar na chali jaaye
+  const [sent, setSent] = useState(false);
 
   // types der se aayein to pehla apne aap chun lo
   useEffect(() => {
@@ -4051,11 +4053,20 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
     }
   }, [types]);
 
-  const rule = LEAVE_RULES[form.leave_type]
+  const base = LEAVE_RULES[form.leave_type]
     || { pastDays: 30, futureDays: 365, note: "", single: false, fixedDays: 0, reasonReq: true };
+  // HR kisi ki bhi backdated leave laga sakta hai — banda bimar pad gaya
+  // aur baad mein bataya, aisa hota hi hai
+  const rule = me.role === "admin"
+    ? { ...base, pastDays: Math.max(base.pastDays, 90),
+        note: base.note ? `${base.note} (admin: backdated allowed)` : "Admin: backdated allowed." }
+    : base;
   const needsTime = ["SHORT", "HALF"].includes(form.leave_type);
   const minDate = addDays(today, -rule.pastDays);
   const maxDate = addDays(today, rule.futureDays);
+
+  // form badla to nayi request bhej sakte hain
+  useEffect(() => { setSent(false); }, [form.leave_type, form.from_date, form.to_date, form.reason]);
 
   // type badalte hi dates ko rule ke andar le aao
   const setType = (code: string) => {
@@ -4093,7 +4104,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
   }, [form, rule, days, minDate, maxDate]);
 
   const submit = async () => {
-    if (problem) { setMsg({ err: problem, ok: "" }); return; }
+    if (problem || sent) { setMsg({ err: problem, ok: "" }); return; }
     setBusy(true); setMsg({ err: "", ok: "" });
     const { error } = await supabase.from("leaves").insert({
       employee_id: me.id, leave_type: form.leave_type,
@@ -4104,7 +4115,7 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
       reason: form.reason.trim(), status: "Pending",
     });
     if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
-    else setMsg({ err: "", ok: "Leave request sent for approval." });
+    else { setMsg({ err: "", ok: "Leave request sent for approval." }); setSent(true); }
     setBusy(false);
   };
 
@@ -4172,8 +4183,8 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
             {days} day{days === 1 ? "" : "s"}
             {rule.fixedDays ? " (counted)" : ""}
           </span>
-          <button className="att-btn sm" onClick={submit} disabled={busy || !!problem}>
-            {busy ? "Sending…" : "Apply"}
+          <button className="att-btn sm" onClick={submit} disabled={busy || sent || !!problem}>
+            {busy ? "Sending…" : sent ? "\u2713 Sent" : "Apply"}
           </button>
         </div>
         {problem && !msg.err && <p className="att-muted">{problem}</p>}
