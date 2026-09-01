@@ -2242,64 +2242,24 @@ function Dashboard({ deliveries, onOpen }) {
 
 /* ═══════════════════════════════════════════════ PROCESS & SLA (all stores)
    Do SLA:
-   1. RESPONSE  — order aane ke 30 min (business hours 10AM–8PM) mein
+   1. RESPONSE  — order aane ke 30 min (wall clock) mein
                   "Talked to Customer" pe move hona chahiye
    2. DELIVERY  — jo confirmed date+time customer ko diya, us tak
                   "Item Delivered" ho jaana chahiye (exact wall clock)
    Dashboard ke hi dash-* classes use karta hai — koi naya CSS nahi.        */
 
-const SLA_BIZ_START = 10; // 10 AM
-const SLA_BIZ_END = 20; // 8 PM
-const SLA_RESPONSE_MIN = 30; // business minutes
+const SLA_RESPONSE_MIN = 30; // minutes
 
-/* 30-min SLA duration hai isliye business-hours clock pe chalta hai.
-   Confirmed date+time absolute hai (customer ko wahi bola gaya) — us pe
-   normal wall clock. */
-function slaBizAdd(from, mins) {
-  const shift = (x) => {
-    const y = new Date(x);
-    const h = y.getHours() + y.getMinutes() / 60;
-    if (h < SLA_BIZ_START) y.setHours(SLA_BIZ_START, 0, 0, 0);
-    else if (h >= SLA_BIZ_END) {
-      y.setDate(y.getDate() + 1);
-      y.setHours(SLA_BIZ_START, 0, 0, 0);
-    }
-    return y;
-  };
-  let d = shift(new Date(from));
-  let left = mins;
-  for (let g = 0; g < 400 && left > 0; g++) {
-    const end = new Date(d);
-    end.setHours(SLA_BIZ_END, 0, 0, 0);
-    const avail = (end - d) / 60000;
-    if (left <= avail) return new Date(d.getTime() + left * 60000);
-    left -= avail;
-    d = shift(new Date(end.getTime() + 60000));
-  }
-  return d;
+/* Sab kuch normal wall clock pe — 24x7, koi business-hours pause nahi. */
+function slaAddMins(from, mins) {
+  const d = new Date(from);
+  return new Date(d.getTime() + mins * 60000);
 }
 
-/* Do timestamps ke beech kitne BUSINESS minutes lage (band ghante count nahi).
-   Mgr/Del/Avg time isse nikalte hain, warna raat ke ghante jud kar store
-   bekaar mein kharab dikhta hai. */
-function slaBizMins(a, b) {
+/* Do timestamps ke beech kitne minutes lage (plain wall clock). */
+function slaSpanMins(a, b) {
   if (!a || !b || b <= a) return 0;
-  let total = 0;
-  let cur = new Date(a);
-  for (let g = 0; g < 400 && cur < b; g++) {
-    const s0 = new Date(cur);
-    s0.setHours(SLA_BIZ_START, 0, 0, 0);
-    const e0 = new Date(cur);
-    e0.setHours(SLA_BIZ_END, 0, 0, 0);
-    const s = cur < s0 ? s0 : cur;
-    const e = b < e0 ? b : e0;
-    if (e > s) total += (e - s) / 60000;
-    const nx = new Date(cur);
-    nx.setDate(nx.getDate() + 1);
-    nx.setHours(0, 0, 0, 0);
-    cur = nx;
-  }
-  return total;
+  return (new Date(b) - new Date(a)) / 60000;
 }
 
 const slaLog = (x) => {
@@ -2404,15 +2364,15 @@ function slaAnalyze(x) {
   const now = new Date();
   const created = new Date(createdTs(x));
   const okStart = !isNaN(created);
-  // saare duration business hours mein — deadline logic ke saath consistent
-  const span = (a, b) => (a && b && b >= a ? slaBizMins(a, b) / 60 : null);
+  // saare duration plain wall clock mein — deadline logic ke saath consistent
+  const span = (a, b) => (a && b && b >= a ? slaSpanMins(a, b) / 60 : null);
 
   const delivered = x.stage === 'delivered';
   const delAt = delivered ? new Date(deliveredTs(x)) : null;
 
   /* SLA 1 — Response */
   const talkedAt = slaResponded(cycle);
-  const respDeadline = okStart ? slaBizAdd(created, SLA_RESPONSE_MIN) : null;
+  const respDeadline = okStart ? slaAddMins(created, SLA_RESPONSE_MIN) : null;
   const respEnd = talkedAt || now;
   const respBreach = !!(respDeadline && respEnd > respDeadline);
   const respOpen = !talkedAt;
@@ -2483,8 +2443,8 @@ function slaAnalyze(x) {
     totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
     openHrs: okStart && !delivered ? span(created, now) : null,
     respHrs,
-    /* Dashboard ke ≤10 / ≤30 buckets ke liye — wahi business-hours value,
-       bas minutes mein. Baat hi nahi hui to null (kisi bucket mein nahi). */
+    /* Dashboard ke ≤10 / ≤30 buckets ke liye — wahi value, bas minutes
+       mein. Baat hi nahi hui to null (kisi bucket mein nahi). */
     respMins: respHrs == null ? null : respHrs * 60,
     delHrs,
   };
@@ -3110,7 +3070,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Avg Time"
                     center
                     div
-                    info={`Entry aane se customer se baat hone tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai, band ghante count nahi hote.`}
+                    info="Entry aane se customer se baat hone tak ka average. Poora time count hota hai — band ghante bhi."
                   />
                   <SlaTh
                     label="Breach"
@@ -3369,7 +3329,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Response TAT"
                     center
                     div
-                    info={`Entry aane se customer se baat hone tak ka average. Business hours (${SLA_BIZ_START}AM–${SLA_BIZ_END - 12}PM) mein gina jaata hai. Ismein pending orders bhi shaamil hain, isliye ye Delivery TAT se zyada ho sakta hai.`}
+                    info="Entry aane se customer se baat hone tak ka average. Poora time count hota hai — band ghante bhi. Ismein pending orders bhi shaamil hain, isliye ye Delivery TAT se zyada ho sakta hai."
                   />
                   <SlaTh
                     label="Delivery TAT"
