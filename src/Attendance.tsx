@@ -5242,8 +5242,18 @@ function OrgTab() {
   if (busy) return <p className="att-muted">Loading…</p>;
 
   const membersOf = (teamId: string) => emps.filter((e) => e.team_id === teamId);
-  // level 1 = teams, level 2 = members
-  const roots = teams.map((t) => ({ ...t, _kind: "team" }));
+  // sub-teams (jaise NCR Finance, Mohali Finance) apne parent ke andar
+  const subTeams = (teamId: string) =>
+    teams.filter((t) => t.parent_team_id === teamId).map((t) => ({ ...t, _kind: "team" }));
+  // team ke apne log + saari sub-teams ke log
+  const deepCount = (teamId: string): number =>
+    membersOf(teamId).length
+    + subTeams(teamId).reduce((n, t) => n + deepCount(t.id), 0);
+
+  // sirf wahi teams upar jinka koi parent nahi
+  const roots = teams
+    .filter((t) => !t.parent_team_id)
+    .map((t) => ({ ...t, _kind: "team" }));
 
   if (q) {
     const hits = emps.filter((r) =>
@@ -5266,12 +5276,22 @@ function OrgTab() {
       <p className="att-muted">{teams.length} teams · click the + on a team to see its people</p>
       <OrgChart
         roots={roots}
-        childrenOf={(n: any) => (n._kind === "team" ? membersOf(n.id) : [])}
-        countOf={(n: any) => (n._kind === "team" ? membersOf(n.id).length : 0)}
-        toCard={(n: any) => n._kind === "team"
-          ? { name: n.name, sub: `${membersOf(n.id).length} people` }
-          : { name: n.full_name, code: n.emp_code, pid: n.id,
-              sub: `${n.emp_code} · ${n.designation || "—"}` }}
+        childrenOf={(n: any) =>
+          n._kind === "team" ? [...subTeams(n.id), ...membersOf(n.id)] : []}
+        countOf={(n: any) => (n._kind === "team" ? deepCount(n.id) : 0)}
+        toCard={(n: any) => {
+          if (n._kind !== "team") {
+            return { name: n.full_name, code: n.emp_code, pid: n.id,
+                     sub: `${n.emp_code} · ${n.designation || "—"}` };
+          }
+          const own = membersOf(n.id).length;
+          const all = deepCount(n.id);
+          const subs = subTeams(n.id).length;
+          return { name: n.name,
+            sub: subs
+              ? `${subs} sub-team${subs === 1 ? "" : "s"} · ${all} people`
+              : `${own} people` };
+        }}
       />
     </>
   );
