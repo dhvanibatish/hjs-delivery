@@ -8237,9 +8237,23 @@ function LmsQuiz({ a, me, onClose }: any) {
                   <span className="att-num ok">{i + 1}</span>
                   <div className="grow">
                     <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
-                    <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                      {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
-                    </p>
+                    {q.kind === "blank" ? (
+                      <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                        {(q.answers || []).join(" / ")}
+                      </p>
+                    ) : q.kind === "match" ? (
+                      <div style={{ marginTop: 4 }}>
+                        {(q.answers || []).map((p: any, k: number) => (
+                          <p className="att-muted" key={k} style={{ whiteSpace: "normal" }}>
+                            {p.left} {"\u2192"} {p.right}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                        {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -8254,7 +8268,7 @@ function LmsQuiz({ a, me, onClose }: any) {
                 {used ? "Re-attempt" : "Start assessment"}
               </button>
             )}
-            {cleared && a.show_answers && !showAns && (
+            {(cleared || leftA === 0) && a.show_answers && !showAns && (
               <button className="att-btn line" onClick={openAnswers}>Show correct answers</button>
             )}
           </div>
