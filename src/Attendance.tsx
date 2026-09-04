@@ -490,6 +490,14 @@ const CSS = `
   background: #f7f8fa; border: 1px solid #eef0f3; font-size: 14.5px;
   white-space: pre-wrap; line-height: 1.55; color: #344054; }
 
+.hjsatt .att-matchrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hjsatt .att-matchrow .lft { flex: 0 0 210px; font-size: 14.5px; font-weight: 600;
+  padding: 9px 12px; background: #f7f8fa; border: 1px solid #eef0f3; border-radius: 8px; }
+.hjsatt .att-matchrow select { flex: 1 1 220px; }
+.hjsatt .att-matchedit { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.hjsatt .att-matchedit input { flex: 1 1 auto; min-width: 0; }
+.hjsatt .att-matchedit span { color: #98a2b3; flex: none; }
+
 .hjsatt .att-optrow { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
 .hjsatt .att-optrow input { flex: 1 1 auto; }
 .hjsatt .att-optpick { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
@@ -8146,7 +8154,9 @@ function LmsQuiz({ a, me, onClose }: any) {
   const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
   const answered = Object.keys(ans).filter((k) => {
     const v = ans[k];
-    return typeof v === "number" ? true : String(v || "").trim() !== "";
+    if (typeof v === "number") return true;
+    if (v && typeof v === "object") return Object.values(v).some((x) => x);
+    return String(v || "").trim() !== "";
   }).length;
 
   const Row = ({ label, children }: any) => (
@@ -8284,6 +8294,27 @@ function LmsQuiz({ a, me, onClose }: any) {
                 placeholder="Apna jawab yahan likho"
                 value={ans[q.id] || ""}
                 onChange={(e) => setAns({ ...ans, [q.id]: e.target.value })} />
+            ) : q.kind === "blank" ? (
+              <input style={{ marginTop: 10, maxWidth: 320 }}
+                placeholder="Khali jagah bharo"
+                value={ans[q.id] || ""}
+                onChange={(e) => setAns({ ...ans, [q.id]: e.target.value })} />
+            ) : q.kind === "match" ? (
+              <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
+                {(q.options || []).map((left: string, k: number) => (
+                  <div className="att-matchrow" key={k}>
+                    <span className="lft">{left}</span>
+                    <select value={(ans[q.id] || {})[left] || ""}
+                      onChange={(e) => setAns({ ...ans,
+                        [q.id]: { ...(ans[q.id] || {}), [left]: e.target.value } })}>
+                      <option value="">Choose…</option>
+                      {(q.pool || []).map((r: string, i: number) => (
+                        <option key={i} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
                 {(q.options || []).map((o: string, k: number) => (
@@ -8784,6 +8815,7 @@ function LmsQuestionsSheet({ a, onClose }: any) {
   useEffect(() => { load(); }, [a.id]);
 
   const opts: string[] = f?.options || ["", "", "", ""];
+  const kindNow = f?.kind || "mcq";
 
   const save = async () => {
     const kind = f.kind || "mcq";
@@ -8794,16 +8826,34 @@ function LmsQuestionsSheet({ a, onClose }: any) {
       if (f.correct_index == null || f.correct_index >= clean.length)
         return setErr("Sahi jawab chuno.");
     }
+    if (kind === "blank" && !(f.answers || []).length)
+      return setErr("Kam se kam ek sahi jawab likho.");
+    if (kind === "match"
+        && (f.pairs || []).filter((p: any) => p.left?.trim() && p.right?.trim()).length < 2)
+      return setErr("Kam se kam 2 jodiyan chahiye.");
     setBusy(true); setErr("");
-    const p = {
+    const pairs = (f.pairs || [])
+      .map((p: any) => ({ left: (p.left || "").trim(), right: (p.right || "").trim() }))
+      .filter((p: any) => p.left && p.right);
+
+    const p: any = {
       assessment_id: a.id,
       question: f.question.trim(),
       kind,
-      options: kind === "mcq" ? clean : null,
-      correct_index: kind === "mcq" ? Number(f.correct_index) : null,
       marks: Number(f.marks) || 1,
       seq: Number(f.seq) || 0,
+      options: null, correct_index: null, answers: null,
     };
+    if (kind === "mcq") {
+      p.options = clean;
+      p.correct_index = Number(f.correct_index);
+    } else if (kind === "blank") {
+      p.answers = f.answers || [];
+    } else if (kind === "match") {
+      // options = left column, answers = sahi jodiyan
+      p.options = pairs.map((x: any) => x.left);
+      p.answers = pairs;
+    }
     const { error } = f.id
       ? await supabase.from("lms_questions").update(p).eq("id", f.id)
       : await supabase.from("lms_questions").insert(p);
@@ -8841,6 +8891,8 @@ function LmsQuestionsSheet({ a, onClose }: any) {
               <select value={f.kind || "mcq"}
                 onChange={(e) => setF({ ...f, kind: e.target.value })}>
                 <option value="mcq">Multiple choice — apne aap check hoga</option>
+                <option value="blank">Fill in the blank — apne aap check hoga</option>
+                <option value="match">Match the following — apne aap check hoga</option>
                 <option value="text">Written answer — admin marks dega</option>
               </select></div>
 
@@ -8862,6 +8914,53 @@ function LmsQuestionsSheet({ a, onClose }: any) {
                   onClick={() => setF({ ...f, options: [...opts, ""] })}>
                   + Option
                 </button>
+              </div>
+            ) : (f.kind || "mcq") === "blank" ? (
+              <div>
+                <label>Sahi jawab (comma se alag karo)</label>
+                <input value={(f.answers || []).join(", ")}
+                  placeholder="home visit, homevisit"
+                  onChange={(e) => setF({ ...f,
+                    answers: e.target.value.split(",").map((x: string) => x.trim()).filter(Boolean) })} />
+                <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Sawaal mein ______ likho jahan khali jagah ho. Chhote-bade
+                  akshar ka farak nahi padega. Ek se zyada sahi jawab ho to
+                  comma se alag karke likh do.
+                </p>
+              </div>
+            ) : (f.kind || "mcq") === "match" ? (
+              <div>
+                <label>Jodiyan — left aur right</label>
+                {(f.pairs || [{ left: "", right: "" }]).map((p: any, i: number) => (
+                  <div className="att-matchedit" key={i}>
+                    <input value={p.left} placeholder="Sales & Delivery"
+                      onChange={(e) => {
+                        const n = [...(f.pairs || [])];
+                        n[i] = { ...n[i], left: e.target.value };
+                        setF({ ...f, pairs: n });
+                      }} />
+                    <span>{"\u2192"}</span>
+                    <input value={p.right} placeholder="Converting leads into orders"
+                      onChange={(e) => {
+                        const n = [...(f.pairs || [])];
+                        n[i] = { ...n[i], right: e.target.value };
+                        setF({ ...f, pairs: n });
+                      }} />
+                    <button className="att-btn sm line" style={{ color: "#dc2626" }}
+                      onClick={() => setF({ ...f,
+                        pairs: (f.pairs || []).filter((_: any, k: number) => k !== i) })}>
+                      {"\u00d7"}
+                    </button>
+                  </div>
+                ))}
+                <button className="att-btn sm line" style={{ marginTop: 8 }}
+                  onClick={() => setF({ ...f, pairs: [...(f.pairs || []), { left: "", right: "" }] })}>
+                  + Jodi
+                </button>
+                <p className="att-muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  Staff ko right wale options shuffle karke dikhenge. Har sahi
+                  jodi ka hissa milta hai — sab sahi to poore marks.
+                </p>
               </div>
             ) : (
               <p className="att-muted">
@@ -8903,15 +9002,18 @@ function LmsQuestionsSheet({ a, onClose }: any) {
               <div className="grow">
                 <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
                 <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                  {q.kind === "text"
-                    ? "Written answer"
+                  {q.kind === "text" ? "Written answer"
+                    : q.kind === "blank" ? `Blank · ${(q.answers || []).join(" / ")}`
+                    : q.kind === "match" ? `Match · ${(q.answers || []).length} pairs`
                     : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
                   {" · "}{q.marks} mark{Number(q.marks) === 1 ? "" : "s"}
                 </p>
               </div>
               <div className="att-flex">
                 <button className="att-btn sm line"
-                  onClick={() => { setF({ ...q, options: q.options || [] }); toForm(); }}>Edit</button>
+                  onClick={() => { setF({ ...q, options: q.options || [],
+                    pairs: q.kind === "match" ? (q.answers || []) : undefined,
+                    answers: q.kind === "blank" ? (q.answers || []) : undefined }); toForm(); }}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(q.id)}>Delete</button>
               </div>
