@@ -7920,6 +7920,13 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
               if (g) g.list.push(x);
               else groups.push({ name: x.module_name || "", list: [x] });
             });
+            // assessment bhi apne module ke andar baithe
+            asmts.forEach((a: any) => {
+              if (!a.module_name) return;
+              const g = groups.find((y) => y.name === a.module_name);
+              if (g) g.asmt = [...(g.asmt || []), a];
+              else groups.push({ name: a.module_name, list: [], asmt: [a] });
+            });
             let n = 0;
             return groups.map((g, gi) => (
               <div key={gi}>
@@ -7928,6 +7935,9 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
                     <b>{g.name}</b>
                     <span className="att-muted">
                       {g.list.filter((x: any) => done.has(x.id)).length}/{g.list.length}
+                      {(g.asmt || []).length
+                        ? ` · ${(g.asmt || []).length} assessment${(g.asmt || []).length === 1 ? "" : "s"}`
+                        : ""}
                       {g.list.some((x: any) => x.duration_min)
                         ? ` · ${g.list.reduce((a: number, x: any) => a + (x.duration_min || 0), 0)} min`
                         : ""}
@@ -7956,15 +7966,39 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
                     </div>
                   );
                 })}
+
+                {(g.asmt || []).map((a: any) => {
+                  const cleared = tries.some((t: any) => t.assessment_id === a.id && t.passed);
+                  const lock = !noLock && firstOpen !== -1;
+                  return (
+                    <div className={`att-row ${lock ? "lock" : ""}`} key={a.id}>
+                      <span className={`att-num ${cleared ? "ok" : ""}`}>
+                        {cleared ? "\u2713" : lock ? "\u{1F512}" : "\u2261"}
+                      </span>
+                      <div className="grow">
+                        <p><b>{a.title}</b></p>
+                        <p className="att-muted">
+                          Assessment · {a.duration_min} min · pass {a.pass_percent}%
+                        </p>
+                      </div>
+                      <button className="att-btn sm" disabled={lock}
+                        onClick={() => setQuiz(a)}>
+                        {lock ? "Locked" : cleared ? "Review" : "Start"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ));
           })()}
         </div>
 
-        {asmts.length > 0 && (
+        {asmts.filter((a: any) => !a.module_name).length > 0 && (
           <div className="att-list">
-            <div className="att-hd"><b>Assessments</b><span className="att-muted">{asmts.length}</span></div>
-            {asmts.map((a: any) => (
+            <div className="att-hd"><b>Assessments</b>
+              <span className="att-muted">{asmts.filter((a: any) => !a.module_name).length}</span>
+            </div>
+            {asmts.filter((a: any) => !a.module_name).map((a: any) => (
               <div className="att-row" key={a.id}>
                 <div className="grow">
                   <p><b>{a.title}</b></p>
@@ -8627,6 +8661,7 @@ function LmsAsmtSheet({ course, onClose }: any) {
     const p = {
       course_id: course.id,
       title: f.title.trim(),
+      module_name: f.module_name?.trim() || null,
       duration_min: Number(f.duration_min) || 10,
       pass_percent: Number(f.pass_percent) || 60,
       max_attempts: Number(f.max_attempts) || 1,
@@ -8658,6 +8693,12 @@ function LmsAsmtSheet({ course, onClose }: any) {
             <div><label>Title</label>
               <input value={f.title || ""}
                 onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
+            <div><label>Module (optional)</label>
+              <input value={f.module_name || ""} placeholder="e.g. Wrap-Up &amp; Assessment"
+                onChange={(e) => setF({ ...f, module_name: e.target.value })} />
+              <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Chapter jaisa hi naam do to assessment usi module ke andar dikhega.
+              </p></div>
             <div className="att-row2">
               <div><label>Duration (minutes)</label>
                 <input type="number" value={f.duration_min ?? 10}
@@ -8706,6 +8747,7 @@ function LmsAsmtSheet({ course, onClose }: any) {
                   {!a.active && <span className="att-pill p-Absent" style={{ marginLeft: 7 }}>hidden</span>}
                 </p>
                 <p className="att-muted">
+                  {a.module_name ? `${a.module_name} · ` : ""}
                   {qcount[a.id] || 0} question{(qcount[a.id] || 0) === 1 ? "" : "s"} ·
                   {" "}{a.duration_min} min · pass {a.pass_percent}% ·
                   {" "}{a.max_attempts} attempt{a.max_attempts === 1 ? "" : "s"}
