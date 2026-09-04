@@ -490,6 +490,17 @@ const CSS = `
   background: #f7f8fa; border: 1px solid #eef0f3; font-size: 14.5px;
   white-space: pre-wrap; line-height: 1.55; color: #344054; }
 
+.hjsatt .att-num.bad { background: #fee4e2; color: #dc2626; }
+.hjsatt .att-rev { font-size: 13.5px; margin-top: 5px; white-space: normal; }
+.hjsatt .att-rev.gd { color: #16a34a; }
+.hjsatt .att-rev.bd { color: #dc2626; }
+.hjsatt .att-revmatch { margin-top: 6px; }
+.hjsatt .att-revmatch > div { display: flex; gap: 8px; flex-wrap: wrap;
+  font-size: 13.5px; margin-top: 4px; }
+.hjsatt .att-revmatch .lft { font-weight: 600; color: #344054; min-width: 150px; }
+.hjsatt .att-revmatch .gd { color: #16a34a; }
+.hjsatt .att-revmatch .bd { color: #dc2626; text-decoration: line-through; }
+
 .hjsatt .att-matchrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hjsatt .att-matchrow .lft { flex: 0 0 210px; font-size: 14.5px; font-weight: 600;
   padding: 9px 12px; background: #f7f8fa; border: 1px solid #eef0f3; border-radius: 8px; }
@@ -8229,36 +8240,78 @@ function LmsQuiz({ a, me, onClose }: any) {
             </div>
           )}
 
-          {showAns && review.length > 0 && (
-            <div className="att-list">
-              <div className="att-hd"><b>Correct answers</b></div>
-              {review.map((q: any, i: number) => (
-                <div className="att-row" key={q.id}>
-                  <span className="att-num ok">{i + 1}</span>
-                  <div className="grow">
-                    <p style={{ whiteSpace: "normal" }}><b>{q.question}</b></p>
-                    {q.kind === "blank" ? (
-                      <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                        {(q.answers || []).join(" / ")}
-                      </p>
-                    ) : q.kind === "match" ? (
-                      <div style={{ marginTop: 4 }}>
-                        {(q.answers || []).map((p: any, k: number) => (
-                          <p className="att-muted" key={k} style={{ whiteSpace: "normal" }}>
-                            {p.left} {"\u2192"} {p.right}
-                          </p>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                        {String.fromCharCode(65 + q.correct_index)}. {(q.options || [])[q.correct_index]}
-                      </p>
-                    )}
-                  </div>
+          {showAns && review.length > 0 && (() => {
+            // aakhri attempt ke jawab, taaki galat-sahi dikha sakein
+            const mine = tries[0]?.answers || {};
+            const norm = (x: any) => String(x ?? "").trim().toLowerCase();
+
+            return (
+              <div className="att-list">
+                <div className="att-hd"><b>Review</b>
+                  <span className="att-muted">aapka jawab vs sahi jawab</span>
                 </div>
-              ))}
-            </div>
-          )}
+                {review.map((q: any, i: number) => {
+                  const got = mine[q.id];
+                  let right = false;
+                  if (q.kind === "blank") {
+                    right = (q.answers || []).some((x: string) => norm(x) === norm(got));
+                  } else if (q.kind === "match") {
+                    right = (q.answers || []).every((p: any) => (got || {})[p.left] === p.right);
+                  } else {
+                    right = got != null && Number(got) === q.correct_index;
+                  }
+                  return (
+                    <div className="att-row" key={q.id} style={{ alignItems: "flex-start" }}>
+                      <span className={`att-num ${right ? "ok" : "bad"}`}>
+                        {right ? "\u2713" : "\u2715"}
+                      </span>
+                      <div className="grow">
+                        <p style={{ whiteSpace: "normal" }}>
+                          <b>{i + 1}. {q.question}</b>
+                        </p>
+
+                        {q.kind === "match" ? (
+                          <div className="att-revmatch">
+                            {(q.answers || []).map((p: any, k: number) => {
+                              const pick = (got || {})[p.left];
+                              const ok = pick === p.right;
+                              return (
+                                <div key={k}>
+                                  <span className="lft">{p.left}</span>
+                                  <span className={ok ? "gd" : "bd"}>{pick || "—"}</span>
+                                  {!ok && <span className="gd">{"\u2192"} {p.right}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <>
+                            <p className={`att-rev ${right ? "gd" : "bd"}`}>
+                              Aapka jawab: {q.kind === "blank"
+                                ? (got || "—")
+                                : got != null
+                                  ? `${String.fromCharCode(65 + Number(got))}. ${(q.options || [])[Number(got)]}`
+                                  : "—"}
+                            </p>
+                            {!right && (
+                              <p className="att-rev gd">
+                                Sahi jawab: {q.kind === "blank"
+                                  ? (q.answers || []).join(" / ")
+                                  : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <span className="att-muted" style={{ flex: "none" }}>
+                        {right ? q.marks : 0}/{q.marks}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <div className="att-flex">
             {leftA > 0 && !busy && qs.length > 0 && (
@@ -8269,7 +8322,7 @@ function LmsQuiz({ a, me, onClose }: any) {
               </button>
             )}
             {(cleared || leftA === 0) && a.show_answers && !showAns && (
-              <button className="att-btn line" onClick={openAnswers}>Show correct answers</button>
+              <button className="att-btn line" onClick={openAnswers}>Review answers</button>
             )}
           </div>
 
