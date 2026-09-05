@@ -455,31 +455,26 @@ const CSS = `
 .hjsatt .att-rich .rt-ul li { font-size: 14px; margin-top: 4px; color: #475467;
   list-style: disc; line-height: 1.5; white-space: normal; }
 .hjsatt .hjs-cert { position: relative; width: 1123px; height: 794px; background: #fff;
-  font-family: Georgia, "Times New Roman", serif; overflow: hidden;
-  border: 14px solid #21996e; box-sizing: border-box; }
-.hjsatt .hjs-cert .c { position: absolute; width: 250px; height: 150px; background: #21996e; }
-.hjsatt .hjs-cert .c.tl { top: 0; left: 0; clip-path: polygon(0 0, 100% 0, 78% 46%, 0 46%); }
-.hjsatt .hjs-cert .c.br { bottom: 0; right: 0; clip-path: polygon(22% 54%, 100% 54%, 100% 100%, 0 100%); }
-.hjsatt .hjs-cert .inner { position: relative; z-index: 2; height: 100%;
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; text-align: center; padding: 60px 90px; }
-.hjsatt .hjs-cert .logo { width: 54px; height: 54px; object-fit: contain; margin-bottom: 14px; }
-.hjsatt .hjs-cert h1 { font-size: 50px; font-style: italic; color: #4a7c62;
-  font-weight: 400; margin: 0 0 26px; }
-.hjsatt .hjs-cert .sub { font-size: 17px; letter-spacing: .22em; color: #1d2939;
-  text-transform: uppercase; margin: 0; }
-.hjsatt .hjs-cert .who { font-size: 40px; font-weight: 700; color: #101828;
-  margin: 26px 0 10px; border-bottom: 2px solid #d7dde5; padding: 0 40px 12px;
-  min-width: 460px; }
-.hjsatt .hjs-cert .for { font-size: 16px; color: #475467; margin: 20px 0 6px; }
-.hjsatt .hjs-cert .course { font-size: 22px; font-weight: 700; color: #21996e; margin: 0; }
-.hjsatt .hjs-cert .feet { display: flex; align-items: flex-end; justify-content: space-between;
-  width: 100%; margin-top: 62px; }
-.hjsatt .hjs-cert .feet div { min-width: 190px; }
-.hjsatt .hjs-cert .feet b { display: block; font-size: 19px; color: #101828; }
-.hjsatt .hjs-cert .feet span { display: block; font-size: 15px; color: #667085;
-  border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
-.hjsatt .hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
+  overflow: hidden; font-family: Georgia, "Times New Roman", serif; }
+.hjsatt .hjs-cert .bg { position: absolute; top: 0; left: 0; width: 1123px; height: 794px;
+  display: block; }
+.hjsatt .hjs-cert .f { position: absolute; text-align: center; z-index: 2; }
+.hjsatt .hjs-cert .who { left: 0; right: 0; top: 296px; height: 68px; line-height: 68px;
+  font-size: 46px; font-weight: 700; color: #1f4d3d; }
+.hjsatt .hjs-cert .rule { position: absolute; z-index: 2; left: 330px; top: 388px;
+  width: 464px; height: 2px; background: #cbd5cf; }
+.hjsatt .hjs-cert .course { left: 120px; right: 120px; top: 430px; height: 64px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 24px; line-height: 30px; color: #44544c; }
+.hjsatt .hjs-cert .dt { left: 137px; width: 200px; top: 604px; height: 32px;
+  line-height: 32px; font-family: Arial, Helvetica, sans-serif;
+  font-size: 20px; font-weight: 700; color: #2d3748; }
+.hjsatt .hjs-cert .gr { left: 792px; width: 200px; top: 604px; height: 32px;
+  line-height: 32px; font-family: Arial, Helvetica, sans-serif;
+  font-size: 20px; font-weight: 700; color: #2d3748; }
+.hjsatt .hjs-cert .no { right: 73px; top: 112px;
+  font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #8a9a92; }
 
 .hjsatt .att-check { display: flex; align-items: center; gap: 9px; cursor: pointer;
   font-size: 14.5px; color: #344054; }
