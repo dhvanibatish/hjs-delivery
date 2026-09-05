@@ -7616,34 +7616,34 @@ const driveEmbed = (url: string) => {
   return url;
 };
 
-// Certificate ka CSS — screen aur print dono jagah same
+// Certificate ka asli template Supabase storage mein hai
+const CERT_TPL = `${URL_}/storage/v1/object/public/lms/certificate-template.png`;
+
+// Certificate ka CSS — screen aur print dono jagah same.
+// Sab positions 1123x794 wale template ke hisaab se pixel-exact hain.
 const CERT_CSS = `
 .hjs-cert { position: relative; width: 1123px; height: 794px; background: #fff;
-  font-family: Georgia, "Times New Roman", serif; overflow: hidden;
-  border: 14px solid #21996e; box-sizing: border-box; }
-.hjs-cert .c { position: absolute; width: 250px; height: 150px; background: #21996e; }
-.hjs-cert .c.tl { top: 0; left: 0; clip-path: polygon(0 0, 100% 0, 78% 46%, 0 46%); }
-.hjs-cert .c.br { bottom: 0; right: 0; clip-path: polygon(22% 54%, 100% 54%, 100% 100%, 0 100%); }
-.hjs-cert .inner { position: relative; z-index: 2; height: 100%;
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; text-align: center; padding: 60px 90px; }
-.hjs-cert .logo { width: 54px; height: 54px; object-fit: contain; margin-bottom: 14px; }
-.hjs-cert h1 { font-size: 50px; font-style: italic; color: #4a7c62;
-  font-weight: 400; margin: 0 0 26px; }
-.hjs-cert .sub { font-size: 17px; letter-spacing: .22em; color: #1d2939;
-  text-transform: uppercase; margin: 0; }
-.hjs-cert .who { font-size: 40px; font-weight: 700; color: #101828;
-  margin: 26px 0 10px; border-bottom: 2px solid #d7dde5; padding: 0 40px 12px;
-  min-width: 460px; }
-.hjs-cert .for { font-size: 16px; color: #475467; margin: 20px 0 6px; }
-.hjs-cert .course { font-size: 22px; font-weight: 700; color: #21996e; margin: 0; }
-.hjs-cert .feet { display: flex; align-items: flex-end; justify-content: space-between;
-  width: 100%; margin-top: 62px; }
-.hjs-cert .feet div { min-width: 190px; }
-.hjs-cert .feet b { display: block; font-size: 19px; color: #101828; }
-.hjs-cert .feet span { display: block; font-size: 15px; color: #667085;
-  border-top: 1px solid #d7dde5; margin-top: 7px; padding-top: 7px; }
-.hjs-cert .feet .seal { font-size: 46px; color: #21996e; min-width: 0; }
+  overflow: hidden; font-family: Georgia, "Times New Roman", serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.hjs-cert .bg { position: absolute; top: 0; left: 0; width: 1123px; height: 794px;
+  display: block; }
+.hjs-cert .f { position: absolute; text-align: center; z-index: 2; }
+.hjs-cert .who { left: 0; right: 0; top: 296px; height: 68px; line-height: 68px;
+  font-size: 46px; font-weight: 700; color: #1f4d3d; }
+.hjs-cert .rule { position: absolute; z-index: 2; left: 330px; top: 388px;
+  width: 464px; height: 2px; background: #cbd5cf; }
+.hjs-cert .course { left: 120px; right: 120px; top: 430px; height: 64px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 24px; line-height: 30px; color: #44544c; }
+.hjs-cert .dt { left: 137px; width: 200px; top: 604px; height: 32px; line-height: 32px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 20px; font-weight: 700; color: #2d3748; }
+.hjs-cert .gr { left: 792px; width: 200px; top: 604px; height: 32px; line-height: 32px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 20px; font-weight: 700; color: #2d3748; }
+.hjs-cert .no { right: 73px; top: 112px; font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px; color: #8a9a92; }
 `;
 
 // Drive ka share link seedha <img> mein nahi chalta — thumbnail URL banao
@@ -8058,47 +8058,140 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
 /* ---------------- certificate ---------------- */
 
 function LmsCertificate({ me, course, date, grade, onClose }: any) {
+  const [cert, setCert] = useState<any>(null);
+  const [err, setErr] = useState("");
+
+  // Pehli baar khulne par row ban jaati hai. Dobara khulne par wahi
+  // purani row (same number, same date) wapas aati hai — nayi nahi banti.
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc("lms_certificate_issue",
+        { p_course: course.id });
+      if (error) setErr(error.message); else setCert(data);
+    })();
+  }, [course.id]);
+
+  const name  = cert?.full_name    || me.full_name;
+  const title = cert?.course_title || course.title;
+  const when  = cert?.issued_date  || (date ? fmtDateY(date) : "—");
+  const gr    = cert
+    ? (cert.score_percent == null
+        ? cert.grade
+        : `${cert.grade} · ${Math.round(Number(cert.score_percent))}%`)
+    : (grade == null ? "Completed" : `${grade}%`);
+
   const print = () => {
     const el = document.getElementById("hjs-cert");
     if (!el) return;
     const w = window.open("", "_blank", "width=1150,height=820");
     if (!w) return;
+    // background image load hone se pehle print mat karo, warna khali page aayega
     w.document.write(`<!doctype html><html><head><title>Certificate</title>
       <style>
         @page { size: A4 landscape; margin: 0; }
-        body { margin: 0; font-family: Georgia, "Times New Roman", serif; }
+        body { margin: 0; }
         ${CERT_CSS}
-      </style></head><body>${el.outerHTML}</body></html>`);
+      </style></head><body>${el.outerHTML}
+      <script>
+        var i = document.images[0];
+        function go() { window.focus(); window.print(); }
+        if (i && !i.complete) { i.onload = go; i.onerror = go; }
+        else { setTimeout(go, 300); }
+      <\/script></body></html>`);
     w.document.close();
-    setTimeout(() => { w.focus(); w.print(); }, 350);
   };
 
   return (
     <Sheet title="Certificate" onClose={onClose}>
       <div className="att-stack">
+        {err && <Note>{err}</Note>}
         <div className="att-certwrap">
           <div className="hjs-cert" id="hjs-cert">
-            <span className="c tl" /><span className="c br" />
-            <div className="inner">
-              <img className="logo" src="/favicon.png" alt="" />
-              <h1>Certificate of Achievement</h1>
-              <p className="sub">This certificate is awarded to</p>
-              <p className="who">{me.full_name}</p>
-              <p className="for">for successfully completing the course</p>
-              <p className="course">{course.title}</p>
-              <div className="feet">
-                <div><b>{date ? fmtDateY(date) : "—"}</b><span>Date</span></div>
-                <div className="seal">★</div>
-                <div><b>{grade == null ? "Completed" : `${grade}%`}</b><span>Grade</span></div>
-              </div>
-            </div>
+            <img className="bg" src={CERT_TPL} alt="" />
+            <div className="f who">{name}</div>
+            <div className="rule" />
+            <div className="f course">{title}</div>
+            <div className="f dt">{when}</div>
+            <div className="f gr">{gr}</div>
+            <div className="f no">{cert ? `Certificate No. ${cert.cert_no}` : ""}</div>
           </div>
         </div>
-        <button className="att-btn" onClick={print}>Download / Print</button>
+        <button className="att-btn" onClick={print} disabled={!cert}>
+          Download / Print
+        </button>
       </div>
     </Sheet>
   );
 }
+
+/* ---------------- admin: issued certificates ---------------- */
+
+function LmsCertificates() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("lms_certificates_list");
+      setRows(data || []);
+      setBusy(false);
+    })();
+  }, []);
+
+  const shown = rows.filter((r) => !q ||
+    `${r.full_name} ${r.emp_code} ${r.course_title} ${r.cert_no}`
+      .toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <>
+      <div className="att-between">
+        <h3 className="att-h2">Certificates</h3>
+        <button className="att-btn sm line" disabled={!shown.length}
+          onClick={() => downloadCsv(shown.map((r) => ({
+            "Certificate No": r.cert_no,
+            Code: r.emp_code,
+            Name: r.full_name,
+            Course: r.course_title,
+            Grade: r.grade,
+            Score: r.score_percent == null
+              ? "" : `${Math.round(Number(r.score_percent))}%`,
+            Issued: fmtDateY(r.issued_at),
+          })), "HJS_certificates.csv")}>CSV</button>
+      </div>
+
+      <p className="att-muted" style={{ marginTop: 4 }}>
+        {busy ? "Loading…" : `${rows.length} certificate issued`}
+      </p>
+
+      <div style={{ marginTop: 10 }}>
+        <Search placeholder="Search by name, course or number"
+          value={q} onChange={setQ} />
+      </div>
+
+      <div className="att-list" style={{ marginTop: 10 }}>
+        {!busy && shown.length === 0 && (
+          <p className="att-empty">Abhi tak koi certificate issue nahi hua.</p>
+        )}
+        {shown.map((r) => (
+          <div className="att-row" key={r.cert_no}>
+            <div className="grow">
+              <p><b>{r.emp_code}</b> · {r.full_name}</p>
+              <p className="att-muted">
+                {r.course_title} · {r.cert_no} · {fmtDateY(r.issued_at)}
+              </p>
+            </div>
+            <span className="att-pill p-Present">
+              {r.score_percent == null ? r.grade
+                : `${r.grade} · ${Math.round(Number(r.score_percent))}%`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 
 /* ---------------- quiz ---------------- */
 
@@ -9569,6 +9662,7 @@ const MODULES: Module[] = [
         { k: "courses", label: "Manage Courses", adminOnly: true },
         { k: "report", label: "Team Progress", adminOnly: true },
         { k: "grade", label: "Grading", adminOnly: true },
+        { k: "certs", label: "Certificates", adminOnly: true },
       ]},
     ],
   },
@@ -9828,6 +9922,7 @@ export default function Attendance() {
       case "lms/manage/courses":    return <div className="att-wrap att-stack"><LmsManage me={me} /></div>;
       case "lms/manage/report":     return <div className="att-wrap att-stack"><LmsProgressReport /></div>;
       case "lms/manage/grade":     return <div className="att-wrap att-stack"><LmsGrading /></div>;
+      case "lms/manage/certs":     return <div className="att-wrap att-stack"><LmsCertificates /></div>;
       // ---- Reports ----
       case "reports/mine/me":       return <MyReportTab me={me} />;
       case "reports/mine/pay":      return <MyPayTab me={me} />;
