@@ -8253,6 +8253,7 @@ function LmsQuiz({ a, me, onClose }: any) {
   const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
   const answered = Object.keys(ans).filter((k) => {
     const v = ans[k];
+    if (Array.isArray(v)) return v.length > 0;
     if (typeof v === "number") return true;
     if (v && typeof v === "object") return Object.values(v).some((x) => x);
     return String(v || "").trim() !== "";
@@ -8340,9 +8341,18 @@ function LmsQuiz({ a, me, onClose }: any) {
                 </div>
                 {review.map((q: any, i: number) => {
                   const got = mine[q.id];
+                  const fmtIdx = (arr: any) => (Array.isArray(arr) ? arr : [])
+                    .map((n: any) =>
+                      `${String.fromCharCode(65 + Number(n))}. ${(q.options || [])[Number(n)]}`)
+                    .join(", ");
+                  const setKey = (arr: any) => (Array.isArray(arr) ? arr : [])
+                    .map(Number).sort((x: number, y: number) => x - y).join(",");
                   let right = false;
                   if (q.kind === "blank") {
                     right = (q.answers || []).some((x: string) => norm(x) === norm(got));
+                  } else if (q.kind === "multi") {
+                    right = Array.isArray(got) && got.length > 0
+                      && setKey(got) === setKey(q.answers);
                   } else if (q.kind === "match") {
                     right = (q.answers || []).every((p: any) => (got || {})[p.left] === p.right);
                   } else {
@@ -8376,16 +8386,20 @@ function LmsQuiz({ a, me, onClose }: any) {
                           <>
                             <p className={`att-rev ${right ? "gd" : "bd"}`}>
                               Aapka jawab: {q.kind === "blank"
-                                ? (got || "—")
-                                : got != null
-                                  ? `${String.fromCharCode(65 + Number(got))}. ${(q.options || [])[Number(got)]}`
-                                  : "—"}
+                                ? (got || "\u2014")
+                                : q.kind === "multi"
+                                  ? (fmtIdx(got) || "\u2014")
+                                  : got != null
+                                    ? `${String.fromCharCode(65 + Number(got))}. ${(q.options || [])[Number(got)]}`
+                                    : "\u2014"}
                             </p>
                             {!right && (
                               <p className="att-rev gd">
                                 Sahi jawab: {q.kind === "blank"
                                   ? (q.answers || []).join(" / ")
-                                  : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
+                                  : q.kind === "multi"
+                                    ? fmtIdx(q.answers)
+                                    : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
                               </p>
                             )}
                           </>
@@ -8469,6 +8483,24 @@ function LmsQuiz({ a, me, onClose }: any) {
                     </select>
                   </div>
                 ))}
+              </div>
+            ) : q.kind === "multi" ? (
+              <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
+                <p className="att-muted">Ek se zyada jawab select kar sakte ho.</p>
+                {(q.options || []).map((o: string, k: number) => {
+                  const cur: number[] = Array.isArray(ans[q.id]) ? ans[q.id] : [];
+                  const on = cur.includes(k);
+                  return (
+                    <button key={k}
+                      className={`att-opt ${on ? "on" : ""}`}
+                      onClick={() => setAns({ ...ans,
+                        [q.id]: on ? cur.filter((x) => x !== k)
+                                   : [...cur, k].sort((x, y) => x - y) })}>
+                      <span className="ltr">{on ? "\u2713" : String.fromCharCode(65 + k)}</span>
+                      <span className="txt">{o}</span>
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="att-stack" style={{ gap: 8, marginTop: 10 }}>
