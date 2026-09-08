@@ -9013,6 +9013,12 @@ function LmsQuestionsSheet({ a, onClose }: any) {
       if (f.correct_index == null || f.correct_index >= clean.length)
         return setErr("Sahi jawab chuno.");
     }
+    if (kind === "multi") {
+      if (clean.length < 2) return setErr("Kam se kam 2 options chahiye.");
+      if ((f.answers || []).map(Number)
+            .filter((n: number) => !isNaN(n) && n < clean.length).length < 1)
+        return setErr("Kam se kam ek sahi jawab chuno.");
+    }
     if (kind === "blank" && !(f.answers || []).length)
       return setErr("Kam se kam ek sahi jawab likho.");
     if (kind === "match"
@@ -9034,6 +9040,11 @@ function LmsQuestionsSheet({ a, onClose }: any) {
     if (kind === "mcq") {
       p.options = clean;
       p.correct_index = Number(f.correct_index);
+    } else if (kind === "multi") {
+      p.options = clean;
+      p.answers = (f.answers || []).map(Number)
+        .filter((n: number) => !isNaN(n) && n < clean.length)
+        .sort((x: number, y: number) => x - y);
     } else if (kind === "blank") {
       p.answers = f.answers || [];
     } else if (kind === "match") {
@@ -9076,27 +9087,38 @@ function LmsQuestionsSheet({ a, onClose }: any) {
 
             <div><label>Answer type</label>
               <select value={f.kind || "mcq"}
-                onChange={(e) => setF({ ...f, kind: e.target.value })}>
-                <option value="mcq">Multiple choice — apne aap check hoga</option>
+                onChange={(e) => setF({ ...f, kind: e.target.value, answers: undefined })}>
+                <option value="mcq">Multiple choice — ek sahi jawab</option>
+                <option value="multi">Multi select — ek se zyada sahi jawab</option>
                 <option value="blank">Fill in the blank — apne aap check hoga</option>
                 <option value="match">Match the following — apne aap check hoga</option>
                 <option value="text">Written answer — admin marks dega</option>
               </select></div>
 
-            {(f.kind || "mcq") === "mcq" ? (
+            {(f.kind || "mcq") === "mcq" || f.kind === "multi" ? (
               <div>
-                <label>Options — sahi jawab pe tick karo</label>
-                {opts.map((o, i) => (
+                <label>{f.kind === "multi"
+                  ? "Options — saare sahi jawab pe tick karo"
+                  : "Options — sahi jawab pe tick karo"}</label>
+                {opts.map((o, i) => {
+                  const picks: number[] = (f.answers || []).map(Number)
+                    .filter((n: number) => !isNaN(n));
+                  const on = f.kind === "multi" ? picks.includes(i) : f.correct_index === i;
+                  return (
                   <div className="att-optrow" key={i}>
-                    <button className={`att-optpick ${f.correct_index === i ? "on" : ""}`}
+                    <button className={`att-optpick ${on ? "on" : ""}`}
                       title="Sahi jawab"
-                      onClick={() => setF({ ...f, correct_index: i })}>
-                      {String.fromCharCode(65 + i)}
+                      onClick={() => setF(f.kind === "multi"
+                        ? { ...f, answers: (on ? picks.filter((x) => x !== i) : [...picks, i])
+                            .sort((x, y) => x - y) }
+                        : { ...f, correct_index: i })}>
+                      {on && f.kind === "multi" ? "\u2713" : String.fromCharCode(65 + i)}
                     </button>
                     <input value={o} placeholder={`Option ${String.fromCharCode(65 + i)}`}
                       onChange={(e) => setOpt(i, e.target.value)} />
                   </div>
-                ))}
+                  );
+                })}
                 <button className="att-btn sm line" style={{ marginTop: 8 }}
                   onClick={() => setF({ ...f, options: [...opts, ""] })}>
                   + Option
@@ -9192,6 +9214,10 @@ function LmsQuestionsSheet({ a, onClose }: any) {
                   {q.kind === "text" ? "Written answer"
                     : q.kind === "blank" ? `Blank · ${(q.answers || []).join(" / ")}`
                     : q.kind === "match" ? `Match · ${(q.answers || []).length} pairs`
+                    : q.kind === "multi"
+                      ? `Multi · ${(q.answers || []).map((n: any) =>
+                          `${String.fromCharCode(65 + Number(n))}. ${(q.options || [])[Number(n)]}`)
+                          .join(", ")}`
                     : `${String.fromCharCode(65 + q.correct_index)}. ${(q.options || [])[q.correct_index]}`}
                   {" · "}{q.marks} mark{Number(q.marks) === 1 ? "" : "s"}
                 </p>
@@ -9200,7 +9226,8 @@ function LmsQuestionsSheet({ a, onClose }: any) {
                 <button className="att-btn sm line"
                   onClick={() => { setF({ ...q, options: q.options || [],
                     pairs: q.kind === "match" ? (q.answers || []) : undefined,
-                    answers: q.kind === "blank" ? (q.answers || []) : undefined }); toForm(); }}>Edit</button>
+                    answers: q.kind === "blank" || q.kind === "multi"
+                      ? (q.answers || []) : undefined }); toForm(); }}>Edit</button>
                 <button className="att-btn sm line" style={{ color: "#dc2626" }}
                   onClick={() => kill(q.id)}>Delete</button>
               </div>
@@ -9327,9 +9354,16 @@ function LmsGradeSheet({ r, onClose, onSaved }: any) {
     })();
   }, [r.id]);
 
+  const sameSet = (a: any, b: any) =>
+    Array.isArray(a) && Array.isArray(b)
+    && a.map(Number).sort((x: number, y: number) => x - y).join(",")
+     === b.map(Number).sort((x: number, y: number) => x - y).join(",");
+
   const textQs = qs.filter((q) => q.kind === "text");
   const mcqScore = qs.filter((q) => q.kind !== "text")
-    .reduce((n, q) => n + (String(r.answers?.[q.id]) === String(q.correct_index)
+    .reduce((n, q) => n + ((q.kind === "multi"
+      ? sameSet(r.answers?.[q.id], q.answers)
+      : String(r.answers?.[q.id]) === String(q.correct_index))
       ? Number(q.marks) : 0), 0);
   const given = textQs.reduce((n, q) => n + (Number(marks[q.id]) || 0), 0);
 
@@ -9369,7 +9403,9 @@ function LmsGradeSheet({ r, onClose, onSaved }: any) {
         {qs.map((q, i) => {
           const ansv = r.answers?.[q.id];
           const isText = q.kind === "text";
-          const right = !isText && String(ansv) === String(q.correct_index);
+          const right = !isText && (q.kind === "multi"
+            ? sameSet(ansv, q.answers)
+            : String(ansv) === String(q.correct_index));
           return (
             <div className="att-qcard" key={q.id}>
               <p className="q"><b>{i + 1}.</b> {q.question}
@@ -9393,7 +9429,11 @@ function LmsGradeSheet({ r, onClose, onSaved }: any) {
               ) : (
                 <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
                   Answer: {ansv == null ? "—"
-                    : `${String.fromCharCode(65 + Number(ansv))}. ${(q.options || [])[Number(ansv)]}`}
+                    : q.kind === "multi"
+                      ? ((Array.isArray(ansv) ? ansv : []).map((n: any) =>
+                          `${String.fromCharCode(65 + Number(n))}. ${(q.options || [])[Number(n)]}`)
+                          .join(", ") || "—")
+                      : `${String.fromCharCode(65 + Number(ansv))}. ${(q.options || [])[Number(ansv)]}`}
                   {" · "}
                   <b style={{ color: right ? "#16a34a" : "#dc2626" }}>
                     {right ? "Correct" : "Incorrect"}
