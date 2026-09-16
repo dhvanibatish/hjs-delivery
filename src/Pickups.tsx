@@ -65,6 +65,42 @@ async function sbRpc(fn, body) {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+// Supabase API ek request mein max 1000 rows deta hai — isliye pages mein
+// laate hain. Paging fail ho to purana tarika, taaki data kabhi band na ho.
+async function sbRpcPaged(fn, body, pageSize = 1000) {
+  try {
+    return await sbRpcPagedTry(fn, body, pageSize);
+  } catch (e) {
+    console.warn('Paged fetch fail, normal fetch pe wapas:', e);
+    return sbRpc(fn, body);
+  }
+}
+async function sbRpcPagedTry(fn, body, pageSize) {
+  const all = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(
+      `${CONFIG.url}/rest/v1/rpc/${fn}?limit=${pageSize}&offset=${offset}`,
+      {
+        method: 'POST',
+        headers: { ...HDRS(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const page = await res.json();
+    if (!Array.isArray(page)) throw new Error('RPC array nahi deta');
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  const seen = new Set();
+  return all.filter((r) => {
+    const k = r && r.invoice_id;
+    if (!k) return true;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 // staff login — DB verifies password, returns [] if wrong
 // Pickups ab delivery jaisa store-scoped hai — app_staff se verify hota hai.
 async function sbLogin(store, pw) {
@@ -73,7 +109,7 @@ async function sbLogin(store, pw) {
 // staff data — returns rows for the store (or all for ALL). Password checked in DB.
 async function sbList(store, pw, days) {
   // _lite = app_log ke bina. p_days = window (0 = sab kuch).
-  return sbRpc('pickup_list_lite', {
+  return sbRpcPaged('pickup_list_lite', {
     p_store: store,
     p_password: pw,
     p_days: days == null ? 90 : days,
@@ -115,7 +151,7 @@ async function pkSalesLog(invoiceNumber) {
 }
 // sirf app_log — ek invoice ka (drawer) ya sabka (Activity log)
 async function sbLogs(store, pw, invoice) {
-  return sbRpc('pickup_logs', {
+  return sbRpcPaged('pickup_logs', {
     p_store: store,
     p_password: pw,
     p_invoice: invoice || null,
