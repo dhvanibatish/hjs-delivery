@@ -69,6 +69,15 @@ async function sbRpc(fn, body) {
 // Supabase API ek request mein max 1000 rows deta hai — isliye pages mein
 // laate hain. Duplicate rows invoice_id se hata di jaati hain.
 async function sbRpcPaged(fn, body, pageSize = 1000) {
+  try {
+    return await sbRpcPagedTry(fn, body, pageSize);
+  } catch (e) {
+    // paging kaam na kare to purana tarika — data kabhi band nahi hoga
+    console.warn('Paged fetch fail, normal fetch pe wapas:', e);
+    return sbRpc(fn, body);
+  }
+}
+async function sbRpcPagedTry(fn, body, pageSize) {
   const all = [];
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(
@@ -81,6 +90,7 @@ async function sbRpcPaged(fn, body, pageSize = 1000) {
     );
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const page = await res.json();
+    if (!Array.isArray(page)) throw new Error('RPC array nahi deta');
     all.push(...page);
     if (page.length < pageSize) break;
   }
