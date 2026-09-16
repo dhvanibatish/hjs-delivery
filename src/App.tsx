@@ -66,6 +66,26 @@ async function sbRpc(fn, body) {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+// Supabase API ek request mein max 1000 rows deta hai — isliye pages mein
+// laate hain. order=invoice_id se har page ka order same rehta hai.
+async function sbRpcPaged(fn, body, pageSize = 1000) {
+  const all = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(
+      `${CONFIG.url}/rest/v1/rpc/${fn}?order=invoice_id&limit=${pageSize}&offset=${offset}`,
+      {
+        method: 'POST',
+        headers: { ...HDRS(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const page = await res.json();
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
 // staff login — DB verifies password, returns [] if wrong
 async function sbLogin(store, pw) {
   return sbRpc('staff_login', { p_store: store, p_password: pw });
@@ -75,10 +95,10 @@ async function sbList(store, pw, days) {
   // _lite = app_log ke bina (wo har row mein bada JSON hota hai). Timeline
   // sirf zarurat pe alag se aata hai — dekho sbLogs().
   // p_days = window. 0 = sab kuch (Archived "purani entries laao")
-  return sbRpc('staff_list_lite', {
+  return sbRpcPaged('staff_list_lite', {
     p_store: store,
     p_password: pw,
-    p_days: days == null ? 90 : days,
+    p_days: days == null ? 60 : days,
   });
 }
 // window se bahar wali entries — server pe search
@@ -1205,7 +1225,7 @@ export default function App() {
   // Topbar ka refresh sirf deliveries reload karta tha — embedded modules ko
   // bhi batana padta hai, isliye ye counter unhe prop se jaata hai.
   const [reloadTick, setReloadTick] = useState(0);
-  // list ab sirf ek window laati hai — saari pending + pichhle 90 din ki
+  // list ab sirf ek window laati hai — saari pending + pichhle 60 din ki
   // closed. Archived mein "purani entries laao" dabane pe poora history.
   const [fullHistory, setFullHistory] = useState(false);
   // Activity log button — jis module pe ho, usi ka log khule
@@ -1245,7 +1265,7 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 90)).map(
+        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 60)).map(
           rowToDelivery,
         ),
       );
@@ -3825,7 +3845,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit, fullHistory, onFullHist
       </div>
       {onFullHistory && !fullHistory && (
         <button className="load-old" onClick={onFullHistory}>
-          <History size={14} /> Purani entries laao (90 din se pehle ki)
+          <History size={14} /> Purani entries laao (60 din se pehle ki)
         </button>
       )}
       {rows.length === 0 ? (
