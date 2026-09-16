@@ -308,6 +308,7 @@ const CSS = `
 .hjsatt .m-H { color: #9333ea; } .hjsatt .m-A { color: #dc2626; }
 .hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #a16207; }
 .hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
+.hjsatt .m-PSL { color: #0891b2; }
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
 .hjsatt .m-X { color: #2563eb; }
 
@@ -999,7 +1000,9 @@ const pillClass = (s: string) => {
   return `att-pill ${map[s] || "p-Off"}`;
 };
 const markClass = (m: string) =>
-  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL"].includes(m) ? m : "X"}`;
+  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL"].includes(m) ? m : "X"}`;
+// muster roll par dikhne wala text — PSL = present, par us din short leave bhi li
+const markText = (m: string) => (m === "PSL" ? "P (SL)" : m);
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
@@ -1681,7 +1684,8 @@ function HomeScreen({ me }: any) {
         key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
         isToday: key === istToday(),
         status,
-        mark: log ? ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P")
+        mark: log ? (lv && lv.leave_type === "SHORT" ? "PSL"
+                : ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P"))
               : off ? "W" : lvm ? lvm : key > istToday() ? "" : "A",
         mins: log?.worked_minutes,
         log, lv,
@@ -2381,7 +2385,8 @@ function MatrixTab({ me }: any) {
         <b className="m-H">H</b> half day · <b className="m-A">A</b> absent ·{" "}
         <b className="m-W">W</b> week off · <b className="m-F">F</b> holiday ·{" "}
         <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
-        <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave
+        <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave ·{" "}
+        <b className="m-PSL">P (SL)</b> present, short leave liya
       </p>
 
       {pick && pickEmp && (
@@ -2432,7 +2437,7 @@ function MatrixTab({ me }: any) {
                           cursor: r.marks[d] ? "pointer" : "default" }}
                           title={r.marks[d] ? "Open this day" : undefined}
                           onClick={() => openDay(r.code, d, r.marks[d])}>
-                          <span className={markClass(r.marks[d])}>{r.marks[d] || "·"}</span>
+                          <span className={markClass(r.marks[d])}>{markText(r.marks[d]) || "·"}</span>
                         </td>
                       ))}
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
@@ -5433,7 +5438,7 @@ function ReportsTab({ isAdmin = false }: any) {
                   <tr key={code}>
                     <td className="name"><PName code={code}>{v.name}</PName></td>
                     {muster.dates.map((d) => (
-                      <td key={d}><span className={markClass(v.marks[d])}>{v.marks[d] || "·"}</span></td>
+                      <td key={d}><span className={markClass(v.marks[d])}>{markText(v.marks[d]) || "·"}</span></td>
                     ))}
                     <td className="tot" style={{ color: "#16a34a" }}>{v.t.P || 0}</td>
                     <td className="tot" style={{ color: "#d97706" }}>{v.t.L || 0}</td>
@@ -5756,7 +5761,10 @@ function MyReportTab({ me }: any) {
       const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
       let mark = "", label = "";
       if (log) { mark = { Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P";
-                 label = log.status; }
+                 label = log.status;
+                 if (lv && lv.leave_type === "SHORT") {
+                   mark = "PSL"; label = `${log.status} · Short leave`;
+                 } }
       else if (hol) { mark = "F"; label = hol.name; }
       else if (off) { mark = "W"; label = "Week off"; }
       else if (lv) {
@@ -5860,8 +5868,8 @@ function MyReportTab({ me }: any) {
                   { weekday: "short" })}</i>
               </span>
 
-              <span className={`${markClass(x.mark)} wide ${x.mark.length > 2 ? "long" : ""}`}>
-                {x.mark}
+              <span className={`${markClass(x.mark)} wide ${markText(x.mark).length > 2 ? "long" : ""}`}>
+                {markText(x.mark)}
               </span>
 
               <span className="mid">
@@ -6082,7 +6090,7 @@ function DaySheet({ d, me, onClose }: any) {
       <div className="att-card att-stack">
         <div className="att-between">
           <span className={markClass(d.mark)} style={{ fontSize: 15, padding: "5px 14px" }}>
-            {d.mark || "—"}
+            {markText(d.mark) || "—"}
           </span>
           <b style={{ fontSize: 15 }}>{d.label}</b>
         </div>
@@ -6765,7 +6773,9 @@ function LeaveBalanceSheet({ me }: any) {
       if (!m.has(r.employee_id)) {
         m.set(r.employee_id, {
           employee_id: r.employee_id, emp_code: r.emp_code,
-          full_name: r.full_name, branch: r.branch, team: r.team, cells: {},
+          full_name: r.full_name, branch: r.branch, team: r.team,
+          half_cnt: Number(r.half_cnt || 0), short_cnt: Number(r.short_cnt || 0),
+          cells: {},
         });
       }
       m.get(r.employee_id).cells[r.leave_type] = r;
@@ -6818,6 +6828,8 @@ function LeaveBalanceSheet({ me }: any) {
               o[`${t.name} used`]    = Number(c.used || 0);
               o[`${t.name} balance`] = Number(c.balance || 0);
             });
+            o["Half days taken"]    = p.half_cnt;
+            o["Short leaves taken"] = p.short_cnt;
             return o;
           }), `HJS_leave_balances_${year}.csv`)}>CSV</button>
       </div>
@@ -6858,6 +6870,8 @@ function LeaveBalanceSheet({ me }: any) {
                 <tr>
                   <th className="name">Employee</th>
                   {types.map((t) => <th key={t.code}>{t.name}</th>)}
+                  <th>Half days</th>
+                  <th>Short leaves</th>
                   {isAdmin && <th></th>}
                 </tr>
               </thead>
@@ -6895,6 +6909,22 @@ function LeaveBalanceSheet({ me }: any) {
                         </td>
                       );
                     })}
+                    <td style={{ textAlign: "center" }}>
+                      <b style={{ fontSize: 15,
+                        color: p.half_cnt ? "#0d9488" : "#667085" }}>
+                        {p.half_cnt}
+                      </b>
+                      <div className="att-muted" style={{ fontSize: 11 }}>
+                        {(p.half_cnt * 0.5).toFixed(2)} EL
+                      </div>
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <b style={{ fontSize: 15,
+                        color: p.short_cnt ? "#0891b2" : "#667085" }}>
+                        {p.short_cnt}
+                      </b>
+                      <div className="att-muted" style={{ fontSize: 11 }}>free</div>
+                    </td>
                     {isAdmin && (
                       <td style={{ textAlign: "right" }}>
                         <button className="att-btn sm line"
@@ -6904,7 +6934,7 @@ function LeaveBalanceSheet({ me }: any) {
                   </tr>
                 ))}
                 {!shown.length && (
-                  <tr><td className="name" colSpan={types.length + 2}>
+                  <tr><td className="name" colSpan={types.length + 4}>
                     <span className="att-muted">Koi record nahi mila.</span>
                   </td></tr>
                 )}
