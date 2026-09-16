@@ -6010,8 +6010,7 @@ const ALIASES: Record<string, string> = {
   "Dashboard": "charts stats trend team",
   "Leave Summary": "balance available casual earned cl el remaining",
   "Leave Requests": "apply leave my requests pending cancel",
-  "Balance History": "ledger given granted carried lapsed adjusted entries",
-  "Everyone's Balance": "all staff leave balance allotment quota remaining hr sheet",
+  "Balance & History": "ledger given granted carried lapsed adjusted entries all staff leave balance allotment quota remaining hr sheet",
   "On Leave Today": "who is on leave absent today",
   "All Team Leaves": "team leave list everyone",
   "Holiday List": "holidays festival calendar",
@@ -6743,6 +6742,7 @@ function LeaveBalanceSheet({ me }: any) {
   const [branch, setBranch] = useState("");
   const [year, setYear] = useState(Number(istToday().slice(0, 4)));
   const [grantFor, setGrantFor] = useState<any>(null);
+  const [histFor, setHistFor] = useState<any>(null);
   const isAdmin = me.role === "admin";
 
   const load = async () => {
@@ -6865,7 +6865,13 @@ function LeaveBalanceSheet({ me }: any) {
                 {shown.map((p) => (
                   <tr key={p.employee_id}>
                     <td className="name">
-                      <b>{p.emp_code}</b> · {p.full_name}
+                      <button className="att-linkbtn"
+                        onClick={() => setHistFor(p)}
+                        style={{ background: "none", border: 0, padding: 0,
+                          font: "inherit", color: "#1849a9", cursor: "pointer",
+                          textAlign: "left" }}>
+                        <b>{p.emp_code}</b> · {p.full_name}
+                      </button>
                       {p.branch && <div className="att-muted" style={{ fontSize: 11 }}>
                         {p.branch}{p.team ? ` · ${p.team}` : ""}
                       </div>}
@@ -6908,6 +6914,13 @@ function LeaveBalanceSheet({ me }: any) {
         </div>
       )}
 
+      {histFor && (
+        <Sheet title={`${histFor.emp_code} · ${histFor.full_name}`}
+          onClose={() => { setHistFor(null); load(); }}>
+          <LeaveLedgerTab me={me} emp={histFor} />
+        </Sheet>
+      )}
+
       {grantFor && <GrantSheet types={types}
         emp={grantFor.employee_id ? grantFor : null}
         onClose={(changed: boolean) => { setGrantFor(null); if (changed) load(); }} />}
@@ -6915,17 +6928,18 @@ function LeaveBalanceSheet({ me }: any) {
   );
 }
 
-function LeaveLedgerTab({ me }: any) {
+function LeaveLedgerTab({ me, emp }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [types, setTypes] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
-  const [who, setWho] = useState("");
+  const [who, setWho] = useState(emp?.employee_id || "");
   const [people, setPeople] = useState<any[]>([]);
   const [type, setType] = useState("");
-  const [range, setRange] = useState({
-    from: `${istToday().slice(0, 7)}-01`, to: istToday(),
-  });
+  const [range, setRange] = useState(emp
+    ? { from: `${Number(istToday().slice(0, 4)) - (Number(istToday().slice(5, 7)) < 4 ? 1 : 0)}-04-01`,
+        to: istToday() }
+    : { from: `${istToday().slice(0, 7)}-01`, to: istToday() });
   const [edit, setEdit] = useState<any>(null);
   const [grant, setGrant] = useState(false);
   const [q, setQ] = useState("");
@@ -6993,7 +7007,7 @@ function LeaveLedgerTab({ me }: any) {
       </div>
 
       <div className="att-flex" style={{ flexWrap: "wrap", gap: 8 }}>
-        {isAdmin && (
+        {isAdmin && !emp && (
           <select value={who} onChange={(e) => setWho(e.target.value)}
             style={{ flex: "1 1 190px", minWidth: 0 }}>
             <option value="">Me</option>
@@ -9881,12 +9895,11 @@ const MODULES: Module[] = [
       { k: "mydata", label: "My Data", views: [
         { k: "summary", label: "Leave Summary" },
         { k: "requests", label: "Leave Requests" },
-        { k: "ledger", label: "Balance History" },
       ]},
       { k: "team", label: "Team", views: [
         { k: "onleave", label: "On Leave Today" },
         { k: "leaves", label: "All Team Leaves" },
-        { k: "balances", label: "Everyone's Balance" },
+        { k: "balances", label: "Balance & History" },
       ]},
       { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
     ],
