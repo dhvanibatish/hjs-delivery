@@ -6011,6 +6011,7 @@ const ALIASES: Record<string, string> = {
   "Leave Summary": "balance available casual earned cl el remaining",
   "Leave Requests": "apply leave my requests pending cancel",
   "Balance History": "ledger given granted carried lapsed adjusted entries",
+  "Everyone's Balance": "all staff leave balance allotment quota remaining hr sheet",
   "On Leave Today": "who is on leave absent today",
   "All Team Leaves": "team leave list everyone",
   "Holiday List": "holidays festival calendar",
@@ -6593,15 +6594,15 @@ function LedgerEditSheet({ row, onClose }: any) {
 }
 
 /* ================= days do ya wapas lo ================= */
-function GrantSheet({ types, onClose }: any) {
-  const [mode, setMode] = useState<"one" | "team" | "all">("all");
+function GrantSheet({ types, onClose, emp }: any) {
+  const [mode, setMode] = useState<"one" | "team" | "all">(emp ? "one" : "all");
   const [type, setType] = useState(types[0]?.code || "CL");
   const [days, setDays] = useState("1");
   const [kind, setKind] = useState("accrual");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(istToday());
   const [teamId, setTeamId] = useState("");
-  const [empId, setEmpId] = useState("");
+  const [empId, setEmpId] = useState(emp?.employee_id || emp?.id || "");
   const [lists, setLists] = useState<any>({ teams: [], people: [] });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ err: "", ok: "" });
@@ -6733,6 +6734,187 @@ function GrantSheet({ types, onClose }: any) {
 }
 
 /* ================= leave ki poori history ================= */
+function LeaveBalanceSheet({ me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [types, setTypes] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [branch, setBranch] = useState("");
+  const [year, setYear] = useState(Number(istToday().slice(0, 4)));
+  const [grantFor, setGrantFor] = useState<any>(null);
+  const isAdmin = me.role === "admin";
+
+  const load = async () => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("leave_balance_matrix", { p_year: year });
+    if (error) setErr(error.message);
+    setRows(data || []); setBusy(false);
+  };
+
+  useEffect(() => {
+    supabase.from("leave_types").select("*").order("code")
+      .then(({ data }) => setTypes((data || []).filter((t: any) => Number(t.annual_qty) > 0)));
+  }, []);
+  useEffect(() => { load(); }, [year]);
+
+  // ek employee = ek row, uske andar type-wise cells
+  const people = useMemo(() => {
+    const m = new Map<string, any>();
+    rows.forEach((r) => {
+      if (!m.has(r.employee_id)) {
+        m.set(r.employee_id, {
+          employee_id: r.employee_id, emp_code: r.emp_code,
+          full_name: r.full_name, branch: r.branch, team: r.team, cells: {},
+        });
+      }
+      m.get(r.employee_id).cells[r.leave_type] = r;
+    });
+    return Array.from(m.values());
+  }, [rows]);
+
+  const branches = useMemo(
+    () => Array.from(new Set(people.map((p) => p.branch).filter(Boolean))).sort(),
+    [people]);
+
+  const shown = people.filter((p) => {
+    if (branch && p.branch !== branch) return false;
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return (`${p.emp_code} ${p.full_name} ${p.team || ""}`).toLowerCase().includes(s);
+  });
+
+  const noAllotment = shown.filter((p) =>
+    types.every((t) => !Number(p.cells[t.code]?.given))).length;
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <b style={{ fontSize: 16 }}>Everyone&apos;s leave balance</b>
+          <p className="att-muted">
+            Har bande ka har leave type ka balance — ek hi screen par
+          </p>
+        </div>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))}
+          style={{ width: 110 }}>
+          {[0, 1, 2].map((n) => {
+            const y = Number(istToday().slice(0, 4)) - n;
+            return <option key={y} value={y}>{y}</option>;
+          })}
+        </select>
+        {isAdmin && (
+          <button className="att-btn sm" onClick={() => setGrantFor({})}>
+            Give / take days
+          </button>
+        )}
+        <button className="att-btn sm line"
+          onClick={() => downloadCsv(shown.map((p) => {
+            const o: any = { Code: p.emp_code, Name: p.full_name,
+              Branch: p.branch || "", Team: p.team || "" };
+            types.forEach((t) => {
+              const c = p.cells[t.code] || {};
+              o[`${t.name} given`]   = Number(c.given || 0);
+              o[`${t.name} used`]    = Number(c.used || 0);
+              o[`${t.name} balance`] = Number(c.balance || 0);
+            });
+            return o;
+          }), `HJS_leave_balances_${year}.csv`)}>CSV</button>
+      </div>
+
+      <div className="att-range" style={{ flexWrap: "wrap" }}>
+        <div className="att-search" style={{ flex: 1, minWidth: 180 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Naam, code ya team se dhoondo" />
+        </div>
+        <select value={branch} onChange={(e) => setBranch(e.target.value)}
+          style={{ minWidth: 150 }}>
+          <option value="">All branches</option>
+          {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+      </div>
+
+      {err && <Note>{err}</Note>}
+      {busy && <div className="att-card">Loading…</div>}
+
+      {!busy && !err && (
+        <div className="att-card">
+          <div style={{ display: "flex", alignItems: "center",
+            flexWrap: "wrap", gap: 10 }}>
+            <span className="att-muted">
+              {shown.length} {shown.length === 1 ? "person" : "people"}
+            </span>
+            {noAllotment > 0 && (
+              <span className="att-muted" style={{ color: "#b42318" }}>
+                {noAllotment} logon ko abhi tak koi allotment nahi mili — unki
+                approved leave poori UL banegi
+              </span>
+            )}
+          </div>
+
+          <div className="att-scroll" style={{ marginTop: 8 }}>
+            <table className="att-table">
+              <thead>
+                <tr>
+                  <th className="name">Employee</th>
+                  {types.map((t) => <th key={t.code}>{t.name}</th>)}
+                  {isAdmin && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((p) => (
+                  <tr key={p.employee_id}>
+                    <td className="name">
+                      <b>{p.emp_code}</b> · {p.full_name}
+                      {p.branch && <div className="att-muted" style={{ fontSize: 11 }}>
+                        {p.branch}{p.team ? ` · ${p.team}` : ""}
+                      </div>}
+                    </td>
+                    {types.map((t) => {
+                      const c = p.cells[t.code] || {};
+                      const bal = Number(c.balance || 0);
+                      const given = Number(c.given || 0);
+                      const used = Number(c.used || 0);
+                      const pend = Number(c.pending || 0);
+                      return (
+                        <td key={t.code} style={{ textAlign: "center" }}>
+                          <b style={{ fontSize: 15,
+                            color: bal > 0 ? "#067647" : bal < 0 ? "#b42318" : "#667085" }}>
+                            {bal}
+                          </b>
+                          <div className="att-muted" style={{ fontSize: 11 }}>
+                            {given} given · {used} used
+                            {pend > 0 ? ` · ${pend} pending` : ""}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    {isAdmin && (
+                      <td style={{ textAlign: "right" }}>
+                        <button className="att-btn sm line"
+                          onClick={() => setGrantFor(p)}>Give</button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {!shown.length && (
+                  <tr><td className="name" colSpan={types.length + 2}>
+                    <span className="att-muted">Koi record nahi mila.</span>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {grantFor && <GrantSheet types={types}
+        emp={grantFor.employee_id ? grantFor : null}
+        onClose={(changed: boolean) => { setGrantFor(null); if (changed) load(); }} />}
+    </div>
+  );
+}
+
 function LeaveLedgerTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [types, setTypes] = useState<any[]>([]);
@@ -9704,6 +9886,7 @@ const MODULES: Module[] = [
       { k: "team", label: "Team", views: [
         { k: "onleave", label: "On Leave Today" },
         { k: "leaves", label: "All Team Leaves" },
+        { k: "balances", label: "Everyone's Balance" },
       ]},
       { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
     ],
@@ -9975,6 +10158,7 @@ export default function Attendance() {
       case "leave/mydata/ledger":   return <LeaveLedgerTab me={me} />;
       case "leave/team/onleave":    return <div className="att-wrap att-stack"><OnLeaveTab /></div>;
       case "leave/team/leaves":     return <div className="att-wrap att-stack"><TeamLeavesTab me={me} /></div>;
+      case "leave/team/balances":   return <LeaveBalanceSheet me={me} />;
       case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
       // ---- Approvals ----
       case "approvals/pending/all":  return <InboxScreen me={me} onCount={setPending} mode="pending" />;
