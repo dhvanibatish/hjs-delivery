@@ -1181,7 +1181,13 @@ export default function App({
   const [lastMove, setLastMove] = useState(null); // {stage, n} — mobile accordion jump
   const [ownPage, setOwnPage] = useState('pickups'); // pickups | dashboard
   // hosted mode mein page delivery app ka sidebar decide karta hai
-  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'pickups') : ownPage;
+  const page = hosted
+    ? view === 'dashboard'
+      ? 'dashboard'
+      : view === 'sla'
+        ? 'sla'
+        : 'pickups'
+    : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
   // hosted mode: head login store switch kar sake (session App ka hai,
@@ -1407,6 +1413,11 @@ export default function App({
     if (showLog && !logsLoaded) loadLogs(null);
     // eslint-disable-next-line
   }, [showLog]);
+  // Process & SLA — saare timelines ek hi baar
+  useEffect(() => {
+    if (page === 'sla' && session && !logsLoaded) loadLogs(null);
+    // eslint-disable-next-line
+  }, [page, session, logsLoaded]);
 
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
@@ -1656,7 +1667,13 @@ export default function App({
     return (
       <div className="hjs-pickups">
         <StyleTag />
-        {page === 'dashboard' ? (
+        {page === 'sla' ? (
+          <SlaReport
+            deliveries={allStoresData}
+            logsLoaded={logsLoaded}
+            onOpen={(x) => setActiveId(x.invoice_id)}
+          />
+        ) : page === 'dashboard' ? (
           <Dashboard
             deliveries={allStoresData}
             onOpen={(x) => setActiveId(x.invoice_id)}
@@ -1794,7 +1811,13 @@ export default function App({
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'dashboard' ? (
+            {session.branch === 'ALL' && page === 'sla' ? (
+              <SlaReport
+                deliveries={allStoresData}
+                logsLoaded={logsLoaded}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            ) : session.branch === 'ALL' && page === 'dashboard' ? (
               <Dashboard
                 deliveries={allStoresData}
                 onOpen={(x) => setActiveId(x.invoice_id)}
@@ -2719,6 +2742,1373 @@ function DashboardInner({ deliveries, onOpen }) {
   );
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   PICKUP PROCESS & SLA — delivery app ke SLA page jaisa hi, pickups ke liye.
+   Stage ids same hain (new/talked/scheduled/dispatched/delivered), isliye
+   logic wahi hai; sirf labels Pickup ke hain.
+   ════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════ PROCESS & SLA (all stores)
+   Do SLA:
+   1. RESPONSE  — order aane ke 30 min (wall clock) mein
+                  "Talked to Customer" pe move hona chahiye
+   2. PICKUP  — jo confirmed date+time customer ko diya, us tak
+                  "Picked Up" ho jaana chahiye (exact wall clock)
+   Dashboard ke hi dash-* classes use karta hai — koi naya CSS nahi.        */
+
+const SLA_RESPONSE_MIN = 30; // minutes
+
+/* Sab kuch normal wall clock pe — 24x7, koi business-hours pause nahi. */
+function slaAddMins(from, mins) {
+  const d = new Date(from);
+  return new Date(d.getTime() + mins * 60000);
+}
+
+/* Do timestamps ke beech kitne minutes lage (plain wall clock). */
+function slaSpanMins(a, b) {
+  if (!a || !b || b <= a) return 0;
+  return (new Date(b) - new Date(a)) / 60000;
+}
+
+const slaLog = (x) => {
+  const r = (x && x._raw) || {};
+  return Array.isArray(r.app_log) ? r.app_log : [];
+};
+
+/* Current cycle = aakhri baar "New Pickup" pe wapas jaane ke baad ka hissa.
+   Iske bina re-opened orders galti se "stage skipped" dikhte hain.
+   "Edited" stage move nahi hai, isliye chhod dete hain. */
+function slaCycle(x) {
+  const mv = slaLog(x)
+    .filter((e) => e && e.stage && (e.action === 'Moved to' || e.action === 'Marked as'))
+    .slice()
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  let start = 0;
+  for (let i = mv.length - 1; i >= 0; i--)
+    if (mv[i].stage === 'new') {
+      start = i;
+      break;
+    }
+  return mv.slice(start);
+}
+function slaFirst(cycle, stage) {
+  for (const e of cycle) if (e.stage === stage) return new Date(e.ts);
+  return null;
+}
+/* Response ka timestamp — pehla event jo 'talked' ya usse AAGE ka ho.
+   Kuch entries seedha Scheduled/Picked up pe move hoti hain (ya purani hain
+   jab log adhoora tha) — unme 'talked' ka event hota hi nahi. Pehle aise
+   order ka respMins null reh jaata tha aur wo kisi bucket mein nahi girta,
+   isliye ≤10 + 10-30 + >30 ka jod Picked up se bahut kam dikhta tha.
+   Agar order Scheduled/Dispatched/Picked up pe pahunch gaya hai to response
+   us waqt ya usse pehle ho hi chuka tha. cycle ts ke hisaab se sorted hai,
+   isliye pehla qualifying event hi sabse pehla hai. Closed events
+   (cancelled/duplicate/renewal) ka stageIndex -1 hota hai — wo skip. */
+function slaResponded(cycle) {
+  const min = stageIndex('talked');
+  for (const e of cycle) {
+    const i = stageIndex(e.stage);
+    if (i >= min) return new Date(e.ts);
+  }
+  return null;
+}
+/* MBC = customer khud le jaata hai — Scheduled se seedha Picked up.
+   Ispe "Out for Pickup skip hua" count nahi hona chahiye. */
+function slaIsMbc(x, cycle) {
+  if (String(x.person || '').trim().toUpperCase() === 'MBC') return true;
+  return cycle.some((e) =>
+    String((e.fields && (e.fields['Person'] || e.fields['Delivery person'])) || '').toUpperCase().includes('MBC'),
+  );
+}
+/* Promise = confirmed_date + confirmed_time (buildPatch inhe hamesha likhta hai) */
+function slaPromise(x) {
+  const r = (x && x._raw) || {};
+  const d = r.confirmed_date;
+  if (!d || d === 'null') return null;
+  let t = r.confirmed_time && r.confirmed_time !== 'null' ? String(r.confirmed_time) : '20:00:00';
+  if (t.length === 5) t += ':00';
+  const dt = new Date(String(d).slice(0, 10) + 'T' + t);
+  return isNaN(dt) ? null : dt;
+}
+
+/* ETA = app_eta column ("YYYY-MM-DDTHH:MM" ya "YYYY-MM-DD HH:MM"),
+   Out for Pickup stage pe bhara jaata hai */
+function slaEta(x) {
+  const r = (x && x._raw) || {};
+  const v = r.app_eta;
+  if (!v || v === 'null') return null;
+  const dt = new Date(String(v).replace(' ', 'T'));
+  return isNaN(dt) ? null : dt;
+}
+
+const slaHrs = (h) =>
+  h == null ? '—' : h < 1 ? Math.round(h * 60) + 'm' : h < 48 ? Math.round(h) + 'h' : (h / 24).toFixed(1) + 'd';
+const slaMins = (m) => {
+  if (m == null) return '—';
+  const a = Math.abs(m);
+  if (a < 60) return Math.round(a) + 'm';
+  if (a < 2880) return Math.round(a / 60) + 'h';
+  return (a / 1440).toFixed(1) + 'd';
+};
+
+/* Adoption % ka color — 85+ green, 70–85 amber, uske neeche red */
+const slaAdoptColor = (p) =>
+  p == null ? T.inkSoft : p >= 85 ? T.green : p >= 70 ? T.amber : T.red;
+
+/* Adoption view ke naye drill kinds ke labels (ye cards mein nahi hote) */
+const SLA_KIND_LABEL = {
+  r10: 'Response ≤10 min',
+  r30: 'Response 10–30 min',
+  r30p: 'Response >30 min',
+  closed: 'Cancelled / Duplicate / Renewal',
+  total: 'Saare orders',
+  pending: 'Pending',
+};
+
+/* ── ek order ka poora SLA picture ── */
+function slaAnalyze(x) {
+  const cycle = slaCycle(x);
+  const mbc = slaIsMbc(x, cycle);
+  const now = new Date();
+  const created = new Date(createdTs(x));
+  const okStart = !isNaN(created);
+  // saare duration plain wall clock mein — deadline logic ke saath consistent
+  const span = (a, b) => (a && b && b >= a ? slaSpanMins(a, b) / 60 : null);
+
+  const delivered = x.stage === 'delivered';
+  const delAt = delivered ? new Date(deliveredTs(x)) : null;
+
+  /* SLA 1 — Response */
+  const talkedAt = slaResponded(cycle);
+  const respDeadline = okStart ? slaAddMins(created, SLA_RESPONSE_MIN) : null;
+  const respEnd = talkedAt || now;
+  const respBreach = !!(respDeadline && respEnd > respDeadline);
+  const respOpen = !talkedAt;
+  const respLateBy = respBreach ? (respEnd - respDeadline) / 60000 : 0;
+
+  const promise = slaPromise(x);
+  const dispAt = slaFirst(cycle, 'dispatched');
+  const eta = slaEta(x);
+
+  /* SLA 2 — ETA fill: jo pickup time customer ko diya tha, us tak order
+     "Out for Pickup" hokar estimated arrival bhar jani chahiye. */
+  const etaApplies = !!promise;
+  const etaEnd = dispAt || now;
+  const etaBreach = !!(etaApplies && etaEnd > promise);
+  const etaOpen = !dispAt;
+  const etaLateBy = etaBreach ? (etaEnd - promise) / 60000 : 0;
+
+  /* SLA 3 — Pickup: jo estimated arrival bhara, us tak pickup ho jani chahiye */
+  const delDeadline = eta;
+  const delEnd = delAt || now;
+  const delBreach = !!(delDeadline && delEnd > delDeadline);
+  const delLateBy = delBreach ? (delEnd - delDeadline) / 60000 : 0;
+
+  /* stage skip */
+  const need = ['talked', 'scheduled', 'dispatched'];
+  const missing = delivered ? need.filter((s) => !slaFirst(cycle, s)) : [];
+
+  /* Manager response — entry aane se customer se baat hone tak.
+     Jo order abhi kisi bhi aage wali stage pe pahuncha hi nahi, uska
+     respHrs null (average mein count nahi hoga — wo Response Breach
+     column mein pakda jaata hai). */
+  const respHrs = okStart && talkedAt ? span(created, talkedAt) : null;
+
+  /* Pickup person ka hissa — Out for Pickup se Picked up tak */
+  let delHrs = null;
+  if (delAt && !isNaN(delAt) && dispAt) delHrs = span(dispAt, delAt);
+
+  const graded = (respDeadline ? 1 : 0) + (etaApplies ? 1 : 0) + (delDeadline ? 1 : 0);
+  const breaches = (respBreach ? 1 : 0) + (etaBreach ? 1 : 0) + (delBreach ? 1 : 0);
+
+  return {
+    x,
+    branch: x.branch,
+    delivered,
+    mbc,
+    respBreach,
+    respOpen,
+    respLateBy,
+    respDeadline,
+    talkedAt,
+    promise,
+    eta,
+    dispAt,
+    etaApplies,
+    etaBreach,
+    etaOpen,
+    etaLateBy,
+    delDeadline,
+    delBreach,
+    delLateBy,
+    delAt,
+    skipped: delivered && missing.length > 0,
+    missing,
+    graded,
+    breaches,
+    /* abhi action chahiye: pending order jiski koi bhi SLA nikal chuki hai */
+    overdue: !delivered && ((respOpen && respBreach) || (etaOpen && etaBreach) || delBreach),
+    totalHrs: okStart && delAt && !isNaN(delAt) ? span(created, delAt) : null,
+    openHrs: okStart && !delivered ? span(created, now) : null,
+    respHrs,
+    /* Dashboard ke ≤10 / ≤30 buckets ke liye — wahi value, bas minutes
+       mein. Baat hi nahi hui to null (kisi bucket mein nahi). */
+    respMins: respHrs == null ? null : respHrs * 60,
+    delHrs,
+  };
+}
+
+/* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka chhota box.
+   position:fixed use karte hain kyunki dash-block mein overflow:hidden hai —
+   warna kam rows hone pe tooltip cut ho jaata. */
+function SlaTh({ label, info, w, colSpan, rowSpan, center, group, div }) {
+  const [pos, setPos] = useState(null);
+  const ref = React.useRef(null);
+  /* nowrap hata dete hain taaki lambi heading 2 line mein aa jaye aur
+     table horizontally scroll na karni pade */
+  const thStyle = {
+    whiteSpace: 'normal',
+    verticalAlign: 'bottom',
+    width: w || 'auto',
+    textAlign: center || group ? 'center' : 'left',
+    ...(group
+      ? { color: T.forestSoft, borderBottom: '1px solid ' + T.line, paddingBottom: 6 }
+      : {}),
+    /* group ke shuru mein vertical line — kaunsa column kis group ka hai saaf rahe */
+    ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+  };
+  const span = { colSpan, rowSpan };
+  if (!info) return <th style={thStyle} {...span}>{label}</th>;
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const w = 250;
+    setPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 12)),
+      top: r.bottom + 6,
+      w,
+    });
+  };
+
+  return (
+    <th style={thStyle} {...span}>
+      <span
+        ref={ref}
+        style={{ cursor: 'help' }}
+        onMouseEnter={show}
+        onMouseLeave={() => setPos(null)}
+        onClick={() => (pos ? setPos(null) : show())}
+      >
+        {label}{' '}
+        <Info size={12} color="#B3AFA4" style={{ verticalAlign: '-1px' }} />
+      </span>
+      {pos && (
+        <div
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            top: pos.top,
+            width: pos.w,
+            zIndex: 90,
+            background: T.forest,
+            color: '#fff',
+            borderRadius: 10,
+            padding: '10px 12px',
+            fontSize: 11.5,
+            fontWeight: 500,
+            lineHeight: 1.55,
+            letterSpacing: 0,
+            textTransform: 'none',
+            whiteSpace: 'normal',
+            boxShadow: '0 10px 26px rgba(20,57,43,.3)',
+            pointerEvents: 'none',
+          }}
+        >
+          {info}
+        </div>
+      )}
+    </th>
+  );
+}
+
+function SlaReport({ deliveries, onOpen, logsLoaded }) {
+  const [range, setRange] = useState('today'); // today|yesterday|7d|custom
+  const [from, setFrom] = useState(todayStr());
+  const [to, setTo] = useState(todayStr());
+  const [store, setStore] = useState('ALL');
+  const [view, setView] = useState('stores'); // stores | boys | adopt
+  const [sel, setSel] = useState(null); // null = drill band
+  const [alertOn, setAlertOn] = useState(null);
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (d) => dayStr(d);
+    if (range === 'today') return [mk(t), mk(t)];
+    if (range === 'yesterday') {
+      const y = new Date(t);
+      y.setDate(y.getDate() - 1);
+      return [mk(y), mk(y)];
+    }
+    if (range === '7d') {
+      const s = new Date(t);
+      s.setDate(s.getDate() - 6);
+      return [mk(s), mk(t)];
+    }
+    return [from, to];
+  }, [range, from, to]);
+
+  /* Closed entries (Cancelled / Duplicate / Renewal / Deleted) SLA mein nahi aati.
+     Jin rows ka timeline abhi load nahi hua unhe bhi chhod dete hain — warna
+     "koi stage move hua hi nahi" maankar sab breach dikhne lagti hain. */
+  const live = useMemo(
+    () =>
+      deliveries.filter(
+        (d) =>
+          !isClosedStage(d.stage) &&
+          d._raw &&
+          Array.isArray(d._raw.app_log),
+      ),
+    [deliveries],
+  );
+
+  const inRange = useMemo(() => {
+    const [s, e] = bounds;
+    return live.filter((d) => {
+      const cd = dayStr(createdTs(d));
+      if (cd < s || cd > e) return false;
+      if (store !== 'ALL' && d.branch !== store) return false;
+      return true;
+    });
+  }, [live, bounds, store]);
+
+  /* Stores / Pickup boys views: MBC = customer khud le jaata hai, store
+     ki SLA uspe lagti hi nahi — isliye in do views se bahar. */
+  const rows = useMemo(() => inRange.map(slaAnalyze).filter((a) => !a.mbc), [inRange]);
+
+  /* Adoption view ka set — Stores/Boys jaisa hi, bas MBC bhi shaamil.
+     Cancelled / Duplicate / Renewal yahan bhi nahi aatin (wo `live` filter
+     mein pehle hi hat chuki hain). MBC isliye hai kyunki uspe bhi stages
+     chalti hain aur response time nikalta hai — bas store ki pickup SLA
+     nahi lagti, jo Stores view ka mamla hai. */
+  const adoptData = useMemo(() => inRange.map(slaAnalyze), [inRange]);
+
+  /* Cancelled / Duplicate / Renewal — ye SLA se bahar hain (`live` unhe
+     pehle hi hata deta hai), par store-wise kitni aayi ye dikhna chahiye.
+     Isliye alag se nikalte hain: sirf date + store filter, aur app_log ki
+     shart bhi nahi (closed entry ka log adhoora ho sakta hai). */
+  const closedRows = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries
+      .filter((d) => {
+        if (d.stage !== 'cancelled' && d.stage !== 'duplicate' && d.stage !== 'renewal')
+          return false;
+        const cd = dayStr(createdTs(d));
+        if (cd < s || cd > e) return false;
+        if (store !== 'ALL' && d.branch !== store) return false;
+        return true;
+      })
+      .map(slaAnalyze);
+  }, [deliveries, bounds, store]);
+  const closedOf = (st) => closedRows.filter((a) => a.branch === st).length;
+
+  /* Overdue = abhi ka metric, date range se filter nahi hota. 3 din se atka
+     order "Aaj" filter mein chhup jaata to report jhooth bolti. */
+  const overdueAll = useMemo(
+    () =>
+      live
+        .filter((d) => d.stage !== 'delivered')
+        .map(slaAnalyze)
+        .filter((a) => a.overdue && !a.mbc && (store === 'ALL' || a.branch === store)),
+    [live, store],
+  );
+
+  const pick = {
+    all: () => true,
+    delivered: (a) => a.delivered,
+    pending: (a) => !a.delivered,
+    resp: (a) => a.respBreach,
+    eta: (a) => a.etaBreach,
+    del: (a) => a.delBreach,
+    /* Dashboard ke response buckets — EXCLUSIVE (≤10 wale 10–30 mein nahi) */
+    r10: (a) => a.respMins != null && a.respMins <= 10,
+    r30: (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+    /* >30 min — SLA ke baad baat hui. Jinpe abhi tak baat hui hi nahi
+       (respMins null) wo yahan nahi, wo Response Breach card mein hain. */
+    r30p: (a) => a.respMins != null && a.respMins > 30,
+  };
+
+  const statOf = (list, ov) => {
+    const dl = list.filter((a) => a.delivered);
+
+    const avg = (k) => {
+      const v = dl.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
+    /* response time delivered hone ka intezaar nahi karta — pending bhi count */
+    const avgAll = (k) => {
+      const v = list.map((a) => a[k]).filter((n) => n != null);
+      return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+    };
+
+    return {
+      total: list.length,
+      delivered: dl.length,
+      pending: list.length - dl.length,
+      /* Jitne orders pe response ho chuka hai. Ye teeno buckets ka asli
+         denominator hai — total ka nahi. Pehle % total pe nikalta tha,
+         isliye teeno % ka jod kabhi 100 tak pahunchta hi nahi tha. */
+      responded: list.filter((a) => a.respMins != null).length,
+      /* Response speed buckets — entry se customer se baat hone tak, business
+         minutes mein. Jin orders pe abhi baat hui hi nahi (respMins null) wo
+         kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain.
+         Buckets EXCLUSIVE hain: jo ≤10 min mein ho gaya wo 10–30 mein nahi
+         ginte, isliye dono column alag-alag orders dikhate hain. */
+      resp10: list.filter((a) => a.respMins != null && a.respMins <= 10).length,
+      resp30: list.filter(
+        (a) => a.respMins != null && a.respMins > 10 && a.respMins <= 30,
+      ).length,
+      /* >30 min — deadline ke baad baat hui. Ye teesra exclusive bucket hai;
+         teeno ka jod = jitne orders pe ab tak baat ho chuki hai. */
+      resp30p: list.filter((a) => a.respMins != null && a.respMins > 30).length,
+      /* Adoption = is duration ke kitne orders pick up ho chuke */
+      adoption: list.length ? (dl.length / list.length) * 100 : null,
+      respBreach: list.filter((a) => a.respBreach).length,
+      etaBreach: list.filter((a) => a.etaBreach).length,
+      delBreach: list.filter((a) => a.delBreach).length,
+      /* sirf breach hue orders ka average — deadline se kitna upar nikle */
+      avgRespLate: (() => {
+        const v = list.filter((a) => a.respBreach).map((a) => a.respLateBy);
+        return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null;
+      })(),
+      overdue: ov.length,
+      avgCycle: avg('totalHrs'),
+      avgResp: avgAll('respHrs'),
+      avgDel: avg('delHrs'),
+    };
+  };
+
+  const overall = statOf(rows, overdueAll);
+  const adoptOverall = statOf(adoptData, overdueAll);
+  /* Adoption view ke cards bhi usi set pe chalein — warna upar ke card ka
+     Total aur neeche table ka Total alag-alag dikhte. */
+  const cardStat = view === 'adopt' ? adoptOverall : overall;
+
+  const cards = [
+    { kind: 'all', label: 'Total', n: cardStat.total, icon: Package, color: T.slate, soft: T.slateSoft },
+    { kind: 'delivered', label: 'Picked up', n: cardStat.delivered, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { kind: 'resp', label: 'Response breach', n: cardStat.respBreach, icon: Clock, color: T.red, soft: T.redSoft },
+    { kind: 'eta', label: 'ETA breach', n: cardStat.etaBreach, icon: MessageSquareWarning, color: T.red, soft: T.redSoft },
+    { kind: 'del', label: 'Pickup breach', n: cardStat.delBreach, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { kind: 'overdue', label: 'Overdue', n: cardStat.overdue, icon: Bell, color: T.amber, soft: T.amberSoft },
+  ];
+
+  /* pickup boy ka naam — MBC self-pickup hai, assign na hua to "Not assigned" */
+  const personOf = (a) => {
+    const p = String(a.x.person || '').trim();
+    if (!p || p === 'null') return 'Not assigned';
+    return p;
+  };
+
+  const drill = useMemo(() => {
+    if (!sel) return [];
+    /* Adoption view ke number MBC/closed ke saath bane hain, isliye unka
+       drill bhi usi set se aana chahiye — warna list ka count number se
+       kam nikalta hai. */
+    let list =
+      sel.kind === 'total'
+        ? [...adoptData, ...closedRows]
+        : sel.kind === 'closed'
+          ? closedRows
+          : sel.kind === 'overdue'
+            ? overdueAll
+            : sel.adopt
+              ? adoptData
+              : rows;
+    if (sel.store) list = list.filter((a) => a.branch === sel.store);
+    if (sel.person) list = list.filter((a) => personOf(a) === sel.person);
+    const fn =
+      sel.kind === 'overdue' || sel.kind === 'closed' || sel.kind === 'total'
+        ? () => true
+        : pick[sel.kind] || (() => true);
+    return list
+      .filter(fn)
+      .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
+    // eslint-disable-next-line
+  }, [rows, adoptData, closedRows, overdueAll, sel]);
+
+  /* Stores wahi order mein jo Dashboard mein hai — koi ranking nahi */
+  const storeStats = DASH_STORES.filter((st) => store === 'ALL' || store === st)
+    .map((st) => ({
+      st,
+      s: statOf(
+        rows.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+    }))
+    .filter((r) => r.s.total > 0 || r.s.overdue > 0);
+
+  /* Adoption view — apna set (MBC + closed shaamil), volume descending */
+  const adoptRows = DASH_STORES.filter((st) => store === 'ALL' || store === st)
+    .map((st) => ({
+      st,
+      s: statOf(
+        adoptData.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+    }))
+    .filter((r) => r.s.total > 0)
+    .sort((a, b) => b.s.total - a.s.total);
+
+  /* pickup boy wise — person + store ke hisaab se group */
+  const boyStats = useMemo(() => {
+    // bina-assign wale orders kisi bande ki performance nahi hain
+    const skip = (a) => personOf(a) === 'Not assigned';
+    const keys = new Set();
+    rows.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    overdueAll.filter((a) => !skip(a)).forEach((a) => keys.add(personOf(a) + '|' + a.branch));
+    return [...keys]
+      .map((k) => {
+        const [person, br] = k.split('|');
+        return {
+          person,
+          br,
+          st: br,
+          s: statOf(
+            rows.filter((a) => personOf(a) === person && a.branch === br),
+            overdueAll.filter((a) => personOf(a) === person && a.branch === br),
+          ),
+        };
+      })
+      .filter((r) => r.s.total > 0 || r.s.overdue > 0)
+      .sort((a, b) => a.person.localeCompare(b.person));
+    // eslint-disable-next-line
+  }, [rows, overdueAll]);
+
+  const rangeLabel =
+    range === 'today'
+      ? 'Aaj'
+      : range === 'yesterday'
+        ? 'Kal'
+        : range === '7d'
+          ? 'Pichhle 7 din'
+          : `${from} → ${to}`;
+
+  /* dobara wahi click = band (dropdown jaisa) */
+  const toggleSel = (next) =>
+    setSel((cur) =>
+      cur && cur.kind === next.kind && cur.store === next.store && cur.person === next.person
+        ? null
+        : next,
+    );
+
+  const cellFor = (target) => (kind, n, color, div) => (
+    <td
+      className={n ? 'dash-td-click' : 'dash-td-zero'}
+      style={{
+        textAlign: 'center',
+        ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+        ...(n ? { color } : {}),
+      }}
+      onClick={() => n && toggleSel({ kind, store: null, person: null, ...target })}
+    >
+      {n}
+    </td>
+  );
+
+  /* Kisi number pe click → poora view badal jaata hai: sirf us subset ki list
+     dikhti hai, cards aur upar wali table chhup jaati hai. Back se wapas. */
+  if (sel) {
+    const selLabel =
+      cards.find((c) => c.kind === sel.kind)?.label ||
+      SLA_KIND_LABEL[sel.kind] ||
+      'All';
+    return (
+      <div>
+        <button className="track-back" onClick={() => setSel(null)}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="dash-head">
+          <div>
+            <div className="dash-sub">
+              {selLabel}
+              {sel.store ? ` · ${branchLabel(sel.store)}` : ''}
+              {sel.person ? ` · ${sel.person}` : ''} · {rangeLabel}
+            </div>
+            <h2 style={{ margin: '2px 0 0' }}>
+              {drill.length} {drill.length === 1 ? 'entry' : 'entries'}
+            </h2>
+          </div>
+        </div>
+      <div className="dash-block">
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <SlaTh label="Invoice" />
+                <SlaTh label="Customer" />
+                <SlaTh label="Store" />
+                <SlaTh label="Stage" />
+                <SlaTh
+                  label="Response"
+                  info={`Entry aane se customer se baat hone tak kitna time laga. Lal ho to ${SLA_RESPONSE_MIN} min ki deadline paar ho gayi thi.`}
+                />
+                <SlaTh
+                  label="Promise"
+                  info="Jo date aur time customer ko diya gaya tha — Talked stage pe bhara hua confirmed slot. Is time tak ETA bhar jani chahiye."
+                />
+                <SlaTh
+                  label="ETA"
+                  info="Out for Pickup stage pe bhara hua Estimated arrival. Is time tak pickup ho jani chahiye."
+                />
+                <SlaTh label="Picked up" />
+                <SlaTh label="Late by" info="Jo SLA breach hui hai, us deadline se kitna time nikal gaya." />
+                <SlaTh label="Pickup boy" />
+              </tr>
+            </thead>
+            <tbody>
+              {drill.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="dash-empty">
+                    Koi entry nahi
+                  </td>
+                </tr>
+              ) : (
+                drill.map((a) => {
+                  const stg = stageMeta(a.x.stage);
+                  return (
+                    <tr key={a.x.invoice_id} className="dash-row" onClick={() => onOpen(a.x)}>
+                      <td>{a.x.id}</td>
+                      <td>{a.x.customer}</td>
+                      <td>{branchLabel(a.branch)}</td>
+                      <td>
+                        <span className="dash-chip" style={{ background: stg.soft, color: stg.color }}>
+                          {stg.short}
+                        </span>
+                      </td>
+                      <td style={{ color: a.respBreach ? T.red : T.ink, fontWeight: a.respBreach ? 700 : 500 }}>
+                        {a.respOpen ? 'abhi tak nahi' : slaHrs(a.respHrs)}
+                      </td>
+                      <td style={{ color: a.etaBreach ? T.red : T.ink, fontWeight: a.etaBreach ? 700 : 500 }}>
+                        {a.promise ? fmtDateTime(a.promise.toISOString()) : '—'}
+                      </td>
+                      <td>
+                        {a.eta ? (
+                          fmtDateTime(a.eta.toISOString())
+                        ) : (
+                          <span style={{ color: a.etaBreach ? T.red : T.inkSoft, fontWeight: a.etaBreach ? 700 : 500 }}>
+                            {a.etaBreach ? 'bhari nahi' : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {a.delAt && !isNaN(a.delAt) ? (
+                          fmtDateTime(a.delAt.toISOString())
+                        ) : (
+                          <span style={{ color: a.delBreach ? T.red : T.inkSoft, fontWeight: a.delBreach ? 700 : 500 }}>
+                            {a.delBreach ? 'nahi hui' : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          color: a.delBreach || a.etaBreach ? T.red : T.inkSoft,
+                          fontWeight: a.delBreach || a.etaBreach ? 700 : 500,
+                        }}
+                      >
+                        {a.delBreach
+                          ? slaMins(a.delLateBy)
+                          : a.etaBreach
+                            ? slaMins(a.etaLateBy)
+                            : '—'}
+                      </td>
+                      <td>{personOf(a)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    );
+  }
+
+  if (!logsLoaded)
+    return (
+      <div className="loading">
+        Timeline load ho raha hai… SLA usi se banti hai.
+      </div>
+    );
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Process &amp; SLA</div>
+          <h2 style={{ margin: '2px 0 0' }}>Process &amp; SLA</h2>
+        </div>
+        <div className="dash-filters">
+          <div className="layout-toggle">
+            <button
+              className={view === 'stores' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('stores');
+                setSel(null);
+              }}
+            >
+              <Building2 size={14} /> Stores
+            </button>
+            <button
+              className={view === 'boys' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('boys');
+                setSel(null);
+              }}
+            >
+              <User size={14} /> Pickup boys
+            </button>
+            <button
+              className={view === 'adopt' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('adopt');
+                setSel(null);
+              }}
+            >
+              <BarChart3 size={14} /> Dashboard
+            </button>
+          </div>
+          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <>
+              <input className="dash-inp" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              <input className="dash-inp" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+            </>
+          )}
+          <select
+            className="dash-inp"
+            value={store}
+            onChange={(e) => {
+              setStore(e.target.value);
+              setSel(null);
+            }}
+          >
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => (
+              <option key={s} value={s}>
+                {branchLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="dash-cards">
+        {cards.map((c) => {
+          const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
+          return (
+            <button
+              key={c.label}
+              className={on ? 'dash-card on' : 'dash-card'}
+              style={{
+                ...(on ? { borderColor: c.color } : {}),
+                ...(c.n ? {} : { cursor: 'default' }),
+              }}
+              onClick={() =>
+                c.n &&
+                toggleSel({
+                  kind: c.kind,
+                  store: null,
+                  person: null,
+                  adopt: view === 'adopt',
+                })
+              }
+            >
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}>
+                <c.icon size={16} />
+              </div>
+              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>
+                {c.n}
+              </div>
+              <div className="dash-card-l">{c.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {view === 'stores' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">
+            Store-wise · {rangeLabel}
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <SlaTh label="Store" rowSpan={2} />
+                  <SlaTh label="Orders" colSpan={2} group div />
+                  <SlaTh label="Response" colSpan={3} group div />
+                  <SlaTh label="Pickup" colSpan={3} group div />
+                  <SlaTh
+                    label="Overdue"
+                    rowSpan={2}
+                    center
+                    div
+                    info={`Pending orders jinki koi bhi SLA nikal chuki hai — ${SLA_RESPONSE_MIN} min ka response, ETA fill, ya ETA tak pickup. Inpe abhi action chahiye. Ye ek hi column hai jo date filter follow nahi karta, purane atke orders bhi isme aate hain, isliye ye Total se zyada ho sakta hai.`}
+                  />
+                  <SlaTh label="Alert" rowSpan={2} center w={70} div />
+                </tr>
+                <tr>
+                  <SlaTh
+                    label="Total"
+                    center
+                    div
+                    info="Is date range ke orders. MBC (customer khud le jaata hai) aur cancelled / duplicate / renewal entries isme nahi aatin — un pe store ki SLA lagti hi nahi. Ye number Dashboard view se kam hoga."
+                  />
+                  <SlaTh label="Picked up" center />
+                  <SlaTh
+                    label="Avg Time"
+                    center
+                    div
+                    info="Entry aane se customer se baat hone tak ka average. Poora time count hota hai — band ghante bhi."
+                  />
+                  <SlaTh
+                    label="Breach"
+                    center
+                    info={`Kitne orders ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi kar paye. Ye store manager ki zimmedari hai.`}
+                  />
+                  <SlaTh
+                    label="Avg Breach Time"
+                    center
+                    info={`Jo orders ${SLA_RESPONSE_MIN} min ki deadline paar kar gaye, unka average kitna upar nikle.`}
+                  />
+                  <SlaTh
+                    label="Avg Time"
+                    center
+                    div
+                    info="Entry aane se Picked Up tak ka poora average. Sirf picked-up orders ka."
+                  />
+                  <SlaTh
+                    label="ETA Breach"
+                    center
+                    info="Jo pickup time customer ko diya tha, us tak order Out for Pickup hokar Estimated arrival bhar jani chahiye thi — nahi hui."
+                  />
+                  <SlaTh
+                    label="Del Breach"
+                    center
+                    info="Jo Estimated arrival bhara tha, us tak pickup nahi hui (ya abhi tak hui hi nahi)."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {storeStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  storeStats.map(({ st, s }) => {
+                    const cell = cellFor({ store: st, person: null });
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">{branchLabel(st)}</td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('delivered', s.delivered, T.green)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {slaHrs(s.avgResp)}
+                        </td>
+                        {cell('resp', s.respBreach, T.red)}
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            color: s.avgRespLate == null ? '#C9C7BE' : T.red,
+                          }}
+                        >
+                          {s.avgRespLate == null ? '—' : '+' + slaMins(s.avgRespLate)}
+                        </td>
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {slaHrs(s.avgCycle)}
+                        </td>
+                        {cell('eta', s.etaBreach, T.red)}
+                        {cell('del', s.delBreach, T.red)}
+                        {cell('overdue', s.overdue, T.amber, true)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          <button
+                            className="mini-edit"
+                            style={
+                              s.overdue || s.respBreach || s.delBreach
+                                ? { background: T.redSoft, borderColor: '#e9cfc4', color: T.red }
+                                : {}
+                            }
+                            onClick={() => setAlertOn({ title: branchLabel(st), s })}
+                          >
+                            <Bell size={12} /> Alert
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : view === 'boys' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">
+            Pickup boy wise · {rangeLabel}
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <SlaTh
+                    label="Pickup boy"
+                    rowSpan={2}
+                    info="Bina-assign wale orders is view mein nahi aate, isliye yahan ke totals Stores view se thode kam ho sakte hain."
+                  />
+                  <SlaTh label="Store" rowSpan={2} />
+                  <SlaTh label="Orders" colSpan={2} group div />
+                  <SlaTh label="Pickup" colSpan={3} group div />
+                  <SlaTh
+                    label="Overdue"
+                    rowSpan={2}
+                    center
+                    div
+                    info="Pending orders jinki koi bhi SLA nikal chuki hai. Ye column date filter follow nahi karta."
+                  />
+                </tr>
+                <tr>
+                  <SlaTh label="Total" center div />
+                  <SlaTh label="Picked up" center />
+                  <SlaTh
+                    label="Del Time"
+                    center
+                    div
+                    info="Out for Pickup se Picked up tak ka average — sirf pickup boy ka hissa."
+                  />
+                  <SlaTh
+                    label="Avg Time"
+                    center
+                    info="Entry aane se Picked Up tak ka poora average, jisme manager ka time bhi shaamil hai."
+                  />
+                  <SlaTh
+                    label="Breach"
+                    center
+                    info="Jo Estimated arrival bhara tha, us tak pickup nahi hui (ya abhi tak hui hi nahi)."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {boyStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  boyStats.map(({ person, br, s }) => {
+                    const cell = cellFor({ person, store: null });
+                    return (
+                      <tr key={person + br}>
+                        <td className="dash-store">{person}</td>
+                        <td style={{ color: T.inkSoft }}>{branchLabel(br)}</td>
+                        {cell('all', s.total, T.green, true)}
+                        {cell('delivered', s.delivered, T.green)}
+                        <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line }}>
+                          {slaHrs(s.avgDel)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>{slaHrs(s.avgCycle)}</td>
+                        {cell('del', s.delBreach, T.red)}
+                        {cell('overdue', s.overdue, T.amber, true)}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="dash-block">
+          <div
+            className="dash-block-h"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-end',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              Store-wise Adoption · {rangeLabel}
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 3,
+                }}
+              >
+                {adoptRows.length} store · Orders mein cancelled bhi shaamil
+              </div>
+            </span>
+            <span style={{ textAlign: 'right' }}>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  color: slaAdoptColor(adoptOverall.adoption),
+                }}
+              >
+                {adoptOverall.adoption == null
+                  ? '—'
+                  : adoptOverall.adoption.toFixed(1) + '%'}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: T.inkSoft,
+                  marginTop: 4,
+                }}
+              >
+                {adoptOverall.delivered} picked up · {adoptOverall.pending} pending
+                {' · '}
+                {closedRows.length} cancelled · of{' '}
+                {adoptOverall.total + closedRows.length} orders
+              </div>
+            </span>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <SlaTh label="Store" />
+                  <SlaTh
+                    label="Orders"
+                    center
+                    div
+                    info="Is duration mein aayi SAARI entries — picked up, pending aur cancelled sab milakar. Ye number board ke Total Pickups se match karta hai."
+                  />
+                  <SlaTh
+                    label="Picked up"
+                    center
+                    info="Inme se kitne Picked Up ho chuke."
+                  />
+                  <SlaTh
+                    label="Pending"
+                    center
+                    info="Jo abhi tak pick up nahi hue aur cancel bhi nahi hue — abhi pipeline mein hain (New / Contacted / Scheduled / Out for Pickup)."
+                  />
+                  <SlaTh
+                    label="Cancelled"
+                    center
+                    info="Inme se kitni entries Cancelled / Duplicate / Renewal mark hui. In pe SLA lagti hi nahi. Number pe click karke list dekh sakte ho."
+                  />
+                  <SlaTh
+                    label="≤10 min"
+                    center
+                    div
+                    info={`Kitne orders mein entry aane ke 10 business minutes ke andar customer se baat ho gayi. Neeche % un orders ka hai jinpe response ho chuka hai — teeno bucket ka jod 100% aata hai.`}
+                  />
+                  <SlaTh
+                    label="10–30 min"
+                    center
+                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar respond hue. ≤10 min wale ismein NAHI aate — teeno column alag orders dikhate hain.`}
+                  />
+                  <SlaTh
+                    label=">30 min"
+                    center
+                    info={`Jo orders ${SLA_RESPONSE_MIN} business minutes ki deadline ke BAAD respond hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
+                  />
+                  <SlaTh
+                    label="Response TAT"
+                    center
+                    div
+                    info="Entry aane se customer se baat hone tak ka average. Poora time count hota hai — band ghante bhi. Ismein pending orders bhi shaamil hain, isliye ye Pickup TAT se zyada ho sakta hai."
+                  />
+                  <SlaTh
+                    label="Pickup TAT"
+                    center
+                    info="Entry aane se Picked Up tak ka poora average. Sirf picked-up orders ka."
+                  />
+                  <SlaTh
+                    label="Adoption"
+                    center
+                    div
+                    info="Is duration ke kitne orders pick up ho chuke. 85%+ green, 70–85% amber, uske neeche red."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {adoptRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  adoptRows.map(({ st, s }) => {
+                    const cell = cellFor({ store: st, person: null, adopt: true });
+                    /* % un orders pe jinpe response ho chuka hai — total pe
+                       nahi. Teeno bucket ka jod ab 100% aata hai. */
+                    const pctOf = (n) =>
+                      s.responded ? Math.round((n / s.responded) * 100) : 0;
+                    const ac = slaAdoptColor(s.adoption);
+                    /* bucket cell — number + neeche chhota % */
+                    const bucket = (kind, n, div, color) => (
+                      <td
+                        className={n ? 'dash-td-click' : 'dash-td-zero'}
+                        style={{
+                          textAlign: 'center',
+                          ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+                          ...(n ? { color: color || T.green } : {}),
+                        }}
+                        onClick={() =>
+                          n &&
+                          toggleSel({
+                            kind,
+                            store: st,
+                            person: null,
+                            adopt: true,
+                          })
+                        }
+                      >
+                        {n}
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: T.inkSoft,
+                          }}
+                        >
+                          {pctOf(n)}%
+                        </div>
+                      </td>
+                    );
+                    return (
+                      <tr key={st}>
+                        <td className="dash-store">{branchLabel(st)}</td>
+                        {(() => {
+                          /* Orders = SLA wale + cancelled, yaani sab. Isse
+                             Picked up + Cancelled + baaki ka jod poora ban
+                             jaata hai aur koi gap nahi dikhta. */
+                          const gt = s.total + closedOf(st);
+                          return (
+                            <td
+                              className={gt ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{
+                                textAlign: 'center',
+                                borderLeft: '1px solid ' + T.line,
+                                fontWeight: 800,
+                                ...(gt ? { color: T.green } : {}),
+                              }}
+                              onClick={() =>
+                                gt &&
+                                toggleSel({ kind: 'total', store: st, person: null })
+                              }
+                            >
+                              {gt}
+                            </td>
+                          );
+                        })()}
+                        {cell('delivered', s.delivered, T.green)}
+                        {(() => {
+                          const pn = s.pending;
+                          return (
+                            <td
+                              className={pn ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{ textAlign: 'center', ...(pn ? { color: T.blue } : {}) }}
+                              onClick={() =>
+                                pn &&
+                                toggleSel({
+                                  kind: 'pending',
+                                  store: st,
+                                  person: null,
+                                  adopt: true,
+                                })
+                              }
+                            >
+                              {pn}
+                            </td>
+                          );
+                        })()}
+                        {(() => {
+                          const cn = closedOf(st);
+                          return (
+                            <td
+                              className={cn ? 'dash-td-click' : 'dash-td-zero'}
+                              style={{ textAlign: 'center', ...(cn ? { color: T.red } : {}) }}
+                              onClick={() =>
+                                cn &&
+                                toggleSel({
+                                  kind: 'closed',
+                                  store: st,
+                                  person: null,
+                                })
+                              }
+                            >
+                              {cn}
+                            </td>
+                          );
+                        })()}
+                        {bucket('r10', s.resp10, true)}
+                        {bucket('r30', s.resp30)}
+                        {bucket('r30p', s.resp30p, false, T.red)}
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            borderLeft: '1px solid ' + T.line,
+                          }}
+                        >
+                          {slaHrs(s.avgResp)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {slaHrs(s.avgCycle)}
+                        </td>
+                        <td style={{ borderLeft: '1px solid ' + T.line }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 76,
+                                height: 5,
+                                borderRadius: 3,
+                                background: T.line,
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width:
+                                    Math.max(
+                                      0,
+                                      Math.min(100, s.adoption || 0),
+                                    ) + '%',
+                                  height: '100%',
+                                  background: ac,
+                                  borderRadius: 3,
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                color: ac,
+                                minWidth: 48,
+                                textAlign: 'right',
+                              }}
+                            >
+                              {s.adoption == null
+                                ? '—'
+                                : s.adoption.toFixed(1) + '%'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+
+      {alertOn && <SlaAlert title={alertOn.title} s={alertOn.s} onClose={() => setAlertOn(null)} />}
+    </div>
+  );
+}
+
+/* ── Alert modal — abhi sirf UI, backend baad mein ── */
+function SlaAlert({ title, s, onClose }) {
+  const problems = [];
+  if (s.overdue)
+    problems.push([
+      'Overdue orders',
+      `${s.overdue} order ka time nikal chuka hai aur abhi tak pending hain — inpe turant action chahiye.`,
+    ]);
+  if (s.respBreach)
+    problems.push([
+      'Response late',
+      `${s.respBreach} order mein ${SLA_RESPONSE_MIN} min ke andar customer se baat nahi hui` +
+        (s.avgRespLate ? ` — average ${slaMins(s.avgRespLate)} deadline se upar.` : '.'),
+    ]);
+  if (s.etaBreach)
+    problems.push([
+      'ETA bhari nahi gayi',
+      `${s.etaBreach} order diye hue pickup time tak Out for Pickup nahi hue — estimated arrival hi nahi bhari.`,
+    ]);
+  if (s.delBreach)
+    problems.push(['Pickup breach', `${s.delBreach} order apni estimated arrival se late gaye.`]);
+
+  return (
+    <div className="overlay center" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>Store head ko bhejne wali summary</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} color={T.ink} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="kv-grid">
+            <KV label="Overdue" value={s.overdue} />
+            <KV label="Avg response time" value={slaHrs(s.avgResp)} />
+            <KV label="Avg pickup time" value={slaHrs(s.avgCycle)} />
+            <KV label="Response breach" value={s.respBreach} />
+            <KV label="ETA breach" value={s.etaBreach} />
+          </div>
+
+          <div className="sec-title" style={{ margin: '4px 0 0' }}>
+            Main problems
+          </div>
+          {problems.length === 0 ? (
+            <div style={{ fontSize: 13, color: T.inkSoft }}>Koi major issue nahi mila.</div>
+          ) : (
+            problems.slice(0, 2).map(([t, d], i) => (
+              <div key={i} className="flag-note" style={{ background: T.redSoft, color: T.red }}>
+                <b>{t}</b>
+                <div style={{ marginTop: 2, opacity: 0.9 }}>{d}</div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn-primary" disabled>
+            <Bell size={15} /> Send alert
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function Login({ onLogin }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
@@ -2801,6 +4191,7 @@ function Sidebar({ session, page, onNav }) {
     },
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
     ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
+    ...(isAll ? [{ id: 'sla', icon: Clock, label: 'Process & SLA' }] : []),
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
     { icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
