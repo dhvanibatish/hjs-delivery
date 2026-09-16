@@ -1413,11 +1413,18 @@ export default function App({
     if (showLog && !logsLoaded) loadLogs(null);
     // eslint-disable-next-line
   }, [showLog]);
-  // Process & SLA — saare timelines ek hi baar
+  // Process & SLA — saare timelines ek hi baar. List load hone ke BAAD hi,
+  // warna timelines khaali list pe merge hote hain aur SLA khaali dikhti hai.
   useEffect(() => {
-    if (page === 'sla' && session && !logsLoaded) loadLogs(null);
+    if (page === 'sla' && session && !loading && !logsLoaded) loadLogs(null);
     // eslint-disable-next-line
-  }, [page, session, logsLoaded]);
+  }, [page, session, loading, logsLoaded]);
+  // list dobara aayi to usme timelines nahi hote — agli baar phir se laao
+  const wasLoadingRef = React.useRef(false);
+  useEffect(() => {
+    if (wasLoadingRef.current && !loading) setLogsLoaded(false);
+    wasLoadingRef.current = loading;
+  }, [loading]);
 
   const applyLocal = (id, patch) => {
     setDeliveries((prev) =>
