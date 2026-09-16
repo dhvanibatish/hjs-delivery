@@ -67,12 +67,12 @@ async function sbRpc(fn, body) {
   return res.json();
 }
 // Supabase API ek request mein max 1000 rows deta hai — isliye pages mein
-// laate hain. order=invoice_id se har page ka order same rehta hai.
+// laate hain. Duplicate rows invoice_id se hata di jaati hain.
 async function sbRpcPaged(fn, body, pageSize = 1000) {
   const all = [];
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(
-      `${CONFIG.url}/rest/v1/rpc/${fn}?order=invoice_id&limit=${pageSize}&offset=${offset}`,
+      `${CONFIG.url}/rest/v1/rpc/${fn}?limit=${pageSize}&offset=${offset}`,
       {
         method: 'POST',
         headers: { ...HDRS(), 'Content-Type': 'application/json' },
@@ -84,7 +84,14 @@ async function sbRpcPaged(fn, body, pageSize = 1000) {
     all.push(...page);
     if (page.length < pageSize) break;
   }
-  return all;
+  const seen = new Set();
+  return all.filter((r) => {
+    const k = r && r.invoice_id;
+    if (!k) return true;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 // staff login — DB verifies password, returns [] if wrong
 async function sbLogin(store, pw) {
