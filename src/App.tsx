@@ -67,37 +67,57 @@ async function sbRpc(fn, body) {
   return res.json();
 }
 // Supabase API ek request mein max 1000 rows deta hai — isliye pages mein
-// laate hain. Duplicate rows invoice_id se hata di jaati hain.
-async function sbRpcPaged(fn, body, pageSize = 1000) {
+// laate hain. opts.key = row ki unique id (duplicate hatane + stable order ke
+// liye). Deliveries/logs mein invoice_id, sales RPCs mein invoice_number.
+async function sbRpcPaged(fn, body, opts = {}) {
+  const pageSize = opts.pageSize || 1000;
+  const key = opts.key === undefined ? 'invoice_id' : opts.key;
+  // 1) order ke saath (pages overlap/skip nahi karte)
+  // 2) order ke bina (agar RPC us column pe order nahi le paata)
+  // 3) purana single fetch — data kabhi band nahi hoga, par 1000 pe ruk sakta hai
   try {
-    return await sbRpcPagedTry(fn, body, pageSize);
-  } catch (e) {
-    // paging kaam na kare to purana tarika — data kabhi band nahi hoga
-    console.warn('Paged fetch fail, normal fetch pe wapas:', e);
-    return sbRpc(fn, body);
+    return await sbRpcPagedTry(fn, body, pageSize, key, key);
+  } catch (e1) {
+    console.warn(`[paging] ${fn}: order=${key} fail, bina order try:`, e1);
+    try {
+      return await sbRpcPagedTry(fn, body, pageSize, key, null);
+    } catch (e2) {
+      console.error(
+        `[paging] ${fn}: paging band — single fetch (max ${pageSize} rows aayengi):`,
+        e2,
+      );
+      return sbRpc(fn, body);
+    }
   }
 }
-async function sbRpcPagedTry(fn, body, pageSize) {
+async function sbRpcPagedTry(fn, body, pageSize, key, order) {
   const all = [];
-  for (let offset = 0; ; offset += pageSize) {
-    const res = await fetch(
-      `${CONFIG.url}/rest/v1/rpc/${fn}?limit=${pageSize}&offset=${offset}`,
-      {
-        method: 'POST',
-        headers: { ...HDRS(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
-    );
+  let firstKey = null;
+  // guard: 200 pages = 2 lakh rows — isse aage loop nahi chalega
+  for (let pg = 0; pg < 200; pg++) {
+    const offset = pg * pageSize;
+    const qs = `limit=${pageSize}&offset=${offset}${order ? `&order=${order}` : ''}`;
+    const res = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}?${qs}`, {
+      method: 'POST',
+      headers: { ...HDRS(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     const page = await res.json();
     if (!Array.isArray(page)) throw new Error('RPC array nahi deta');
+    // server offset ignore kar raha ho (json return wala RPC) → wahi page
+    // baar baar aayega. Pehchaan ke ruk jao, warna infinite loop.
+    const k0 = key && page[0] ? page[0][key] : null;
+    if (pg === 0) firstKey = k0;
+    else if (k0 != null && k0 === firstKey) break;
     all.push(...page);
     if (page.length < pageSize) break;
   }
+  if (!key) return all;
   const seen = new Set();
   return all.filter((r) => {
-    const k = r && r.invoice_id;
-    if (!k) return true;
+    const k = r && r[key];
+    if (k == null || k === '') return true;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -120,15 +140,14 @@ async function sbList(store, pw, days) {
 }
 // window se bahar wali entries — server pe search
 async function sbSearch(store, pw, q) {
-  return sbRpc('staff_search', { p_store: store, p_password: pw, p_q: q });
+  return sbRpcPaged('staff_search', { p_store: store, p_password: pw, p_q: q });
 }
 // sirf app_log — ek invoice ka (drawer khulne pe) ya sabka (Activity / SLA).
 async function sbLogs(store, pw, invoice) {
-  return sbRpc('staff_logs', {
-    p_store: store,
-    p_password: pw,
-    p_invoice: invoice || null,
-  });
+  const body = { p_store: store, p_password: pw, p_invoice: invoice || null };
+  // ek invoice = ek row, paging ki zarurat nahi. Sabke logs (Activity / SLA)
+  // 1000 se zyada hote hain — wahan paging zaroori hai.
+  return invoice ? sbRpc('staff_logs', body) : sbRpcPaged('staff_logs', body);
 }
 // staff update — stage move/edit. Password + store-scope checked in DB.
 async function sbUpdate(store, pw, invoiceId, patch) {
@@ -162,7 +181,7 @@ async function sbSalesMatrix(from, to, status) {
 }
 // Global search: customer / invoice / salesperson
 async function sbSalesSearch(qq) {
-  return sbRpc('sales_search', { p_q: qq });
+  return sbRpcPaged('sales_search', { p_q: qq }, { key: 'invoice_number' });
 }
 // Sales tracker: ek order ka app_log (timeline ke "Updated" timestamps ke liye).
 // Sales list RPCs app_log nahi bhejtin — wo bhaari hai — isliye alag se.
@@ -172,13 +191,17 @@ async function sbSalesLog(invoiceNumber) {
 }
 // Flexible list: store / salesperson / cell / all (date range + status)
 async function sbSalesList(sales, store, from, to, status) {
-  return sbRpc('sales_list', {
-    p_sales: sales || '',
-    p_store: store || '',
-    p_from: from,
-    p_to: to,
-    p_status: status || 'all',
-  });
+  return sbRpcPaged(
+    'sales_list',
+    {
+      p_sales: sales || '',
+      p_store: store || '',
+      p_from: from,
+      p_to: to,
+      p_status: status || 'all',
+    },
+    { key: 'invoice_number' },
+  );
 }
 // Ek cell ki deliveries (salesperson + store, date range)
 // photo upload → Supabase Storage bucket 'delivery-photos'.
