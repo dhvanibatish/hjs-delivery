@@ -3203,8 +3203,8 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
          denominator hai — total ka nahi. Pehle % total pe nikalta tha,
          isliye teeno % ka jod kabhi 100 tak pahunchta hi nahi tha. */
       responded: list.filter((a) => a.respMins != null).length,
-      /* Response speed buckets — entry se customer se baat hone tak, business
-         minutes mein. Jin orders pe abhi baat hui hi nahi (respMins null) wo
+      /* Response speed buckets — entry se customer se baat hone tak, plain
+         wall-clock minutes mein (24x7). Jin orders pe abhi baat hui hi nahi (respMins null) wo
          kisi bucket mein nahi aate — wo Response Breach mein pakde jaate hain.
          Buckets EXCLUSIVE hain: jo ≤10 min mein ho gaya wo 10–30 mein nahi
          ginte, isliye dono column alag-alag orders dikhate hain. */
@@ -3863,17 +3863,17 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="≤10 min"
                     center
                     div
-                    info={`Kitne orders mein entry aane ke 10 business minutes ke andar customer se baat ho gayi. Neeche % un orders ka hai jinpe response ho chuka hai — teeno bucket ka jod 100% aata hai.`}
+                    info={`Kitne orders mein entry aane ke 10 min (wall clock, 24x7) ke andar customer se baat ho gayi. Neeche % un orders ka hai jinpe response ho chuka hai — teeno bucket ka jod 100% aata hai.`}
                   />
                   <SlaTh
                     label="10–30 min"
                     center
-                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} business minutes ke andar respond hue. ≤10 min wale ismein NAHI aate — teeno column alag orders dikhate hain.`}
+                    info={`Jo orders 10 min ke baad, par ${SLA_RESPONSE_MIN} min (wall clock) ke andar respond hue. ≤10 min wale ismein NAHI aate — teeno column alag orders dikhate hain.`}
                   />
                   <SlaTh
                     label=">30 min"
                     center
-                    info={`Jo orders ${SLA_RESPONSE_MIN} business minutes ki deadline ke BAAD respond hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
+                    info={`Jo orders ${SLA_RESPONSE_MIN} min (wall clock) ki deadline ke BAAD respond hue — yaani response SLA breach. Jinpe abhi tak baat hui hi nahi, wo yahan nahi aate; wo upar Response breach card mein hain.`}
                   />
                   <SlaTh
                     label="Response TAT"
