@@ -1079,6 +1079,78 @@ const CATS = [
   },
 ];
 
+/* ── NAYI ENTRY KA HIGHLIGHT ────────────────────────────────────────────
+   Pichhle 3 ghante mein aayi entry card pe green border + "NEW" chip ke
+   saath dikhti hai, taaki board pe turant nazar aa jaye. 3 ghante baad
+   highlight apne aap hat jaata hai (card khud har minute check karta hai). */
+const RECENT_MS = 3 * 60 * 60 * 1000;
+function isRecentEntry(x) {
+  const ts = createdTs(x);
+  if (!ts) return false;
+  const t = new Date(String(ts).replace(' ', 'T')).getTime();
+  if (isNaN(t)) return false;
+  const diff = Date.now() - t;
+  return diff >= 0 && diff < RECENT_MS;
+}
+function agoText(ts) {
+  const t = new Date(String(ts || '').replace(' ', 'T')).getTime();
+  if (isNaN(t)) return '';
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return 'abhi';
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h} ghanta${h > 1 ? 'e' : ''}`;
+}
+
+/* ── TEST ENTRY ─────────────────────────────────────────────────────────
+   Ansh ke number pe banayi test entry kisi store ya head ko nahi dikhni
+   chahiye. Row Supabase mein rehti hai — bas app ki har list (board,
+   dashboard, SLA, search, sales tracker) se chhaant di jaati hai.
+   Dekhne ke liye app ke URL mein ?test=1 lagao, band karne ke liye
+   ?test=0. Customer tracking link pe ye filter NAHI lagta — wahi to
+   test karna hota hai. */
+const TEST_PHONE = '9354553030';
+const TEST_STORE = 'TST';
+const onlyDigits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+function isTestRow(r) {
+  if (!r || typeof r !== 'object') return false;
+  const ph = `${onlyDigits(r.customer_phone)} ${onlyDigits(r.phone)}`;
+  if (ph.includes(TEST_PHONE)) return true;
+  const code = String(r.store_code || r.branch_code || r.store || '')
+    .trim()
+    .toUpperCase();
+  if (code === TEST_STORE) return true;
+  const inv = String(r.invoice_number || '').trim().toUpperCase();
+  if (inv.startsWith(TEST_STORE + '/')) return true;
+  return (
+    String(r.salesperson || r.sales_person || '').trim().toUpperCase() === 'TEST'
+  );
+}
+const TEST_MODE = (() => {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const v = p.get('test');
+    if (v === '1') {
+      try {
+        window.localStorage.setItem('hjs_test', '1');
+      } catch (_) {}
+      return true;
+    }
+    if (v === '0') {
+      try {
+        window.localStorage.removeItem('hjs_test');
+      } catch (_) {}
+      return false;
+    }
+    return window.localStorage.getItem('hjs_test') === '1';
+  } catch (_) {
+    return false;
+  }
+})();
+// har list isi se guzarti hai — test mode off = test rows gayab
+const hideTest = (rows) =>
+  TEST_MODE ? rows || [] : (rows || []).filter((r) => !isTestRow(r));
+
 function rowToDelivery(r) {
   const branch = deriveBranch(r);
   return {
@@ -1311,9 +1383,9 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        (await sbList(session.authStore, session.pw, fullHistory ? 0 : 60)).map(
-          rowToDelivery,
-        ),
+        hideTest(
+          await sbList(session.authStore, session.pw, fullHistory ? 0 : 60),
+        ).map(rowToDelivery),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1366,7 +1438,7 @@ export default function App() {
     const t = setTimeout(async () => {
       try {
         const res = await sbSearch(session.authStore, session.pw, q);
-        if (alive) setRemoteRows((res || []).map(rowToDelivery));
+        if (alive) setRemoteRows(hideTest(res).map(rowToDelivery));
       } catch (_) {
         if (alive) setRemoteRows([]);
       }
@@ -4804,11 +4876,32 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
+  const recent = !closed && isRecentEntry(d);
+  const testRow = TEST_MODE && isTestRow(d._raw);
+  // chip pe "12 min" purana na dikhe — recent card har minute khud refresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!recent) return;
+    const id = setInterval(() => setTick((v) => v + 1), 60000);
+    return () => clearInterval(id);
+  }, [recent]);
   return (
     <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
+      className={
+        cancelled ? 'card is-cancelled' : recent ? 'card is-recent' : 'card'
+      }
       onClick={onOpen}
     >
+      {(recent || testRow) && (
+        <div>
+          {recent && (
+            <span className="new-chip">
+              <span className="new-dot" /> NEW · {agoText(createdTs(d))}
+            </span>
+          )}
+          {testRow && <span className="test-chip">TEST</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -6421,7 +6514,7 @@ function SalesTrackPage() {
       try {
         const res = await sbSalesSearch(term);
         if (alive) {
-          setSRows(res || []);
+          setSRows(hideTest(res));
           setSState('done');
         }
       } catch (_) {
@@ -6464,7 +6557,7 @@ function SalesTrackPage() {
     const [f, t] = bounds();
     try {
       const res = await sbSalesMatrix(f, t, statusFilter);
-      setMatrix(res || []);
+      setMatrix(hideTest(res));
       setMState('done');
     } catch (e) {
       setMErr(e.message || 'error');
@@ -6496,7 +6589,7 @@ function SalesTrackPage() {
     const [f, t] = bounds();
     try {
       const res = await sbSalesList(sales, store, f, t, statusFilter);
-      setRows(res || []);
+      setRows(hideTest(res));
       setCState('done');
     } catch (e) {
       setCState('error');
@@ -8108,6 +8201,11 @@ function StyleTag() {
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+      .card.is-recent { border-color: ${T.greenBright}; box-shadow: 0 0 0 2px rgba(46,125,50,.13); }
+      .new-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; color: ${T.green}; background: ${T.mint}; border: 1px solid #CFE3D1; border-radius: 999px; padding: 3px 9px; margin-bottom: 9px; }
+      .new-dot { width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; display: inline-block; animation: newpulse 1.6s ease-in-out infinite; }
+      @keyframes newpulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+      .test-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; color: ${T.violet}; background: ${T.violetSoft}; border-radius: 999px; padding: 3px 9px; margin-bottom: 9px; margin-left: 6px; }
       .card.is-cancelled { background: #FCEFEA; border-color: #EAD0C6; }
       .card.is-cancelled:hover { border-color: #DFB9AC; }
       .cancel-note { display: flex; align-items: flex-start; gap: 10px; background: ${T.redSoft}; border: 1px solid #e9cfc4; color: ${T.red}; border-radius: 12px; padding: 12px 14px; margin-top: 14px; font-size: 13.5px; }
