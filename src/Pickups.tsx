@@ -1004,6 +1004,15 @@ const CATS = [
   },
 ];
 
+/* board/list hamesha newest-first — RPC ya paging ka order badle to bhi
+   nayi entry apne stage mein sabse upar rahe */
+function tsNum(x) {
+  const v = createdTs(x);
+  const t = new Date(String(v || '').replace(' ', 'T')).getTime();
+  return isNaN(t) ? 0 : t;
+}
+const newestFirst = (list) => [...(list || [])].sort((a, b) => tsNum(b) - tsNum(a));
+
 /* ── NAYI ENTRY KA HIGHLIGHT ────────────────────────────────────────────
    Pichhle 3 ghante mein aayi entry card pe green border + "NEW" chip ke
    saath dikhti hai, taaki board pe turant nazar aa jaye. 3 ghante baad
@@ -1333,9 +1342,11 @@ export default function App({
     setError(null);
     try {
       setDeliveries(
-        hideTest(
-          await sbList(session.authStore, session.pw, fullHistory ? 0 : 90),
-        ).map(rowToDelivery),
+        newestFirst(
+          hideTest(
+            await sbList(session.authStore, session.pw, fullHistory ? 0 : 90),
+          ).map(rowToDelivery),
+        ),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1450,7 +1461,7 @@ export default function App({
     const t = setTimeout(async () => {
       try {
         const res = await sbSearch(session.authStore, session.pw, hostSearch);
-        if (alive) setRemoteRows(hideTest(res).map(rowToDelivery));
+        if (alive) setRemoteRows(newestFirst(hideTest(res).map(rowToDelivery)));
       } catch (_) {
         if (alive) setRemoteRows([]);
       }
