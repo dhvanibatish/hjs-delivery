@@ -1188,7 +1188,11 @@ function toggleTestMode() {
 if (typeof window !== 'undefined' && !window.__hjsTestKey) {
   window.__hjsTestKey = true;
   window.addEventListener('keydown', (e) => {
-    if (e.altKey && e.shiftKey && String(e.key || '').toLowerCase() === 't') {
+    // Mac pe Option+Shift+T se e.key ek special character ban jaata hai,
+    // isliye physical key (e.code) dekhte hain — dono OS pe kaam karta hai.
+    const isT =
+      e.code === 'KeyT' || String(e.key || '').toLowerCase() === 't';
+    if (e.altKey && e.shiftKey && isT) {
       e.preventDefault();
       toggleTestMode();
     }
@@ -1324,6 +1328,21 @@ function useEmbedFlag() {
 }
 
 /* ════════════════════════════════════════════════════════════════ APP */
+/* Test mode on hai ya nahi, ye hamesha dikhta rahe — chahe koi bhi layout ho.
+   Click ya Alt+Shift+T se off. */
+function TestModeBadge() {
+  if (!TEST_MODE) return null;
+  return (
+    <div
+      className="test-mode-badge"
+      title="Test mode ON — test entries dikh rahi hain. Band karne ke liye click karo (ya Alt+Shift+T)."
+      onClick={toggleTestMode}
+    >
+      TEST MODE · ON
+    </div>
+  );
+}
+
 export default function App() {
   useEmbedFlag();
   // Tracking routes (Netlify SPA — query params + optional /track path):
@@ -2078,6 +2097,7 @@ export default function App() {
         />
       )}
       {toast && <Toast msg={toast} />}
+      <TestModeBadge />
     </div>
   );
 }
@@ -4400,15 +4420,6 @@ function Topbar({
         </div>
         <span>Healthy Jeena Sikho</span>
       </div>
-      {TEST_MODE && (
-        <span
-          className="test-mode-badge"
-          title="Test mode on — test entries dikh rahi hain. Alt+Shift+T se band karo."
-          onClick={toggleTestMode}
-        >
-          TEST MODE
-        </span>
-      )}
       <div className="tb-search">
         <Search
           size={16}
@@ -8261,7 +8272,7 @@ function StyleTag() {
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
-      .test-mode-badge { cursor: pointer; font-size: 10.5px; font-weight: 800; letter-spacing: .5px; color: ${T.violet}; background: ${T.violetSoft}; border: 1px solid #DBD3F0; border-radius: 999px; padding: 4px 10px; margin-left: 10px; white-space: nowrap; }
+      .test-mode-badge { position: fixed; right: 16px; bottom: 16px; z-index: 9999; cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: .5px; color: #fff; background: ${T.violet}; border-radius: 999px; padding: 8px 14px; white-space: nowrap; box-shadow: 0 6px 18px rgba(107,91,154,.35); }
       .card.is-recent { border-color: ${T.greenBright}; box-shadow: 0 0 0 2px rgba(46,125,50,.13); }
       .new-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; color: ${T.green}; background: ${T.mint}; border: 1px solid #CFE3D1; border-radius: 999px; padding: 3px 9px; margin-bottom: 9px; }
       .new-dot { width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; display: inline-block; animation: newpulse 1.6s ease-in-out infinite; }
