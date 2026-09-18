@@ -1113,7 +1113,11 @@ function toggleTestMode() {
 if (typeof window !== 'undefined' && !window.__hjsTestKey) {
   window.__hjsTestKey = true;
   window.addEventListener('keydown', (e) => {
-    if (e.altKey && e.shiftKey && String(e.key || '').toLowerCase() === 't') {
+    // Mac pe Option+Shift+T se e.key ek special character ban jaata hai,
+    // isliye physical key (e.code) dekhte hain — dono OS pe kaam karta hai.
+    const isT =
+      e.code === 'KeyT' || String(e.key || '').toLowerCase() === 't';
+    if (e.altKey && e.shiftKey && isT) {
       e.preventDefault();
       toggleTestMode();
     }
