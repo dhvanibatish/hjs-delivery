@@ -1099,7 +1099,7 @@ function agoText(ts) {
   if (m < 1) return 'abhi';
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
-  return `${h} ghanta${h > 1 ? 'e' : ''}`;
+  return h > 1 ? `${h} ghante` : '1 ghanta';
 }
 
 /* ── TEST ENTRY ─────────────────────────────────────────────────────────
@@ -4876,7 +4876,9 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
-  const recent = !closed && isRecentEntry(d);
+  // NEW chip sirf pehli stage pe. Entry aage badh gayi to wo nayi nahi rahi,
+  // warna Out for Delivery / Delivered pe bhi green chip lagti rehti hai.
+  const recent = !closed && d.stage === STAGES[0].id && isRecentEntry(d);
   const testRow = TEST_MODE && isTestRow(d._raw);
   // chip pe "12 min" purana na dikhe — recent card har minute khud refresh
   const [, setTick] = useState(0);
