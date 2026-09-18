@@ -2692,6 +2692,16 @@ function slaAnalyze(x) {
   };
 }
 
+/* Median — beech wali value. Ek-do bahut lambe orders (jaise 3 din atka
+   hua) average ko upar kheench lete hain, median pe unka asar nahi padta.
+   Isliye "aam taur pe kitna time lagta hai" ka sahi jawab median hai. */
+function slaMedian(vals) {
+  const v = (vals || []).filter((n) => n != null && !isNaN(n)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 /* Heading ke saath ⓘ — hover (mobile pe tap) karne se definition ka chhota box.
    position:fixed use karte hain kyunki dash-block mein overflow:hidden hai —
    warna kam rows hone pe tooltip cut ho jaata. */
@@ -2772,7 +2782,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
   const [from, setFrom] = useState(todayStr());
   const [to, setTo] = useState(todayStr());
   const [store, setStore] = useState('ALL');
-  const [view, setView] = useState('stores'); // stores | boys | adopt
+  const [view, setView] = useState('stores'); // stores | boys | adopt | median
   const [sel, setSel] = useState(null); // null = drill band
   const [alertOn, setAlertOn] = useState(null);
 
@@ -2921,6 +2931,14 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       avgCycle: avg('totalHrs'),
       avgResp: avgAll('respHrs'),
       avgDel: avg('delHrs'),
+      /* Median view — response pending orders pe bhi (jinpe baat ho chuki),
+         delivery sirf delivered orders pe. Average jaisa hi set, bas median. */
+      medResp: slaMedian(list.map((a) => a.respHrs)),
+      medCycle: slaMedian(dl.map((a) => a.totalHrs)),
+      medDel: slaMedian(dl.map((a) => a.delHrs)),
+      /* median kitne orders pe bana — chhote number pe median bhi jhool sakta hai */
+      nResp: list.filter((a) => a.respHrs != null).length,
+      nCycle: dl.filter((a) => a.totalHrs != null).length,
     };
   };
 
@@ -3214,6 +3232,15 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
             >
               <BarChart3 size={14} /> Dashboard
             </button>
+            <button
+              className={view === 'median' ? 'lt-btn active' : 'lt-btn'}
+              onClick={() => {
+                setView('median');
+                setSel(null);
+              }}
+            >
+              <Clock size={14} /> Median
+            </button>
           </div>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
             <option value="today">Aaj</option>
@@ -3391,6 +3418,136 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : view === 'median' ? (
+        <div className="dash-block">
+          <div className="dash-block-h">
+            Store-wise Median TAT · {rangeLabel}
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginTop: 3 }}>
+              Median = beech wala order. 1–2 bahut late orders iska number nahi bigaadte. Avg sirf
+              comparison ke liye — Avg median se bahut upar ho to kuch orders atke hue hain.
+            </div>
+          </div>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <SlaTh label="Store" rowSpan={2} />
+                  <SlaTh label="Orders" colSpan={2} group div />
+                  <SlaTh label="Response" colSpan={2} group div />
+                  <SlaTh label="Delivery" colSpan={3} group div />
+                </tr>
+                <tr>
+                  <SlaTh
+                    label="Total"
+                    center
+                    div
+                    info="Stores view jaisa hi set — MBC aur cancelled / duplicate / renewal isme nahi."
+                  />
+                  <SlaTh label="Delivered" center />
+                  <SlaTh
+                    label="Median"
+                    center
+                    div
+                    info="Entry aane se customer se baat hone tak — beech wale order ka time. Sirf wo orders jinpe baat ho chuki hai (pending bhi). Wall clock, 24x7."
+                  />
+                  <SlaTh
+                    label="Avg"
+                    center
+                    info="Same orders ka average — sirf comparison ke liye. Median se kaafi zyada ho to kuch orders ne bahut der lagayi."
+                  />
+                  <SlaTh
+                    label="Median"
+                    center
+                    div
+                    info="Entry aane se Item Delivered tak — beech wale order ka time. Sirf delivered orders."
+                  />
+                  <SlaTh
+                    label="Avg"
+                    center
+                    info="Same delivered orders ka average — sirf comparison ke liye."
+                  />
+                  <SlaTh
+                    label="Boy Median"
+                    center
+                    info="Out for Delivery se Delivered tak ka median — sirf delivery boy ka hissa."
+                  />
+                </tr>
+              </thead>
+              <tbody>
+                {storeStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="dash-empty">
+                      Is duration mein koi entry nahi
+                    </td>
+                  </tr>
+                ) : (
+                  [...storeStats, ...(storeStats.length > 1 ? [{ st: null, s: overall }] : [])].map(
+                    ({ st, s }) => {
+                      const cell = cellFor({ store: st, person: null });
+                      const isAll = st == null;
+                      /* avg median ka 2x se zyada = outliers kheench rahe hain */
+                      const skew = (avg, med) =>
+                        avg != null && med != null && med > 0 && avg > med * 2;
+                      const medCell = (v, n, div) => (
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            fontWeight: 800,
+                            ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+                          }}
+                        >
+                          {slaHrs(v)}
+                          {n != null && (
+                            <div style={{ fontSize: 10.5, fontWeight: 600, color: T.inkSoft }}>
+                              {n} orders
+                            </div>
+                          )}
+                        </td>
+                      );
+                      const avgCell = (avg, med) => (
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            color: skew(avg, med) ? T.amber : T.inkSoft,
+                            fontWeight: skew(avg, med) ? 700 : 500,
+                          }}
+                        >
+                          {slaHrs(avg)}
+                        </td>
+                      );
+                      return (
+                        <tr
+                          key={st || 'ALL'}
+                          style={isAll ? { background: T.slateSoft } : undefined}
+                        >
+                          <td className="dash-store">{isAll ? 'All stores' : branchLabel(st)}</td>
+                          {isAll ? (
+                            <>
+                              <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line, fontWeight: 800 }}>
+                                {s.total}
+                              </td>
+                              <td style={{ textAlign: 'center', fontWeight: 800 }}>{s.delivered}</td>
+                            </>
+                          ) : (
+                            <>
+                              {cell('all', s.total, T.green, true)}
+                              {cell('delivered', s.delivered, T.green)}
+                            </>
+                          )}
+                          {medCell(s.medResp, s.nResp, true)}
+                          {avgCell(s.avgResp, s.medResp)}
+                          {medCell(s.medCycle, s.nCycle, true)}
+                          {avgCell(s.avgCycle, s.medCycle)}
+                          <td style={{ textAlign: 'center' }}>{slaHrs(s.medDel)}</td>
+                        </tr>
+                      );
+                    },
+                  )
                 )}
               </tbody>
             </table>
