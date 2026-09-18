@@ -911,13 +911,19 @@ function makeEvent(toStage, fields, mode) {
   };
 }
 /* closed (cancelled/duplicate/renewal) mark hone pe timeline event */
-function makeClosedEvent(flag, remarks) {
+function makeClosedEvent(flag, remarks, atStage) {
+  // atStage = jis stage pe entry thi jab close/cancel hui. Isse pata chalta hai
+  // ki cancel store mein hua, raaste mein hua ya ghar pahunch ke.
+  const at = (STAGES[stageIndex(atStage)] || {}).label || '';
   return {
     ts: new Date().toISOString(),
     stage: flag,
     label: (CLOSED[flag] || {}).label || flag,
     action: 'Marked as',
-    fields: remarks ? { Remarks: remarks } : {},
+    fields: {
+      ...(remarks ? { Remarks: remarks } : {}),
+      ...(at ? { 'Cancel at stage': at } : {}),
+    },
     ...actorStamp(),
   };
 }
@@ -1517,12 +1523,17 @@ export default function App() {
   };
 
   // closed mark (cancelled/duplicate/renewal) — status column mein likha jaata hai
-  const closeEntry = async (invoiceId, flag, remarks) => {
+  // baseLog = jab caller ne app_log fresh fetch kiya ho (cancelOrder). Warna
+  // local row ka log. Dono soorat mein purani history overwrite nahi hoti.
+  const closeEntry = async (invoiceId, flag, remarks, baseLog) => {
     const cur = deliveries.find((x) => x.invoice_id === invoiceId);
     const patch = {
       status: CLOSED_STATUS[flag],
       updated_at: new Date().toISOString(),
-      app_log: [...existingLog(cur), makeClosedEvent(flag, remarks)],
+      app_log: [
+        ...(Array.isArray(baseLog) ? baseLog : existingLog(cur)),
+        makeClosedEvent(flag, remarks, cur && cur.stage),
+      ],
     };
     if (!CONFIGURED) {
       setDeliveries((prev) =>
@@ -1542,6 +1553,27 @@ export default function App() {
     } catch (e) {
       ping('Save failed: ' + e.message);
     }
+  };
+
+  // Drawer ka "Cancel order" — kisi bhi stage se. Kaaran zaroori hai.
+  const cancelOrder = async (invoiceId, reason) => {
+    const cur = deliveries.find((x) => x.invoice_id === invoiceId);
+    if (!cur) return;
+    let baseLog = existingLog(cur);
+    // list _lite app_log ke bina aati hai. Agar drawer ka log abhi tak load
+    // nahi hua, to pehle laao — warna purani timeline mit jayegi.
+    if (CONFIGURED && cur._raw && cur._raw.app_log === undefined) {
+      try {
+        const rows = await sbLogs(session.authStore, session.pw, invoiceId);
+        const row = (rows || []).find((x) => x.invoice_id === invoiceId);
+        if (row && Array.isArray(row.app_log)) baseLog = row.app_log;
+        mergeLogs(rows);
+      } catch (e) {
+        ping('Timeline load nahi hua — thodi der baad dobara try karo');
+        return;
+      }
+    }
+    await closeEntry(invoiceId, 'cancelled', reason, baseLog);
   };
 
   // core move/edit apply — modal aur inline card dono use karte hain
@@ -1894,6 +1926,7 @@ export default function App() {
             setModal({ invoiceId: active.invoice_id, toStage, mode: 'move' })
           }
           onSetStage={(toStage) => setStage(active.invoice_id, toStage)}
+          onCancelOrder={(reason) => cancelOrder(active.invoice_id, reason)}
           onEditStage={(sid) =>
             setModal({
               invoiceId: active.invoice_id,
@@ -4886,8 +4919,20 @@ function FooterTotal({ items }) {
 }
 
 /* ══════════════════════════════════════════════════════════════ DRAWER */
-function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onDelete }) {
+function Drawer({
+  d,
+  onClose,
+  onAdvance,
+  onSetStage,
+  onEditStage,
+  onCancelOrder,
+  canDelete,
+  onDelete,
+}) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
   const cancelled = !!closedMeta; // "closed" = cancelled / duplicate / renewal
@@ -5020,6 +5065,13 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
     return merged.sort((a, b) => stageIndex(a.stage) - stageIndex(b.stage));
   })();
   const hasClosedLog = appLog.some((e) => e && CLOSED[e.stage]);
+  // app se cancel hui entry — uska kaaran, stage aur kisne kiya (log se)
+  const closedEv = cancelled
+    ? [...rawLog].reverse().find((e) => e && CLOSED[e.stage])
+    : null;
+  const closedFields = (closedEv && closedEv.fields) || {};
+  const closedReason = closedFields.Remarks || '';
+  const closedAtStage = closedFields['Cancel at stage'] || '';
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -5077,11 +5129,18 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
               ) : (
                 <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
               )}
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 800 }}>{closedMeta.title}</div>
                 <div style={{ fontSize: 12, marginTop: 2, opacity: 0.85 }}>
-                  {closedMeta.note}
+                  {closedEv
+                    ? `App se mark hua${closedAtStage ? ` — ${closedAtStage} stage pe` : ''} · ${actorText(closedEv)}`
+                    : closedMeta.note}
                 </div>
+                {closedReason && (
+                  <div style={{ fontSize: 12.5, marginTop: 6, fontWeight: 700 }}>
+                    Kaaran: <span style={{ fontWeight: 600 }}>{closedReason}</span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="sec-title" style={{ marginTop: 16 }}>
@@ -5350,6 +5409,82 @@ function Drawer({ d, onClose, onAdvance, onSetStage, onEditStage, canDelete, onD
           </div>
         )}
 
+        {!cancelled && onCancelOrder && (
+          <div className="cancel-zone">
+            {cancelOpen ? (
+              <>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: T.red,
+                    marginBottom: 8,
+                  }}
+                >
+                  Ye order cancel ho raha hai — <b>{sLabel(d.stage)}</b> stage pe
+                </div>
+                <textarea
+                  className="inp"
+                  rows={3}
+                  autoFocus
+                  placeholder="Kaaran likho — kisne bola (customer / sales) aur kyun…"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                />
+                {!cancelReason.trim() && (
+                  <div className="req-note" style={{ marginTop: 8 }}>
+                    Kaaran likhe bina cancel nahi hoga.
+                  </div>
+                )}
+                <div className="danger-confirm" style={{ marginTop: 10 }}>
+                  <button
+                    className="btn-danger"
+                    disabled={!cancelReason.trim() || cancelling}
+                    style={
+                      !cancelReason.trim() || cancelling
+                        ? { opacity: 0.5, cursor: 'not-allowed' }
+                        : null
+                    }
+                    onClick={async () => {
+                      const reason = cancelReason.trim();
+                      if (!reason || cancelling) return;
+                      setCancelling(true);
+                      try {
+                        await onCancelOrder(reason);
+                      } finally {
+                        setCancelling(false);
+                        setCancelOpen(false);
+                        setCancelReason('');
+                      }
+                    }}
+                  >
+                    <AlertTriangle size={15} />{' '}
+                    {cancelling ? 'Ho raha hai…' : 'Haan, cancel karo'}
+                  </button>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => {
+                      setCancelOpen(false);
+                      setCancelReason('');
+                    }}
+                  >
+                    Rehne do
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button className="btn-danger" onClick={() => setCancelOpen(true)}>
+                <AlertTriangle size={15} /> Cancel order
+              </button>
+            )}
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 8 }}>
+              Kisi bhi stage se cancel ho sakta hai · kaaran, stage aur naam
+              timeline mein save hote hain. Customer ke tracking link pe sirf
+              "order cancelled" dikhta hai — kaaran nahi.
+            </div>
+          </div>
+        )}
+
         {canDelete && (
           <div className="danger-zone">
             {confirmDel ? (
@@ -5524,7 +5659,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
   // hi final details bhar ke entry seedha Item Delivered ho jaati hai.
   const mbc = toStage === 'scheduled' && f.person === 'MBC';
   const canSave = flagSel
-    ? true
+    ? f.invoiceFlag !== 'cancelled' || !!String(f.remarks || '').trim()
     : toStage === 'talked'
       ? !!(f.date && f.time) // baat hui → date + time
       : toStage === 'scheduled'
@@ -5611,8 +5746,10 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                   }}
                 >
                   Ye entry <b>{CLOSED[f.invoiceFlag].label}</b> mark hokar active
-                  list se hat jayegi — date/time bharne ki zarurat nahi. Neeche
-                  save dabao.
+                  list se hat jayegi — date/time bharne ki zarurat nahi.
+                  {f.invoiceFlag === 'cancelled'
+                    ? ' Neeche Remarks mein kaaran likhna zaroori hai.'
+                    : ' Neeche save dabao.'}
                 </div>
               ) : (
                 <>
@@ -5895,15 +6032,30 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
             </>
           )}
 
-          <Field label="Remarks">
+          <Field
+            label={
+              flagSel && f.invoiceFlag === 'cancelled'
+                ? 'Cancel ka kaaran *'
+                : 'Remarks'
+            }
+          >
             <textarea
               className="inp"
               rows={2}
-              placeholder="Optional notes…"
+              placeholder={
+                flagSel && f.invoiceFlag === 'cancelled'
+                  ? 'Kisne bola (customer / sales) aur kyun…'
+                  : 'Optional notes…'
+              }
               value={f.remarks}
               onChange={(e) => set('remarks', e.target.value)}
             />
           </Field>
+          {flagSel &&
+            f.invoiceFlag === 'cancelled' &&
+            !String(f.remarks || '').trim() && (
+              <div className="req-note">Kaaran likhe bina cancel nahi hoga.</div>
+            )}
         </div>
         <div className="modal-foot">
           <button className="btn-ghost" onClick={onClose}>
@@ -7982,6 +8134,8 @@ function StyleTag() {
 
       .flag-note { border-radius: 12px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; line-height: 1.5; }
       .flag-note b { font-weight: 800; }
+      .cancel-zone { margin-top: 22px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
+      .cancel-zone textarea.inp { width: 100%; }
       .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e9cfc4; }
       .danger-confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .btn-danger { background: ${T.redSoft}; color: ${T.red}; border: 1px solid #e9cfc4; border-radius: 11px; padding: 11px 16px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .12s, border-color .12s; }
