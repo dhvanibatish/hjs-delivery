@@ -1337,6 +1337,13 @@ export default function App({
   const [activeId, setActiveId] = useState(null);
   const [modal, setModal] = useState(null); // { invoiceId, toStage, mode }
   const [search, setSearch] = useState('');
+  // Test mode ka sabse pakka switch: search box mein apna number type karo
+  // (9354553030) — test mode on ho jaata hai. URL, iframe, keyboard kisi pe
+  // depend nahi karta. Band karne ke liye neeche-daayein wale badge pe click.
+  useEffect(() => {
+    if (TEST_MODE) return;
+    if (onlyDigits(search).includes(TEST_PHONE)) toggleTestMode();
+  }, [search]);
   const [toast, setToast] = useState(null);
   const [viewMode, setViewMode] = useState('today'); // today|yesterday|month|custom|archived
   const [vFrom, setVFrom] = useState(() => todayStr());
