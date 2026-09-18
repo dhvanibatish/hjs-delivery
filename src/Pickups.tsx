@@ -7343,6 +7343,14 @@ function TrackResult({ row }) {
   const log = Array.isArray(row.app_log) ? row.app_log : [];
   // closed: cancel/mark se pehle jahan tak pahunchi thi (app_log se)
   const reachedIdx = cancelled ? reachedIdxFromLog(log) : idx;
+  // cancel/close kab hua — app_log ke closed event se, warna row ka
+  // updated_at. Customer ko sirf time dikhta hai, kaaran nahi.
+  const closedTs = cancelled
+    ? (() => {
+        const ev = [...log].reverse().find((e) => e && CLOSED[e.stage] && e.ts);
+        return (ev && ev.ts) || row.updated_at || null;
+      })()
+    : null;
   const flowIdx = cancelled ? reachedIdx : idx; // kitni stages timeline mein dikhein
   const Icon = equipIcon(equipment);
   const person = row.delivery_partner || row.app_pickup_person || null;
@@ -7557,6 +7565,9 @@ function TrackResult({ row }) {
                 {closedMeta.label}
               </div>
               <div className="ttl-desc">{closedMeta.cust}</div>
+              {closedTs && (
+                <div className="ttl-time">Updated: {fmtDateTime(closedTs)}</div>
+              )}
             </div>
           </div>
         )}
