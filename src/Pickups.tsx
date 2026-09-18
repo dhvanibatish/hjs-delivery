@@ -1061,26 +1061,64 @@ function isTestRow(r) {
   );
 }
 const TEST_MODE = (() => {
+  // ?test=1 app ke apne URL pe ho ya us page pe jisme app embed hai — dono
+  // dekho. Cross-origin parent padha nahi ja sakta, wo throw karega → ignore.
+  const qs = [];
+  const grab = (w) => {
+    try {
+      if (w && w.location && typeof w.location.search === 'string')
+        qs.push(w.location.search);
+    } catch (_) {}
+  };
   try {
-    const p = new URLSearchParams(window.location.search);
-    const v = p.get('test');
-    if (v === '1') {
-      try {
-        window.localStorage.setItem('hjs_test', '1');
-      } catch (_) {}
-      return true;
-    }
-    if (v === '0') {
-      try {
-        window.localStorage.removeItem('hjs_test');
-      } catch (_) {}
-      return false;
-    }
+    grab(window);
+    if (window.parent !== window) grab(window.parent);
+    if (window.top !== window && window.top !== window.parent) grab(window.top);
+  } catch (_) {}
+  let v = null;
+  qs.forEach((q) => {
+    try {
+      const got = new URLSearchParams(q).get('test');
+      if (got !== null && v === null) v = got;
+    } catch (_) {}
+  });
+  const store = (val) => {
+    try {
+      if (val) window.localStorage.setItem('hjs_test', '1');
+      else window.localStorage.removeItem('hjs_test');
+    } catch (_) {}
+  };
+  if (v === '1') {
+    store(true);
+    return true;
+  }
+  if (v === '0') {
+    store(false);
+    return false;
+  }
+  try {
     return window.localStorage.getItem('hjs_test') === '1';
   } catch (_) {
     return false;
   }
 })();
+// iframe ke andar URL apne haath mein nahi hota — Alt+Shift+T se toggle.
+function toggleTestMode() {
+  try {
+    if (TEST_MODE) window.localStorage.removeItem('hjs_test');
+    else window.localStorage.setItem('hjs_test', '1');
+    window.location.reload();
+  } catch (_) {}
+}
+if (typeof window !== 'undefined' && !window.__hjsTestKey) {
+  window.__hjsTestKey = true;
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && e.shiftKey && String(e.key || '').toLowerCase() === 't') {
+      e.preventDefault();
+      toggleTestMode();
+    }
+  });
+}
 // har list isi se guzarti hai — test mode off = test rows gayab
 const hideTest = (rows) =>
   TEST_MODE ? rows || [] : (rows || []).filter((r) => !isTestRow(r));
