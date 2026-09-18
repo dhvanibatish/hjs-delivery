@@ -1136,26 +1136,64 @@ function isTestRow(r) {
   );
 }
 const TEST_MODE = (() => {
+  // ?test=1 app ke apne URL pe ho ya us page pe jisme app embed hai — dono
+  // dekho. Cross-origin parent padha nahi ja sakta, wo throw karega → ignore.
+  const qs = [];
+  const grab = (w) => {
+    try {
+      if (w && w.location && typeof w.location.search === 'string')
+        qs.push(w.location.search);
+    } catch (_) {}
+  };
   try {
-    const p = new URLSearchParams(window.location.search);
-    const v = p.get('test');
-    if (v === '1') {
-      try {
-        window.localStorage.setItem('hjs_test', '1');
-      } catch (_) {}
-      return true;
-    }
-    if (v === '0') {
-      try {
-        window.localStorage.removeItem('hjs_test');
-      } catch (_) {}
-      return false;
-    }
+    grab(window);
+    if (window.parent !== window) grab(window.parent);
+    if (window.top !== window && window.top !== window.parent) grab(window.top);
+  } catch (_) {}
+  let v = null;
+  qs.forEach((q) => {
+    try {
+      const got = new URLSearchParams(q).get('test');
+      if (got !== null && v === null) v = got;
+    } catch (_) {}
+  });
+  const store = (val) => {
+    try {
+      if (val) window.localStorage.setItem('hjs_test', '1');
+      else window.localStorage.removeItem('hjs_test');
+    } catch (_) {}
+  };
+  if (v === '1') {
+    store(true);
+    return true;
+  }
+  if (v === '0') {
+    store(false);
+    return false;
+  }
+  try {
     return window.localStorage.getItem('hjs_test') === '1';
   } catch (_) {
     return false;
   }
 })();
+// iframe ke andar URL apne haath mein nahi hota — Alt+Shift+T se toggle.
+function toggleTestMode() {
+  try {
+    if (TEST_MODE) window.localStorage.removeItem('hjs_test');
+    else window.localStorage.setItem('hjs_test', '1');
+    window.location.reload();
+  } catch (_) {}
+}
+if (typeof window !== 'undefined' && !window.__hjsTestKey) {
+  window.__hjsTestKey = true;
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && e.shiftKey && String(e.key || '').toLowerCase() === 't') {
+      e.preventDefault();
+      toggleTestMode();
+    }
+  });
+}
 // har list isi se guzarti hai — test mode off = test rows gayab
 const hideTest = (rows) =>
   TEST_MODE ? rows || [] : (rows || []).filter((r) => !isTestRow(r));
@@ -4362,6 +4400,15 @@ function Topbar({
         </div>
         <span>Healthy Jeena Sikho</span>
       </div>
+      {TEST_MODE && (
+        <span
+          className="test-mode-badge"
+          title="Test mode on — test entries dikh rahi hain. Alt+Shift+T se band karo."
+          onClick={toggleTestMode}
+        >
+          TEST MODE
+        </span>
+      )}
       <div className="tb-search">
         <Search
           size={16}
@@ -8214,6 +8261,7 @@ function StyleTag() {
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+      .test-mode-badge { cursor: pointer; font-size: 10.5px; font-weight: 800; letter-spacing: .5px; color: ${T.violet}; background: ${T.violetSoft}; border: 1px solid #DBD3F0; border-radius: 999px; padding: 4px 10px; margin-left: 10px; white-space: nowrap; }
       .card.is-recent { border-color: ${T.greenBright}; box-shadow: 0 0 0 2px rgba(46,125,50,.13); }
       .new-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; color: ${T.green}; background: ${T.mint}; border: 1px solid #CFE3D1; border-radius: 999px; padding: 3px 9px; margin-bottom: 9px; }
       .new-dot { width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; display: inline-block; animation: newpulse 1.6s ease-in-out infinite; }
