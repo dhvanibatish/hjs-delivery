@@ -1079,6 +1079,15 @@ const CATS = [
   },
 ];
 
+/* board/list hamesha newest-first — RPC ya paging ka order badle to bhi
+   nayi entry apne stage mein sabse upar rahe */
+function tsNum(x) {
+  const v = createdTs(x);
+  const t = new Date(String(v || '').replace(' ', 'T')).getTime();
+  return isNaN(t) ? 0 : t;
+}
+const newestFirst = (list) => [...(list || [])].sort((a, b) => tsNum(b) - tsNum(a));
+
 /* ── NAYI ENTRY KA HIGHLIGHT ────────────────────────────────────────────
    Pichhle 3 ghante mein aayi entry card pe green border + "NEW" chip ke
    saath dikhti hai, taaki board pe turant nazar aa jaye. 3 ghante baad
@@ -1383,9 +1392,11 @@ export default function App() {
     setError(null);
     try {
       setDeliveries(
-        hideTest(
-          await sbList(session.authStore, session.pw, fullHistory ? 0 : 60),
-        ).map(rowToDelivery),
+        newestFirst(
+          hideTest(
+            await sbList(session.authStore, session.pw, fullHistory ? 0 : 60),
+          ).map(rowToDelivery),
+        ),
       );
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -1438,7 +1449,7 @@ export default function App() {
     const t = setTimeout(async () => {
       try {
         const res = await sbSearch(session.authStore, session.pw, q);
-        if (alive) setRemoteRows(hideTest(res).map(rowToDelivery));
+        if (alive) setRemoteRows(newestFirst(hideTest(res).map(rowToDelivery)));
       } catch (_) {
         if (alive) setRemoteRows([]);
       }
@@ -2152,7 +2163,7 @@ function Dashboard({ deliveries, onOpen }) {
     if (sel.store) list = list.filter((x) => x.branch === sel.store);
     const fn =
       metric[sel.kind] || stageMetric[sel.kind] || (() => true);
-    return list.filter(fn).sort((a, b) => (createdTs(b) || 0) - (createdTs(a) || 0));
+    return newestFirst(list.filter(fn));
     // eslint-disable-next-line
   }, [base, sel]);
 
@@ -2892,7 +2903,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
         : pick[sel.kind] || (() => true);
     return list
       .filter(fn)
-      .sort((a, b) => (createdTs(b.x) || 0) - (createdTs(a.x) || 0));
+      .sort((a, b) => tsNum(b.x) - tsNum(a.x));
     // eslint-disable-next-line
   }, [rows, adoptData, closedRows, overdueAll, sel]);
 
