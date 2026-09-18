@@ -1926,6 +1926,7 @@ export default function App({
               onCommit={(dd, toStage, fields) =>
                 applyMove(dd.invoice_id, toStage, fields, 'move')
               }
+              onCancel={(dd, reason) => cancelOrder(dd.invoice_id, reason)}
               focus={lastMove}
             />
           </>
@@ -2079,6 +2080,7 @@ export default function App({
               onCommit={(dd, toStage, fields) =>
                 applyMove(dd.invoice_id, toStage, fields, 'move')
               }
+              onCancel={(dd, reason) => cancelOrder(dd.invoice_id, reason)}
               focus={lastMove}
             />
               </>
@@ -2144,6 +2146,7 @@ function EntriesView({
   onOpen,
   onMove,
   onCommit,
+  onCancel,
   focus,
 }) {
   const isMobile = useIsMobile();
@@ -2185,6 +2188,7 @@ function EntriesView({
         onOpen={onOpen}
         onMove={onMove}
         onCommit={onCommit}
+        onCancel={onCancel}
       />
     );
   }
@@ -2200,6 +2204,7 @@ function EntriesView({
         onOpen={onOpen}
         onMove={onMove}
         onCommit={onCommit}
+        onCancel={onCancel}
       />
     );
   }
@@ -2216,6 +2221,7 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          onCancel={onCancel}
         />
       ) : isMobile ? (
         <MobileBoard
@@ -2224,6 +2230,7 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          onCancel={onCancel}
           focus={focus}
         />
       ) : (
@@ -2233,6 +2240,7 @@ function EntriesView({
           onOpen={onOpen}
           onMove={onMove}
           onCommit={onCommit}
+          onCancel={onCancel}
         />
       )}
       {viewMode !== 'archived' && <FooterTotal items={items} />}
@@ -2269,7 +2277,7 @@ const STAT_CATS = {
 };
 
 /* Stat card click → us category ki entries grid + Back to stages */
-function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
+function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit, onCancel }) {
   const meta = STAT_CATS[cat] || STAT_CATS.total;
   // Archived mein "Total" = saari archived entries (delivered + cancelled etc.)
   const allArchived = cat === 'total' && viewMode === 'archived';
@@ -2305,6 +2313,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
               onOpen={() => onOpen(x)}
               onMove={onMove}
               onCommit={onCommit}
+              onCancel={onCancel}
             />
           ))}
         </div>
@@ -2315,7 +2324,7 @@ function DrillView({ cat, items, viewMode, onBack, onOpen, onMove, onCommit }) {
 
 /* Archived board → Delivered / Cancelled dropdown se choose karo. Dot ka
    color bhi badalta hai (green = delivered, red = cancelled). */
-function ArchivedList({ items, onOpen, onMove, onCommit }) {
+function ArchivedList({ items, onOpen, onMove, onCommit, onCancel }) {
   const [mode, setMode] = useState('delivered');
   const meta =
     mode === 'cancelled'
@@ -2366,6 +2375,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
               onOpen={() => onOpen(x)}
               onMove={onMove}
               onCommit={onCommit}
+              onCancel={onCancel}
             />
           ))}
         </div>
@@ -2378,7 +2388,7 @@ function ArchivedList({ items, onOpen, onMove, onCommit }) {
    Stat categories (Pending / Delivered / Cancelled / Renewal / Duplicate) —
    har card clickable + collapsible. Click karo to us category ki entries
    khulti hain. Ismein koi stage-wise board NAHI hota.                    */
-function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
+function CategoriesView({ items, loading, onOpen, onMove, onCommit, onCancel }) {
   const [open, setOpen] = useState('pending'); // default: Pending khula
   if (loading && items.length === 0)
     return <div className="loading">Pickups load ho rahe hain…</div>;
@@ -2437,6 +2447,7 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
                           onOpen={() => onOpen(x)}
                           onMove={onMove}
                           onCommit={onCommit}
+                          onCancel={onCancel}
                         />
                       );
                     })}
@@ -4883,7 +4894,7 @@ function Stats({ items, viewMode, onDrill }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ BOARD */
-function Board({ items, loading, onOpen, onMove, onCommit }) {
+function Board({ items, loading, onOpen, onMove, onCommit, onCancel }) {
   if (loading && items.length === 0)
     return (
       <div className="loading">Supabase se pickups load ho rahe hain…</div>
@@ -4918,6 +4929,7 @@ function Board({ items, loading, onOpen, onMove, onCommit }) {
                   onOpen={() => onOpen(x)}
                   onMove={onMove}
                   onCommit={onCommit}
+                  onCancel={onCancel}
                 />
               ))}
             </div>
@@ -4929,7 +4941,7 @@ function Board({ items, loading, onOpen, onMove, onCommit }) {
 }
 
 /* Mobile: 4 stage tabs (accordion). Records tap karne pe hi khulte hain. */
-function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
+function MobileBoard({ items, loading, onOpen, onMove, onCommit, onCancel, focus }) {
   // Phone: sirf entry-waale stages dikhao. Accordion single-open.
   const active = STAGES.filter((s) => items.some((x) => x.stage === s.id));
   const activeIds = active.map((s) => s.id);
@@ -5015,6 +5027,7 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
                     onOpen={() => onOpen(x)}
                     onMove={onMove}
                     onCommit={onCommit}
+                    onCancel={onCancel}
                   />
                 ))}
               </div>
@@ -5026,13 +5039,16 @@ function MobileBoard({ items, loading, onOpen, onMove, onCommit, focus }) {
   );
 }
 
-function Card({ d, stage, onOpen, onMove, onCommit }) {
+function Card({ d, stage, onOpen, onMove, onCommit, onCancel }) {
   const resched = isResched(d);
   const Icon = equipIcon(d.equipment);
   const closed = isClosedStage(d.stage);
   const cancelled = d.stage === 'cancelled';
   const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const canInline = !!(next && onCommit); // inline move sirf jab commit handler ho
   // NEW chip sirf pehli stage pe. Entry aage badh gayi to wo nayi nahi rahi,
   // warna Out for Delivery / Delivered pe bhi green chip lagti rehti hai.
@@ -5175,6 +5191,66 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
       ) : (
         <div className="card-done">
           <Check size={13} /> Completed
+        </div>
+      )}
+      {!closed && onCancel && (
+        <div onClick={(e) => e.stopPropagation()}>
+          {cancelOpen ? (
+            <div className="card-cancel-box">
+              <textarea
+                className="inp"
+                rows={2}
+                autoFocus
+                placeholder="Cancel ka kaaran — kisne bola aur kyun…"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+              />
+              <div className="card-cancel-row">
+                <button
+                  className="card-cancel-go"
+                  disabled={!cancelReason.trim() || cancelling}
+                  style={
+                    !cancelReason.trim() || cancelling
+                      ? { opacity: 0.5, cursor: 'not-allowed' }
+                      : null
+                  }
+                  onClick={async () => {
+                    const reason = cancelReason.trim();
+                    if (!reason || cancelling) return;
+                    setCancelling(true);
+                    try {
+                      await onCancel(d, reason);
+                    } finally {
+                      setCancelling(false);
+                      setCancelOpen(false);
+                      setCancelReason('');
+                    }
+                  }}
+                >
+                  {cancelling ? 'Ho raha hai…' : 'Haan, cancel karo'}
+                </button>
+                <button
+                  className="card-cancel-no"
+                  onClick={() => {
+                    setCancelOpen(false);
+                    setCancelReason('');
+                  }}
+                >
+                  Rehne do
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="card-cancel"
+              onClick={() => {
+                setExpand(false);
+                setCancelOpen(true);
+              }}
+            >
+              <AlertTriangle size={12} /> Cancel pickup
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -7874,6 +7950,13 @@ function StyleTag() {
       .inline-move .modal-foot .btn-primary { flex: 1 1 auto; min-width: 0; padding: 12px 14px; text-align: center; }
       .card-next:hover { background: ${T.mint}; border-color: ${T.green}; }
       .card-done { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 700; color: ${T.green}; background: ${T.mint}; border-radius: 10px; padding: 8px; }
+      .card-cancel { width: 100%; margin-top: 7px; display: flex; align-items: center; justify-content: center; gap: 6px; background: transparent; border: 1px dashed #E3C3B8; color: ${T.red}; font-weight: 700; font-size: 11.5px; border-radius: 10px; padding: 7px 10px; cursor: pointer; }
+      .card-cancel:hover { background: ${T.redSoft}; }
+      .card-cancel-box { margin-top: 8px; background: ${T.redSoft}; border: 1px solid #E9CFC4; border-radius: 12px; padding: 9px; }
+      .card-cancel-box textarea.inp { width: 100%; }
+      .card-cancel-row { display: flex; gap: 7px; margin-top: 8px; }
+      .card-cancel-go { flex: 1; background: ${T.red}; color: #fff; border: none; border-radius: 9px; padding: 7px 10px; font-weight: 800; font-size: 11.5px; cursor: pointer; }
+      .card-cancel-no { background: #fff; border: 1px solid ${T.line}; color: ${T.inkSoft}; border-radius: 9px; padding: 7px 12px; font-weight: 700; font-size: 11.5px; cursor: pointer; }
       .card.is-recent { border-color: ${T.greenBright}; box-shadow: 0 0 0 2px rgba(46,125,50,.13); }
       .new-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; color: ${T.green}; background: ${T.mint}; border: 1px solid #CFE3D1; border-radius: 999px; padding: 3px 9px; margin-bottom: 9px; }
       .new-dot { width: 6px; height: 6px; border-radius: 50%; background: ${T.greenBright}; display: inline-block; animation: newpulse 1.6s ease-in-out infinite; }
