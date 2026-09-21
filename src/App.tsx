@@ -3018,6 +3018,8 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       total: ad.length + cl,
       /* Delivered = store ne deliver kiya + MBC (customer le gaya) */
       delivered: ad.filter((a) => a.delivered).length,
+      /* Pending = abhi deliver nahi hua (cancelled/renewal/duplicate nahi ginte) */
+      pending: ad.filter((a) => !a.delivered).length,
       mbc: ad.filter((a) => a.mbc).length,
       cancelled: closedN('cancelled'),
       renewal: closedN('renewal'),
@@ -3483,7 +3485,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <thead>
                 <tr>
                   <SlaTh label="Store" rowSpan={2} />
-                  <SlaTh label="Orders" colSpan={2} group div />
+                  <SlaTh label="Orders" colSpan={3} group div />
                   <SlaTh label="TAT mein nahi" colSpan={4} group div />
                   <SlaTh
                     label="Response Time"
@@ -3513,6 +3515,11 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     info="Store ne deliver kiye + MBC (customer khud le gaya)."
                   />
                   <SlaTh
+                    label="Pending"
+                    center
+                    info="Abhi deliver nahi hua. Cancelled / Renewal / Duplicate isme nahi."
+                  />
+                  <SlaTh
                     label="MBC"
                     center
                     div
@@ -3526,7 +3533,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
               <tbody>
                 {medianStats.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="dash-empty">
+                    <td colSpan={10} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3582,11 +3589,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                                 {ex.total}
                               </td>
                               <td style={{ textAlign: 'center', fontWeight: 800 }}>{ex.delivered}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 800 }}>{ex.pending}</td>
                             </>
                           ) : (
                             <>
                               {tcell('total', ex.total, T.green, true)}
                               {tcell('delivered', ex.delivered, T.green)}
+                              {tcell('pending', ex.pending, T.amber)}
                             </>
                           )}
                           {exCell(ex.mbc, true)}
