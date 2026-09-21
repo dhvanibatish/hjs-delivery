@@ -3002,6 +3002,15 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     }))
     .filter((r) => r.s.total > 0 || r.s.overdue > 0);
 
+  /* Median view mein showrooms nahi — wahan delivery flow alag hai, TAT
+     compare karne layak nahi. All stores row bhi inke bina banti hai. */
+  const MEDIAN_SKIP = ['MOH', 'NOD'];
+  const medianStats = storeStats.filter((r) => !MEDIAN_SKIP.includes(r.st));
+  const medianOverall = statOf(
+    rows.filter((a) => !MEDIAN_SKIP.includes(a.branch)),
+    overdueAll.filter((a) => !MEDIAN_SKIP.includes(a.branch)),
+  );
+
   /* Adoption view — apna set (MBC + closed shaamil), volume descending */
   const adoptRows = DASH_STORES.filter((st) => store === 'ALL' || store === st)
     .map((st) => ({
@@ -3479,14 +3488,14 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 </tr>
               </thead>
               <tbody>
-                {storeStats.length === 0 ? (
+                {medianStats.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
                 ) : (
-                  [...storeStats, ...(storeStats.length > 1 ? [{ st: null, s: overall }] : [])].map(
+                  [...medianStats, ...(medianStats.length > 1 ? [{ st: null, s: medianOverall }] : [])].map(
                     ({ st, s }) => {
                       const cell = cellFor({ store: st, person: null });
                       const isAll = st == null;
