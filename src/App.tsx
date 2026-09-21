@@ -3005,7 +3005,36 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
   /* Median view mein showrooms nahi — wahan delivery flow alag hai, TAT
      compare karne layak nahi. All stores row bhi inke bina banti hai. */
   const MEDIAN_SKIP = ['MOH', 'NOD'];
-  const medianStats = storeStats.filter((r) => !MEDIAN_SKIP.includes(r.st));
+  /* TAT se bahar wale orders bhi dikhen — MBC, Cancelled, Renewal, Duplicate.
+     st = null → saare (showrooms chhod ke) stores ka jod. */
+  const tatExtra = (st) => {
+    const mine = (a) =>
+      !MEDIAN_SKIP.includes(a.branch) && (st == null || a.branch === st);
+    const closedN = (k) => closedRows.filter((a) => mine(a) && a.x.stage === k).length;
+    return {
+      mbc: adoptData.filter((a) => mine(a) && a.mbc).length,
+      cancelled: closedN('cancelled'),
+      renewal: closedN('renewal'),
+      duplicate: closedN('duplicate'),
+    };
+  };
+  const medianStats = DASH_STORES.filter(
+    (st) => (store === 'ALL' || store === st) && !MEDIAN_SKIP.includes(st),
+  )
+    .map((st) => ({
+      st,
+      s: statOf(
+        rows.filter((a) => a.branch === st),
+        overdueAll.filter((a) => a.branch === st),
+      ),
+      ex: tatExtra(st),
+    }))
+    .filter(
+      (r) =>
+        r.s.total > 0 ||
+        r.s.overdue > 0 ||
+        r.ex.mbc + r.ex.cancelled + r.ex.renewal + r.ex.duplicate > 0,
+    );
   const medianOverall = statOf(
     rows.filter((a) => !MEDIAN_SKIP.includes(a.branch)),
     overdueAll.filter((a) => !MEDIAN_SKIP.includes(a.branch)),
@@ -3449,6 +3478,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 <tr>
                   <SlaTh label="Store" rowSpan={2} />
                   <SlaTh label="Orders" colSpan={2} group div />
+                  <SlaTh label="TAT mein nahi" colSpan={4} group div />
                   <SlaTh
                     label="Response Time"
                     rowSpan={2}
@@ -3472,18 +3502,32 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     info="Stores view jaisa hi set — MBC aur cancelled / duplicate / renewal isme nahi."
                   />
                   <SlaTh label="Delivered" center />
+                  <SlaTh
+                    label="MBC"
+                    center
+                    div
+                    info="Customer khud le gaya — store ki delivery SLA nahi lagti, isliye time mein count nahi."
+                  />
+                  <SlaTh label="Cancelled" center info="Zoho Books se cancel hua invoice." />
+                  <SlaTh label="Renewal" center info="Renewal invoice — nayi delivery nahi hoti." />
+                  <SlaTh label="Duplicate" center info="Duplicate invoice." />
                 </tr>
               </thead>
               <tbody>
                 {medianStats.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="dash-empty">
+                    <td colSpan={9} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
                 ) : (
-                  [...medianStats, ...(medianStats.length > 1 ? [{ st: null, s: medianOverall }] : [])].map(
-                    ({ st, s }) => {
+                  [
+                    ...medianStats,
+                    ...(medianStats.length > 1
+                      ? [{ st: null, s: medianOverall, ex: tatExtra(null) }]
+                      : []),
+                  ].map(
+                    ({ st, s, ex }) => {
                       const cell = cellFor({ store: st, person: null });
                       const isAll = st == null;
                       const medCell = (v, n, div) => (
@@ -3500,6 +3544,18 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                               {n} orders
                             </div>
                           )}
+                        </td>
+                      );
+                      const exCell = (n, div) => (
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            fontWeight: isAll ? 800 : 600,
+                            color: n ? T.ink : T.inkSoft,
+                            ...(div ? { borderLeft: '1px solid ' + T.line } : {}),
+                          }}
+                        >
+                          {n}
                         </td>
                       );
                       return (
@@ -3521,6 +3577,10 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                               {cell('delivered', s.delivered, T.green)}
                             </>
                           )}
+                          {exCell(ex.mbc, true)}
+                          {exCell(ex.cancelled)}
+                          {exCell(ex.renewal)}
+                          {exCell(ex.duplicate)}
                           {medCell(s.medResp, s.nResp, true)}
                           {medCell(s.medCycle, s.nCycle, true)}
                         </tr>
