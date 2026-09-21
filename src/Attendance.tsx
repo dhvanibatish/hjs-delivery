@@ -309,6 +309,7 @@ const CSS = `
 .hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #a16207; }
 .hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
 .hjsatt .m-PSL { color: #0891b2; }
+.hjsatt .m-PEND { color: #b54708; opacity: .75; }
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
 .hjsatt .m-X { color: #2563eb; }
 
@@ -1000,7 +1001,8 @@ const pillClass = (s: string) => {
   return `att-pill ${map[s] || "p-Off"}`;
 };
 const markClass = (m: string) =>
-  `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL"].includes(m) ? m : "X"}`;
+  m && m.endsWith("?") ? "att-mark m-PEND"
+  : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL"].includes(m) ? m : "X"}`;
 // muster roll par dikhne wala text — PSL = present, par us din short leave bhi li
 const markText = (m: string) => (m === "PSL" ? "P (SL)" : m);
 const stateColor: Record<string, string> = {
@@ -1625,7 +1627,7 @@ function HomeScreen({ me }: any) {
     const [m, pr, lvs] = await Promise.all([
       supabase.rpc("my_manager"), supabase.rpc("my_peers"),
       supabase.from("leaves").select("*").eq("employee_id", me.id)
-        .eq("status", "Approved").gte("to_date", addDays(istToday(), -10)),
+        .in("status", ["Approved", "Pending"]).gte("to_date", addDays(istToday(), -10)),
     ]);
     setMyLeaves(lvs.data || []);
     setMgr(m.data || []);
@@ -1678,7 +1680,9 @@ function HomeScreen({ me }: any) {
       const isWork = (k: string) => !offDays.includes(new Date(k + "T00:00:00").getDay());
       const lvm = off ? "" : leaveMarkFor(lv, key, isWork);
       const status = log?.status
-        || (off ? "Off" : lvm ? (lvm === "UL" ? "Unpaid leave" : lvm)
+        || (off ? "Off"
+            : lvm ? (lvm === "UL" ? "Unpaid leave"
+                     : lvm.endsWith("?") ? `${lv.leave_type} — approval pending` : lvm)
             : key > istToday() ? "" : "Absent");
       return {
         key, dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()], num: d.getDate(),
@@ -1998,6 +2002,8 @@ const mondayOf = (iso: string) => {
 // balance mein the wo paid, uske baad UL. Week off / holiday ginti mein nahi.
 const leaveMarkFor = (lv: any, key: string, isWork: (k: string) => boolean) => {
   if (!lv) return "";
+  // abhi approve nahi hui — "EL?" jaisa mark, taaki A na dikhe
+  if (lv.status === "Pending") return `${lv.leave_type}?`;
   const paid = Number(lv.days || 0) - Number(lv.unpaid_days || 0);
   let n = 0;
   for (let k = lv.from_date; k <= key; k = addDays(k, 1)) if (isWork(k)) n++;
@@ -2043,7 +2049,7 @@ function AttSummary({ me }: any) {
         .gte("work_date", wkFrom).lte("work_date", wkEnd).order("in_at"),
       supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
         .gte("work_date", wkFrom).lte("work_date", wkEnd),
-      supabase.from("leaves").select("*").eq("employee_id", me.id).eq("status", "Approved")
+      supabase.from("leaves").select("*").eq("employee_id", me.id).in("status", ["Approved", "Pending"])
         .lte("from_date", wkEnd).gte("to_date", wkFrom),
       supabase.from("holidays").select("*").gte("hol_date", wkFrom).lte("hol_date", wkEnd),
     ]);
@@ -2295,7 +2301,7 @@ function MatrixTab({ me }: any) {
         supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
           .gte("work_date", from).lte("work_date", to),
         supabase.from("leaves").select("*").eq("employee_id", me.id)
-          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+          .in("status", ["Approved", "Pending"]).lte("from_date", to).gte("to_date", from),
         supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
       ]);
       const marks: Record<string, string> = {};
@@ -2386,7 +2392,8 @@ function MatrixTab({ me }: any) {
         <b className="m-W">W</b> week off · <b className="m-F">F</b> holiday ·{" "}
         <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
         <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave ·{" "}
-        <b className="m-PSL">P (SL)</b> present, short leave liya
+        <b className="m-PSL">P (SL)</b> present, short leave liya ·{" "}
+        <b className="m-PEND">EL?</b> leave lagi hai, approval pending
       </p>
 
       {pick && pickEmp && (
@@ -2486,7 +2493,7 @@ function CalendarTab({ me }: any) {
         supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
           .gte("work_date", from).lte("work_date", to),
         supabase.from("leaves").select("*").eq("employee_id", me.id)
-          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+          .in("status", ["Approved", "Pending"]).lte("from_date", to).gte("to_date", from),
         supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
       ]);
       setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []); setBusy(false);
@@ -2516,6 +2523,8 @@ function CalendarTab({ me }: any) {
         && !hols.some((h: any) => h.hol_date === k));
       return m === "UL"
         ? { label: "Unpaid leave", color: "#be123c" }
+        : m.endsWith("?")
+        ? { label: `${lv.leave_type} — approval pending`, color: "#b54708" }
         : { label: lv.leave_type, color: "#2563eb" };
     }
     if (key > istToday()) return { label: "", color: "#d0d5dd" };
@@ -4764,6 +4773,7 @@ function StaffTab({ me }: any) {
   const [add, setAdd] = useState(false);
   const [edit, setEdit] = useState<any>(null);
   const [mgD, setMgD] = useState(false);
+  const [mgT, setMgT] = useState(false);
 
   const load = async () => {
     const [e, b, t, d] = await Promise.all([
@@ -4790,6 +4800,7 @@ function StaffTab({ me }: any) {
           onChange={setQ} style={{ flex: 1 }} />
         {me.role === "admin" && (
           <>
+            <button className="att-btn sm line" onClick={() => setMgT(true)}>Teams</button>
             <button className="att-btn sm line" onClick={() => setMgD(true)}>Designations</button>
             <button className="att-btn sm" onClick={() => setAdd(true)}>+ New</button>
           </>
@@ -4821,6 +4832,7 @@ function StaffTab({ me }: any) {
         onClose={() => { setAdd(false); load(); }} />}
       {edit && <EmployeeSheet branches={branches} teams={teams} desigs={desigs} people={rows}
         row={edit} onClose={() => { setEdit(null); load(); }} />}
+      {mgT && <TeamsSheet onClose={() => { setMgT(false); load(); }} />}
       {mgD && <DesignationSheet onClose={() => { setMgD(false); load(); }} />}
     </>
   );
@@ -5181,6 +5193,113 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             )}
           </div>
         )}
+      </div>
+    </Sheet>
+  );
+}
+
+function TeamsSheet({ onClose }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [people, setPeople] = useState<any[]>([]);
+  const [name, setName] = useState("");
+  const [mgr, setMgr] = useState("");
+  const [parent, setParent] = useState("");
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  const load = async () => {
+    const [t, p] = await Promise.all([
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("employees").select("id, emp_code, full_name")
+        .eq("active", true).order("full_name"),
+    ]);
+    setRows(t.data || []); setPeople(p.data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const nameOf = (id: string) => {
+    const p = people.find((x) => x.id === id);
+    return p ? p.full_name : "—";
+  };
+
+  const add = async () => {
+    if (!name.trim()) return;
+    const { error } = await supabase.from("teams").insert({
+      name: name.trim(),
+      manager_id: mgr || null,
+      parent_team_id: parent || null,
+    });
+    if (error) setMsg({ err: error.message, ok: "" });
+    else { setName(""); setMgr(""); setParent(""); setMsg({ err: "", ok: "Team added." }); load(); }
+  };
+
+  const setManager = async (r: any, id: string) => {
+    const { error } = await supabase.from("teams")
+      .update({ manager_id: id || null }).eq("id", r.id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
+    load();
+  };
+
+  const toggle = async (r: any) => {
+    const { error } = await supabase.from("teams")
+      .update({ active: !r.active }).eq("id", r.id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
+    load();
+  };
+
+  return (
+    <Sheet title="Teams" onClose={onClose}>
+      <div className="att-card att-stack">
+        <input placeholder="New team name" value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()} />
+        <div className="att-row2">
+          <div>
+            <label>Manager <span className="att-muted">(optional)</span></label>
+            <select value={mgr} onChange={(e) => setMgr(e.target.value)}>
+              <option value="">— none —</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.emp_code} · {p.full_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>Under team <span className="att-muted">(optional)</span></label>
+            <select value={parent} onChange={(e) => setParent(e.target.value)}>
+              <option value="">— top level —</option>
+              {rows.filter((r) => r.active).map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <button className="att-btn sm" onClick={add} disabled={!name.trim()}>Add team</button>
+        <Note>{msg.err}</Note>
+        <Note kind="ok">{msg.ok}</Note>
+        <p className="att-muted">These show up in the team dropdown on every employee.</p>
+      </div>
+      <div className="att-list" style={{ marginTop: 12 }}>
+        {rows.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <div className="grow">
+              <b>{r.name}</b>
+              <p className="att-muted" style={{ fontSize: 12 }}>
+                Manager: {r.manager_id ? nameOf(r.manager_id) : "—"}
+              </p>
+            </div>
+            {!r.active && <span className="att-pill p-Off">hidden</span>}
+            <select value={r.manager_id || ""} onChange={(e) => setManager(r, e.target.value)}
+              style={{ maxWidth: 170 }}>
+              <option value="">— no manager —</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.full_name}</option>
+              ))}
+            </select>
+            <button className="att-muted" onClick={() => toggle(r)}>
+              {r.active ? "Hide" : "Show"}
+            </button>
+          </div>
+        ))}
+        {!rows.length && <p className="att-empty">None yet.</p>}
       </div>
     </Sheet>
   );
@@ -5741,7 +5860,7 @@ function MyReportTab({ me }: any) {
         supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
           .gte("work_date", from).lte("work_date", to).order("work_date"),
         supabase.from("leaves").select("*").eq("employee_id", me.id)
-          .eq("status", "Approved").lte("from_date", to).gte("to_date", from),
+          .in("status", ["Approved", "Pending"]).lte("from_date", to).gte("to_date", from),
         supabase.from("holidays").select("*").gte("hol_date", from).lte("hol_date", to),
       ]);
       setLogs(a.data || []); setLeaves(l.data || []); setHols(h.data || []);
@@ -5771,7 +5890,9 @@ function MyReportTab({ me }: any) {
         mark = leaveMarkFor(lv, d, (k) =>
           !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
           && !hols.some((h: any) => h.hol_date === k));
-        label = mark === "UL" ? "Unpaid leave" : lv.leave_type;
+        label = mark === "UL" ? "Unpaid leave"
+          : mark.endsWith("?") ? `${lv.leave_type} — approval pending`
+          : lv.leave_type;
       }
       else if (d > istToday()) { mark = ""; label = ""; }
       else { mark = "A"; label = "Absent"; }
