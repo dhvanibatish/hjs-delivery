@@ -3248,7 +3248,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 setSel(null);
               }}
             >
-              <Clock size={14} /> Median
+              <Clock size={14} /> TAT
             </button>
           </div>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
@@ -3435,10 +3435,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
       ) : view === 'median' ? (
         <div className="dash-block">
           <div className="dash-block-h">
-            Store-wise Median TAT · {rangeLabel}
+            Store-wise TAT · {rangeLabel}
             <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginTop: 3 }}>
-              Median = beech wala order. 1–2 bahut late orders iska number nahi bigaadte. Avg sirf
-              comparison ke liye — Avg median se bahut upar ho to kuch orders atke hue hain.
+              Aam taur pe kitna time lagta hai — 1–2 bahut late orders is number ko nahi bigaadte.
             </div>
           </div>
           <div className="dash-table-wrap">
@@ -3447,8 +3446,20 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                 <tr>
                   <SlaTh label="Store" rowSpan={2} />
                   <SlaTh label="Orders" colSpan={2} group div />
-                  <SlaTh label="Response" colSpan={2} group div />
-                  <SlaTh label="Delivery" colSpan={3} group div />
+                  <SlaTh
+                    label="Response Time"
+                    rowSpan={2}
+                    center
+                    div
+                    info="Entry aane se customer se baat hone tak. Sirf wo orders jinpe baat ho chuki hai (pending bhi). Wall clock, 24x7."
+                  />
+                  <SlaTh
+                    label="Delivery Time"
+                    rowSpan={2}
+                    center
+                    div
+                    info="Entry aane se Item Delivered tak. Sirf delivered orders."
+                  />
                 </tr>
                 <tr>
                   <SlaTh
@@ -3458,39 +3469,12 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     info="Stores view jaisa hi set — MBC aur cancelled / duplicate / renewal isme nahi."
                   />
                   <SlaTh label="Delivered" center />
-                  <SlaTh
-                    label="Median"
-                    center
-                    div
-                    info="Entry aane se customer se baat hone tak — beech wale order ka time. Sirf wo orders jinpe baat ho chuki hai (pending bhi). Wall clock, 24x7."
-                  />
-                  <SlaTh
-                    label="Avg"
-                    center
-                    info="Same orders ka average — sirf comparison ke liye. Median se kaafi zyada ho to kuch orders ne bahut der lagayi."
-                  />
-                  <SlaTh
-                    label="Median"
-                    center
-                    div
-                    info="Entry aane se Item Delivered tak — beech wale order ka time. Sirf delivered orders."
-                  />
-                  <SlaTh
-                    label="Avg"
-                    center
-                    info="Same delivered orders ka average — sirf comparison ke liye."
-                  />
-                  <SlaTh
-                    label="Boy Median"
-                    center
-                    info="Out for Delivery se Delivered tak ka median — sirf delivery boy ka hissa."
-                  />
                 </tr>
               </thead>
               <tbody>
                 {medianStats.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="dash-empty">
+                    <td colSpan={5} className="dash-empty">
                       Is duration mein koi entry nahi
                     </td>
                   </tr>
@@ -3499,9 +3483,6 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     ({ st, s }) => {
                       const cell = cellFor({ store: st, person: null });
                       const isAll = st == null;
-                      /* avg median ka 2x se zyada = outliers kheench rahe hain */
-                      const skew = (avg, med) =>
-                        avg != null && med != null && med > 0 && avg > med * 2;
                       const medCell = (v, n, div) => (
                         <td
                           style={{
@@ -3516,17 +3497,6 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                               {n} orders
                             </div>
                           )}
-                        </td>
-                      );
-                      const avgCell = (avg, med) => (
-                        <td
-                          style={{
-                            textAlign: 'center',
-                            color: skew(avg, med) ? T.amber : T.inkSoft,
-                            fontWeight: skew(avg, med) ? 700 : 500,
-                          }}
-                        >
-                          {slaHrs(avg)}
                         </td>
                       );
                       return (
@@ -3549,10 +3519,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                             </>
                           )}
                           {medCell(s.medResp, s.nResp, true)}
-                          {avgCell(s.avgResp, s.medResp)}
                           {medCell(s.medCycle, s.nCycle, true)}
-                          {avgCell(s.avgCycle, s.medCycle)}
-                          <td style={{ textAlign: 'center' }}>{slaHrs(s.medDel)}</td>
                         </tr>
                       );
                     },
