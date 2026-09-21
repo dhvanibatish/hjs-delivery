@@ -3011,8 +3011,14 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
     const mine = (a) =>
       !MEDIAN_SKIP.includes(a.branch) && (st == null || a.branch === st);
     const closedN = (k) => closedRows.filter((a) => mine(a) && a.x.stage === k).length;
+    const cl = closedRows.filter(mine).length;
+    const ad = adoptData.filter(mine);
     return {
-      mbc: adoptData.filter((a) => mine(a) && a.mbc).length,
+      /* Total = sab kuch: store delivery + MBC + cancelled/renewal/duplicate */
+      total: ad.length + cl,
+      /* Delivered = store ne deliver kiya + MBC (customer le gaya) */
+      delivered: ad.filter((a) => a.delivered).length,
+      mbc: ad.filter((a) => a.mbc).length,
       cancelled: closedN('cancelled'),
       renewal: closedN('renewal'),
       duplicate: closedN('duplicate'),
@@ -3499,9 +3505,13 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                     label="Total"
                     center
                     div
-                    info="Stores view jaisa hi set — MBC aur cancelled / duplicate / renewal isme nahi."
+                    info="Is duration ke saare orders — store delivery + MBC + Cancelled + Renewal + Duplicate."
                   />
-                  <SlaTh label="Delivered" center />
+                  <SlaTh
+                    label="Delivered"
+                    center
+                    info="Store ne deliver kiye + MBC (customer khud le gaya)."
+                  />
                   <SlaTh
                     label="MBC"
                     center
@@ -3528,7 +3538,9 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                       : []),
                   ].map(
                     ({ st, s, ex }) => {
-                      const cell = cellFor({ store: st, person: null });
+                      /* adopt: true → drill list MBC ke saath wale set se aaye,
+                         taaki click karne pe list ka count number se match kare */
+                      const tcell = cellFor({ store: st, person: null, adopt: true });
                       const isAll = st == null;
                       const medCell = (v, n, div) => (
                         <td
@@ -3567,14 +3579,14 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
                           {isAll ? (
                             <>
                               <td style={{ textAlign: 'center', borderLeft: '1px solid ' + T.line, fontWeight: 800 }}>
-                                {s.total}
+                                {ex.total}
                               </td>
-                              <td style={{ textAlign: 'center', fontWeight: 800 }}>{s.delivered}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 800 }}>{ex.delivered}</td>
                             </>
                           ) : (
                             <>
-                              {cell('all', s.total, T.green, true)}
-                              {cell('delivered', s.delivered, T.green)}
+                              {tcell('total', ex.total, T.green, true)}
+                              {tcell('delivered', ex.delivered, T.green)}
                             </>
                           )}
                           {exCell(ex.mbc, true)}
