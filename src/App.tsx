@@ -3281,6 +3281,8 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
         </div>
       </div>
 
+      {/* TAT view mein KPI cards nahi — sirf store-wise time table */}
+      {view !== 'median' && (
       <div className="dash-cards">
         {cards.map((c) => {
           const on = !!sel && sel.kind === c.kind && !sel.store && !sel.person;
@@ -3313,6 +3315,7 @@ function SlaReport({ deliveries, onOpen, logsLoaded }) {
           );
         })}
       </div>
+      )}
 
       {view === 'stores' ? (
         <div className="dash-block">
