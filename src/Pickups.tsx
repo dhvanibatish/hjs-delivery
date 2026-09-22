@@ -619,6 +619,54 @@ function clean(v) {
         .trim()
     : '';
 }
+/* ── Security refund status ─────────────────────────────────────────────
+   Data Books ke Payment Refunds se aata hai (n8n raat ko sync karta hai).
+   done    = refund ho gaya (kisi bhi stage pe dikhe)
+   pending = Picked Up ho gaya, security li thi, par refund abhi nahi mila
+   null    = kuch dikhana nahi (security li hi nahi / pickup abhi baaki)   */
+function refundInfo(d) {
+  if (!d) return null;
+  const sec = d.securityAmount != null ? d.securityAmount : null;
+  if (d.refundAmount != null) {
+    const short = sec != null && d.refundAmount < sec ? sec - d.refundAmount : 0;
+    return {
+      kind: 'done',
+      amount: d.refundAmount,
+      date: d.refundDate,
+      short,
+    };
+  }
+  if (d.stage === 'delivered' && sec != null && sec > 0) {
+    return { kind: 'pending', amount: sec };
+  }
+  return null;
+}
+function refundText(info) {
+  if (!info) return '—';
+  if (info.kind === 'pending') return 'Refund pending';
+  const dt = info.date ? ` · ${niceDate(info.date) || info.date}` : '';
+  const cut = info.short > 0 ? ` (₹${info.short.toLocaleString('en-IN')} kata)` : '';
+  return `Refunded ₹${info.amount.toLocaleString('en-IN')}${dt}${cut}`;
+}
+function RefundChip({ d }) {
+  const info = refundInfo(d);
+  if (!info) return null;
+  const done = info.kind === 'done';
+  return (
+    <span
+      className="refund-chip"
+      style={{
+        background: done ? T.mint : T.amberSoft,
+        color: done ? T.green : T.amber,
+      }}
+      title="Security refund (Books se)"
+    >
+      {done ? <CheckCircle2 size={12} /> : <Clock size={12} />}{' '}
+      {refundText(info)}
+    </span>
+  );
+}
+
 function equipmentText(r) {
   let li = r.line_items;
   // Supabase se line_items kabhi-kabhi JSON string aati hai — usko parse karo.
@@ -1155,9 +1203,21 @@ function rowToDelivery(r) {
       r.pending_amount !== 'null'
         ? Number(r.pending_amount)
         : null,
-    // Books se: security kis mode se li gayi thi (refund usi mode mein karna
-    // hota hai) aur delivery pe amount kis mode se aaya tha. Sirf type.
+    // Books se: security kis mode se li gayi thi (sirf record ke liye —
+    // refund hamesha UPI se hota hai, chahe security kisi bhi mode se li ho).
     securityType: clean(r.security_type),
+    // Refund — Books ke Payment Refunds se, raat ke n8n sync se aata hai.
+    refundAmount:
+      r.refund_amount != null &&
+      r.refund_amount !== '' &&
+      r.refund_amount !== 'null' &&
+      Number(r.refund_amount) > 0
+        ? Number(r.refund_amount)
+        : null,
+    refundDate:
+      r.refund_date && r.refund_date !== 'null'
+        ? String(r.refund_date).slice(0, 10)
+        : null,
     securityAmount:
       r.security_amount != null &&
       r.security_amount !== '' &&
@@ -5107,6 +5167,11 @@ function Card({ d, stage, onOpen, onMove, onCommit, onCancel }) {
           </span>
         </div>
       )}
+      {refundInfo(d) && (
+        <div className="card-meta">
+          <RefundChip d={d} />
+        </div>
+      )}
       {resched && (
         <div className="resched-chip">
           <RotateCcw size={12} /> Rescheduled
@@ -5629,6 +5694,10 @@ function Drawer({
                 ? `${d.securityAmount != null ? '₹' + d.securityAmount.toLocaleString('en-IN') : ''}${d.securityAmount != null && d.securityType ? ' · ' : ''}${d.securityType || ''}`
                 : '—'
             }
+          />
+          <KV
+            label="Security refund"
+            value={refundInfo(d) ? <RefundChip d={d} /> : '—'}
           />
           <KV label="Pickup date" value={niceDate(d.expected) || d.expected} />
           <KV label="Store manager" value={d.manager} full />
@@ -7090,6 +7159,19 @@ function PkOrderCard({ row }) {
   const val = (x) => (x && x !== 'null' ? x : null);
   const money = (n) =>
     n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : null;
+  // refund chip ke liye wahi shape jo board card use karta hai
+  const rfD = {
+    stage,
+    securityAmount:
+      row.security_amount != null && Number(row.security_amount) > 0
+        ? Number(row.security_amount)
+        : null,
+    refundAmount:
+      row.refund_amount != null && Number(row.refund_amount) > 0
+        ? Number(row.refund_amount)
+        : null,
+    refundDate: row.refund_date ? String(row.refund_date).slice(0, 10) : null,
+  };
 
   const rows = [
     ['Order stage', <span key="s" className="sales-chip" style={{ background: stg.soft, color: stg.color }}>{stg.short}</span>],
@@ -7108,6 +7190,7 @@ function PkOrderCard({ row }) {
       row.security_amount != null || val(row.security_type)
         ? `${row.security_amount != null ? money(row.security_amount) : ''}${row.security_amount != null && val(row.security_type) ? ' · ' : ''}${val(row.security_type) || ''}`
         : '—'],
+    ['Security refund', refundInfo(rfD) ? <RefundChip key="rf" d={rfD} /> : '—'],
     ['Pickup charges', money(row.pickup_charges_collected) || '—'],
     ['Pending collected', money(row.pending_collected) || '—'],
     ['Pending amount', money(row.pending_amount) || '—'],
@@ -7949,6 +8032,7 @@ function StyleTag() {
       .card-equip { font-size: 12px; color: ${T.inkSoft}; margin-top: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .card-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; }
       .card-meta span { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: ${T.inkSoft}; }
+      .refund-chip { display: inline-flex !important; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11.5px !important; font-weight: 700; line-height: 1.3; }
       .card-next { width: 100%; margin-top: 12px; border: 1px dashed ${T.line}; background: ${T.cream}; border-radius: 10px; padding: 8px; font-size: 12.5px; font-weight: 700; color: ${T.green}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
       .card-next.is-open { background: ${T.mint}; border-style: solid; border-color: ${T.green}; }
       .inline-move { margin-top: 10px; border-top: 1px solid ${T.line}; padding-top: 12px; }
