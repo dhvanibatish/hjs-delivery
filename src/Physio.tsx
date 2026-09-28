@@ -6,8 +6,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const URL_ = import.meta.env.VITE_SUPABASE_URL;
-const KEY_ = import.meta.env.VITE_SUPABASE_ANON_KEY;
+/* Same project as Deliveries / Pickups / Complaints (App.tsx CONFIG).
+   Attendance ka env-var wala project alag hai — physio tables yahan hain. */
+const URL_ = "https://idcmfebqizovivuvsuns.supabase.co";
+const KEY_ =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkY21mZWJxaXpvdml2dXZzdW5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDgxODgsImV4cCI6MjA5OTMyNDE4OH0.miXziOcl5sEo8S6K1WsrHRhCbtEYRgnnUA4gAISUkmM";
 
 const supabase = createClient(URL_, KEY_, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: "hjs-physio" },
@@ -286,7 +289,7 @@ export default function Physio() {
       supabase.from("physio_therapies").select("*").eq("active", true).order("sort_order"),
     ]);
     if (d.error || p.error || s.error) {
-      toast("Load failed — check Supabase keys / tables");
+      toast("Load failed — check Supabase tables / grants");
       // eslint-disable-next-line no-console
       console.error(d.error || p.error || s.error);
     }
