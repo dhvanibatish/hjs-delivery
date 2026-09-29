@@ -187,7 +187,6 @@ const CSS = `
 .hjsp .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--line); }
 .hjsp .pill.bigin { background:var(--blue-soft); color:var(--blue); }
 .hjsp .pill.home, .hjsp .tag.home { background:var(--plum-soft); color:var(--plum); }
-.hjsp .dsel { padding:3px 6px; border:1px solid var(--line); border-radius:8px; background:var(--panel); font-size:12px; max-width:100%; }
 .hjsp .pill.off { background:var(--plum-soft); color:var(--plum); }
 .hjsp .pill.leave { background:var(--red-soft); color:var(--red); }
 /* calendar: time rows x doctor columns */
@@ -1375,25 +1374,8 @@ export default function Physio() {
                           {c.on ? (<><span className="pill ongoing">Ongoing</span> <span className="rt">{routineLabel(p.routine)}</span></>)
                                 : (<><span className={`pill ${srcCls(p.source)}`}>{p.source}</span> {nice(createdDay(p))}</>)}
                         </div>
-                        {/* Kitne session liye — yahin se badal sakte hain */}
+                        {/* Bas itna: kitne session ho chuke */}
                         <div className="hint" style={{ marginTop: 4 }}>
-                          <select className="dsel"
-                            value={p.sessions_planned && !PACKS.includes(p.sessions_planned) ? "__c" : p.sessions_planned ?? ""}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              const n = v === "__c"
-                                ? Number(window.prompt("How many sessions?", String(p.sessions_planned || "")) || 0)
-                                : Number(v);
-                              if (v === "__c" && !n) return;
-                              updPatient(p.id, { sessions_planned: n || null } as Partial<Patient>,
-                                n ? `${p.name} · ${n} sessions` : "Sessions cleared");
-                            }}>
-                            <option value="">Sessions? —</option>
-                            {PACKS.map((n) => <option key={n} value={n}>{n} sessions</option>)}
-                            <option value="__c">
-                              {p.sessions_planned && !PACKS.includes(p.sessions_planned) ? `${p.sessions_planned} sessions` : "Custom…"}
-                            </option>
-                          </select>{" "}
                           <b>{progress(p).done}</b> done
                         </div>
                       </td>
