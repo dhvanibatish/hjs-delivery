@@ -64,7 +64,8 @@ type Session = {
 };
 
 /* ========================= helpers ========================= */
-const SOURCES = ["Bigin", "Walk-in", "Existing customer", "Customer referral"];
+// Bigin yahan se hata diya — wo source sirf n8n ke bharose aata hai, haath se nahi.
+const SOURCES = ["Walk-in", "Existing customer", "Customer referral"];
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -430,7 +431,7 @@ export default function Physio() {
   const close = () => setDlg(null);
 
   const NewLead = () => {
-    const [f, setF] = useState({ name: "", phone: "", ailment: "", source: "Bigin", notes: "" });
+    const [f, setF] = useState({ name: "", phone: "", source: "Walk-in", notes: "" });
     const save = async () => {
       if (!f.name.trim()) return toast("Enter a name");
       const phone = f.phone.replace(/\D/g, "").slice(-10);
@@ -441,7 +442,6 @@ export default function Physio() {
           supabase.from("physio_patients").insert({
             name: f.name.trim(),
             phone,
-            ailment: f.ailment.trim(),
             source: f.source,
             notes: f.notes.trim(),
             status: "new",
@@ -456,14 +456,11 @@ export default function Physio() {
           <Field label="Name"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
           <Field label="Mobile"><input inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
         </div>
-        <div className="row2">
-          <Field label="Ailment / body part"><input placeholder="Knee pain, stroke rehab…" value={f.ailment} onChange={(e) => setF({ ...f, ailment: e.target.value })} /></Field>
-          <Field label="Source">
-            <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
-              {SOURCES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </Field>
-        </div>
+        <Field label="Source">
+          <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+            {SOURCES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
         <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="end">
           <button className="btn" onClick={close}>Cancel</button>
@@ -584,7 +581,7 @@ export default function Physio() {
   const OngoingDlg = ({ p, fresh }: { p?: Patient; fresh?: boolean }) => {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
-    const [f, setF] = useState({ name: "", phone: "", ailment: "", source: "Walk-in" });
+    const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
     const [did, setDid] = useState(p?.doctor_id || "");
     const [rt, setRt] = useState<"daily" | "days" | "week">((p?.routine?.type as "daily") || "daily");
     const [days, setDays] = useState<number[]>(
@@ -609,7 +606,7 @@ export default function Physio() {
         if (!f.name.trim()) return toast("Enter a name or pick a lead");
         const { data, error } = await supabase
           .from("physio_patients")
-          .insert({ name: f.name.trim(), phone: f.phone.replace(/\D/g, "").slice(-10), ailment: f.ailment.trim(), source: f.source, status: "new" })
+          .insert({ name: f.name.trim(), phone: f.phone.replace(/\D/g, "").slice(-10), source: f.source, status: "new" })
           .select()
           .single();
         if (error) return toast("Could not save");
@@ -657,14 +654,11 @@ export default function Physio() {
                   <Field label="Name *"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
                   <Field label="Mobile"><input inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
                 </div>
-                <div className="row2">
-                  <Field label="Ailment"><input value={f.ailment} onChange={(e) => setF({ ...f, ailment: e.target.value })} /></Field>
-                  <Field label="Source">
-                    <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
-                      {SOURCES.map((s) => <option key={s}>{s}</option>)}
-                    </select>
-                  </Field>
-                </div>
+                <Field label="Source">
+                  <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+                    {SOURCES.map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                </Field>
               </>
             )}
           </>
