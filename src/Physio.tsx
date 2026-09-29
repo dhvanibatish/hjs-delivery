@@ -1047,7 +1047,15 @@ export default function Physio() {
     const notDone = rows.filter((p) => cell(p).booked).length;
     const cx = patients.filter((p) => p.status === "cancelled");
 
-    rows = rows.sort((a, b) => Number(!!cell(a).done) - Number(!!cell(b).done) || b.created_at.localeCompare(a.created_at));
+    // Jitna kaam ho gaya, utna neeche. Fresh leads hamesha upar.
+    // 0 = doctor nahi, 1 = doctor laga, 2 = time laga, 3 = session ho gaya
+    const rank = (p: Patient) => {
+      const c = cell(p);
+      if (c.done) return 3;
+      if (c.slot) return 2;
+      return p.doctor_id ? 1 : 0;
+    };
+    rows = rows.sort((a, b) => rank(a) - rank(b) || b.created_at.localeCompare(a.created_at));
 
     return (
       <>
