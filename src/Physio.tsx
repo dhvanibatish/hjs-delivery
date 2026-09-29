@@ -61,6 +61,7 @@ type Session = {
   cancel_note: string | null;
   therapies: string[] | null;
   therapy_note: string | null;
+  reschedule_note: string | null;
 };
 
 /* ========================= helpers ========================= */
@@ -196,6 +197,7 @@ const CSS = `
 .hjsp .slot:last-child { border-bottom:0; }
 .hjsp .slot .t { font-weight:700; font-size:13px; color:var(--muted); }
 .hjsp .acts { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
+.hjsp td .acts { margin-top:0; }
 .hjsp .empty { padding:18px 14px; color:var(--muted); font-size:14px; }
 .hjsp .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:10px 14px; margin-bottom:14px; }
 .hjsp .drow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:5px 0; }
@@ -514,28 +516,44 @@ export default function Physio() {
     const [date, setDate] = useState(s?.session_date || T);
     const [time, setTime] = useState(hhmm(s?.session_time) === "--" ? "10:00" : hhmm(s?.session_time));
     const [why, setWhy] = useState("");
+    const [note, setNote] = useState("");
     if (!s) return null;
+    const same = date === s.session_date && time === hhmm(s.session_time);
     const save = async () => {
       if (!date || !time) return toast("Pick a date and time");
+      if (same) return toast("Pick a different date or time");
+      if (!why) return toast("Select a reason");
+      // Purana note rakhte hain, uske aage naya — poora trail dikh jaye.
+      const line = `${nice(s.session_date)} ${hhmm(s.session_time)} → ${nice(date)} ${time} · ${why}${note.trim() ? `: ${note.trim()}` : ""}`;
       const ok = await updSession(
         s.id,
-        { session_date: date, session_time: time, reschedule_note: why || null } as Partial<Session>,
-        `Moved to ${nice(date)} ${time}`
+        { session_date: date, session_time: time,
+          reschedule_note: s.reschedule_note ? `${s.reschedule_note} | ${line}` : line } as Partial<Session>,
+        `Moved to ${nice(date)} ${time} · ${why}`
       );
       if (ok) close();
     };
     return (
       <Modal title={`Reschedule · ${p.name}`}>
         <p className="hint" style={{ marginBottom: 10 }}>
-          Currently {nice(s.session_date)} at {hhmm(s.session_time)} with {doc(s.doctor_id)?.name || "—"}
+          Currently {nice(s.session_date)} at {hhmm(s.session_time)} with {doc(s.doctor_id)?.name || "—"}. A reason is required.
         </p>
         <div className="row2">
           <Field label="New date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
           <Field label="New time"><input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} /></Field>
         </div>
-        <Field label="Reason (optional)"><input placeholder="Patient asked to shift…" value={why} onChange={(e) => setWhy(e.target.value)} /></Field>
+        <Field label="Reason *">
+          <select value={why} onChange={(e) => setWhy(e.target.value)}>
+            <option value="">— Select a reason —</option>
+            {["Patient asked to shift", "Patient did not turn up", "Doctor not available",
+              "Doctor on leave / week off", "Machine or room not free", "Clinic holiday",
+              "Double booking", "Other"].map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Remarks"><textarea rows={2} placeholder="Anything the desk should know…" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        {!!s.reschedule_note && <p className="hint" style={{ marginTop: -4 }}>Earlier: {s.reschedule_note}</p>}
         <div className="end">
-          <button className="btn" onClick={close}>Cancel</button>
+          <button className="btn" onClick={close}>Close</button>
           <button className="btn pri" onClick={save}>Save new date &amp; time</button>
         </div>
       </Modal>
@@ -1136,11 +1154,17 @@ export default function Physio() {
                         )}
                       </td>
                       <td>
-                        {c.on ? (
-                          c.booked ? <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Cancel</button> : <span className="hint">—</span>
-                        ) : (
-                          <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>
-                        )}
+                        <div className="acts">
+                          {/* Booked session hai to hi time badal sakte hain */}
+                          {c.booked && (
+                            <button className="btn sm ghost" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>
+                          )}
+                          {c.on ? (
+                            c.booked ? <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Cancel</button> : <span className="hint">—</span>
+                          ) : (
+                            <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1446,6 +1470,7 @@ export default function Physio() {
               {!!(s.therapies || []).length && (
                 <span className="thl">{(s.therapies || []).join(" · ")}{s.therapy_note ? ` — ${s.therapy_note}` : ""}</span>
               )}
+              {!!s.reschedule_note && <span className="thl">Rescheduled: {s.reschedule_note}</span>}
             </div>
           )) : <span className="hint">No sessions yet</span>}
         </div>
