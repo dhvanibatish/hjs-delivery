@@ -213,8 +213,8 @@ const CSS = `
 .hjsp table.week thead th { background:var(--bg); border-bottom:2px solid var(--line);
   padding:8px; font-size:12px; line-height:1.3; text-align:left; white-space:nowrap; }
 .hjsp table.week thead th.today { color:var(--green); }
-.hjsp table.week .tcol { width:66px; background:var(--bg); border-right:2px solid var(--line);
-  text-align:right; padding:6px 8px; color:var(--muted); font-size:11px; font-weight:700; white-space:nowrap; }
+.hjsp table.week .tcol { width:82px; background:var(--bg); border-right:2px solid var(--line);
+  text-align:center; padding:8px 6px; color:var(--ink); font-size:15px; font-weight:800; white-space:nowrap; }
 .hjsp table.week td.gcell { padding:4px; vertical-align:top; height:54px; }
 .hjsp table.week th.today, .hjsp table.week td.today { outline:0; background:var(--bg); }
 /* naam column se bahar na nikle */
@@ -1802,7 +1802,7 @@ export default function Physio() {
     return (
       <>
         <div className="dayhead">
-          <div className="d">Roster</div>
+          <div className="d">Roaster</div>
           <button className="btn sm" onClick={() => setDay(addDays(day, -7))}>‹ Prev 7 days</button>
           <button className="btn sm" onClick={() => setDay(T)}>From today</button>
           <button className="btn sm" onClick={() => setDay(addDays(day, 7))}>Next 7 days ›</button>
@@ -2004,7 +2004,7 @@ export default function Physio() {
             {tab("board", "Day view")}
             {tab("doctors", "Doctors")}
             {tab("cal", "Calendar")}
-            {tab("roster", "Roster")}
+            {tab("roster", "Roaster")}
           </nav>
           <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
         </div>
