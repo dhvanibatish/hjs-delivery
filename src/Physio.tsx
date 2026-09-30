@@ -350,13 +350,14 @@ export default function Physio() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  const [view, setView] = useState<"leads" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor">("leads");
+  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor">("leads");
   const [q, setQ] = useState("");
   const [day, setDay] = useState(todayS());
   const [showCx, setShowCx] = useState(false);
   const [oFilt, setOFilt] = useState<"all" | "due" | "today" | "fu">("all");
   const [oDoc, setODoc] = useState("");
   const [dSel, setDSel] = useState("");
+  const [tDoc, setTDoc] = useState("");   // Schedule for today — doctor filter
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
   // Day view: kitne din dikhane hain aur kis patient ka
@@ -1457,6 +1458,129 @@ export default function Physio() {
     );
   };
 
+  /* ---------- Schedule for today: aaj kaun, kis time, kis doctor ke paas ---------- */
+  const TodayView = () => {
+    const mineDoc = (id: string | null) => !tDoc || id === tDoc;
+    const dayS = liveS
+      .filter((x) => x.session_date === T && mineDoc(x.doctor_id))
+      .sort((a, b) => a.session_time.localeCompare(b.session_time));
+    const pend = dayS.filter((x) => x.status === "scheduled");
+    const done = dayS.filter((x) => x.status === "completed");
+    // Routine ke hisaab se aaj aana tha, par time abhi laga nahi
+    const noTime = patients.filter((p) => isOngoing(p) && mineDoc(p.doctor_id) && dueOn(p, T)
+      && !sessOf(p.id).some((x) => x.session_date === T) && !skipOf(p, T))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const notComing = patients.filter((p) => isOngoing(p) && mineDoc(p.doctor_id) && skipOf(p, T));
+
+    return (
+      <>
+        <div className="dayhead"><div className="d">Schedule for today · {nice(T)}</div></div>
+        <div className="seg wrap" style={{ marginBottom: 12 }}>
+          <button className={!tDoc ? "on" : ""} onClick={() => setTDoc("")}>All doctors</button>
+          {activeDocs.map((d) => (
+            <button key={d.id} className={tDoc === d.id ? "on" : ""} onClick={() => setTDoc(d.id)}>{d.name}</button>
+          ))}
+        </div>
+        <div className="stats">
+          <Stat n={dayS.length} l="Booked today" />
+          <Stat n={pend.length} l="Pending" />
+          <Stat n={done.length} l="Done" />
+          <Stat n={noTime.length} l="Due, time not set" />
+          <Stat n={notComing.length} l="Not coming" />
+        </div>
+
+        <h3 style={{ margin: "14px 0 8px" }}>Booked sessions</h3>
+        <div className="tbl">
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Time</th><th>Doctor</th><th>Where</th><th>Sessions</th><th>Status</th><th /></tr>
+            </thead>
+            <tbody>
+              {dayS.map((x) => {
+                const p = pat(x.patient_id);
+                const d = doc(x.doctor_id);
+                return (
+                  <tr key={x.id}>
+                    <td>
+                      <button className="lnk" onClick={() => p && openPat(p.id)}>{p?.name || "(deleted)"}</button>
+                      <div className="hint">{p?.phone}{p?.ailment ? ` · ${p.ailment}` : ""}</div>
+                    </td>
+                    <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
+                    <td>{d ? <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button> : "—"}</td>
+                    <td>{isHome(x) ? <span className="pill home">Home</span> : <span className="hint">Clinic</span>}</td>
+                    <td>{p ? (isOngoing(p) ? doneText(p, progress(p).done) : <span className="pill bigin">New lead</span>) : "—"}</td>
+                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "pending" : "done"}</span></td>
+                    <td>
+                      {x.status === "scheduled" ? (
+                        <>
+                          <button className="btn sm pri" onClick={() => markSession(x, "completed")}>Complete</button>{" "}
+                          {p && <button className="btn sm ghost" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Move</button>}
+                        </>
+                      ) : (
+                        <button className="btn sm ghost" onClick={() => markSession(x, "scheduled")}>Undo</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!dayS.length && <tr><td colSpan={7}><span className="hint">No sessions booked for today yet.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style={{ margin: "18px 0 8px" }}>Due today — time not set</h3>
+        <div className="tbl">
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Doctor</th><th>Routine</th><th>Sessions</th><th>Last</th><th /></tr>
+            </thead>
+            <tbody>
+              {noTime.map((p) => {
+                const pr = progress(p);
+                const d = doc(p.doctor_id);
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                      <div className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</div>
+                    </td>
+                    <td>{d ? d.name : "—"}</td>
+                    <td><span className="rt">{routineLabel(p.routine)}</span></td>
+                    <td>{doneText(p, pr.done)}</td>
+                    <td>{pr.last ? nice(pr.last.session_date) : "—"}</td>
+                    <td>
+                      <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>{" "}
+                      <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!noTime.length && <tr><td colSpan={6}><span className="hint">Everyone due today has a time.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        {notComing.length > 0 && (
+          <>
+            <h3 style={{ margin: "18px 0 8px" }}>Not coming today</h3>
+            <div className="panel">
+              {notComing.map((p) => {
+                const sk = skipOf(p, T)!;
+                return (
+                  <div className="drow" key={p.id}>
+                    <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                    <span className="tag fu">{sk.reason}</span>
+                    {sk.note && <span className="hint">{sk.note}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </>
+    );
+  };
+
   const OngoingView = () => {
     const all = patients.filter(isOngoing);
     const dueCount = all.filter((p) => dueOn(p, T) && !sessOf(p.id).some((s) => s.session_date === T)).length;
@@ -2013,6 +2137,7 @@ export default function Physio() {
           <div className="brand">HJS Physio Desk<small>{loading ? "Loading…" : `${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads`}</small></div>
           <nav>
             {tab("leads", "Sessions")}
+            {tab("today", "Today's schedule")}
             {tab("ongoing", "Ongoing patients")}
             {tab("board", "Day view")}
             {tab("doctors", "Doctors")}
@@ -2025,6 +2150,7 @@ export default function Physio() {
       <main>
         {loading ? <div className="stat"><span className="hint">Loading…</span></div>
           : view === "leads" ? <LeadsView />
+          : view === "today" ? <TodayView />
           : view === "ongoing" ? <OngoingView />
           : view === "board" ? <BoardView />
           : view === "doctors" ? <DoctorsView />
