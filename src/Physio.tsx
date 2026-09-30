@@ -183,6 +183,10 @@ const CSS = `
 .hjsp th,.hjsp td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:top; }
 .hjsp th { font-size:12px; color:var(--muted); font-weight:700; }
 .hjsp tr:last-child td { border-bottom:0; }
+/* Pehla column (patient name) freeze — side scroll karne par bhi dikhe */
+.hjsp .tbl th:first-child, .hjsp .tbl td:first-child { position:sticky; left:0; z-index:2; background:var(--panel);
+  box-shadow:1px 0 0 var(--line); }
+.hjsp .tbl thead th:first-child { z-index:3; }
 .hjsp .hint { font-size:12px; color:var(--muted); }
 .hjsp .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--line); }
 .hjsp .pill.bigin { background:var(--blue-soft); color:var(--blue); }
@@ -415,9 +419,9 @@ export default function Physio() {
   const isNew = (p: Patient) => p.status === "new";
   const isOngoing = (p: Patient) => p.status === "ongoing";
   const ongoingOf = (did: string) => patients.filter((p) => isOngoing(p) && p.doctor_id === did);
-  // Plan ho to "12 out of 20", warna bas "12 done"
+  // Plan ho to "12/20", warna bas "12 done"
   const doneText = (p: Patient, n: number) =>
-    p.sessions_planned ? `${n} out of ${p.sessions_planned}` : `${n} done`;
+    p.sessions_planned ? `${n}/${p.sessions_planned}` : `${n} done`;
   const skipOf = (p: Patient, date: string) => (p.skips || []).find((s) => s.date === date);
 
   const progress = (p: Patient) => {
