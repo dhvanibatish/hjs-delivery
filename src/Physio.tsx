@@ -187,6 +187,10 @@ const CSS = `
 .hjsp .tbl th:first-child, .hjsp .tbl td:first-child { position:sticky; left:0; z-index:2; background:var(--panel);
   box-shadow:1px 0 0 var(--line); }
 .hjsp .tbl thead th:first-child { z-index:3; }
+/* Naam wala column patla — lamba ailment 2 line mein wrap, baaki "…" */
+.hjsp .tbl td:first-child { width:220px; min-width:180px; max-width:240px; white-space:normal; }
+.hjsp .tbl td:first-child .hint { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow:hidden; word-break:break-word; }
 .hjsp .hint { font-size:12px; color:var(--muted); }
 .hjsp .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--line); }
 .hjsp .pill.bigin { background:var(--blue-soft); color:var(--blue); }
