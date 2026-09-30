@@ -415,12 +415,17 @@ export default function Physio() {
   const isNew = (p: Patient) => p.status === "new";
   const isOngoing = (p: Patient) => p.status === "ongoing";
   const ongoingOf = (did: string) => patients.filter((p) => isOngoing(p) && p.doctor_id === did);
+  // Plan ho to "12 out of 20", warna bas "12 done"
+  const doneText = (p: Patient, n: number) =>
+    p.sessions_planned ? `${n} out of ${p.sessions_planned}` : `${n} done`;
   const skipOf = (p: Patient, date: string) => (p.skips || []).find((s) => s.date === date);
 
   const progress = (p: Patient) => {
     const ss = sessOf(p.id);
+    const comp = ss.filter((s) => s.status === "completed");
     return {
-      done: ss.filter((s) => s.status === "completed").length,
+      // Books se aaye patients ka asli count seq mein hai (jaise 12/20) — jo bada ho wahi
+      done: Math.max(comp.length, ...comp.map((s) => s.seq || 0)),
       next: ss.find((s) => s.status === "scheduled" && s.session_date >= T),
       today: ss.find((s) => s.session_date === T),
       last: ss.filter((s) => s.status === "completed").slice(-1)[0],
@@ -1247,7 +1252,7 @@ export default function Physio() {
               {isOngoing(p) ? (
                 <>
                   <span className="rt">{routineLabel(p.routine)}</span>
-                  <span className="pill">{pr.done} done</span>
+                  <span className="pill">{doneText(p, pr.done)}</span>
                 </>
               ) : (
                 <>
@@ -1376,7 +1381,7 @@ export default function Physio() {
                         </div>
                         {/* Bas itna: kitne session ho chuke */}
                         <div className="hint" style={{ marginTop: 4 }}>
-                          <b>{progress(p).done}</b> done
+                          <b>{doneText(p, progress(p).done)}</b>
                         </div>
                       </td>
                       <td>
@@ -1491,7 +1496,7 @@ export default function Physio() {
                       </td>
                       <td>{d ? <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button> : "—"}</td>
                       <td><span className="rt">{routineLabel(p.routine)}</span></td>
-                      <td><b style={{ fontSize: 16 }}>{pr.done}</b> <span className="hint">done{p.sessions_planned ? ` · ${p.sessions_planned} taken` : ""}</span></td>
+                      <td><b style={{ fontSize: 16 }}>{doneText(p, pr.done)}</b></td>
                       <td>{pr.last ? nice(pr.last.session_date) : "—"}</td>
                       <td>
                         {pr.today ? (
@@ -1940,7 +1945,7 @@ export default function Physio() {
           )}
         </div>
         <div className="stats">
-          <Stat n={pr.done} l="Sessions done" />
+          <StatT v={doneText(p, pr.done)} l="Sessions" />
           <StatT v={p.sessions_planned ? String(p.sessions_planned) : "—"} l="Sessions taken" />
           <StatT v={p.start_date ? nice(p.start_date) : "—"} l="Started" />
           <StatT v={pr.last ? nice(pr.last.session_date) : "—"} l="Last session" />
@@ -1999,8 +2004,8 @@ export default function Physio() {
         <div className="bar">
           <div className="brand">HJS Physio Desk<small>{loading ? "Loading…" : `${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads`}</small></div>
           <nav>
-            {tab("leads", "Leads")}
-            {tab("ongoing", "Ongoing")}
+            {tab("leads", "Sessions")}
+            {tab("ongoing", "Ongoing patients")}
             {tab("board", "Day view")}
             {tab("doctors", "Doctors")}
             {tab("cal", "Calendar")}
