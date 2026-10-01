@@ -2004,6 +2004,8 @@ const leaveMarkFor = (lv: any, key: string, isWork: (k: string) => boolean) => {
   if (!lv) return "";
   // abhi approve nahi hui — "EL?" jaisa mark, taaki A na dikhe
   if (lv.status === "Pending") return `${lv.leave_type}?`;
+  // LV = balance ke bina li gayi chutti — muster roll par absent hi dikhegi
+  if (lv.leave_type === "LV") return "A";
   const paid = Number(lv.days || 0) - Number(lv.unpaid_days || 0);
   let n = 0;
   for (let k = lv.from_date; k <= key; k = addDays(k, 1)) if (isWork(k)) n++;
@@ -4057,6 +4059,8 @@ const LEAVE_RULES: Record<string, {
            note: "Apply in advance — backdated casual leave isn't allowed." },
   EL:    { reasonReq: true, pastDays: 0, futureDays: 365,
            note: "Apply in advance — backdated earned leave isn't allowed." },
+  LV:    { reasonReq: true, pastDays: 30, futureDays: 365,
+           note: "Full day leave with no balance behind it \u2014 the day is unpaid and shows as absent on the muster roll." },
   SHORT: { single: true, fixedDays: 0.25, reasonReq: true, pastDays: 7, futureDays: 30,
            note: "Single day only, counts as a quarter day. Reason is required." },
   HALF:  { single: true, fixedDays: 0.5, reasonReq: true, pastDays: 7, futureDays: 30,
@@ -5890,7 +5894,8 @@ function MyReportTab({ me }: any) {
         mark = leaveMarkFor(lv, d, (k) =>
           !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
           && !hols.some((h: any) => h.hol_date === k));
-        label = mark === "UL" ? "Unpaid leave"
+        label = lv.leave_type === "LV" ? "Leave (unpaid)"
+          : mark === "UL" ? "Unpaid leave"
           : mark.endsWith("?") ? `${lv.leave_type} — approval pending`
           : lv.leave_type;
       }
