@@ -268,7 +268,7 @@ const branchLabel = (code) => BRANCH_NAMES[code] || code;
 
 /* Store managers (branch → name) */
 const STORE_MANAGERS = {
-  GGN: 'Ankit - 7357862627',
+  GGN: 'Hemant - 9773641804',
   CHD: 'Niranjan - 9811069030',
   NCR: 'Dharmendra Singh - 9315573166',
   LDH: 'Gursajan - 8360687306',
