@@ -77,8 +77,8 @@ type Off = {
 };
 
 /* ========================= helpers ========================= */
-// Bigin yahan se hata diya — wo source sirf n8n ke bharose aata hai, haath se nahi.
-const SOURCES = ["Walk-in", "Existing customer", "Customer referral"];
+// Bigin bhi haath se chun sakte hain — jab n8n se lead na aayi ho par Bigin mein ho
+const SOURCES = ["Walk-in", "Bigin", "Existing customer", "Customer referral"];
 const PACKS = [1, 3, 5, 6, 10];   // kitne session liye — is ke alawa Custom
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const pad = (n: number) => String(n).padStart(2, "0");
