@@ -2525,7 +2525,7 @@ export default function Physio() {
         {extra}
       </td>
     );
-    const total = dayS.length + dueNoTime.length + newLeads.length + notComing.length;
+    const total = dayS.length + newLeads.length;
 
     return (
       <>
@@ -2540,7 +2540,7 @@ export default function Physio() {
           <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
           <Stat n={pend.length} l="Pending" />
           <Stat n={done.length} l="Completed" />
-          <Stat n={dueNoTime.length} l="Due, time not set" />
+          <Stat n={dueNoTime.length} l="Follow-up pending" />
           <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
         </div>
 
@@ -2582,23 +2582,6 @@ export default function Physio() {
                 );
               })}
 
-              {dueNoTime.map((p) => (
-                <tr key={`due-${p.id}`}>
-                  {nameCell(p)}
-                  <td><span className="hint">Not set</span></td>
-                  <td>{typeCell(p)}</td>
-                  <td>{sessCell(p)}</td>
-                  <td><span className="hint">—</span></td>
-                  <td><span className="pill scheduled">Time not set</span></td>
-                  <td>
-                    <div className="acts">
-                      <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
-                      <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-
               {newLeads.map((p) => (
                 <tr key={`lead-${p.id}`}>
                   {nameCell(p)}
@@ -2617,25 +2600,61 @@ export default function Physio() {
                 </tr>
               ))}
 
-              {notComing.map((p) => {
-                const sk = skipOf(p, T)!;
-                return (
-                  <tr key={`skip-${p.id}`} className="dim">
-                    {nameCell(p, sk.note && <div className="hint">{sk.note}</div>)}
-                    <td><span className="hint">—</span></td>
-                    <td>{typeCell(p)}</td>
-                    <td>{sessCell(p)}</td>
-                    <td><span className="hint">—</span></td>
-                    <td><span className="tag fu">Not coming · {sk.reason}</span></td>
-                    <td><button className="btn sm" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming after all</button></td>
-                  </tr>
-                );
-              })}
-
-              {!total && <tr><td colSpan={7}><span className="hint">Nothing {isT ? "for today" : "this day"}.</span></td></tr>}
+              {!total && <tr><td colSpan={7}><span className="hint">No sessions booked {isT ? "for today" : "this day"}.</span></td></tr>}
             </tbody>
           </table>
         </div>
+
+        {/* Ongoing patients jo aaj aane the — aaj ka follow-up abhi nahi hua, isliye alag */}
+        {!!(dueNoTime.length || notComing.length) && (
+          <>
+            <h3 style={{ margin: "18px 0 4px" }}>Ongoing — today&apos;s follow-up pending</h3>
+            <p className="hint" style={{ marginBottom: 8 }}>
+              These ongoing patients usually come today but nobody has confirmed yet. Call them, then mark Coming (set the time) or Not coming.
+            </p>
+            <div className="tbl">
+              <table className="mytoday">
+                <thead>
+                  <tr><th>Patient</th><th>Time</th><th>Type</th><th>Sessions</th><th>Last visit</th><th>Status</th><th /></tr>
+                </thead>
+                <tbody>
+                  {dueNoTime.map((p) => (
+                    <tr key={`due-${p.id}`}>
+                      {nameCell(p)}
+                      <td><span className="hint">Not set</span></td>
+                      <td>{typeCell(p)}</td>
+                      <td>{sessCell(p)}</td>
+                      <td>{progress(p).last ? nice(progress(p).last!.session_date) : "—"}</td>
+                      <td><span className="pill scheduled">Follow-up pending</span></td>
+                      <td>
+                        <div className="acts">
+                          <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
+                          <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {notComing.map((p) => {
+                    const sk = skipOf(p, T)!;
+                    return (
+                      <tr key={`skip-${p.id}`} className="dim">
+                        {nameCell(p, sk.note && <div className="hint">{sk.note}</div>)}
+                        <td><span className="hint">—</span></td>
+                        <td>{typeCell(p)}</td>
+                        <td>{sessCell(p)}</td>
+                        <td>{progress(p).last ? nice(progress(p).last!.session_date) : "—"}</td>
+                        <td><span className="tag fu">Not coming · {sk.reason}</span></td>
+                        <td><button className="btn sm" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming after all</button></td>
+                      </tr>
+                    );
+                  })}
+
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </>
     );
   };
