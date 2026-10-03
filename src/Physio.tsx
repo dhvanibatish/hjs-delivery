@@ -1144,9 +1144,29 @@ export default function Physio() {
 
     const toggle = (n: string) =>
       setPicked((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
+    // List mein na ho to haath se likh ke add — session mein save + list mein bhi aage ke liye
+    const typed = tq.trim();
+    const exact = typed && (therapies.some((t) => t.name.toLowerCase() === typed.toLowerCase())
+      || picked.some((n) => n.toLowerCase() === typed.toLowerCase()));
+    const addCustom = async () => {
+      if (!typed) return;
+      if (exact) {
+        const t = therapies.find((x) => x.name.toLowerCase() === typed.toLowerCase());
+        if (t && !picked.includes(t.name)) toggle(t.name);
+        setTq("");
+        return;
+      }
+      setPicked((cur) => [...cur, typed]);
+      setTq("");
+      const { error } = await supabase.from("physio_therapies")
+        .insert({ name: typed, grp: "Other", sort_order: 999, active: true });
+      // Table mein na bhi jaye to session mein to save hoga hi
+      toast(error ? `Added "${typed}" to this session` : `Added "${typed}" — it will show in the list next time`);
+    };
     const takeFirst = () => {
       const first = groups[0]?.[1]?.[0];
       if (first) { toggle(first.name); setTq(""); }
+      else addCustom();
     };
     const save = async (thenOngoing?: boolean) => {
       if (!picked.length) return toast("Pick at least one therapy");
@@ -1194,7 +1214,7 @@ export default function Physio() {
           </button>
           {open && (
             <div className="tdrop" ref={boxRef}>
-              <input className="tsearch" autoFocus placeholder="Type to search… (tens, laser, cup)"
+              <input className="tsearch" autoFocus placeholder="Search, or type a new therapy and press Enter"
                 value={tq} onChange={(e) => setTq(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); takeFirst(); } }} />
               <div className="tlist">
@@ -1206,7 +1226,10 @@ export default function Physio() {
                         onClick={() => toggle(t.name)}><i />{t.name}</button>
                     ))}
                   </React.Fragment>
-                )) : <p className="hint" style={{ padding: 10 }}>No match</p>}
+                )) : <p className="hint" style={{ padding: 10 }}>Not in the list.</p>}
+                {!!typed && !exact && (
+                  <button className="topt g7" onClick={addCustom}><i />+ Add &quot;{typed}&quot; as a new therapy</button>
+                )}
               </div>
             </div>
           )}
