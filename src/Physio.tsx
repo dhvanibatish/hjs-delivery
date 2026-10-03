@@ -2506,18 +2506,17 @@ export default function Physio() {
     const done = dayS.filter((s) => s.status === "completed");
     const mineOn = ongoingOf(d.id);
     const isT = day === T;
-    const dueNoTime = isT
-      ? mineOn.filter((p) => dueOn(p, T) && !sessOf(p.id).some((s) => s.session_date === T) && !skipOf(p, T))
-      : [];
-    const notComing = isT ? mineOn.filter((p) => skipOf(p, T)) : [];
+    // Sirf do cheezein: aaj aane wale ongoing (jinka time laga hai) aur mujhe mile naye leads
+    // Ongoing patients alag, naye leads alag
+    const onS = dayS.filter((x) => { const p = pat(x.patient_id); return !!p && isOngoing(p); });
+    const leadS = dayS.filter((x) => !onS.includes(x));
     // Lead mili hai par abhi koi session book nahi hua
     const newLeads = patients.filter((p) => isNew(p) && p.doctor_id === d.id && !sessOf(p.id).length);
 
-    // Sab ek hi table mein — booked (time ke hisaab se), phir time nahi laga, naye leads, aur aakhir mein not coming
-    const typeCell = (p?: Patient) => p && isOngoing(p)
-      ? <><span className="pill ongoing">Ongoing</span> <span className="rt">{routineLabel(p.routine)}</span></>
-      : <span className={`pill ${srcCls(p?.source || null)}`}>New lead{p?.source ? ` · ${p.source}` : ""}</span>;
-    const sessCell = (p?: Patient) => (p && isOngoing(p) ? <b>{doneText(p, progress(p).done)}</b> : <span className="hint">—</span>);
+    const lastVisit = (p?: Patient) => {
+      const l = p ? sessOf(p.id).filter((s) => s.status === "completed" && s.session_date < day).slice(-1)[0] : undefined;
+      return l ? nice(l.session_date) : "—";
+    };
     const nameCell = (p: Patient | undefined, extra?: React.ReactNode) => (
       <td>
         <button className="lnk" onClick={() => p && openPat(p.id)}>{p?.name || "(deleted)"}</button>
@@ -2525,7 +2524,13 @@ export default function Physio() {
         {extra}
       </td>
     );
-    const total = dayS.length + newLeads.length;
+    const therapyLine = (x: Session) =>
+      !!(x.therapies || []).length && <div className="thl">{(x.therapies || []).join(" · ")}</div>;
+    const whereCell = (x: Session) =>
+      <td>{isHome(x) ? <span className="pill home">Home visit</span> : <span className="hint">Clinic</span>}</td>;
+    const statusCell = (x: Session) =>
+      <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "Pending" : "Done ✓"}</span></td>;
+    const empty = (n: number, t: string) => !n && <tr><td colSpan={8}><span className="hint">{t}</span></td></tr>;
 
     return (
       <>
@@ -2540,35 +2545,33 @@ export default function Physio() {
           <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
           <Stat n={pend.length} l="Pending" />
           <Stat n={done.length} l="Completed" />
-          <Stat n={dueNoTime.length} l="Follow-up pending" />
           <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
         </div>
 
+        {/* 1 — Naye leads */}
+        <h3 style={{ margin: "6px 0 8px" }}>New leads assigned to me</h3>
         <div className="tbl">
           <table className="mytoday">
             <thead>
-              <tr><th>Patient</th><th>Time</th><th>Type</th><th>Sessions</th><th>Where</th><th>Status</th><th /></tr>
+              <tr><th>Patient</th><th>Time</th><th>Source</th><th>Where</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {dayS.map((x) => {
+              {leadS.map((x) => {
                 const p = pat(x.patient_id);
                 return (
                   <tr key={x.id}>
-                    {nameCell(p, !!(x.therapies || []).length && <div className="thl">{(x.therapies || []).join(" · ")}</div>)}
+                    {nameCell(p, therapyLine(x))}
                     <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
-                    <td>{typeCell(p)}</td>
-                    <td>{sessCell(p)}</td>
-                    <td>{isHome(x) ? <span className="pill home">Home visit</span> : <span className="hint">Clinic</span>}</td>
-                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "Pending" : "Done ✓"}</span></td>
+                    <td><span className={`pill ${srcCls(p?.source || null)}`}>{p?.source || "—"}</span></td>
+                    {whereCell(x)}
+                    {statusCell(x)}
                     <td>
                       <div className="acts">
                         {x.status === "scheduled" ? (
                           <>
                             <button className="btn sm pri" onClick={() => markSession(x, "completed")}>Complete</button>
                             {p && <button className="btn sm" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
-                            {p && (isOngoing(p)
-                              ? <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
-                              : <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>)}
+                            {p && <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>}
                           </>
                         ) : p && isNew(p) ? (
                           <>
@@ -2581,15 +2584,13 @@ export default function Physio() {
                   </tr>
                 );
               })}
-
               {newLeads.map((p) => (
                 <tr key={`lead-${p.id}`}>
                   {nameCell(p)}
                   <td><span className="hint">Not set</span></td>
-                  <td>{typeCell(p)}</td>
-                  <td>{sessCell(p)}</td>
+                  <td><span className={`pill ${srcCls(p.source)}`}>{p.source || "—"}</span></td>
                   <td><span className="hint">—</span></td>
-                  <td><span className="pill bigin">New lead</span></td>
+                  <td><span className="pill bigin">Time not set</span></td>
                   <td>
                     <div className="acts">
                       <button className="btn sm pri" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Set date &amp; time</button>
@@ -2599,62 +2600,46 @@ export default function Physio() {
                   </td>
                 </tr>
               ))}
-
-              {!total && <tr><td colSpan={7}><span className="hint">No sessions booked {isT ? "for today" : "this day"}.</span></td></tr>}
+              {empty(leadS.length + newLeads.length, `No new leads ${isT ? "today" : "this day"}.`)}
             </tbody>
           </table>
         </div>
 
-        {/* Ongoing patients jo aaj aane the — aaj ka follow-up abhi nahi hua, isliye alag */}
-        {!!(dueNoTime.length || notComing.length) && (
-          <>
-            <h3 style={{ margin: "18px 0 4px" }}>Ongoing — today&apos;s follow-up pending</h3>
-            <p className="hint" style={{ marginBottom: 8 }}>
-              These ongoing patients usually come today but nobody has confirmed yet. Call them, then mark Coming (set the time) or Not coming.
-            </p>
-            <div className="tbl">
-              <table className="mytoday">
-                <thead>
-                  <tr><th>Patient</th><th>Time</th><th>Type</th><th>Sessions</th><th>Last visit</th><th>Status</th><th /></tr>
-                </thead>
-                <tbody>
-                  {dueNoTime.map((p) => (
-                    <tr key={`due-${p.id}`}>
-                      {nameCell(p)}
-                      <td><span className="hint">Not set</span></td>
-                      <td>{typeCell(p)}</td>
-                      <td>{sessCell(p)}</td>
-                      <td>{progress(p).last ? nice(progress(p).last!.session_date) : "—"}</td>
-                      <td><span className="pill scheduled">Follow-up pending</span></td>
-                      <td>
+        {/* 2 — Ongoing patients: booked, follow-up pending, not coming */}
+        <h3 style={{ margin: "18px 0 8px" }}>Ongoing patients coming {isT ? "today" : "this day"}</h3>
+        <div className="tbl">
+          <table className="mytoday">
+            <thead>
+              <tr><th>Patient</th><th>Time</th><th>Routine</th><th>Sessions</th><th>Last visit</th><th>Where</th><th>Status</th><th /></tr>
+            </thead>
+            <tbody>
+              {onS.map((x) => {
+                const p = pat(x.patient_id)!;
+                return (
+                  <tr key={x.id}>
+                    {nameCell(p, therapyLine(x))}
+                    <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
+                    <td><span className="rt">{routineLabel(p.routine)}</span></td>
+                    <td><b>{doneText(p, progress(p).done)}</b></td>
+                    <td>{lastVisit(p)}</td>
+                    {whereCell(x)}
+                    {statusCell(x)}
+                    <td>
+                      {x.status === "scheduled" && (
                         <div className="acts">
-                          <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
+                          <button className="btn sm pri" onClick={() => markSession(x, "completed")}>Complete</button>
+                          <button className="btn sm" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>
                           <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-
-                  {notComing.map((p) => {
-                    const sk = skipOf(p, T)!;
-                    return (
-                      <tr key={`skip-${p.id}`} className="dim">
-                        {nameCell(p, sk.note && <div className="hint">{sk.note}</div>)}
-                        <td><span className="hint">—</span></td>
-                        <td>{typeCell(p)}</td>
-                        <td>{sessCell(p)}</td>
-                        <td>{progress(p).last ? nice(progress(p).last!.session_date) : "—"}</td>
-                        <td><span className="tag fu">Not coming · {sk.reason}</span></td>
-                        <td><button className="btn sm" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming after all</button></td>
-                      </tr>
-                    );
-                  })}
-
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {empty(onS.length, `No ongoing patient coming ${isT ? "today" : "this day"} yet.`)}
+            </tbody>
+          </table>
+        </div>
       </>
     );
   };
