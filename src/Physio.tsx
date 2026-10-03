@@ -374,6 +374,13 @@ const CSS = `
 .hjsp .rbar { display:grid; grid-template-columns:minmax(0,1fr) 90px 28px; gap:10px; align-items:center; padding:5px 0; font-size:14px; }
 .hjsp .rbar i { display:block; height:10px; border-radius:99px; background:var(--red); opacity:.75; min-width:4px; }
 .hjsp .rbar b { text-align:right; font-variant-numeric:tabular-nums; }
+.hjsp .gsearch { position:relative; flex:0 1 300px; min-width:200px; }
+.hjsp .gsearch input { min-height:38px; }
+.hjsp .gres { position:absolute; top:calc(100% + 6px); left:0; right:0; min-width:300px; z-index:30; background:var(--panel);
+  border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.15); padding:4px; max-height:60vh; overflow:auto; }
+.hjsp .gres button { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; width:100%; padding:8px 10px; border-radius:9px; }
+.hjsp .gres button:hover { background:var(--bg); }
+.hjsp .gres button b { margin-right:auto; }
 .hjsp .thl { font-size:12px; color:var(--muted); }
 .hjsp .pinpage { padding:18px 20px 22px; display:grid; gap:10px; justify-items:center; text-align:center; }
 .hjsp .pinpage > .btn { justify-self:start; }
@@ -417,6 +424,7 @@ export default function Physio() {
   const [eMonth, setEMonth] = useState(todayS().slice(0, 7));   // Ended view — kaunsa mahina ("" = sab)
   const [eDoc, setEDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
   const [q, setQ] = useState("");
+  const [gq, setGq] = useState("");   // upar wala patient search
   const [day, setDay] = useState(todayS());
   const [showCx, setShowCx] = useState(false);
   const [oFilt, setOFilt] = useState<"all" | "due" | "today" | "fu">("all");
@@ -1347,6 +1355,105 @@ export default function Physio() {
           <button className="btn pri" onClick={() => save()}>
             Mark complete{picked.length ? ` (${picked.length})` : ""}
           </button>
+        </div>
+      </Modal>
+    );
+  };
+
+  // Patient ki saari details + ongoing settings (kab aata hai, doctor, time, kitne session) badlo
+  const EditPatientDlg = ({ p }: { p: Patient }) => {
+    const r = p.routine;
+    const [f, setF] = useState({
+      name: p.name, phone: p.phone || "", ailment: p.ailment || "", source: p.source || "Walk-in", notes: p.notes || "",
+    });
+    const [did, setDid] = useState(p.doctor_id || "");
+    const [rt, setRt] = useState<"daily" | "days" | "week">(r?.type || "daily");
+    const [days, setDays] = useState<number[]>(r && r.type === "days" ? r.days : [1, 3, 5]);
+    const [perWeek, setPerWeek] = useState(String(r && r.type === "week" ? r.perWeek || 2 : 2));
+    const [time, setTime] = useState(hhmm(p.usual_time) === "--" ? "" : hhmm(p.usual_time));
+    const [start, setStart] = useState(p.start_date || "");
+    const [packN, setPackN] = useState(String(p.sessions_planned ?? ""));
+    const on = isOngoing(p);
+
+    const save = async () => {
+      if (!f.name.trim()) return toast("Name cannot be empty");
+      if (rt === "days" && !days.length) return toast("Pick at least one day");
+      const data: Partial<Patient> = {
+        name: f.name.trim(), phone: f.phone.replace(/\D/g, "").slice(-10) || null,
+        ailment: f.ailment.trim() || null, source: f.source, notes: f.notes.trim() || null,
+        doctor_id: did || null, sessions_planned: Number(packN) || null,
+      };
+      if (on) {
+        data.routine = rt === "daily" ? { type: "daily" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: Math.max(1, Math.min(6, Number(perWeek) || 2)) };
+        data.usual_time = time || null;
+        data.start_date = start || null;
+      }
+      const ok = await updPatient(p.id, data, `${f.name.trim()} updated`);
+      if (ok) close();
+    };
+
+    return (
+      <Modal title={`Edit · ${p.name}`}>
+        <div className="row2">
+          <Field label="Name *"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+          <Field label="Mobile"><input inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        </div>
+        <div className="row2">
+          <Field label="Problem / ailment"><input value={f.ailment} placeholder="Knee pain, back pain…" onChange={(e) => setF({ ...f, ailment: e.target.value })} /></Field>
+          <Field label="Source">
+            <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+              {[...new Set([...SOURCES, f.source])].map((x) => <option key={x}>{x}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Doctor">
+          <select value={did} onChange={(e) => setDid(e.target.value)}>
+            <option value="">— Not assigned —</option>
+            {activeDocs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </Field>
+        {on && (
+          <>
+            <Field label="When do they come in?">
+              <div className="seg">
+                <button className={rt === "daily" ? "on" : ""} onClick={() => setRt("daily")}>Daily</button>
+                <button className={rt === "days" ? "on" : ""} onClick={() => setRt("days")}>Fixed days</button>
+                <button className={rt === "week" ? "on" : ""} onClick={() => setRt("week")}>Times a week</button>
+              </div>
+            </Field>
+            {rt === "days" && (
+              <Field label="Which days">
+                <div className="days">
+                  {DOW.map((n, i) => (
+                    <label key={n}>
+                      <input type="checkbox" checked={days.includes(i)}
+                        onChange={(e) => setDays(e.target.checked ? [...days, i].sort() : days.filter((x) => x !== i))} />
+                      {n}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {rt === "week" && (
+              <Field label="How many times a week">
+                <div className="seg wrap">
+                  {["1", "2", "3", "4", "5", "6"].map((n) => (
+                    <button key={n} className={perWeek === n ? "on" : ""} onClick={() => setPerWeek(n)}>{n}x</button>
+                  ))}
+                </div>
+              </Field>
+            )}
+            <div className="row2">
+              <Field label="Usual time"><input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+              <Field label="Started on"><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
+            </div>
+          </>
+        )}
+        <PackPick v={packN} on={setPackN} label="Sessions in the plan" />
+        <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+        <div className="end">
+          <button className="btn" onClick={close}>Cancel</button>
+          <button className="btn pri" onClick={save}>Save changes</button>
         </div>
       </Modal>
     );
@@ -2310,6 +2417,7 @@ export default function Physio() {
           {pr.today && pr.today.status === "scheduled" && (
             <button className="btn pri" onClick={() => markSession(pr.today!, "completed")}>Mark today complete</button>
           )}
+          <button className="btn" onClick={() => setDlg(<EditPatientDlg p={p} />)}>Edit details</button>
           <button className={`btn${pr.today ? "" : " pri"}`} onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book a session</button>
           {isNew(p) && <button className="btn pri" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
           <button className="btn" onClick={() => setDlg(<FollowUpDlg p={p} />)}>Log follow-up</button>
@@ -2759,6 +2867,33 @@ export default function Physio() {
     <button className={dv === v ? "on" : ""} onClick={() => { setView(v); if (v === "mytoday") setDay(T); }}>{label}</button>
   );
 
+  // Upar ka search — kisi bhi patient ko naam / mobile se dhoondo, khol ke edit karo
+  const SearchBox = () => {
+    const t = gq.trim().toLowerCase();
+    const hits = t
+      ? patients.filter((p) => `${p.name} ${p.phone || ""} ${p.ailment || ""}`.toLowerCase().includes(t)).slice(0, 8)
+      : [];
+    const tag = (p: Patient) => isOngoing(p) ? "Ongoing" : isNew(p) ? "New lead" : p.status === "done" ? "Ended" : "Cancelled";
+    return (
+      <div className="gsearch">
+        <input id="gsearch" placeholder="Search patient — name or mobile" value={gq}
+          onChange={(e) => setGq(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setGq(""); }} />
+        {!!t && (
+          <div className="gres">
+            {hits.length ? hits.map((p) => (
+              <button key={p.id} onClick={() => { setGq(""); openPat(p.id); }}>
+                <b>{p.name}</b>
+                <span className="hint">{p.phone || "no number"}{p.ailment ? ` · ${p.ailment}` : ""}</span>
+                <span className={`pill ${isOngoing(p) ? "ongoing" : isNew(p) ? "bigin" : ""}`}>{tag(p)}</span>
+                <span className="hint">{doc(p.doctor_id)?.name || ""}</span>
+              </button>
+            )) : <div className="hint" style={{ padding: 10 }}>No patient found</div>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="hjsp">
       <style>{CSS}</style>
@@ -2773,6 +2908,7 @@ export default function Physio() {
               <div className="brand">{me?.name || "Doctor"}<small>
                 {isAdmin ? "Admin viewing this doctor's dashboard" : "HJS Physio Desk · my dashboard"}
               </small></div>
+              {SearchBox()}
               <nav>
                 {myTab("mytoday", "Today")}
                 {myTab("myongoing", "My ongoing patients")}
@@ -2784,6 +2920,7 @@ export default function Physio() {
           ) : (
             <>
               <div className="brand">HJS Physio Desk<small>{`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · Admin`}</small></div>
+              {SearchBox()}
               <nav>
                 {tab("leads", "Sessions")}
                 {tab("today", "Today's schedule")}
