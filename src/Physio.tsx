@@ -385,6 +385,9 @@ const CSS = `
 .hjsp .gres button { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; width:100%; padding:8px 10px; border-radius:9px; }
 .hjsp .gres button:hover, .hjsp .gres button.sel { background:var(--green-soft); }
 .hjsp .gres button b { margin-right:auto; }
+.hjsp table.mytoday td { vertical-align:middle; }
+.hjsp table.mytoday tr.dim td { opacity:.7; }
+.hjsp table.mytoday tr.dim td:first-child { opacity:1; }
 .hjsp .thl { font-size:12px; color:var(--muted); }
 .hjsp .pinpage { padding:18px 20px 22px; display:grid; gap:10px; justify-items:center; text-align:center; }
 .hjsp .pinpage > .btn { justify-self:start; }
@@ -2510,6 +2513,20 @@ export default function Physio() {
     // Lead mili hai par abhi koi session book nahi hua
     const newLeads = patients.filter((p) => isNew(p) && p.doctor_id === d.id && !sessOf(p.id).length);
 
+    // Sab ek hi table mein — booked (time ke hisaab se), phir time nahi laga, naye leads, aur aakhir mein not coming
+    const typeCell = (p?: Patient) => p && isOngoing(p)
+      ? <><span className="pill ongoing">Ongoing</span> <span className="rt">{routineLabel(p.routine)}</span></>
+      : <span className={`pill ${srcCls(p?.source || null)}`}>New lead{p?.source ? ` · ${p.source}` : ""}</span>;
+    const sessCell = (p?: Patient) => (p && isOngoing(p) ? <b>{doneText(p, progress(p).done)}</b> : <span className="hint">—</span>);
+    const nameCell = (p: Patient | undefined, extra?: React.ReactNode) => (
+      <td>
+        <button className="lnk" onClick={() => p && openPat(p.id)}>{p?.name || "(deleted)"}</button>
+        <div className="hint">{p?.phone}{p?.ailment ? ` · ${p.ailment}` : ""}</div>
+        {extra}
+      </td>
+    );
+    const total = dayS.length + dueNoTime.length + newLeads.length + notComing.length;
+
     return (
       <>
         <div className="dayhead">
@@ -2523,34 +2540,26 @@ export default function Physio() {
           <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
           <Stat n={pend.length} l="Pending" />
           <Stat n={done.length} l="Completed" />
+          <Stat n={dueNoTime.length} l="Due, time not set" />
           <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
-          <Stat n={newLeads.length} l="New leads, no time yet" />
         </div>
 
-        <h3 style={{ margin: "14px 0 8px" }}>My sessions</h3>
         <div className="tbl">
-          <table>
+          <table className="mytoday">
             <thead>
-              <tr><th>Patient</th><th>Time</th><th>Type</th><th>Where</th><th>Status</th><th /></tr>
+              <tr><th>Patient</th><th>Time</th><th>Type</th><th>Sessions</th><th>Where</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
               {dayS.map((x) => {
                 const p = pat(x.patient_id);
                 return (
                   <tr key={x.id}>
-                    <td>
-                      <button className="lnk" onClick={() => p && openPat(p.id)}>{p?.name || "(deleted)"}</button>
-                      <div className="hint">{p?.phone}{p?.ailment ? ` · ${p.ailment}` : ""}</div>
-                      {!!(x.therapies || []).length && <div className="thl">{(x.therapies || []).join(" · ")}</div>}
-                    </td>
+                    {nameCell(p, !!(x.therapies || []).length && <div className="thl">{(x.therapies || []).join(" · ")}</div>)}
                     <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
-                    <td>
-                      {p && isOngoing(p)
-                        ? <><span className="pill ongoing">Ongoing</span> <span className="hint">{doneText(p, progress(p).done)}</span></>
-                        : <span className={`pill ${srcCls(p?.source || null)}`}>New lead{p?.source ? ` · ${p.source}` : ""}</span>}
-                    </td>
+                    <td>{typeCell(p)}</td>
+                    <td>{sessCell(p)}</td>
                     <td>{isHome(x) ? <span className="pill home">Home visit</span> : <span className="hint">Clinic</span>}</td>
-                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "pending" : "done"}</span></td>
+                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "Pending" : "Done ✓"}</span></td>
                     <td>
                       <div className="acts">
                         {x.status === "scheduled" ? (
@@ -2561,78 +2570,72 @@ export default function Physio() {
                               ? <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
                               : <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>)}
                           </>
-                        ) : (
+                        ) : p && isNew(p) ? (
                           <>
-                            <span className="pill completed">Done ✓</span>
-                            {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
-                            {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book again</button>}
+                            <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>
+                            <button className="btn sm" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book again</button>
                           </>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
                 );
               })}
-              {!dayS.length && <tr><td colSpan={6}><span className="hint">No sessions booked {isT ? "for today" : "this day"}.</span></td></tr>}
-            </tbody>
-          </table>
-        </div>
 
-        {!!dueNoTime.length && (
-          <>
-            <h3 style={{ margin: "18px 0 8px" }}>Due today — time not set yet</h3>
-            <p className="hint" style={{ marginBottom: 8 }}>These patients usually come today. Set their time or mark them not coming.</p>
-            <div className="panel">
               {dueNoTime.map((p) => (
-                <div className="drow" key={p.id}>
-                  <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
-                  <span className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</span>
-                  <span className="rt">{routineLabel(p.routine)}</span>
-                  <span className="pill">{doneText(p, progress(p).done)}</span>
-                  <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
-                  <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
-                </div>
+                <tr key={`due-${p.id}`}>
+                  {nameCell(p)}
+                  <td><span className="hint">Not set</span></td>
+                  <td>{typeCell(p)}</td>
+                  <td>{sessCell(p)}</td>
+                  <td><span className="hint">—</span></td>
+                  <td><span className="pill scheduled">Time not set</span></td>
+                  <td>
+                    <div className="acts">
+                      <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
+                      <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                    </div>
+                  </td>
+                </tr>
               ))}
-            </div>
-          </>
-        )}
 
-        {!!notComing.length && (
-          <>
-            <h3 style={{ margin: "18px 0 8px" }}>Not coming today</h3>
-            <div className="panel">
+              {newLeads.map((p) => (
+                <tr key={`lead-${p.id}`}>
+                  {nameCell(p)}
+                  <td><span className="hint">Not set</span></td>
+                  <td>{typeCell(p)}</td>
+                  <td>{sessCell(p)}</td>
+                  <td><span className="hint">—</span></td>
+                  <td><span className="pill bigin">New lead</span></td>
+                  <td>
+                    <div className="acts">
+                      <button className="btn sm pri" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Set date &amp; time</button>
+                      <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>
+                      <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
               {notComing.map((p) => {
                 const sk = skipOf(p, T)!;
                 return (
-                  <div className="drow" key={p.id}>
-                    <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
-                    <span className="tag fu">{sk.reason}</span>
-                    {sk.note && <span className="hint">{sk.note}</span>}
-                  </div>
+                  <tr key={`skip-${p.id}`} className="dim">
+                    {nameCell(p, sk.note && <div className="hint">{sk.note}</div>)}
+                    <td><span className="hint">—</span></td>
+                    <td>{typeCell(p)}</td>
+                    <td>{sessCell(p)}</td>
+                    <td><span className="hint">—</span></td>
+                    <td><span className="tag fu">Not coming · {sk.reason}</span></td>
+                    <td><button className="btn sm" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming after all</button></td>
+                  </tr>
                 );
               })}
-            </div>
-          </>
-        )}
 
-        {!!newLeads.length && (
-          <>
-            <h3 style={{ margin: "18px 0 8px" }}>New leads assigned to me — no time yet</h3>
-            <div className="panel">
-              {newLeads.map((p) => (
-                <div className="drow" key={p.id}>
-                  <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
-                  <span className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</span>
-                  <span className={`pill ${srcCls(p.source)}`}>{p.source}</span>
-                  <span className="hint">{nice(createdDay(p))}</span>
-                  <button className="btn sm pri" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Set date &amp; time</button>
-                  <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>
-                  <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+              {!total && <tr><td colSpan={7}><span className="hint">Nothing {isT ? "for today" : "this day"}.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
       </>
     );
   };
