@@ -211,6 +211,7 @@ const CSS = `
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 13px; color: #fff; }
 .hjsatt .att-av.lg { width: 82px; height: 82px; font-size: 27px; border-radius: 14px; }
+.hjsatt img.att-av { object-fit: cover; background: #eef2f6; }
 
 /* ---------- punch card ---------- */
 .hjsatt .att-punch { text-align: center; }
@@ -1094,8 +1095,17 @@ function DayListSheet({ title, rows, onClose }: any) {
 }
 
 const AV_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
+// full_name (lowercase) -> photo_url — app khulte hi employee_photos() se bharta hai
+const PHOTOS: Record<string, string> = {};
+
 const Avatar = ({ name, lg }: any) => {
   const n = String(name || "?");
+  const [broken, setBroken] = useState(false);
+  const src = PHOTOS[n.trim().toLowerCase()];
+  if (src && !broken) {
+    return <img className={`att-av ${lg ? "lg" : ""}`} src={src} alt={n}
+      loading="lazy" onError={() => setBroken(true)} />;
+  }
   const initials = n.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   let h = 0; for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 997;
   return <div className={`att-av ${lg ? "lg" : ""}`} style={{ background: AV_COLORS[h % AV_COLORS.length] }}>{initials}</div>;
@@ -10167,6 +10177,19 @@ export default function Attendance() {
   const [canVerify, setCanVerify] = useState(false);
   const [meErr, setMeErr] = useState("");
   const [toCheck, setToCheck] = useState(0);
+  const [, setPhotoTick] = useState(0);
+
+  // Employee photos ek baar load — Avatar har jagah inhe use karta hai
+  useEffect(() => {
+    if (!session) return;
+    supabase.rpc("employee_photos").then(({ data, error }) => {
+      if (error) { console.error("employee_photos failed:", error); return; }
+      (data || []).forEach((r: any) => {
+        if (r.full_name && r.photo_url) PHOTOS[String(r.full_name).trim().toLowerCase()] = r.photo_url;
+      });
+      setPhotoTick((t) => t + 1);
+    });
+  }, [session]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
