@@ -20,7 +20,8 @@ const supabase = createClient(URL_, KEY_, {
 type Routine =
   | { type: "daily" }
   | { type: "days"; days: number[] }
-  | { type: "week"; perWeek: number };
+  | { type: "week"; perWeek: number }
+  | { type: "alt" };   // ek din chhod ke (alternate days)
 
 type FollowUp = { date: string; note: string };
 type Skip = { date: string; reason: string; note: string };
@@ -67,8 +68,9 @@ type Patient = {
   cancel_reason: string | null;
   cancel_note: string | null;
   sessions_planned: number | null;   // kitne session liye — package
+  done_adjust?: number | null;       // haath se count theek kiya (physio-desk-updates.sql)
   ended_at?: string | null;          // treatment kab band hua
-  end_reason?: string | null;        // kyun band hua (physio-end-reason.sql)
+  end_reason?: string | null;        // kyun band hua (physio-desk-updates.sql)
   end_note?: string | null;
   notes: string | null;
   created_at: string;
@@ -155,12 +157,20 @@ const routineLabel = (r: Routine | null) => {
   if (!r) return "Not set";
   if (r.type === "daily") return "Daily";
   if (r.type === "days") return (r.days || []).map((i) => DOW[i]).join(", ") || "Days not set";
+  if (r.type === "alt") return "Alternate days";
   return `${r.perWeek || 1}x / week`;
 };
-const dueOn = (p: Patient, date: string) => {
+// last = pichhli session ki date (alternate days ke liye)
+const dueOnBase = (p: Patient, date: string, last?: string) => {
   const r = p.routine || ({ type: "daily" } as Routine);
   if (r.type === "daily") return true;
   if (r.type === "days") return (r.days || []).includes(parseYmd(date).getDay());
+  if (r.type === "alt") {
+    // Pichhli session se 2 din baad — na ho to start date se ek-chhod-ek
+    if (last) return daysBetween(last, date) >= 2;
+    const start = p.start_date || (p.created_at ? ymd(new Date(p.created_at)) : date);
+    return Math.abs(daysBetween(start, date)) % 2 === 0;
+  }
   return false;
 };
 
@@ -379,7 +389,7 @@ const CSS = `
 .hjsp .gres { position:absolute; top:calc(100% + 6px); left:0; right:0; min-width:300px; z-index:30; background:var(--panel);
   border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.15); padding:4px; max-height:60vh; overflow:auto; }
 .hjsp .gres button { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; width:100%; padding:8px 10px; border-radius:9px; }
-.hjsp .gres button:hover { background:var(--bg); }
+.hjsp .gres button:hover, .hjsp .gres button.sel { background:var(--green-soft); }
 .hjsp .gres button b { margin-right:auto; }
 .hjsp .thl { font-size:12px; color:var(--muted); }
 .hjsp .pinpage { padding:18px 20px 22px; display:grid; gap:10px; justify-items:center; text-align:center; }
@@ -425,6 +435,7 @@ export default function Physio() {
   const [eDoc, setEDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
   const [q, setQ] = useState("");
   const [gq, setGq] = useState("");   // upar wala patient search
+  const [gi, setGi] = useState(0);    // arrow se kaunsa result chuna hai
   const [day, setDay] = useState(todayS());
   const [showCx, setShowCx] = useState(false);
   const [oFilt, setOFilt] = useState<"all" | "due" | "today" | "fu">("all");
@@ -502,12 +513,21 @@ export default function Physio() {
     p.sessions_planned ? `${n}/${p.sessions_planned}` : `${n} done`;
   const skipOf = (p: Patient, date: string) => (p.skips || []).find((s) => s.date === date);
 
+  // Session data se gina hua count (haath wala sudhaar chhod ke)
+  const autoDone = (p: Patient) => {
+    const comp = sessOf(p.id).filter((s) => s.status === "completed");
+    // Books se aaye patients ka asli count seq mein hai (jaise 12/20) — jo bada ho wahi
+    return Math.max(comp.length, ...comp.map((s) => s.seq || 0));
+  };
+  const dueOn = (p: Patient, date: string) => {
+    const last = sessOf(p.id).filter((s) => s.status !== "cancelled" && s.session_date < date).slice(-1)[0];
+    return dueOnBase(p, date, last?.session_date);
+  };
   const progress = (p: Patient) => {
     const ss = sessOf(p.id);
-    const comp = ss.filter((s) => s.status === "completed");
     return {
-      // Books se aaye patients ka asli count seq mein hai (jaise 12/20) — jo bada ho wahi
-      done: Math.max(comp.length, ...comp.map((s) => s.seq || 0)),
+      // Haath se badla count (done_adjust) bhi jodo — aage ki sessions us par judti rahengi
+      done: Math.max(0, autoDone(p) + (p.done_adjust || 0)),
       next: ss.find((s) => s.status === "scheduled" && s.session_date >= T),
       today: ss.find((s) => s.session_date === T),
       last: ss.filter((s) => s.status === "completed").slice(-1)[0],
@@ -519,7 +539,7 @@ export default function Physio() {
     const pr = progress(p);
     if (pr.next) return false;
     const ref = pr.last ? pr.last.session_date : p.start_date || createdDay(p);
-    const gap = p.routine && p.routine.type === "daily" ? 2 : 8;
+    const gap = p.routine?.type === "daily" ? 2 : p.routine?.type === "alt" ? 3 : 8;
     return daysBetween(ref, T) >= gap;
   };
   const docStats = (d: Doctor) => {
@@ -952,7 +972,7 @@ export default function Physio() {
     const [search, setSearch] = useState("");
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
     const [did, setDid] = useState(p?.doctor_id || effDoc || "");
-    const [rt, setRt] = useState<"daily" | "days" | "week">((p?.routine?.type as "daily") || "daily");
+    const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">((p?.routine?.type as "daily") || "daily");
     const [days, setDays] = useState<number[]>(
       p?.routine && p.routine.type === "days" ? p.routine.days : [1, 3, 5]
     );
@@ -971,7 +991,7 @@ export default function Physio() {
 
     const save = async () => {
       if (!did) return toast("Pick a doctor");
-      const routine: Routine = rt === "daily" ? { type: "daily" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: 2 };
+      const routine: Routine = rt === "daily" ? { type: "daily" } : rt === "alt" ? { type: "alt" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: 2 };
       let pid = pick?.id;
       if (!pid) {
         if (!f.name.trim()) return toast("Enter a name or pick a lead");
@@ -1051,6 +1071,7 @@ export default function Physio() {
         <Field label="When do they come in?">
           <select value={rt} onChange={(e) => setRt(e.target.value as "daily")}>
             <option value="daily">Daily</option>
+            <option value="alt">Alternate days</option>
             <option value="days">Fixed days of the week</option>
             <option value="week">1-2 times a week (book manually)</option>
           </select>
@@ -1367,7 +1388,9 @@ export default function Physio() {
       name: p.name, phone: p.phone || "", ailment: p.ailment || "", source: p.source || "Walk-in", notes: p.notes || "",
     });
     const [did, setDid] = useState(p.doctor_id || "");
-    const [rt, setRt] = useState<"daily" | "days" | "week">(r?.type || "daily");
+    const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">(r?.type || "daily");
+    const auto = autoDone(p);
+    const [doneN, setDoneN] = useState(String(Math.max(0, auto + (p.done_adjust || 0))));
     const [days, setDays] = useState<number[]>(r && r.type === "days" ? r.days : [1, 3, 5]);
     const [perWeek, setPerWeek] = useState(String(r && r.type === "week" ? r.perWeek || 2 : 2));
     const [time, setTime] = useState(hhmm(p.usual_time) === "--" ? "" : hhmm(p.usual_time));
@@ -1384,12 +1407,22 @@ export default function Physio() {
         doctor_id: did || null, sessions_planned: Number(packN) || null,
       };
       if (on) {
-        data.routine = rt === "daily" ? { type: "daily" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: Math.max(1, Math.min(6, Number(perWeek) || 2)) };
+        data.routine = rt === "daily" ? { type: "daily" } : rt === "alt" ? { type: "alt" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: Math.max(1, Math.min(6, Number(perWeek) || 2)) };
         data.usual_time = time || null;
         data.start_date = start || null;
       }
       const ok = await updPatient(p.id, data, `${f.name.trim()} updated`);
-      if (ok) close();
+      if (!ok) return;
+      // Sessions done haath se — farak done_adjust mein, taaki aage ki sessions judti rahein
+      const want = Math.max(0, Math.round(Number(doneN)));
+      const adj = Number.isFinite(want) ? want - auto : p.done_adjust || 0;
+      if (doneN !== "" && adj !== (p.done_adjust || 0)) {
+        const { error } = await supabase.from("physio_patients").update({ done_adjust: adj }).eq("id", p.id);
+        if (error) { toast("Count not saved — run physio-desk-updates.sql in Supabase"); return; }
+        await load();
+        toast(`${f.name.trim()} · sessions done set to ${want}`);
+      }
+      close();
     };
 
     return (
@@ -1417,6 +1450,7 @@ export default function Physio() {
             <Field label="When do they come in?">
               <div className="seg">
                 <button className={rt === "daily" ? "on" : ""} onClick={() => setRt("daily")}>Daily</button>
+                <button className={rt === "alt" ? "on" : ""} onClick={() => setRt("alt")}>Alternate days</button>
                 <button className={rt === "days" ? "on" : ""} onClick={() => setRt("days")}>Fixed days</button>
                 <button className={rt === "week" ? "on" : ""} onClick={() => setRt("week")}>Times a week</button>
               </div>
@@ -1449,6 +1483,14 @@ export default function Physio() {
             </div>
           </>
         )}
+        <div className="row2">
+          <Field label="Sessions done (change if the count is wrong)">
+            <input type="number" min={0} max={999} value={doneN} onChange={(e) => setDoneN(e.target.value)} />
+          </Field>
+          <div className="f"><label>&nbsp;</label>
+            <span className="hint" style={{ paddingTop: 8 }}>Counted from sessions: {auto}{p.done_adjust ? ` · corrected by ${p.done_adjust > 0 ? "+" : ""}${p.done_adjust}` : ""}</span>
+          </div>
+        </div>
         <PackPick v={packN} on={setPackN} label="Sessions in the plan" />
         <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="end">
@@ -2876,12 +2918,20 @@ export default function Physio() {
     const tag = (p: Patient) => isOngoing(p) ? "Ongoing" : isNew(p) ? "New lead" : p.status === "done" ? "Ended" : "Cancelled";
     return (
       <div className="gsearch">
-        <input id="gsearch" placeholder="Search patient — name or mobile" value={gq}
-          onChange={(e) => setGq(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setGq(""); }} />
+        <input id="gsearch" placeholder="Search patient — name or mobile" value={gq} autoComplete="off"
+          onChange={(e) => { setGq(e.target.value); setGi(0); }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { setGq(""); return; }
+            if (!hits.length) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); setGi((i) => (i + 1) % hits.length); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setGi((i) => (i - 1 + hits.length) % hits.length); }
+            else if (e.key === "Enter") { e.preventDefault(); const h = hits[Math.min(gi, hits.length - 1)]; setGq(""); setGi(0); openPat(h.id); }
+          }} />
         {!!t && (
           <div className="gres">
-            {hits.length ? hits.map((p) => (
-              <button key={p.id} onClick={() => { setGq(""); openPat(p.id); }}>
+            {hits.length ? hits.map((p, i) => (
+              <button key={p.id} className={i === Math.min(gi, hits.length - 1) ? "sel" : ""}
+                onMouseEnter={() => setGi(i)} onClick={() => { setGq(""); setGi(0); openPat(p.id); }}>
                 <b>{p.name}</b>
                 <span className="hint">{p.phone || "no number"}{p.ailment ? ` · ${p.ailment}` : ""}</span>
                 <span className={`pill ${isOngoing(p) ? "ongoing" : isNew(p) ? "bigin" : ""}`}>{tag(p)}</span>
@@ -2943,21 +2993,21 @@ export default function Physio() {
           : !who ? LoginView()
           : effDoc ? (
             dv === "myongoing" ? MyOngoingView()
-              : dv === "patient" ? <PatientView />
+              : dv === "patient" ? PatientView()
               : MyTodayView()
           )
-          : view === "leads" ? <LeadsView />
-          : view === "today" ? <TodayView />
-          : view === "ongoing" ? <OngoingView />
-          : view === "board" ? <BoardView />
-          : view === "doctors" ? <DoctorsView />
-          : view === "cal" ? <CalView />
-          : view === "roster" ? <RosterView />
-          : view === "doctor" ? <DoctorView />
+          : view === "leads" ? LeadsView()
+          : view === "today" ? TodayView()
+          : view === "ongoing" ? OngoingView()
+          : view === "board" ? BoardView()
+          : view === "doctors" ? DoctorsView()
+          : view === "cal" ? CalView()
+          : view === "roster" ? RosterView()
+          : view === "doctor" ? DoctorView()
           : view === "access" ? AccessView()
           : view === "ended" ? EndedView()
-          : view === "patient" ? <PatientView />
-          : <LeadsView />}
+          : view === "patient" ? PatientView()
+          : LeadsView()}
       </main>
       {dlg}
       {!!msg && <div className="toast">{msg}</div>}
