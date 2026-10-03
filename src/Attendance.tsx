@@ -1111,6 +1111,62 @@ const Avatar = ({ name, lg }: any) => {
   return <div className={`att-av ${lg ? "lg" : ""}`} style={{ background: AV_COLORS[h % AV_COLORS.length] }}>{initials}</div>;
 };
 
+// Photo upload — phone pe hi 400x400 crop + compress, phir Storage + photo_url.
+// File ka naam employee ki id (uuid) pe hai, isliye emp code badle to bhi link nahi tootega.
+const PHOTO_BUCKET = "employee-photos";
+async function squareJpeg(file: File, size = 400): Promise<Blob> {
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(bmp.width, bmp.height);
+  const sx = (bmp.width - s) / 2;
+  const sy = bmp.height > bmp.width ? (bmp.height - s) * 0.25 : 0;   // portrait: chehra upar hota hai
+  const c = document.createElement("canvas");
+  c.width = size; c.height = size;
+  c.getContext("2d")!.drawImage(bmp, sx, sy, s, s, 0, 0, size, size);
+  return await new Promise((res, rej) =>
+    c.toBlob((b) => (b ? res(b) : rej(new Error("Photo process nahi hui"))), "image/jpeg", 0.88));
+}
+
+function PhotoPicker({ emp, label, onDone }: any) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const pick = async (file?: File | null) => {
+    if (!file || !emp?.id) return;
+    if (!file.type.startsWith("image/")) { setErr("Sirf photo (image) chuno."); return; }
+    setBusy(true); setErr("");
+    try {
+      const blob = await squareJpeg(file);
+      const path = `u/${emp.id}.jpg`;
+      const up = await supabase.storage.from(PHOTO_BUCKET)
+        .upload(path, blob, { upsert: true, contentType: "image/jpeg", cacheControl: "3600" });
+      if (up.error) throw up.error;
+      const url = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl + `?v=${Date.now()}`;
+      const { error } = await supabase.rpc("set_employee_photo", { p_emp: emp.id, p_url: url });
+      if (error) throw error;
+      if (emp.full_name) PHOTOS[String(emp.full_name).trim().toLowerCase()] = url;
+      window.dispatchEvent(new CustomEvent("hjs:photo-updated"));
+      onDone?.(url);
+    } catch (e: any) {
+      setErr(e?.message || "Upload nahi hua, dobara try karo.");
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = "";
+    }
+  };
+
+  return (
+    <div>
+      <input ref={ref} type="file" accept="image/*" style={{ display: "none" }}
+        onChange={(e) => pick(e.target.files?.[0])} />
+      <button className="att-btn line sm" type="button" disabled={busy} onClick={() => ref.current?.click()}>
+        {busy ? "Uploading…" : label || "Add photo"}
+      </button>
+      {err && <p style={{ color: "#dc2626", fontSize: 12, marginTop: 6 }}>{err}</p>}
+    </div>
+  );
+}
+
 const ICONS: Record<string, string> = {
   home: "M3 10.5 12 3l9 7.5M5 9.8V20h14V9.8",
   clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
@@ -4944,6 +5000,12 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   return (
     <Sheet title={isNew ? "New employee" : f.full_name} onClose={onClose}>
       <div className="att-card att-stack">
+        {!isNew && (
+          <div className="att-flex">
+            <Avatar name={row.full_name} lg />
+            <PhotoPicker emp={row} label={row.photo_url || PHOTOS[String(row.full_name || "").trim().toLowerCase()] ? "Change photo" : "Add photo"} />
+          </div>
+        )}
         <div className="att-row2">
           <div>
             <label>Employee code</label>
@@ -5722,6 +5784,7 @@ function PayrollTab({ isAdmin = false }: any) {
 
 /* ========================= profile ========================= */
 function MeScreen({ me }: any) {
+  const [hasPhoto, setHasPhoto] = useState(!!me.photo_url);
   const info: [string, string][] = [
     ["Employee code", me.emp_code],
     ["Email", me.email || "—"],
@@ -5740,6 +5803,11 @@ function MeScreen({ me }: any) {
         <div>
           <h2 className="att-h1">{me.full_name}</h2>
           <p className="att-muted">{me.designation || me.role} · {me.emp_code}</p>
+          {!hasPhoto && (
+            <div style={{ marginTop: 8 }}>
+              <PhotoPicker emp={me} label="Add your photo" onDone={() => setHasPhoto(true)} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -10190,6 +10258,12 @@ export default function Attendance() {
       setPhotoTick((t) => t + 1);
     });
   }, [session]);
+
+  useEffect(() => {
+    const bump = () => setPhotoTick((t) => t + 1);
+    window.addEventListener("hjs:photo-updated", bump);
+    return () => window.removeEventListener("hjs:photo-updated", bump);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
