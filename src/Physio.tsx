@@ -27,6 +27,27 @@ type Skip = { date: string; reason: string; note: string };
 
 type Doctor = { id: string; name: string; active: boolean };
 
+/* Login — har doctor apne PIN se sirf apna dashboard dekhe, admin sab kuch.
+   PIN code mein fixed hain — app se koi (admin bhi) badal nahi sakta. Badalna ho to yahin badlo. */
+type Who = { role: "admin"; pin: string } | { role: "doctor"; id: string; pin: string };
+const WHO_KEY = "hjs-physio-who";
+const ADMIN_PIN = "0000";
+// Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
+const DOC_PINS: [string, string][] = [
+  ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
+  ["anshu", "5555"], ["shubham", "6666"], ["vaibhav", "7777"], ["prabhjot", "8888"],
+];
+const pinOf = (d?: { name: string }) =>
+  d ? DOC_PINS.find(([k]) => d.name.toLowerCase().includes(k))?.[1] || "" : "";
+const readWho = (): Who | null => {
+  try {
+    const r = localStorage.getItem(WHO_KEY);
+    return r ? (JSON.parse(r) as Who) : null;
+  } catch {
+    return null;
+  }
+};
+
 type Therapy = { id: string; name: string; grp: string | null; sort_order: number; active: boolean };
 
 type Patient = {
@@ -335,6 +356,15 @@ const CSS = `
 .hjsp .g6,.hjsp .topt.g6{color:#0F766E}      .hjsp .chip.g6{background:#D7F0EC}           .hjsp .topt.g6:hover{background:#D7F0EC}
 .hjsp .g7,.hjsp .topt.g7{color:var(--muted)} .hjsp .chip.g7{background:var(--line)}        .hjsp .topt.g7:hover{background:var(--line)}
 .hjsp .thl { font-size:12px; color:var(--muted); }
+.hjsp .pinpage { padding:18px 20px 22px; display:grid; gap:10px; justify-items:center; text-align:center; }
+.hjsp .pinpage > .btn { justify-self:start; }
+.hjsp .pinpage h2 { font-size:22px; letter-spacing:-.02em; text-align:center; }
+.hjsp .pinbox { position:relative; display:flex; gap:12px; justify-content:center; margin:4px 0 6px; cursor:text; }
+.hjsp .pinbox input { position:absolute; inset:0; opacity:0; min-height:0; }
+.hjsp .pd { width:52px; height:58px; border:1.5px solid var(--line); border-radius:12px; background:var(--bg);
+  display:flex; align-items:center; justify-content:center; font-size:20px; color:var(--green); }
+.hjsp .pd.on { border-color:var(--green); background:var(--green-soft); }
+.hjsp .pd.cur { border-color:var(--green); box-shadow:0 0 0 3px var(--green-soft); }
 .hjsp .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--ink);
   color:#fff; padding:10px 16px; border-radius:10px; font-weight:600; z-index:60; }
 @media (max-width:640px){ .hjsp .row2 { grid-template-columns:1fr; } .hjsp nav { width:100%; overflow-x:auto; } }
@@ -350,7 +380,21 @@ export default function Physio() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor">("leads");
+  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor"
+    | "mytoday" | "myongoing" | "access">(() => (readWho()?.role === "doctor" ? "mytoday" : "leads"));
+
+  /* ---------- login ---------- */
+  const [who, setWhoS] = useState<Who | null>(readWho);
+  const setWho = (w: Who | null) => {
+    setWhoS(w);
+    try {
+      if (w) localStorage.setItem(WHO_KEY, JSON.stringify(w));
+      else localStorage.removeItem(WHO_KEY);
+    } catch { /* private window — bas is tab tak login */ }
+  };
+  const [loginAs, setLoginAs] = useState("");      // "admin" ya doctor id
+  const [pinIn, setPinIn] = useState("");
+  const [asDoc, setAsDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
   const [q, setQ] = useState("");
   const [day, setDay] = useState(todayS());
   const [showCx, setShowCx] = useState(false);
@@ -464,6 +508,57 @@ export default function Physio() {
       fu: on.filter(fuDue),
       dueToday: on.filter((p) => dueOn(p, T) && !sessOf(p.id).some((s) => s.session_date === T)),
     };
+  };
+
+  /* ---------- who is looking ---------- */
+  const isAdmin = who?.role === "admin";
+  // Doctor login ho to wahi doctor; admin preview kar raha ho to woh doctor
+  const effDoc = who?.role === "doctor" ? who.id : asDoc;
+
+  // PIN badal gaya / doctor hat gaya to purana login band
+  useEffect(() => {
+    if (loading || !who) return;
+    const ok = who.role === "admin"
+      ? who.pin === ADMIN_PIN
+      : doctors.some((d) => d.id === who.id && d.active !== false && !!pinOf(d) && pinOf(d) === who.pin);
+    if (!ok) {
+      setWho(null);
+      setAsDoc("");
+      toast("Please log in again");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, doctors]);
+
+  // v = abhi type hua PIN (4th digit aate hi seedha login)
+  const tryLogin = (v: string = pinIn) => {
+    const pinIn = v;
+    if (!loginAs) return toast("Pick your name first");
+    if (pinIn.length !== 4) return toast("Enter your 4-digit PIN");
+    if (loginAs === "admin") {
+      if (pinIn !== ADMIN_PIN) { setPinIn(""); return toast("Wrong PIN"); }
+      setWho({ role: "admin", pin: pinIn });
+      setView("leads");
+    } else {
+      const d = doctors.find((x) => x.id === loginAs);
+      if (!pinOf(d)) { setPinIn(""); return toast("No PIN for this name — ask the admin"); }
+      if (pinIn !== pinOf(d)) { setPinIn(""); return toast("Wrong PIN"); }
+      setWho({ role: "doctor", id: d!.id, pin: pinIn });
+      setView("mytoday");
+      setDay(todayS());
+    }
+    setPinIn("");
+    setLoginAs("");
+  };
+  // PIN mein sirf 4 ank — 4 hote hi login try
+  const typePin = (raw: string) => {
+    const v = raw.replace(/\D/g, "").slice(0, 4);
+    setPinIn(v);
+    if (v.length === 4) window.setTimeout(() => tryLogin(v), 120);
+  };
+  const logout = () => {
+    setWho(null);
+    setAsDoc("");
+    setView("leads");
   };
 
   /* ---------- writes ---------- */
@@ -689,7 +784,7 @@ export default function Physio() {
   const ScheduleDlg = ({ p }: { p: Patient }) => {
     const [date, setDate] = useState(T);
     const [time, setTime] = useState(hhmm(p.usual_time) === "--" ? "10:00" : hhmm(p.usual_time));
-    const [did, setDid] = useState(p.doctor_id || "");
+    const [did, setDid] = useState(p.doctor_id || effDoc || "");
     const [place, setPlace] = useState<Place>(lastPlace(p.id));
     const save = async () => {
       if (!did) return toast("Select a doctor");
@@ -821,7 +916,7 @@ export default function Physio() {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
-    const [did, setDid] = useState(p?.doctor_id || "");
+    const [did, setDid] = useState(p?.doctor_id || effDoc || "");
     const [rt, setRt] = useState<"daily" | "days" | "week">((p?.routine?.type as "daily") || "daily");
     const [days, setDays] = useState<number[]>(
       p?.routine && p.routine.type === "days" ? p.routine.days : [1, 3, 5]
@@ -863,7 +958,7 @@ export default function Physio() {
       await load();
       toast(`Ongoing with ${doc(did)?.name} · ${routineLabel(routine)}`);
       close();
-      setView("ongoing");
+      setView(effDoc ? "myongoing" : "ongoing");
     };
 
     return (
@@ -2014,6 +2109,7 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">{d.name}</div>
+          <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open their dashboard</button>
           <button className="btn sm" onClick={() => setView("board")}>‹ All doctors</button>
         </div>
         <div className="stats">
@@ -2059,12 +2155,12 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">{p.name}</div>
-          <button className="btn sm" onClick={() => setView(isOngoing(p) ? "ongoing" : "leads")}>‹ Back</button>
+          <button className="btn sm" onClick={() => setView(effDoc ? (isOngoing(p) ? "myongoing" : "mytoday") : isOngoing(p) ? "ongoing" : "leads")}>‹ Back</button>
         </div>
         <div className="tools">
           <span className={`pill ${srcCls(p.source)}`}>{p.source}</span>
           <span className="hint">{p.phone || "no number"}{p.ailment ? ` · ${p.ailment}` : ""}</span>
-          {d ? <span className="hint">Doctor: <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button></span>
+          {d ? <span className="hint">Doctor: {effDoc ? <b>{d.name}</b> : <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button>}</span>
              : <span className="hint">No doctor yet</span>}
           {isOngoing(p) ? <span className="rt">{routineLabel(p.routine)}</span>
             : <span className="pill">{isNew(p) ? "New lead" : p.status === "cancelled" ? "Cancelled" : "Finished"}</span>}
@@ -2091,6 +2187,8 @@ export default function Physio() {
           <button className={`btn${pr.today ? "" : " pri"}`} onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book a session</button>
           {isNew(p) && <button className="btn pri" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
           <button className="btn" onClick={() => setDlg(<FollowUpDlg p={p} />)}>Log follow-up</button>
+          {!!next.length && <button className="btn" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
+          {isNew(p) && <button className="btn ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel lead</button>}
           {isOngoing(p) && <button className="btn ghost" onClick={() => endOngoing(p)}>End treatment</button>}
         </div>
         <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>Upcoming sessions</h2>
@@ -2123,10 +2221,323 @@ export default function Physio() {
     );
   };
 
+  /* ========================= doctor dashboard ========================= */
+  /* Note: yeh views function ki tarah call hote hain (MyTodayView()), component ki tarah nahi —
+     taaki typing karte waqt input ka focus na jaye. Inke andar hooks mat daalna. */
+
+  // View 1 — aaj ka kaam: is doctor ke session (lead + ongoing), due-but-no-time, naye leads
+  const MyTodayView = () => {
+    const d = doc(effDoc);
+    if (!d) return <div className="stat"><span className="hint">Doctor not found.</span></div>;
+    const dayS = liveS.filter((s) => s.doctor_id === d.id && s.session_date === day)
+      .sort((a, b) => a.session_time.localeCompare(b.session_time));
+    const pend = dayS.filter((s) => s.status === "scheduled");
+    const done = dayS.filter((s) => s.status === "completed");
+    const mineOn = ongoingOf(d.id);
+    const isT = day === T;
+    const dueNoTime = isT
+      ? mineOn.filter((p) => dueOn(p, T) && !sessOf(p.id).some((s) => s.session_date === T) && !skipOf(p, T))
+      : [];
+    const notComing = isT ? mineOn.filter((p) => skipOf(p, T)) : [];
+    // Lead mili hai par abhi koi session book nahi hua
+    const newLeads = patients.filter((p) => isNew(p) && p.doctor_id === d.id && !sessOf(p.id).length);
+
+    return (
+      <>
+        <div className="dayhead">
+          <div className="d">{isT ? "Today · " : day === addDays(T, 1) ? "Tomorrow · " : ""}{nice(day)}</div>
+          <button className="btn sm" onClick={() => setDay(addDays(day, -1))}>‹ Prev</button>
+          <button className="btn sm" onClick={() => setDay(T)}>Today</button>
+          <button className="btn sm" onClick={() => setDay(addDays(day, 1))}>Next ›</button>
+          <button className="btn sm pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+        </div>
+        <div className="stats">
+          <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
+          <Stat n={pend.length} l="Pending" />
+          <Stat n={done.length} l="Completed" />
+          <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
+          <Stat n={newLeads.length} l="New leads, no time yet" />
+        </div>
+
+        <h3 style={{ margin: "14px 0 8px" }}>My sessions</h3>
+        <div className="tbl">
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Time</th><th>Type</th><th>Where</th><th>Status</th><th /></tr>
+            </thead>
+            <tbody>
+              {dayS.map((x) => {
+                const p = pat(x.patient_id);
+                return (
+                  <tr key={x.id}>
+                    <td>
+                      <button className="lnk" onClick={() => p && openPat(p.id)}>{p?.name || "(deleted)"}</button>
+                      <div className="hint">{p?.phone}{p?.ailment ? ` · ${p.ailment}` : ""}</div>
+                      {!!(x.therapies || []).length && <div className="thl">{(x.therapies || []).join(" · ")}</div>}
+                    </td>
+                    <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
+                    <td>
+                      {p && isOngoing(p)
+                        ? <><span className="pill ongoing">Ongoing</span> <span className="hint">{doneText(p, progress(p).done)}</span></>
+                        : <span className={`pill ${srcCls(p?.source || null)}`}>New lead{p?.source ? ` · ${p.source}` : ""}</span>}
+                    </td>
+                    <td>{isHome(x) ? <span className="pill home">Home visit</span> : <span className="hint">Clinic</span>}</td>
+                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "pending" : "done"}</span></td>
+                    <td>
+                      <div className="acts">
+                        {x.status === "scheduled" ? (
+                          <>
+                            <button className="btn sm pri" onClick={() => markSession(x, "completed")}>Complete</button>
+                            {p && <button className="btn sm" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
+                            {p && (isOngoing(p)
+                              ? <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                              : <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>)}
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn sm ghost" onClick={() => markSession(x, "scheduled")}>Undo</button>
+                            {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
+                            {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book again</button>}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!dayS.length && <tr><td colSpan={6}><span className="hint">No sessions booked {isT ? "for today" : "this day"}.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        {!!dueNoTime.length && (
+          <>
+            <h3 style={{ margin: "18px 0 8px" }}>Due today — time not set yet</h3>
+            <p className="hint" style={{ marginBottom: 8 }}>These patients usually come today. Set their time or mark them not coming.</p>
+            <div className="panel">
+              {dueNoTime.map((p) => (
+                <div className="drow" key={p.id}>
+                  <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                  <span className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</span>
+                  <span className="rt">{routineLabel(p.routine)}</span>
+                  <span className="pill">{doneText(p, progress(p).done)}</span>
+                  <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>
+                  <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {!!notComing.length && (
+          <>
+            <h3 style={{ margin: "18px 0 8px" }}>Not coming today</h3>
+            <div className="panel">
+              {notComing.map((p) => {
+                const sk = skipOf(p, T)!;
+                return (
+                  <div className="drow" key={p.id}>
+                    <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                    <span className="tag fu">{sk.reason}</span>
+                    {sk.note && <span className="hint">{sk.note}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {!!newLeads.length && (
+          <>
+            <h3 style={{ margin: "18px 0 8px" }}>New leads assigned to me — no time yet</h3>
+            <div className="panel">
+              {newLeads.map((p) => (
+                <div className="drow" key={p.id}>
+                  <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                  <span className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</span>
+                  <span className={`pill ${srcCls(p.source)}`}>{p.source}</span>
+                  <span className="hint">{nice(createdDay(p))}</span>
+                  <button className="btn sm pri" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Set date &amp; time</button>
+                  <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>
+                  <button className="btn sm ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </>
+    );
+  };
+
+  // View 2 — mere saare ongoing patients
+  const MyOngoingView = () => {
+    const d = doc(effDoc);
+    if (!d) return <div className="stat"><span className="hint">Doctor not found.</span></div>;
+    const all = ongoingOf(d.id);
+    const comingToday = all.filter((p) => sessOf(p.id).some((s) => s.session_date === T));
+    const dueNotBooked = all.filter((p) => dueOn(p, T) && !sessOf(p.id).some((s) => s.session_date === T) && !skipOf(p, T));
+    const list = all.slice().sort((a, b) => {
+      const ta = progress(a).today?.session_time || "99", tb = progress(b).today?.session_time || "99";
+      return ta.localeCompare(tb) || a.name.localeCompare(b.name);
+    });
+
+    return (
+      <>
+        <div className="dayhead">
+          <div className="d">My ongoing patients</div>
+          <button className="btn sm pri" onClick={() => setDlg(<OngoingDlg fresh />)}>+ Ongoing patient</button>
+        </div>
+        <div className="stats">
+          <Stat n={all.length} l="Ongoing patients" />
+          <Stat n={comingToday.length} l="Booked today" />
+          <Stat n={dueNotBooked.length} l="Due today, no time yet" />
+          <Stat n={all.filter(fuDue).length} l="Follow-up needed" />
+        </div>
+        <div className="tbl">
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Routine</th><th>Sessions</th><th>Last</th><th>Coming today?</th><th>Next</th><th>Follow-up</th><th /></tr>
+            </thead>
+            <tbody>
+              {list.map((p) => {
+                const pr = progress(p);
+                const skip = skipOf(p, T);
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                      <div className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</div>
+                    </td>
+                    <td><span className="rt">{routineLabel(p.routine)}</span></td>
+                    <td><b style={{ fontSize: 16 }}>{doneText(p, pr.done)}</b></td>
+                    <td>{pr.last ? nice(pr.last.session_date) : "—"}</td>
+                    <td>
+                      {pr.today ? (
+                        <span className={`step ${pr.today.status === "completed" ? "ok" : "no"}`}>
+                          {hhmm(pr.today.session_time)} · {pr.today.status === "completed" ? "done" : "coming"}
+                        </span>
+                      ) : skip ? (
+                        <span className="tag fu">Not coming · {skip.reason}</span>
+                      ) : (
+                        <>
+                          <button className="btn sm pri" onClick={() => setDlg(<ComingDlg p={p} />)}>Coming</button>{" "}
+                          <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} />)}>Not coming</button>
+                        </>
+                      )}
+                    </td>
+                    <td>{pr.next && pr.next.session_date > T ? `${nice(pr.next.session_date)} ${hhmm(pr.next.session_time)}` : "—"}</td>
+                    <td>{fuDue(p) ? <span className="tag fu">Needed</span> : p.next_follow_up ? nice(p.next_follow_up) : "—"}</td>
+                    <td>
+                      <div className="acts">
+                        {pr.today && pr.today.status === "scheduled" ? (
+                          <>
+                            <button className="btn sm pri" onClick={() => markSession(pr.today!, "completed")}>Done</button>
+                            <button className="btn sm" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>
+                          </>
+                        ) : (
+                          <button className="btn sm" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Schedule</button>
+                        )}
+                        <button className="btn sm ghost" onClick={() => setDlg(<FollowUpDlg p={p} />)}>Follow-up</button>
+                        <button className="btn sm ghost" onClick={() => endOngoing(p)}>End</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!list.length && <tr><td colSpan={8}><span className="hint">No ongoing patients with you right now.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
+
+  /* ========================= login + PINs ========================= */
+  // Page 1: naam chuno → Page 2: sirf PIN (4 ank)
+  const LoginView = () => {
+    if (!loginAs) return (
+      <div style={{ maxWidth: 520, margin: "6vh auto 0" }}>
+        <div className="panel" style={{ padding: "18px 20px" }}>
+          <h2 style={{ fontSize: 20, marginBottom: 4 }}>Who is logging in?</h2>
+          <p className="hint" style={{ marginBottom: 12 }}>Doctors see only their own dashboard. Admin sees everything.</p>
+          <div className="dpick" style={{ maxHeight: "none" }}>
+            {/* Admin sabse upar */}
+            <button className="dopt" onClick={() => { setLoginAs("admin"); setPinIn(""); }}>
+              <b>Admin</b><span className="tag load">Full desk</span><span className="hint">›</span>
+            </button>
+            {activeDocs.map((d) => (
+              <button key={d.id} className="dopt" onClick={() => { setLoginAs(d.id); setPinIn(""); }}>
+                <b>{d.name}</b><span className="hint">›</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+    const name = loginAs === "admin" ? "Admin" : doc(loginAs)?.name || "";
+    return (
+      <div style={{ maxWidth: 380, margin: "6vh auto 0" }}>
+        <div className="panel pinpage">
+          <button className="btn sm ghost" onClick={() => { setLoginAs(""); setPinIn(""); }}>‹ Change name</button>
+          <h2>{name}</h2>
+          <p className="hint">Enter your 4-digit PIN</p>
+          <label className="pinbox">
+            {[0, 1, 2, 3].map((i) => (
+              <span key={i} className={`pd${pinIn.length > i ? " on" : ""}${pinIn.length === i ? " cur" : ""}`}>
+                {pinIn.length > i ? "●" : ""}
+              </span>
+            ))}
+            <input id="pin" type="password" inputMode="numeric" autoComplete="off" autoFocus maxLength={4}
+              aria-label="PIN" value={pinIn} onChange={(e) => typePin(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") tryLogin(); }} />
+          </label>
+        </div>
+      </div>
+    );
+  };
+
+  // Admin: har doctor ka dashboard yahan se khulta hai. PIN sirf dikhte hain, badal nahi sakte.
+  const AccessView = () => (
+    <>
+      <div className="dayhead"><div className="d">Doctor dashboards</div></div>
+      <p className="hint" style={{ marginBottom: 8 }}>
+        Each doctor logs in with their own PIN and sees only their sessions and ongoing patients. PINs are fixed. Admin PIN is {ADMIN_PIN}.
+      </p>
+      <div className="tbl">
+        <table>
+          <thead><tr><th>Doctor</th><th>PIN</th><th>Today</th><th>Ongoing</th><th /></tr></thead>
+          <tbody>
+            {activeDocs.map((d) => {
+              const st = docStats(d);
+              return (
+                <tr key={d.id}>
+                  <td><b>{d.name}</b></td>
+                  <td>{pinOf(d) ? <b style={{ letterSpacing: ".1em" }}>{pinOf(d)}</b> : <span className="pill scheduled">No PIN</span>}</td>
+                  <td>{st.done.length}/{st.today.length} done</td>
+                  <td>{st.ongoing.length}</td>
+                  <td>
+                    <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open dashboard</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
   /* ========================= shell ========================= */
   const tab = (v: typeof view, label: string) => (
     <button className={view === v || (v === "board" && view === "doctor") || (v === "leads" && view === "patient") ? "on" : ""}
       onClick={() => { setView(v); setDSel(""); }}>{label}</button>
+  );
+
+  // Doctor dashboard ke andar sirf yeh teen view
+  const dv = view === "myongoing" || view === "patient" ? view : "mytoday";
+  const me = doc(effDoc);
+  const myTab = (v: "mytoday" | "myongoing", label: string) => (
+    <button className={dv === v ? "on" : ""} onClick={() => { setView(v); if (v === "mytoday") setDay(T); }}>{label}</button>
   );
 
   return (
@@ -2134,21 +2545,50 @@ export default function Physio() {
       <style>{CSS}</style>
       <header>
         <div className="bar">
-          <div className="brand">HJS Physio Desk<small>{loading ? "Loading…" : `${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads`}</small></div>
-          <nav>
-            {tab("leads", "Sessions")}
-            {tab("today", "Today's schedule")}
-            {tab("ongoing", "Ongoing patients")}
-            {tab("board", "Day view")}
-            {tab("doctors", "Doctors")}
-            {tab("cal", "Calendar")}
-            {tab("roster", "Roaster")}
-          </nav>
-          <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+          {loading ? (
+            <div className="brand">HJS Physio Desk<small>Loading…</small></div>
+          ) : !who ? (
+            <div className="brand">HJS Physio Desk<small>Log in to continue</small></div>
+          ) : effDoc ? (
+            <>
+              <div className="brand">{me?.name || "Doctor"}<small>
+                {isAdmin ? "Admin viewing this doctor's dashboard" : "HJS Physio Desk · my dashboard"}
+              </small></div>
+              <nav>
+                {myTab("mytoday", "Today")}
+                {myTab("myongoing", "My ongoing patients")}
+              </nav>
+              {isAdmin
+                ? <button className="btn" onClick={() => { setAsDoc(""); setView("access"); }}>‹ Back to admin</button>
+                : <button className="btn" onClick={logout}>Log out</button>}
+            </>
+          ) : (
+            <>
+              <div className="brand">HJS Physio Desk<small>{`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · Admin`}</small></div>
+              <nav>
+                {tab("leads", "Sessions")}
+                {tab("today", "Today's schedule")}
+                {tab("ongoing", "Ongoing patients")}
+                {tab("board", "Day view")}
+                {tab("doctors", "Doctors")}
+                {tab("cal", "Calendar")}
+                {tab("roster", "Roaster")}
+                {tab("access", "Doctor dashboards")}
+              </nav>
+              <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+              <button className="btn" onClick={logout}>Log out</button>
+            </>
+          )}
         </div>
       </header>
       <main>
         {loading ? <div className="stat"><span className="hint">Loading…</span></div>
+          : !who ? LoginView()
+          : effDoc ? (
+            dv === "myongoing" ? MyOngoingView()
+              : dv === "patient" ? <PatientView />
+              : MyTodayView()
+          )
           : view === "leads" ? <LeadsView />
           : view === "today" ? <TodayView />
           : view === "ongoing" ? <OngoingView />
@@ -2157,7 +2597,9 @@ export default function Physio() {
           : view === "cal" ? <CalView />
           : view === "roster" ? <RosterView />
           : view === "doctor" ? <DoctorView />
-          : <PatientView />}
+          : view === "access" ? AccessView()
+          : view === "patient" ? <PatientView />
+          : <LeadsView />}
       </main>
       {dlg}
       {!!msg && <div className="toast">{msg}</div>}
