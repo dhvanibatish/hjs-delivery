@@ -67,6 +67,9 @@ type Patient = {
   cancel_reason: string | null;
   cancel_note: string | null;
   sessions_planned: number | null;   // kitne session liye — package
+  ended_at?: string | null;          // treatment kab band hua
+  end_reason?: string | null;        // kyun band hua (physio-end-reason.sql)
+  end_note?: string | null;
   notes: string | null;
   created_at: string;
 };
@@ -132,6 +135,15 @@ const monthEdges = (d: string) => {
 };
 const srcCls = (s: string | null) =>
   s === "Walk-in" ? "walk" : s === "Existing customer" ? "exist" : s === "Customer referral" ? "ref" : "bigin";
+
+const END_REASONS = [
+  "Recovered / treatment complete", "Package sessions finished", "Feeling better, stopped on own",
+  "Not improving", "Cost / payment issue", "Distance / travel", "Moved to another centre",
+  "Health issue / hospitalised", "Not reachable", "Other",
+];
+const monthKey = (d: string) => d.slice(0, 7);   // "2026-10"
+const monthName = (k: string) =>
+  new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 
 const GRP_CLS: Record<string, string> = {
   Core: "g1", Laser: "g2", Needling: "g3", Cupping: "g4",
@@ -355,6 +367,13 @@ const CSS = `
 .hjsp .g5,.hjsp .topt.g5{color:var(--blue)}  .hjsp .chip.g5{background:var(--blue-soft)}  .hjsp .topt.g5:hover{background:var(--blue-soft)}
 .hjsp .g6,.hjsp .topt.g6{color:#0F766E}      .hjsp .chip.g6{background:#D7F0EC}           .hjsp .topt.g6:hover{background:#D7F0EC}
 .hjsp .g7,.hjsp .topt.g7{color:var(--muted)} .hjsp .chip.g7{background:var(--line)}        .hjsp .topt.g7:hover{background:var(--line)}
+.hjsp .tadd { display:block; width:100%; margin-top:6px; padding:9px 10px; border:1px dashed var(--green);
+  border-radius:9px; color:var(--green); font-weight:700; text-align:center; background:var(--green-soft); }
+.hjsp .tnew { display:flex; gap:6px; align-items:center; margin-top:6px; padding-top:6px; border-top:1px solid var(--line); }
+.hjsp .tnew input { flex:1; min-width:0; min-height:36px; }
+.hjsp .rbar { display:grid; grid-template-columns:minmax(0,1fr) 90px 28px; gap:10px; align-items:center; padding:5px 0; font-size:14px; }
+.hjsp .rbar i { display:block; height:10px; border-radius:99px; background:var(--red); opacity:.75; min-width:4px; }
+.hjsp .rbar b { text-align:right; font-variant-numeric:tabular-nums; }
 .hjsp .thl { font-size:12px; color:var(--muted); }
 .hjsp .pinpage { padding:18px 20px 22px; display:grid; gap:10px; justify-items:center; text-align:center; }
 .hjsp .pinpage > .btn { justify-self:start; }
@@ -381,7 +400,7 @@ export default function Physio() {
   const [msg, setMsg] = useState("");
 
   const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor"
-    | "mytoday" | "myongoing" | "access">(() => (readWho()?.role === "doctor" ? "mytoday" : "leads"));
+    | "mytoday" | "myongoing" | "access" | "ended">(() => (readWho()?.role === "doctor" ? "mytoday" : "leads"));
 
   /* ---------- login ---------- */
   const [who, setWhoS] = useState<Who | null>(readWho);
@@ -394,7 +413,9 @@ export default function Physio() {
   };
   const [loginAs, setLoginAs] = useState("");      // "admin" ya doctor id
   const [pinIn, setPinIn] = useState("");
-  const [asDoc, setAsDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
+  const [asDoc, setAsDoc] = useState("");
+  const [eMonth, setEMonth] = useState(todayS().slice(0, 7));   // Ended view — kaunsa mahina ("" = sab)
+  const [eDoc, setEDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
   const [q, setQ] = useState("");
   const [day, setDay] = useState(todayS());
   const [showCx, setShowCx] = useState(false);
@@ -634,17 +655,23 @@ export default function Physio() {
       setDlg(<CompleteDlg s={s} />);
       return Promise.resolve(true);
     }
-    return updSession(s.id, { status } as Partial<Session>, "Undone");
+    // Complete hone ke baad wapas nahi — undo band
+    return Promise.resolve(false);
   };
 
-  const endOngoing = async (p: Patient) => {
-    if (!window.confirm(`End treatment for ${p.name}? Future booked sessions will be cancelled.`)) return;
-    const ids = sessOf(p.id)
-      .filter((s) => s.status === "scheduled" && s.session_date >= T)
-      .map((s) => s.id);
-    if (ids.length) await supabase.from("physio_sessions").update({ status: "cancelled" }).in("id", ids);
-    await updPatient(p.id, { status: "done", ended_at: new Date().toISOString() } as Partial<Patient>,
-      `${p.name} removed from ongoing`);
+  // End = patient "done" ho jata hai — Supabase se kuch delete nahi hota, reason saath mein save
+  const endOngoing = (p: Patient) => setDlg(<EndDlg p={p} />);
+
+  // Ended patient ka reason / date — naye column ho to wahan se, warna follow-up log se
+  const endInfo = (p: Patient) => {
+    const log = [...(p.follow_ups || [])].reverse().find((f) => f.note.startsWith("Ended — "));
+    const parts = log ? log.note.replace("Ended — ", "").split(" — ") : [];
+    const last = sessOf(p.id).filter((s) => s.status === "completed").slice(-1)[0];
+    return {
+      date: p.ended_at ? ymd(new Date(p.ended_at)) : log?.date || last?.session_date || createdDay(p),
+      reason: p.end_reason || parts[0] || "Not recorded",
+      note: p.end_note || parts.slice(1).join(" — ") || "",
+    };
   };
 
   /* ========================= dialogs ========================= */
@@ -1083,6 +1110,57 @@ export default function Physio() {
     );
   };
 
+  const EndDlg = ({ p }: { p: Patient }) => {
+    const [why, setWhy] = useState("");
+    const [note, setNote] = useState("");
+    const future = sessOf(p.id).filter((s) => s.status === "scheduled" && s.session_date >= T);
+    const save = async () => {
+      if (!why) return toast("Select a reason");
+      const now = new Date().toISOString();
+      if (future.length)
+        await supabase.from("physio_sessions")
+          .update({ status: "cancelled", cancel_reason: "Treatment ended", cancel_note: why, cancelled_at: now })
+          .in("id", future.map((s) => s.id));
+      // Taaza follow-up log lo — Follow-up dialog se aaye ho to abhi wala note bhi rahe
+      const fresh = await supabase.from("physio_patients").select("follow_ups").eq("id", p.id).single();
+      const prev = ((fresh.data as { follow_ups: FollowUp[] | null } | null)?.follow_ups) || p.follow_ups || [];
+      const fu = [...prev, { date: T, note: `Ended — ${why}${note.trim() ? ` — ${note.trim()}` : ""}` }].slice(-20);
+      const base = { status: "done", follow_ups: fu, next_follow_up: null, ended_at: now };
+      let { error } = await supabase.from("physio_patients")
+        .update({ ...base, end_reason: why, end_note: note.trim() || null }).eq("id", p.id);
+      // end_reason column abhi na bana ho to bhi end ho jaye — reason follow-up log mein hai
+      if (error) ({ error } = await supabase.from("physio_patients").update(base).eq("id", p.id));
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error(error);
+        return toast("Could not save");
+      }
+      await load();
+      toast(`${p.name} · treatment ended · ${why}`);
+      close();
+    };
+    return (
+      <Modal title={`End treatment · ${p.name}`}>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          {doneText(p, progress(p).done)} · {doc(p.doctor_id)?.name || "no doctor"}.
+          {future.length ? ` ${future.length} booked session${future.length === 1 ? "" : "s"} will be cancelled.` : ""}
+          {" "}The patient and all their sessions stay saved.
+        </p>
+        <Field label="Why is the treatment ending? *">
+          <select value={why} onChange={(e) => setWhy(e.target.value)}>
+            <option value="">— Select a reason —</option>
+            {END_REASONS.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Remarks"><textarea rows={2} placeholder="What did the patient / doctor say?" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <div className="end">
+          <button className="btn" onClick={close}>Close</button>
+          <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }} onClick={save}>End treatment</button>
+        </div>
+      </Modal>
+    );
+  };
+
   const NotComingDlg = ({ p }: { p: Patient }) => {
     const [why, setWhy] = useState("");
     const [note, setNote] = useState("");
@@ -1145,12 +1223,18 @@ export default function Physio() {
     const toggle = (n: string) =>
       setPicked((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
     // List mein na ho to haath se likh ke add — session mein save + list mein bhi aage ke liye
+    const [adding, setAdding] = useState(false);
+    const [newName, setNewName] = useState("");
     const typed = tq.trim();
-    const exact = typed && (therapies.some((t) => t.name.toLowerCase() === typed.toLowerCase())
-      || picked.some((n) => n.toLowerCase() === typed.toLowerCase()));
-    const addCustom = async () => {
-      if (!typed) return;
-      if (exact) {
+    const known = (n: string) => therapies.some((t) => t.name.toLowerCase() === n.toLowerCase())
+      || picked.some((x) => x.toLowerCase() === n.toLowerCase());
+    const exact = !!typed && known(typed);
+    const addCustom = async (raw: string = tq) => {
+      const typed = raw.trim();
+      if (!typed) return toast("Type the therapy name");
+      setAdding(false);
+      setNewName("");
+      if (known(typed)) {
         const t = therapies.find((x) => x.name.toLowerCase() === typed.toLowerCase());
         if (t && !picked.includes(t.name)) toggle(t.name);
         setTq("");
@@ -1228,9 +1312,21 @@ export default function Physio() {
                   </React.Fragment>
                 )) : <p className="hint" style={{ padding: 10 }}>Not in the list.</p>}
                 {!!typed && !exact && (
-                  <button className="topt g7" onClick={addCustom}><i />+ Add &quot;{typed}&quot; as a new therapy</button>
+                  <button className="topt g7" onClick={() => addCustom()}><i />+ Add &quot;{typed}&quot; as a new therapy</button>
                 )}
               </div>
+              {/* Hamesha dikhe — list mein na ho to yahin se naya therapy */}
+              {adding ? (
+                <div className="tnew">
+                  <input autoFocus placeholder="New therapy name" value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(newName); } }} />
+                  <button className="btn sm pri" onClick={() => addCustom(newName)}>Add</button>
+                  <button className="btn sm ghost" onClick={() => { setAdding(false); setNewName(""); }}>Cancel</button>
+                </div>
+              ) : (
+                <button className="tadd" onClick={() => { setAdding(true); setNewName(typed); }}>+ Add new therapy</button>
+              )}
             </div>
           )}
         </div>
@@ -1327,7 +1423,7 @@ export default function Physio() {
                 <button className="btn sm" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Move</button>
               </>
             ) : (
-              <button className="btn sm ghost" onClick={() => markSession(s, "scheduled")}>Undo</button>
+              <span className="pill completed">Done ✓</span>
             )}
           </div>
         </div>
@@ -1357,7 +1453,7 @@ export default function Physio() {
                   <button className="btn sm ghost" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Move</button>
                 </>
               ) : (
-                <button className="btn sm ghost" onClick={() => markSession(s, "scheduled")}>Undo</button>
+                <span className="pill completed">Done ✓</span>
               )}
             </div>
           );
@@ -1537,7 +1633,7 @@ export default function Physio() {
                       <td className="arw"><span className={hasTime ? "on" : ""}>→</span></td>
                       <td>
                         {hasDone ? (
-                          <button className="step ok" onClick={() => markSession(c.done!, "scheduled")}>Completed ✓</button>
+                          <span className="step ok">Completed ✓</span>
                         ) : c.booked ? (
                           <button className="step no" onClick={() => markSession(c.booked!, "completed")}>Mark complete</button>
                         ) : (
@@ -1635,7 +1731,7 @@ export default function Physio() {
                           {p && <button className="btn sm ghost" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Move</button>}
                         </>
                       ) : (
-                        <button className="btn sm ghost" onClick={() => markSession(x, "scheduled")}>Undo</button>
+                        <span className="pill completed">Done ✓</span>
                       )}
                     </td>
                   </tr>
@@ -2187,6 +2283,13 @@ export default function Physio() {
              : <span className="hint">No doctor yet</span>}
           {isOngoing(p) ? <span className="rt">{routineLabel(p.routine)}</span>
             : <span className="pill">{isNew(p) ? "New lead" : p.status === "cancelled" ? "Cancelled" : "Finished"}</span>}
+          {p.status === "done" && (
+            <>
+              <span className="tag fu">Ended {nice(endInfo(p).date)} · {endInfo(p).reason}</span>
+              {endInfo(p).note && <span className="hint">{endInfo(p).note}</span>}
+              <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Restart treatment</button>
+            </>
+          )}
           {p.status === "cancelled" && (
             <>
               <span className="tag fu">{p.cancel_reason}</span>
@@ -2318,7 +2421,7 @@ export default function Physio() {
                           </>
                         ) : (
                           <>
-                            <button className="btn sm ghost" onClick={() => markSession(x, "scheduled")}>Undo</button>
+                            <span className="pill completed">Done ✓</span>
                             {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
                             {p && isNew(p) && <button className="btn sm" onClick={() => setDlg(<ScheduleDlg p={p} />)}>Book again</button>}
                           </>
@@ -2475,6 +2578,99 @@ export default function Physio() {
     );
   };
 
+  /* ========================= ended patients ========================= */
+  // Jinka treatment band hua — mahine ke hisaab se kitne, kyun, kis doctor ke
+  const EndedView = () => {
+    const all = patients.filter((p) => p.status === "done")
+      .map((p) => ({ p, e: endInfo(p) }))
+      .filter((x) => !eDoc || x.p.doctor_id === eDoc)
+      .sort((a, b) => b.e.date.localeCompare(a.e.date));
+    const months = Array.from({ length: 6 }, (_, i) => {
+      const d = parseYmd(T); d.setDate(1); d.setMonth(d.getMonth() - (5 - i));
+      return ymd(d).slice(0, 7);
+    });
+    const list = eMonth ? all.filter((x) => monthKey(x.e.date) === eMonth) : all;
+    const count = (arr: string[]) => {
+      const m: Record<string, number> = {};
+      arr.forEach((k) => { m[k] = (m[k] || 0) + 1; });
+      return Object.entries(m).sort((a, b) => b[1] - a[1]);
+    };
+    const byReason = count(list.map((x) => x.e.reason));
+    const byDoc = count(list.map((x) => doc(x.p.doctor_id)?.name || "No doctor"));
+    const top = Math.max(1, ...byReason.map(([, n]) => n));
+    const avgDone = list.length ? Math.round(list.reduce((n, x) => n + progress(x.p).done, 0) / list.length) : 0;
+
+    return (
+      <>
+        <div className="dayhead">
+          <div className="d">Ended patients</div>
+          <select value={eDoc} onChange={(e) => setEDoc(e.target.value)} style={{ width: "auto", minWidth: 180 }}>
+            <option value="">All doctors</option>
+            {activeDocs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <p className="hint" style={{ marginBottom: 10 }}>Ended patients stay saved with every session. Tap a month to see who ended and why.</p>
+        <div className="stats">
+          {months.map((m) => (
+            <Stat key={m} n={all.filter((x) => monthKey(x.e.date) === m).length}
+              l={m === T.slice(0, 7) ? `${monthName(m)} (this month)` : monthName(m)}
+              on={eMonth === m} onClick={() => setEMonth(m)} />
+          ))}
+          <Stat n={all.length} l="All time" on={!eMonth} onClick={() => setEMonth("")} />
+        </div>
+
+        <div className="cols" style={{ marginBottom: 14 }}>
+          <div className="col">
+            <h3>Why they ended<em>{eMonth ? monthName(eMonth) : "All time"}</em></h3>
+            <div style={{ padding: "8px 14px" }}>
+              {byReason.length ? byReason.map(([r, n]) => (
+                <div key={r} className="rbar">
+                  <span>{r}</span>
+                  <i style={{ width: `${(n / top) * 100}%` }} />
+                  <b>{n}</b>
+                </div>
+              )) : <span className="hint">Nobody ended in this period.</span>}
+            </div>
+          </div>
+          <div className="col">
+            <h3>By doctor<em>avg {avgDone} sessions done</em></h3>
+            <div style={{ padding: "8px 14px" }}>
+              {byDoc.length ? byDoc.map(([d, n]) => (
+                <div className="drow" key={d}><span style={{ marginRight: "auto" }}>{d}</span><b>{n}</b></div>
+              )) : <span className="hint">—</span>}
+            </div>
+          </div>
+        </div>
+
+        <div className="tbl">
+          <table>
+            <thead>
+              <tr><th>Patient</th><th>Doctor</th><th>Sessions</th><th>Started</th><th>Ended on</th><th>Reason</th><th>Remarks</th><th /></tr>
+            </thead>
+            <tbody>
+              {list.map(({ p, e }) => (
+                <tr key={p.id}>
+                  <td>
+                    <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                    <div className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</div>
+                  </td>
+                  <td>{doc(p.doctor_id)?.name || "—"}</td>
+                  <td><b>{doneText(p, progress(p).done)}</b></td>
+                  <td>{p.start_date ? nice(p.start_date) : "—"}</td>
+                  <td>{nice(e.date)}</td>
+                  <td><span className={`tag ${e.reason === "Not recorded" ? "" : "fu"}`}>{e.reason}</span></td>
+                  <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="hint">{e.note || "—"}</span></td>
+                  <td><button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Restart</button></td>
+                </tr>
+              ))}
+              {!list.length && <tr><td colSpan={8}><span className="hint">No ended patients {eMonth ? `in ${monthName(eMonth)}` : "yet"}.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
+
   /* ========================= login + PINs ========================= */
   // Page 1: naam chuno → Page 2: sirf PIN (4 ank)
   const LoginView = () => {
@@ -2596,6 +2792,7 @@ export default function Physio() {
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
+                {tab("ended", "Ended")}
                 {tab("access", "Doctor dashboards")}
               </nav>
               <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
@@ -2621,6 +2818,7 @@ export default function Physio() {
           : view === "roster" ? <RosterView />
           : view === "doctor" ? <DoctorView />
           : view === "access" ? AccessView()
+          : view === "ended" ? EndedView()
           : view === "patient" ? <PatientView />
           : <LeadsView />}
       </main>
