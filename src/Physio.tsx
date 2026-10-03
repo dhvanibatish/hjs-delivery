@@ -143,9 +143,6 @@ const END_REASONS = [
   "Not improving", "Cost / payment issue", "Distance / travel", "Moved to another centre",
   "Health issue / hospitalised", "Not reachable", "Other",
 ];
-const monthKey = (d: string) => d.slice(0, 7);   // "2026-10"
-const monthName = (k: string) =>
-  new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 
 const GRP_CLS: Record<string, string> = {
   Core: "g1", Laser: "g2", Needling: "g3", Cupping: "g4",
@@ -381,9 +378,6 @@ const CSS = `
   border-radius:9px; color:var(--green); font-weight:700; text-align:center; background:var(--green-soft); }
 .hjsp .tnew { display:flex; gap:6px; align-items:center; margin-top:6px; padding-top:6px; border-top:1px solid var(--line); }
 .hjsp .tnew input { flex:1; min-width:0; min-height:36px; }
-.hjsp .rbar { display:grid; grid-template-columns:minmax(0,1fr) 90px 28px; gap:10px; align-items:center; padding:5px 0; font-size:14px; }
-.hjsp .rbar i { display:block; height:10px; border-radius:99px; background:var(--red); opacity:.75; min-width:4px; }
-.hjsp .rbar b { text-align:right; font-variant-numeric:tabular-nums; }
 .hjsp .gsearch { position:relative; flex:0 1 300px; min-width:200px; }
 .hjsp .gsearch input { min-height:38px; }
 .hjsp .gres { position:absolute; top:calc(100% + 6px); left:0; right:0; min-width:300px; z-index:30; background:var(--panel);
@@ -417,7 +411,7 @@ export default function Physio() {
   const [msg, setMsg] = useState("");
 
   const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor"
-    | "mytoday" | "myongoing" | "access" | "ended">(() => (readWho()?.role === "doctor" ? "mytoday" : "leads"));
+    | "mytoday" | "myongoing">(() => (readWho()?.role === "doctor" ? "mytoday" : "leads"));
 
   /* ---------- login ---------- */
   const [who, setWhoS] = useState<Who | null>(readWho);
@@ -430,9 +424,7 @@ export default function Physio() {
   };
   const [loginAs, setLoginAs] = useState("");      // "admin" ya doctor id
   const [pinIn, setPinIn] = useState("");
-  const [asDoc, setAsDoc] = useState("");
-  const [eMonth, setEMonth] = useState(todayS().slice(0, 7));   // Ended view — kaunsa mahina ("" = sab)
-  const [eDoc, setEDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
+  const [asDoc, setAsDoc] = useState("");          // admin kisi doctor ka dashboard dekh raha hai
   const [q, setQ] = useState("");
   const [gq, setGq] = useState("");   // upar wala patient search
   const [gi, setGi] = useState(0);    // arrow se kaunsa result chuna hai
@@ -2728,99 +2720,6 @@ export default function Physio() {
     );
   };
 
-  /* ========================= ended patients ========================= */
-  // Jinka treatment band hua — mahine ke hisaab se kitne, kyun, kis doctor ke
-  const EndedView = () => {
-    const all = patients.filter((p) => p.status === "done")
-      .map((p) => ({ p, e: endInfo(p) }))
-      .filter((x) => !eDoc || x.p.doctor_id === eDoc)
-      .sort((a, b) => b.e.date.localeCompare(a.e.date));
-    const months = Array.from({ length: 6 }, (_, i) => {
-      const d = parseYmd(T); d.setDate(1); d.setMonth(d.getMonth() - (5 - i));
-      return ymd(d).slice(0, 7);
-    });
-    const list = eMonth ? all.filter((x) => monthKey(x.e.date) === eMonth) : all;
-    const count = (arr: string[]) => {
-      const m: Record<string, number> = {};
-      arr.forEach((k) => { m[k] = (m[k] || 0) + 1; });
-      return Object.entries(m).sort((a, b) => b[1] - a[1]);
-    };
-    const byReason = count(list.map((x) => x.e.reason));
-    const byDoc = count(list.map((x) => doc(x.p.doctor_id)?.name || "No doctor"));
-    const top = Math.max(1, ...byReason.map(([, n]) => n));
-    const avgDone = list.length ? Math.round(list.reduce((n, x) => n + progress(x.p).done, 0) / list.length) : 0;
-
-    return (
-      <>
-        <div className="dayhead">
-          <div className="d">Ended patients</div>
-          <select value={eDoc} onChange={(e) => setEDoc(e.target.value)} style={{ width: "auto", minWidth: 180 }}>
-            <option value="">All doctors</option>
-            {activeDocs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        </div>
-        <p className="hint" style={{ marginBottom: 10 }}>Ended patients stay saved with every session. Tap a month to see who ended and why.</p>
-        <div className="stats">
-          {months.map((m) => (
-            <Stat key={m} n={all.filter((x) => monthKey(x.e.date) === m).length}
-              l={m === T.slice(0, 7) ? `${monthName(m)} (this month)` : monthName(m)}
-              on={eMonth === m} onClick={() => setEMonth(m)} />
-          ))}
-          <Stat n={all.length} l="All time" on={!eMonth} onClick={() => setEMonth("")} />
-        </div>
-
-        <div className="cols" style={{ marginBottom: 14 }}>
-          <div className="col">
-            <h3>Why they ended<em>{eMonth ? monthName(eMonth) : "All time"}</em></h3>
-            <div style={{ padding: "8px 14px" }}>
-              {byReason.length ? byReason.map(([r, n]) => (
-                <div key={r} className="rbar">
-                  <span>{r}</span>
-                  <i style={{ width: `${(n / top) * 100}%` }} />
-                  <b>{n}</b>
-                </div>
-              )) : <span className="hint">Nobody ended in this period.</span>}
-            </div>
-          </div>
-          <div className="col">
-            <h3>By doctor<em>avg {avgDone} sessions done</em></h3>
-            <div style={{ padding: "8px 14px" }}>
-              {byDoc.length ? byDoc.map(([d, n]) => (
-                <div className="drow" key={d}><span style={{ marginRight: "auto" }}>{d}</span><b>{n}</b></div>
-              )) : <span className="hint">—</span>}
-            </div>
-          </div>
-        </div>
-
-        <div className="tbl">
-          <table>
-            <thead>
-              <tr><th>Patient</th><th>Doctor</th><th>Sessions</th><th>Started</th><th>Ended on</th><th>Reason</th><th>Remarks</th><th /></tr>
-            </thead>
-            <tbody>
-              {list.map(({ p, e }) => (
-                <tr key={p.id}>
-                  <td>
-                    <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
-                    <div className="hint">{p.phone}{p.ailment ? ` · ${p.ailment}` : ""}</div>
-                  </td>
-                  <td>{doc(p.doctor_id)?.name || "—"}</td>
-                  <td><b>{doneText(p, progress(p).done)}</b></td>
-                  <td>{p.start_date ? nice(p.start_date) : "—"}</td>
-                  <td>{nice(e.date)}</td>
-                  <td><span className={`tag ${e.reason === "Not recorded" ? "" : "fu"}`}>{e.reason}</span></td>
-                  <td style={{ whiteSpace: "normal", minWidth: 160 }}><span className="hint">{e.note || "—"}</span></td>
-                  <td><button className="btn sm" onClick={() => setDlg(<OngoingDlg p={p} />)}>Restart</button></td>
-                </tr>
-              ))}
-              {!list.length && <tr><td colSpan={8}><span className="hint">No ended patients {eMonth ? `in ${monthName(eMonth)}` : "yet"}.</span></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </>
-    );
-  };
-
   /* ========================= login + PINs ========================= */
   // Page 1: naam chuno → Page 2: sirf PIN (4 ank)
   const LoginView = () => {
@@ -2864,37 +2763,6 @@ export default function Physio() {
       </div>
     );
   };
-
-  // Admin: har doctor ka dashboard yahan se khulta hai. PIN sirf dikhte hain, badal nahi sakte.
-  const AccessView = () => (
-    <>
-      <div className="dayhead"><div className="d">Doctor dashboards</div></div>
-      <p className="hint" style={{ marginBottom: 8 }}>
-        Each doctor logs in with their own PIN and sees only their sessions and ongoing patients. PINs are fixed. Admin PIN is {ADMIN_PIN}.
-      </p>
-      <div className="tbl">
-        <table>
-          <thead><tr><th>Doctor</th><th>PIN</th><th>Today</th><th>Ongoing</th><th /></tr></thead>
-          <tbody>
-            {activeDocs.map((d) => {
-              const st = docStats(d);
-              return (
-                <tr key={d.id}>
-                  <td><b>{d.name}</b></td>
-                  <td>{pinOf(d) ? <b style={{ letterSpacing: ".1em" }}>{pinOf(d)}</b> : <span className="pill scheduled">No PIN</span>}</td>
-                  <td>{st.done.length}/{st.today.length} done</td>
-                  <td>{st.ongoing.length}</td>
-                  <td>
-                    <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open dashboard</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
 
   /* ========================= shell ========================= */
   const tab = (v: typeof view, label: string) => (
@@ -2964,7 +2832,7 @@ export default function Physio() {
                 {myTab("myongoing", "My ongoing patients")}
               </nav>
               {isAdmin
-                ? <button className="btn" onClick={() => { setAsDoc(""); setView("access"); }}>‹ Back to admin</button>
+                ? <button className="btn" onClick={() => { setAsDoc(""); setView("board"); }}>‹ Back to admin</button>
                 : <button className="btn" onClick={logout}>Log out</button>}
             </>
           ) : (
@@ -2979,8 +2847,6 @@ export default function Physio() {
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
-                {tab("ended", "Ended")}
-                {tab("access", "Doctor dashboards")}
               </nav>
               <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
               <button className="btn" onClick={logout}>Log out</button>
@@ -3004,8 +2870,6 @@ export default function Physio() {
           : view === "cal" ? CalView()
           : view === "roster" ? RosterView()
           : view === "doctor" ? DoctorView()
-          : view === "access" ? AccessView()
-          : view === "ended" ? EndedView()
           : view === "patient" ? PatientView()
           : LeadsView()}
       </main>
