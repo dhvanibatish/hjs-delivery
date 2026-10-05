@@ -29,14 +29,14 @@ type Skip = { date: string; reason: string; note: string };
 type Doctor = { id: string; name: string; active: boolean };
 
 /* Login — har doctor apne PIN se sirf apna dashboard dekhe, admin sab kuch.
-   Store manager ko poora desk dikhta hai aur roz ka kaam bhi kar sakta hai,
+   Physio admin ko poora desk dikhta hai aur roz ka kaam bhi kar sakta hai,
    bas do cheezein admin ke paas rehti hain: session count haath se theek karna
    aur kisi doctor ka dashboard uski tarah kholna.
    PIN code mein fixed hain — app se koi (admin bhi) badal nahi sakta. Badalna ho to yahin badlo. */
 type Who = { role: "admin"; pin: string } | { role: "manager"; pin: string } | { role: "doctor"; id: string; pin: string };
 const WHO_KEY = "hjs-physio-who";
 const ADMIN_PIN = "9999";
-const MANAGER_PIN = "0000";   // store manager
+const MANAGER_PIN = "0000";   // physio admin
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
   ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
@@ -448,13 +448,28 @@ export default function Physio() {
   const [tDoc, setTDoc] = useState("");   // Schedule for today — doctor filter
   const [tDay, setTDay] = useState(todayS());   // Schedule kis din ka — kal/parso bhi dekh sakte hain
   const [tTo, setTTo] = useState("");           // khali = ek din; bhara = 1 se 5 Oct wala range
+  const [tFilt, setTFilt] = useState("");       // "" = sab | late = pending | soon = upcoming | done
+  /* Page ki khali jagah par click = saare filter hat jaate hain.
+     Button / input / table / tile ke andar click ho to kuch nahi hota. */
+  useEffect(() => {
+    const off = (ev: MouseEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (!t || t.closest("button, a, input, select, textarea, label, .tbl, .panel, .stat, .cols, .dtabs, .ovl, table")) return;
+      setTFilt("");
+      setOFilt("all");
+      setDSel("");
+      setShowCx(false);
+    };
+    document.addEventListener("click", off);
+    return () => document.removeEventListener("click", off);
+  }, []);
   const [lDay, setLDay] = useState(todayS());   // Sessions board kis din ka
   const [oDay, setODay] = useState(todayS());   // Ongoing patients kis din ka
   const [bDay, setBDay] = useState(todayS());   // Day view kis din ka
   // Therapy report: kaunsi therapy kitni chali
   const [thFrom, setThFrom] = useState(addDays(todayS(), -29));
   const [thTo, setThTo] = useState(todayS());
-  const [thDoc, setThDoc] = useState("");
+  const [repTab, setRepTab] = useState<"therapy" | "doctor">("therapy");
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
   // Day view: kitne din dikhane hain aur kis patient ka
@@ -509,6 +524,36 @@ export default function Physio() {
 
   /* ---------- derived ---------- */
   const T = todayS();
+  // ghadi — har minute tick, taki "time nikal gaya" apne aap update hota rahe
+  const [nowHM, setNowHM] = useState(() => new Date().toTimeString().slice(0, 5));
+  useEffect(() => {
+    const t = setInterval(() => setNowHM(new Date().toTimeString().slice(0, 5)), 30000);
+    return () => clearInterval(t);
+  }, []);
+  /* Bahar kahin bhi click karo to upar wala search band ho jaye.
+     Esc dabane par search aur khula hua dialog — dono hat jate hain. */
+  useEffect(() => {
+    const click = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest?.(".gsearch")) { setGq(""); setGi(0); }
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setGq(""); setGi(0); setDlg(null);
+    };
+    document.addEventListener("mousedown", click);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", click);
+      document.removeEventListener("keydown", key);
+    };
+  }, []);
+
+  /* Session ka time nikal chuka hai? Purana din = haan, aane wala din = nahi,
+     aaj hai to tabhi jab ghadi us time se aage ja chuki ho. */
+  const isLate = (s: Session) =>
+    s.status === "scheduled" &&
+    (s.session_date < T || (s.session_date === T && !!s.session_time && hhmm(s.session_time) <= nowHM));
   const grpCls = (n: string) => grpKey(therapies.find((t) => t.name === n)?.grp || "");
   const activeDocs = useMemo(() => doctors.filter((d) => d.active !== false), [doctors]);
   const doc = (id: string | null) => doctors.find((d) => d.id === id);
@@ -987,7 +1032,40 @@ export default function Physio() {
     );
   };
 
-  const OngoingDlg = ({ p, fresh }: { p?: Patient; fresh?: boolean }) => {
+  /* Patient ko hamesha ke liye hatana — sirf admin / physio admin ke paas */
+  const DeletePatientDlg = ({ p }: { p: Patient }) => {
+    const [sure, setSure] = useState(false);
+    const mine = sessOf(p.id);
+    const del = async () => {
+      if (!sure) return toast("Pehle tick karo");
+      if (mine.length) {
+        const ok1 = await run(() => supabase.from("physio_sessions").delete().eq("patient_id", p.id));
+        if (!ok1) return;
+      }
+      const ok = await run(() => supabase.from("physio_patients").delete().eq("id", p.id), "Patient deleted");
+      if (ok) { close(); setView("leads"); }
+    };
+    return (
+      <Modal title={`Delete patient · ${p.name}`}>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          Yeh patient aur iske <b>{mine.length}</b> session hamesha ke liye hat jayenge — wapas nahi aayenge,
+          aur reports me bhi nahi ginne jayenge. Sirf galti se bani ya duplicate entry ke liye use karo.
+          Treatment band karna ho to &quot;Cancel lead&quot; ya &quot;End treatment&quot; behtar hai.
+        </p>
+        <label className="drow" style={{ cursor: "pointer" }}>
+          <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+          <span>Haan, mujhe pata hai — permanently delete karo</span>
+        </label>
+        <div className="end">
+          <button className="btn" onClick={close}>Close</button>
+          <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }}
+            onClick={del}>Delete permanently</button>
+        </div>
+      </Modal>
+    );
+  };
+
+  const OngoingDlg =({ p, fresh }: { p?: Patient; fresh?: boolean }) => {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
@@ -1275,6 +1353,16 @@ export default function Physio() {
     }, [tq]);
 
     useEffect(() => { if (open) boxRef.current?.scrollIntoView({ block: "nearest" }); }, [open]);
+    // Dropdown ke bahar kahin bhi click karo to wo band ho jaye
+    useEffect(() => {
+      if (!open) return;
+      const h = (e: MouseEvent) => {
+        const el = e.target as HTMLElement | null;
+        if (!el?.closest?.(".tdrop") && !el?.closest?.(".tbtn")) setOpen(false);
+      };
+      document.addEventListener("mousedown", h);
+      return () => document.removeEventListener("mousedown", h);
+    }, [open]);
 
     const toggle = (n: string) =>
       setPicked((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
@@ -1782,7 +1870,7 @@ export default function Physio() {
         )}
         {!rows.length ? (
           <div className="stat">
-            <span className="hint">{s ? "No patient matches that search." : "Nothing for today. Use \"+ New lead\" to add one."}</span>
+            <span className="hint">{s ? "No patient matches that search." : "Nothing for today."}</span>
           </div>
         ) : (
           <div className="tbl">
@@ -1893,8 +1981,12 @@ export default function Physio() {
     const dayS = liveS
       .filter((x) => x.session_date >= from && x.session_date <= to && mineDoc(x.doctor_id))
       .sort((a, b) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time));
-    const pend = dayS.filter((x) => x.status === "scheduled");
+    // Pending = jiska time nikal chuka aur abhi tak complete nahi hua.
+    // Jiska time aana baaki hai wo "Upcoming" hai — subha subha sab pending nahi dikhega.
+    const late = dayS.filter(isLate);
+    const soon = dayS.filter((x) => x.status === "scheduled" && !isLate(x));
     const done = dayS.filter((x) => x.status === "completed");
+    const shown = tFilt === "late" ? late : tFilt === "soon" ? soon : tFilt === "done" ? done : dayS;
     // Routine ke hisaab se us din aana tha, par time abhi laga nahi — sirf ek din wale view me
     const noTime = range ? [] : patients.filter((p) => isOngoing(p) && mineDoc(p.doctor_id) && dueOn(p, D)
       && !sessOf(p.id).some((x) => x.session_date === D) && !skipOf(p, D))
@@ -1937,23 +2029,29 @@ export default function Physio() {
           ))}
         </div>
         <div className="stats">
-          <Stat n={dayS.length} l={range ? "Booked in range" : `Booked ${word}`.trim()} />
-          <Stat n={pend.length} l="Pending" />
-          <Stat n={done.length} l="Done" />
+          <Stat n={dayS.length} l={range ? "Booked in range" : `Booked ${word}`.trim()}
+            on={tFilt === ""} onClick={() => setTFilt("")} />
+          <Stat n={late.length} l="Pending" on={tFilt === "late"} onClick={() => setTFilt(tFilt === "late" ? "" : "late")} />
+          <Stat n={soon.length} l="Upcoming" on={tFilt === "soon"} onClick={() => setTFilt(tFilt === "soon" ? "" : "soon")} />
+          <Stat n={done.length} l="Done" on={tFilt === "done"} onClick={() => setTFilt(tFilt === "done" ? "" : "done")} />
           {range
             ? <Stat n={dayS.filter(isHome).length} l="Home visits" />
             : <Stat n={noTime.length} l="Due, time not set" />}
           <Stat n={skipRows.length} l="Not coming" />
         </div>
 
-        <h3 style={{ margin: "14px 0 8px" }}>Booked sessions</h3>
+        <h3 style={{ margin: "14px 0 8px" }}>
+          {tFilt === "late" ? "Pending — time nikal gaya" : tFilt === "soon" ? "Upcoming sessions"
+            : tFilt === "done" ? "Completed sessions" : "Booked sessions"}
+          {tFilt && <button className="btn sm ghost" style={{ marginLeft: 8 }} onClick={() => setTFilt("")}>Show all</button>}
+        </h3>
         <div className="tbl">
           <table>
             <thead>
               <tr>{range && <th>Date</th>}<th>Patient</th><th>Time</th><th>Doctor</th><th>Where</th><th>Sessions</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {dayS.map((x) => {
+              {shown.map((x) => {
                 const p = pat(x.patient_id);
                 const d = doc(x.doctor_id);
                 return (
@@ -1967,7 +2065,11 @@ export default function Physio() {
                     <td>{d ? <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button> : "—"}</td>
                     <td>{isHome(x) ? <span className="pill home">Home</span> : <span className="hint">Clinic</span>}</td>
                     <td>{p ? (isOngoing(p) ? doneText(p, progress(p).done) : <span className="pill bigin">New lead</span>) : "—"}</td>
-                    <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "pending" : "done"}</span></td>
+                    <td>
+                      <span className={`pill ${x.status === "scheduled" && !isLate(x) ? "" : x.status}`}>
+                        {x.status === "completed" ? "done" : isLate(x) ? "pending" : "upcoming"}
+                      </span>
+                    </td>
                     <td>
                       {x.status === "scheduled" ? (
                         <>
@@ -1982,9 +2084,14 @@ export default function Physio() {
                   </tr>
                 );
               })}
-              {!dayS.length && (
+              {!shown.length && (
                 <tr><td colSpan={range ? 8 : 7}>
-                  <span className="hint">No sessions booked for {range ? `${nice(from)} — ${nice(to)}` : word || nice(D)} yet.</span>
+                  <span className="hint">
+                    {tFilt === "late" ? "Abhi koi pending nahi — jiska time nikla hai wo sab complete hai."
+                      : tFilt === "soon" ? "Aage koi session nahi."
+                      : tFilt === "done" ? "Abhi tak koi session complete nahi hua."
+                      : `No sessions booked for ${range ? `${nice(from)} — ${nice(to)}` : word || nice(D)} yet.`}
+                  </span>
                 </td></tr>
               )}
             </tbody>
@@ -2287,7 +2394,8 @@ export default function Physio() {
         <div className="stats">
           <Stat n={mine.length} l={oneDay ? "Booked this day" : "Booked in range"} />
           <Stat n={done} l="Completed" />
-          <Stat n={mine.length - done} l="Pending" />
+          <Stat n={mine.filter(isLate).length} l="Pending" />
+          <Stat n={mine.filter((s) => s.status === "scheduled" && !isLate(s)).length} l="Upcoming" />
           <Stat n={homes} l="Home visits" />
         </div>
         <div className="cols">
@@ -2405,12 +2513,78 @@ export default function Physio() {
   };
 
   /* Roster — kaun kis din chhutti par, aur uske session kisko jayenge */
-  /* ---------- Therapy report: kaunsi therapy sabse zyada chal rahi ---------- */
-  const TherapyView = () => {
+  /* Doctor wise — kis doctor ne kitne session kiye aur kin patients ke */
+  const DoctorReport = (from: string, to: string) => {
+    const inRange = liveS.filter((x) => x.session_date >= from && x.session_date <= to);
+    const done = inRange.filter((x) => x.status === "completed");
+
+    const rows = activeDocs
+      .map((d) => {
+        const mine = done.filter((x) => x.doctor_id === d.id);
+        // patient wise jod — naam ke saath kitni baar
+        const byPat: Record<string, number> = {};
+        mine.forEach((x) => { byPat[x.patient_id] = (byPat[x.patient_id] || 0) + 1; });
+        const pats = Object.entries(byPat)
+          .map(([id, n]) => ({ p: pat(id), n }))
+          .filter((r) => !!r.p)
+          .sort((a, b) => b.n - a.n || (a.p!.name || "").localeCompare(b.p!.name || ""));
+        return {
+          d, mine, pats,
+          pend: inRange.filter((x) => x.doctor_id === d.id && x.status === "scheduled").length,
+        };
+      })
+      .filter((r) => r.mine.length || r.pend)
+      .sort((a, b) => b.mine.length - a.mine.length || a.d.name.localeCompare(b.d.name));
+
+    const totalDone = rows.reduce((n, r) => n + r.mine.length, 0);
+    const totalPats = new Set(done.map((x) => x.patient_id)).size;
+
+    return (
+      <>
+        <div className="stats">
+          <Stat n={totalDone} l="Sessions done" />
+          <Stat n={totalPats} l="Patients seen" />
+          <Stat n={inRange.filter((x) => x.status === "scheduled").length} l="Still pending" />
+        </div>
+        {!rows.length ? (
+          <div className="stat"><span className="hint">Nothing in this range.</span></div>
+        ) : (
+          <div className="tbl">
+            <table>
+              <thead>
+                <tr><th>Doctor</th><th>Patients</th><th>Sessions</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.d.id}>
+                    <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
+                    <td>
+                      {r.pats.length ? r.pats.map(({ p: q, n }) => (
+                        <div key={q!.id} style={{ padding: "2px 0" }}>
+                          <button className="lnk" onClick={() => openPat(q!.id)}>{q!.name}</button>
+                          <span className="hint"> ({n})</span>
+                        </div>
+                      )) : <span className="hint">—</span>}
+                    </td>
+                    <td className="unum"><b style={{ fontSize: 16 }}>{r.mine.length}</b></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="hint" style={{ marginTop: 10 }}>
+          Only completed sessions are counted. Number next to a name = us patient ke kitne session.
+        </p>
+      </>
+    );
+  };
+
+  /* ---------- Reports: therapy kitni chali, aur doctor wise kaam ---------- */
+  const ReportsView = () => {
     const [from, to] = thFrom <= thTo ? [thFrom, thTo] : [thTo, thFrom];
     const done = liveS.filter((x) => x.status === "completed"
-      && x.session_date >= from && x.session_date <= to
-      && (!thDoc || x.doctor_id === thDoc));
+      && x.session_date >= from && x.session_date <= to);
 
     // ek session mein kai therapy ho sakti hain — har ek alag se gini jaati hai
     const count: Record<string, number> = {};
@@ -2419,13 +2593,6 @@ export default function Physio() {
     const top = rows[0]?.[1] || 1;            // sabse lambi bar
     const totalUses = rows.reduce((n, [, c]) => n + c, 0);
     const noLog = done.filter((x) => !(x.therapies || []).length).length;
-
-    // group-wise jod
-    const grpOf = (n: string) => therapies.find((t) => t.name === n)?.grp || "Other";
-    const gCount: Record<string, number> = {};
-    rows.forEach(([n, c]) => { const g = grpOf(n); gCount[g] = (gCount[g] || 0) + c; });
-    const gRows = Object.entries(gCount).sort((a, b) => b[1] - a[1]);
-    const gTop = gRows[0]?.[1] || 1;
 
     const quick = (d: number, label: string) => (
       <button className={`btn sm${from === addDays(T, -d + 1) && to === T ? " pri" : ""}`}
@@ -2436,7 +2603,10 @@ export default function Physio() {
     return (
       <>
         <div className="dayhead">
-          <div className="d">Therapy use · {nice(from)} — {nice(to)}</div>
+          <div className="d">
+            {repTab === "therapy" ? "Therapy use" : "Doctor wise"} · {nice(from)} — {nice(to)}
+          </div>
+          {quick(1, "Today")}
           {quick(7, "7 days")}
           {quick(30, "30 days")}
           {quick(90, "90 days")}
@@ -2446,12 +2616,13 @@ export default function Physio() {
           <input type="date" className="btn sm" style={{ width: "auto" }} value={thTo}
             onChange={(e) => setThTo(e.target.value || T)} />
         </div>
-        <div className="seg wrap" style={{ marginBottom: 12 }}>
-          <button className={!thDoc ? "on" : ""} onClick={() => setThDoc("")}>All doctors</button>
-          {activeDocs.map((d) => (
-            <button key={d.id} className={thDoc === d.id ? "on" : ""} onClick={() => setThDoc(d.id)}>{d.name}</button>
-          ))}
+        <div className="seg" style={{ marginBottom: 10, maxWidth: 420 }}>
+          <button className={repTab === "therapy" ? "on" : ""} onClick={() => setRepTab("therapy")}>Therapy / product use</button>
+          <button className={repTab === "doctor" ? "on" : ""}
+            onClick={() => setRepTab("doctor")}>Doctor wise</button>
         </div>
+        {repTab === "doctor" ? DoctorReport(from, to) : (
+          <>
         <div className="stats">
           <Stat n={done.length} l="Sessions completed" />
           <Stat n={totalUses} l="Therapies given" />
@@ -2466,18 +2637,16 @@ export default function Physio() {
           </div>
         ) : (
           <>
-            <h3 style={{ margin: "14px 0 8px" }}>Therapy wise</h3>
             <div className="tbl">
               <table>
                 <thead>
-                  <tr><th>Therapy</th><th>Group</th><th className="ucell">Share</th><th>Times</th><th>%</th></tr>
+                  <tr><th>Therapy</th><th className="ucell">Share</th><th>Times</th><th>%</th></tr>
                 </thead>
                 <tbody>
                   {rows.map(([n, c]) => (
                     <tr key={n}>
                       <td><b>{n}</b></td>
-                      <td><span className={`tgrp ${grpCls(n)}`} style={{ padding: 0 }}>{grpOf(n)}</span></td>
-                      <td className={`ucell ${grpCls(n)}`}>
+                      <td className="ucell g1">
                         <div className="ubar"><i style={{ width: `${Math.max(3, (c / top) * 100)}%` }} /></div>
                       </td>
                       <td className="unum"><b style={{ fontSize: 16 }}>{c}</b></td>
@@ -2487,31 +2656,12 @@ export default function Physio() {
                 </tbody>
               </table>
             </div>
-
-            <h3 style={{ margin: "18px 0 8px" }}>Group wise</h3>
-            <div className="tbl">
-              <table>
-                <thead>
-                  <tr><th>Group</th><th className="ucell">Share</th><th>Times</th><th>%</th></tr>
-                </thead>
-                <tbody>
-                  {gRows.map(([g, c]) => (
-                    <tr key={g}>
-                      <td><b className={grpKey(g)}>{g}</b></td>
-                      <td className={`ucell ${grpKey(g)}`}>
-                        <div className="ubar"><i style={{ width: `${Math.max(3, (c / gTop) * 100)}%` }} /></div>
-                      </td>
-                      <td className="unum"><b style={{ fontSize: 16 }}>{c}</b></td>
-                      <td className="unum hint">{pct(c)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
             <p className="hint" style={{ marginTop: 10 }}>
-              Ek session mein jitni therapy likhi gayi, sab alag-alag gini gayi hain — isliye &quot;Therapies given&quot;
-              sessions se zyada ho sakta hai. % poore total ka hissa hai.
+              Every therapy written on a session is counted on its own, so &quot;Therapies given&quot; can be
+              larger than the number of sessions. The % is a share of that total.
             </p>
+          </>
+        )}
           </>
         )}
       </>
@@ -2691,6 +2841,10 @@ export default function Physio() {
           {!!next.length && <button className="btn" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
           {isNew(p) && <button className="btn ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel lead</button>}
           {isOngoing(p) && <button className="btn ghost" onClick={() => endOngoing(p)}>End treatment</button>}
+          {/* Delete sirf admin / physio admin ko — doctor ke paas nahi */}
+          {(isAdmin || isManager) && (
+            <button className="btn ghost danger" onClick={() => setDlg(<DeletePatientDlg p={p} />)}>Delete patient</button>
+          )}
         </div>
         <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>Upcoming sessions</h2>
         <div className="panel"><SList arr={next} showDate showDoctor /></div>
@@ -2732,7 +2886,8 @@ export default function Physio() {
     if (!d) return <div className="stat"><span className="hint">Doctor not found.</span></div>;
     const dayS = liveS.filter((s) => s.doctor_id === d.id && s.session_date === day)
       .sort((a, b) => a.session_time.localeCompare(b.session_time));
-    const pend = dayS.filter((s) => s.status === "scheduled");
+    const pend = dayS.filter(isLate);                                   // time nikal gaya, complete nahi
+    const soon = dayS.filter((s) => s.status === "scheduled" && !isLate(s));  // abhi aana baaki
     const done = dayS.filter((s) => s.status === "completed");
     const mineOn = ongoingOf(d.id);
     const isT = day === T;
@@ -2759,7 +2914,11 @@ export default function Physio() {
     const whereCell = (x: Session) =>
       <td>{isHome(x) ? <span className="pill home">Home visit</span> : <span className="hint">Clinic</span>}</td>;
     const statusCell = (x: Session) =>
-      <td><span className={`pill ${x.status}`}>{x.status === "scheduled" ? "Pending" : "Done ✓"}</span></td>;
+      <td>
+        <span className={`pill ${x.status === "scheduled" && !isLate(x) ? "" : x.status}`}>
+          {x.status === "completed" ? "Done ✓" : isLate(x) ? "Pending" : "Upcoming"}
+        </span>
+      </td>;
     const empty = (n: number, t: string) => !n && <tr><td colSpan={8}><span className="hint">{t}</span></td></tr>;
 
     return (
@@ -2772,11 +2931,13 @@ export default function Physio() {
           <button className="btn sm" onClick={() => setDay(addDays(day, 1))}>Next ›</button>
           <input type="date" className="btn sm" style={{ width: "auto" }} value={day}
             onChange={(e) => setDay(e.target.value || T)} />
-          <button className="btn sm pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+          {/* "+ New lead" abhi hata diya — wapas chahiye to yeh line khol do
+          <button className="btn sm pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button> */}
         </div>
         <div className="stats">
           <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
           <Stat n={pend.length} l="Pending" />
+          <Stat n={soon.length} l="Upcoming" />
           <Stat n={done.length} l="Completed" />
           <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
         </div>
@@ -2968,7 +3129,7 @@ export default function Physio() {
         <div className="panel" style={{ padding: "18px 20px" }}>
           <h2 style={{ fontSize: 20, marginBottom: 4 }}>Who is logging in?</h2>
           <p className="hint" style={{ marginBottom: 12 }}>
-            Doctors see only their own dashboard. Admin and the store manager see every doctor.
+            Doctors see only their own dashboard. Admin and the physio admin see every doctor.
           </p>
           <div className="dpick" style={{ maxHeight: "none" }}>
             {/* Admin sabse upar */}
@@ -2976,7 +3137,7 @@ export default function Physio() {
               <b>Admin</b><span className="tag load">Full desk</span><span className="hint">›</span>
             </button>
             <button className="dopt" onClick={() => { setLoginAs("manager"); setPinIn(""); }}>
-              <b>Store manager</b><span className="tag free">All doctors</span><span className="hint">›</span>
+              <b>Physio admin</b><span className="tag free">All doctors</span><span className="hint">›</span>
             </button>
             {activeDocs.map((d) => (
               <button key={d.id} className="dopt" onClick={() => { setLoginAs(d.id); setPinIn(""); }}>
@@ -2987,7 +3148,7 @@ export default function Physio() {
         </div>
       </div>
     );
-    const name = loginAs === "admin" ? "Admin" : loginAs === "manager" ? "Store manager" : doc(loginAs)?.name || "";
+    const name = loginAs === "admin" ? "Admin" : loginAs === "manager" ? "Physio admin" : doc(loginAs)?.name || "";
     return (
       <div style={{ maxWidth: 380, margin: "6vh auto 0" }}>
         <div className="panel pinpage">
@@ -3090,7 +3251,7 @@ export default function Physio() {
           ) : (
             <>
               <div className="brand">HJS Physio Desk<small>
-                {`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · ${isManager ? "Store manager" : "Admin"}`}
+                {`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · ${isManager ? "Physio admin" : "Admin"}`}
               </small></div>
               {SearchBox()}
               <nav>
@@ -3103,9 +3264,10 @@ export default function Physio() {
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
                 {/* Therapy report sirf admin ko */}
-                {isAdmin && tab("therapy", "Therapy use")}
+                {isAdmin && tab("therapy", "Reports")}
               </nav>
-              <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+              {/* "+ New lead" abhi hata diya — wapas chahiye to yeh line khol do
+              <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button> */}
               <button className="btn" onClick={logout}>Log out</button>
             </>
           )}
@@ -3126,7 +3288,7 @@ export default function Physio() {
           : view === "doctors" ? DoctorsView()
           : view === "cal" ? CalView()
           : view === "roster" ? RosterView()
-          : view === "therapy" ? (isAdmin ? TherapyView() : TodayView())
+          : view === "therapy" ? (isAdmin ? ReportsView() : TodayView())
           : view === "doctor" ? DoctorView()
           : view === "patient" ? PatientView()
           : LeadsView()}
@@ -3138,8 +3300,10 @@ export default function Physio() {
 
   /* ========================= tiny ui ========================= */
   function Modal({ title, children }: { title: string; children: React.ReactNode }) {
+    // mousedown par check — warna andar ka dropdown band hone se layout khisak jata hai
+    // aur click overlay par gir kar poora dialog band kar deta tha
     return (
-      <div className="ovl" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+      <div className="ovl" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
         <div className="dlg"><h3>{title}</h3>{children}</div>
       </div>
     );
