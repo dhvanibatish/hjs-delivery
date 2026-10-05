@@ -378,6 +378,11 @@ const CSS = `
 .hjsp .g5,.hjsp .topt.g5{color:var(--blue)}  .hjsp .chip.g5{background:var(--blue-soft)}  .hjsp .topt.g5:hover{background:var(--blue-soft)}
 .hjsp .g6,.hjsp .topt.g6{color:#0F766E}      .hjsp .chip.g6{background:#D7F0EC}           .hjsp .topt.g6:hover{background:#D7F0EC}
 .hjsp .g7,.hjsp .topt.g7{color:var(--muted)} .hjsp .chip.g7{background:var(--line)}        .hjsp .topt.g7:hover{background:var(--line)}
+/* therapy usage — bar grid */
+.hjsp .ubar { height:10px; border-radius:99px; background:var(--line); overflow:hidden; min-width:60px; }
+.hjsp .ubar i { display:block; height:100%; border-radius:99px; background:currentColor; }
+.hjsp td.ucell { width:40%; vertical-align:middle; }
+.hjsp .unum { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .hjsp .tadd { display:block; width:100%; margin-top:6px; padding:9px 10px; border:1px dashed var(--green);
   border-radius:9px; color:var(--green); font-weight:700; text-align:center; background:var(--green-soft); }
 .hjsp .tnew { display:flex; gap:6px; align-items:center; margin-top:6px; padding-top:6px; border-top:1px solid var(--line); }
@@ -417,7 +422,7 @@ export default function Physio() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "patient" | "doctor"
+  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "therapy" | "patient" | "doctor"
     | "mytoday" | "myongoing">(() => (readWho()?.role === "doctor" ? "mytoday" : "today"));
 
   /* ---------- login ---------- */
@@ -446,6 +451,10 @@ export default function Physio() {
   const [lDay, setLDay] = useState(todayS());   // Sessions board kis din ka
   const [oDay, setODay] = useState(todayS());   // Ongoing patients kis din ka
   const [bDay, setBDay] = useState(todayS());   // Day view kis din ka
+  // Therapy report: kaunsi therapy kitni chali
+  const [thFrom, setThFrom] = useState(addDays(todayS(), -29));
+  const [thTo, setThTo] = useState(todayS());
+  const [thDoc, setThDoc] = useState("");
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
   // Day view: kitne din dikhane hain aur kis patient ka
@@ -2396,6 +2405,119 @@ export default function Physio() {
   };
 
   /* Roster — kaun kis din chhutti par, aur uske session kisko jayenge */
+  /* ---------- Therapy report: kaunsi therapy sabse zyada chal rahi ---------- */
+  const TherapyView = () => {
+    const [from, to] = thFrom <= thTo ? [thFrom, thTo] : [thTo, thFrom];
+    const done = liveS.filter((x) => x.status === "completed"
+      && x.session_date >= from && x.session_date <= to
+      && (!thDoc || x.doctor_id === thDoc));
+
+    // ek session mein kai therapy ho sakti hain — har ek alag se gini jaati hai
+    const count: Record<string, number> = {};
+    done.forEach((x) => (x.therapies || []).forEach((n) => { count[n] = (count[n] || 0) + 1; }));
+    const rows = Object.entries(count).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const top = rows[0]?.[1] || 1;            // sabse lambi bar
+    const totalUses = rows.reduce((n, [, c]) => n + c, 0);
+    const noLog = done.filter((x) => !(x.therapies || []).length).length;
+
+    // group-wise jod
+    const grpOf = (n: string) => therapies.find((t) => t.name === n)?.grp || "Other";
+    const gCount: Record<string, number> = {};
+    rows.forEach(([n, c]) => { const g = grpOf(n); gCount[g] = (gCount[g] || 0) + c; });
+    const gRows = Object.entries(gCount).sort((a, b) => b[1] - a[1]);
+    const gTop = gRows[0]?.[1] || 1;
+
+    const quick = (d: number, label: string) => (
+      <button className={`btn sm${from === addDays(T, -d + 1) && to === T ? " pri" : ""}`}
+        onClick={() => { setThFrom(addDays(T, -d + 1)); setThTo(T); }}>{label}</button>
+    );
+    const pct = (c: number) => (totalUses ? Math.round((c / totalUses) * 100) : 0);
+
+    return (
+      <>
+        <div className="dayhead">
+          <div className="d">Therapy use · {nice(from)} — {nice(to)}</div>
+          {quick(7, "7 days")}
+          {quick(30, "30 days")}
+          {quick(90, "90 days")}
+          <input type="date" className="btn sm" style={{ width: "auto" }} value={thFrom}
+            onChange={(e) => setThFrom(e.target.value || T)} />
+          <span className="hint">to</span>
+          <input type="date" className="btn sm" style={{ width: "auto" }} value={thTo}
+            onChange={(e) => setThTo(e.target.value || T)} />
+        </div>
+        <div className="seg wrap" style={{ marginBottom: 12 }}>
+          <button className={!thDoc ? "on" : ""} onClick={() => setThDoc("")}>All doctors</button>
+          {activeDocs.map((d) => (
+            <button key={d.id} className={thDoc === d.id ? "on" : ""} onClick={() => setThDoc(d.id)}>{d.name}</button>
+          ))}
+        </div>
+        <div className="stats">
+          <Stat n={done.length} l="Sessions completed" />
+          <Stat n={totalUses} l="Therapies given" />
+          <StatT v={rows[0] ? rows[0][0] : "—"} l="Most used" />
+          <StatT v={done.length ? (totalUses / done.length).toFixed(1) : "—"} l="Per session" />
+          <Stat n={noLog} l="Sessions with nothing logged" />
+        </div>
+
+        {!rows.length ? (
+          <div className="stat">
+            <span className="hint">No therapy logged in this range. Pick a wider date range, or check that sessions are being completed with a therapy.</span>
+          </div>
+        ) : (
+          <>
+            <h3 style={{ margin: "14px 0 8px" }}>Therapy wise</h3>
+            <div className="tbl">
+              <table>
+                <thead>
+                  <tr><th>Therapy</th><th>Group</th><th className="ucell">Share</th><th>Times</th><th>%</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map(([n, c]) => (
+                    <tr key={n}>
+                      <td><b>{n}</b></td>
+                      <td><span className={`tgrp ${grpCls(n)}`} style={{ padding: 0 }}>{grpOf(n)}</span></td>
+                      <td className={`ucell ${grpCls(n)}`}>
+                        <div className="ubar"><i style={{ width: `${Math.max(3, (c / top) * 100)}%` }} /></div>
+                      </td>
+                      <td className="unum"><b style={{ fontSize: 16 }}>{c}</b></td>
+                      <td className="unum hint">{pct(c)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h3 style={{ margin: "18px 0 8px" }}>Group wise</h3>
+            <div className="tbl">
+              <table>
+                <thead>
+                  <tr><th>Group</th><th className="ucell">Share</th><th>Times</th><th>%</th></tr>
+                </thead>
+                <tbody>
+                  {gRows.map(([g, c]) => (
+                    <tr key={g}>
+                      <td><b className={grpKey(g)}>{g}</b></td>
+                      <td className={`ucell ${grpKey(g)}`}>
+                        <div className="ubar"><i style={{ width: `${Math.max(3, (c / gTop) * 100)}%` }} /></div>
+                      </td>
+                      <td className="unum"><b style={{ fontSize: 16 }}>{c}</b></td>
+                      <td className="unum hint">{pct(c)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="hint" style={{ marginTop: 10 }}>
+              Ek session mein jitni therapy likhi gayi, sab alag-alag gini gayi hain — isliye &quot;Therapies given&quot;
+              sessions se zyada ho sakta hai. % poore total ka hissa hai.
+            </p>
+          </>
+        )}
+      </>
+    );
+  };
+
   const RosterView = () => {
     if (!activeDocs.length) return <div className="stat"><span className="hint">No doctors yet.</span></div>;
     const days = Array.from({ length: 14 }, (_, i) => addDays(day, i));
@@ -2980,6 +3102,8 @@ export default function Physio() {
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
+                {/* Therapy report sirf admin ko */}
+                {isAdmin && tab("therapy", "Therapy use")}
               </nav>
               <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
               <button className="btn" onClick={logout}>Log out</button>
@@ -3002,6 +3126,7 @@ export default function Physio() {
           : view === "doctors" ? DoctorsView()
           : view === "cal" ? CalView()
           : view === "roster" ? RosterView()
+          : view === "therapy" ? (isAdmin ? TherapyView() : TodayView())
           : view === "doctor" ? DoctorView()
           : view === "patient" ? PatientView()
           : LeadsView()}
