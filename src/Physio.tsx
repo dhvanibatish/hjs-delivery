@@ -1185,20 +1185,24 @@ export default function Physio() {
     );
   };
 
-  const NotComingDlg = ({ p }: { p: Patient }) => {
+  // sess diya ho to sirf wahi ek session, warna aaj ke saare scheduled
+  const NotComingDlg = ({ p, sess }: { p: Patient; sess?: Session }) => {
+    const day0 = sess ? sess.session_date : T;
     const [why, setWhy] = useState("");
     const [note, setNote] = useState("");
-    const [next, setNext] = useState(addDays(T, 1));
+    const [next, setNext] = useState(addDays(day0, 1));
     const save = async () => {
       if (!why) return toast("Select a reason");
       if (!note.trim()) return toast("Remarks are required");
-      const ids = sessOf(p.id).filter((s) => s.session_date === T && s.status === "scheduled").map((s) => s.id);
+      const ids = sess
+        ? [sess.id]
+        : sessOf(p.id).filter((s) => s.session_date === T && s.status === "scheduled").map((s) => s.id);
       if (ids.length)
         await supabase.from("physio_sessions")
           .update({ status: "cancelled", cancel_reason: why, cancel_note: note.trim(), cancelled_at: new Date().toISOString() })
           .in("id", ids);
-      const skips = [...(p.skips || []).filter((s) => s.date !== T), { date: T, reason: why, note: note.trim() }].slice(-60);
-      const fu = [...(p.follow_ups || []), { date: T, note: `Not coming — ${why} — ${note.trim()}` }].slice(-20);
+      const skips = [...(p.skips || []).filter((s) => s.date !== day0), { date: day0, reason: why, note: note.trim() }].slice(-60);
+      const fu = [...(p.follow_ups || []), { date: T, note: `Not coming ${nice(day0)} — ${why} — ${note.trim()}` }].slice(-20);
       await supabase.from("physio_patients").update({ skips, follow_ups: fu, next_follow_up: next || null }).eq("id", p.id);
       await load();
       toast(`Marked not coming · ${why}`);
@@ -1206,7 +1210,9 @@ export default function Physio() {
     };
     return (
       <Modal title={`Not coming · ${p.name}`}>
-        <p className="hint" style={{ marginBottom: 10 }}>Today&apos;s visit will be marked as skipped. A reason is required.</p>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          {sess ? `${nice(sess.session_date)} at ${hhmm(sess.session_time)}` : "Today's visit"} will be marked as skipped. A reason is required.
+        </p>
         <Field label="Reason *">
           <select value={why} onChange={(e) => setWhy(e.target.value)}>
             <option value="">— Select a reason —</option>
@@ -1564,7 +1570,8 @@ export default function Physio() {
             {s.status === "scheduled" ? (
               <>
                 <button className="btn sm pri" onClick={() => markSession(s, "completed")}>Complete</button>
-                <button className="btn sm" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Move</button>
+                <button className="btn sm" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>
+                <button className="btn sm ghost danger" onClick={() => p && setDlg(<NotComingDlg p={p} sess={s} />)}>Not coming</button>
               </>
             ) : (
               <span className="pill completed">Done ✓</span>
@@ -1594,7 +1601,8 @@ export default function Physio() {
               {s.status === "scheduled" ? (
                 <>
                   <button className="btn sm pri" onClick={() => markSession(s, "completed")}>Complete</button>
-                  <button className="btn sm ghost" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Move</button>
+                  <button className="btn sm ghost" onClick={() => p && setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>
+                  <button className="btn sm ghost danger" onClick={() => p && setDlg(<NotComingDlg p={p} sess={s} />)}>Not coming</button>
                 </>
               ) : (
                 <span className="pill completed">Done ✓</span>
@@ -1872,7 +1880,8 @@ export default function Physio() {
                       {x.status === "scheduled" ? (
                         <>
                           <button className="btn sm pri" onClick={() => markSession(x, "completed")}>Complete</button>{" "}
-                          {p && <button className="btn sm ghost" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Move</button>}
+                          {p && <button className="btn sm ghost" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}{" "}
+                          {p && <button className="btn sm ghost danger" onClick={() => setDlg(<NotComingDlg p={p} sess={x} />)}>Not coming</button>}
                         </>
                       ) : (
                         <span className="pill completed">Done ✓</span>
