@@ -35,8 +35,8 @@ type Doctor = { id: string; name: string; active: boolean };
    PIN code mein fixed hain — app se koi (admin bhi) badal nahi sakta. Badalna ho to yahin badlo. */
 type Who = { role: "admin"; pin: string } | { role: "manager"; pin: string } | { role: "doctor"; id: string; pin: string };
 const WHO_KEY = "hjs-physio-who";
-const ADMIN_PIN = "0000";
-const MANAGER_PIN = "9999";   // store manager
+const ADMIN_PIN = "9999";
+const MANAGER_PIN = "0000";   // store manager
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
   ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
