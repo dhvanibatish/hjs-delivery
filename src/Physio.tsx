@@ -1034,7 +1034,109 @@ export default function Physio() {
     );
   };
 
-  /* Patient ko hamesha ke liye hatana — sirf admin / physio admin ke paas */
+  /* Do duplicate entry ko ek karna — dusre ke session is patient me aa jaate hain */
+  const MergePatientDlg = ({ p }: { p: Patient }) => {
+    const [q, setQ] = useState("");
+    const [pick, setPick] = useState<Patient | null>(null);
+    const [sure, setSure] = useState(false);     // confirm kiye bina merge nahi hota
+    const [busy, setBusy] = useState(false);
+
+    const hits = !q.trim() ? [] : patients
+      .filter((x) => x.id !== p.id
+        && `${x.name} ${x.phone || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+      .slice(0, 8);
+
+    const merge = async () => {
+      if (!pick || busy) return;
+      if (!sure) return toast("Pehle confirm par tick karo");
+      setBusy(true);
+      // 1. duplicate ke saare session is patient par kar do
+      const ok1 = await run(() =>
+        supabase.from("physio_sessions").update({ patient_id: p.id }).eq("patient_id", pick.id));
+      if (!ok1) return setBusy(false);
+      // 2. jo khaana is patient me khali hai wo duplicate se bhar do + follow-up/skip jod do
+      const fill: Partial<Patient> = {
+        phone: p.phone || pick.phone,
+        ailment: p.ailment || pick.ailment,
+        source: p.source || pick.source,
+        doctor_id: p.doctor_id || pick.doctor_id,
+        routine: p.routine || pick.routine,
+        usual_time: p.usual_time || pick.usual_time,
+        start_date: [p.start_date, pick.start_date].filter(Boolean).sort()[0] || null,
+        sessions_planned: Math.max(p.sessions_planned || 0, pick.sessions_planned || 0) || null,
+        follow_ups: [...(p.follow_ups || []), ...(pick.follow_ups || [])],
+        skips: [...(p.skips || []), ...(pick.skips || [])],
+        notes: [p.notes, pick.notes].filter(Boolean).join("\n") || null,
+        // dono me se jo zyada aage hai wahi status
+        status: p.status === "ongoing" || pick.status === "ongoing" ? "ongoing"
+          : p.status === "new" || pick.status === "new" ? "new" : p.status,
+      };
+      const ok2 = await run(() => supabase.from("physio_patients").update(fill).eq("id", p.id));
+      if (!ok2) return setBusy(false);
+      // 3. duplicate entry hata do
+      const ok = await run(() => supabase.from("physio_patients").delete().eq("id", pick.id),
+        `${pick.name} is patient me mila diya`);
+      setBusy(false);
+      if (ok) close();
+    };
+
+    const mineN = sessOf(p.id).length;
+    const theirN = pick ? sessOf(pick.id).length : 0;
+
+    return (
+      <Modal title={`Merge duplicate · ${p.name}`}>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          Duplicate entry dhoondo. Uske saare session, follow-up aur notes <b>{p.name}</b> me aa jayenge
+          aur duplicate entry hat jayegi. Session count dono ka jud kar aayega.
+        </p>
+        <Field label="Duplicate dhoondo — naam ya mobile">
+          <input autoFocus placeholder="e.g. Ramesh / 98156…" value={q}
+            onChange={(e) => { setQ(e.target.value); setPick(null); setSure(false); }} />
+        </Field>
+        {!pick && !!hits.length && (
+          <div className="panel" style={{ maxHeight: 220, overflow: "auto" }}>
+            {hits.map((x) => (
+              <div className="drow" key={x.id}>
+                <button className="lnk" onClick={() => setPick(x)}>{x.name}</button>
+                <span className="hint">{x.phone || "no number"}</span>
+                <span className="pill">{sessOf(x.id).length} session{sessOf(x.id).length === 1 ? "" : "s"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!pick && !!q.trim() && !hits.length && <p className="hint">Koi match nahi mila.</p>}
+        {pick && (
+          <div className="panel">
+            <div className="drow">
+              <b>{p.name}</b><span className="hint">rahega — {mineN} session</span>
+            </div>
+            <div className="drow">
+              <b>{pick.name}</b><span className="hint">hat jayega — {theirN} session is me aa jayenge</span>
+              <button className="btn sm ghost" onClick={() => { setPick(null); setSure(false); }}>Change</button>
+            </div>
+            <div className="drow"><b>Merge ke baad: {mineN + theirN} session</b></div>
+          </div>
+        )}
+        {pick && (
+          <label className="drow" style={{ cursor: "pointer" }}>
+            <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+            <span>
+              Confirm — <b>{pick.name}</b> ki entry hat jayegi aur uske {theirN} session{" "}
+              <b>{p.name}</b> me aa jayenge. Yeh wapas nahi hoga.
+            </span>
+          </label>
+        )}
+        <div className="end">
+          <button className="btn" onClick={close}>Close</button>
+          <button className="btn pri" disabled={!pick || !sure || busy} onClick={merge}>
+            {busy ? "Merging…" : "Merge karo"}
+          </button>
+        </div>
+      </Modal>
+    );
+  };
+
+  /* Patient ko hamesha ke liye hatana — sirf admin ke paas */
   const DeletePatientDlg = ({ p }: { p: Patient }) => {
     const [sure, setSure] = useState(false);
     const mine = sessOf(p.id);
@@ -2859,8 +2961,12 @@ export default function Physio() {
           {!!next.length && <button className="btn" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
           {isNew(p) && <button className="btn ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel lead</button>}
           {isOngoing(p) && <button className="btn ghost" onClick={() => endOngoing(p)}>End treatment</button>}
-          {/* Delete sirf admin / physio admin ko — doctor ke paas nahi */}
+          {/* Duplicate milana — admin aur physio admin dono kar sakte hain */}
           {(isAdmin || isManager) && (
+            <button className="btn ghost" onClick={() => setDlg(<MergePatientDlg p={p} />)}>Merge duplicate</button>
+          )}
+          {/* Delete sirf admin ko — physio admin aur doctor ke paas nahi */}
+          {isAdmin && (
             <button className="btn ghost danger" onClick={() => setDlg(<DeletePatientDlg p={p} />)}>Delete patient</button>
           )}
         </div>
@@ -3281,8 +3387,8 @@ export default function Physio() {
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
-                {/* Therapy report sirf admin ko */}
-                {isAdmin && tab("therapy", "Reports")}
+                {/* Reports admin aur physio admin dono ko */}
+                {(isAdmin || isManager) && tab("therapy", "Reports")}
               </nav>
               {/* "+ New lead" abhi hata diya — wapas chahiye to yeh line khol do
               <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button> */}
@@ -3306,7 +3412,7 @@ export default function Physio() {
           : view === "doctors" ? DoctorsView()
           : view === "cal" ? CalView()
           : view === "roster" ? RosterView()
-          : view === "therapy" ? (isAdmin ? ReportsView() : TodayView())
+          : view === "therapy" ? (isAdmin || isManager ? ReportsView() : TodayView())
           : view === "doctor" ? DoctorView()
           : view === "patient" ? PatientView()
           : LeadsView()}
