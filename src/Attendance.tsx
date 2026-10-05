@@ -259,6 +259,8 @@ const CSS = `
 
 .hjsatt .att-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .hjsatt .att-grid5 { grid-template-columns: repeat(5, 1fr); }
+.hjsatt .att-grid6 { grid-template-columns: repeat(6, 1fr); }
+@media (max-width: 640px) { .hjsatt .att-grid6 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) { .hjsatt .att-grid5 { grid-template-columns: repeat(3, 1fr); } }
 .hjsatt .att-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .hjsatt .att-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
@@ -1359,7 +1361,9 @@ function Login() {
     const e = email.trim().toLowerCase();
     const { data, error } = await supabase.rpc("email_status", { p_email: e });
     if (error) setErr(error.message);
-    else if (data === "not_found") setStage("new");
+    else if (data === "not_found")
+      setErr("This email isn't registered. Ask HR / admin to add you first, " +
+             "then come back and set your 4-digit code.");
     else setStage(data === "ready" ? "enter" : "set");
     setBusy(false);
   };
@@ -1387,10 +1391,11 @@ function Login() {
       session = si.data?.session || null;
       if (!session) {
         setBusy(false);
-        if (up.error && /already/i.test(up.error.message))
+        if (up.error && /already/i.test(up.error.message)) {
           setStage("forgot");
           return setErr("This email already has a code. Confirm your date of birth " +
                         "or ask your admin to reset it.");
+        }
         if (up.error) return setErr(up.error.message);
         return setErr(
           "Couldn't start your session. In Supabase, Authentication \u2192 Email \u2192 turn off " +
@@ -4658,7 +4663,10 @@ function TodayTab() {
 
       {busy && <p className="att-muted">Loading…</p>}
 
-      <div className="att-grid4 att-grid5">
+      <div className="att-grid4 att-grid6">
+        <div className={`att-stat clk ${!filter ? "on" : ""}`}
+          onClick={() => setFilter("")}>
+          <b style={{ color: "#1849a9" }}>{rows.length}</b><span>Total staff</span></div>
         <div className={`att-stat clk ${filter === "In" ? "on" : ""}`}
           onClick={() => setFilter(filter === "In" ? "" : "In")}>
           <b style={{ color: "#16a34a" }}>{inNow}</b><span>In now</span></div>
@@ -4984,7 +4992,11 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
       } else {
         const { error } = await supabase.from("employees").update(payload).eq("id", row.id);
         if (error) throw new Error(error.message);
-        setMsg({ err: "", ok: "Saved." });
+        const emailChanged = row.auth_user_id && payload.email
+          && payload.email !== String(row.email || "").trim().toLowerCase();
+        setMsg({ err: "", ok: emailChanged
+          ? `Saved. Login email bhi ${payload.email} ho gaya — 4-digit code wahi rahega.`
+          : "Saved." });
         // payroll wagairah taaza ho jaye
         window.dispatchEvent(new CustomEvent("hjs:employee-updated"));
       }
@@ -7986,25 +7998,12 @@ function LinkAccount({ session, err: outerErr }: any) {
         <h2 className="att-h1">We don't have this email yet</h2>
         <p className="att-muted" style={{ marginTop: 8, whiteSpace: "normal" }}>
           You're signed in as <b>{email}</b>, but that address isn't on the employee
-          list. If you have a different work email, sign out and try that one —
-          you'll go straight in.
+          list. Ask HR / admin to add your email, or sign out and try your
+          registered work email.
         </p>
 
         <div className="att-stack" style={{ marginTop: 16 }}>
-          <div>
-            <label>Your full name</label>
-            <input value={name} autoFocus placeholder="Full name"
-              onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div>
-            <label>Mobile <span className="att-muted">(optional)</span></label>
-            <input value={phone} placeholder="98765 43210"
-              onChange={(e) => setPhone(e.target.value)} />
-          </div>
           <Note>{err}</Note>
-          <button className="att-btn" disabled={busy || !name.trim()} onClick={request}>
-            {busy ? "Sending…" : "Ask an admin for access"}
-          </button>
           <button className="att-btn line" onClick={() => supabase.auth.signOut()}>
             Sign out and try another email
           </button>
