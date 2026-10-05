@@ -29,10 +29,14 @@ type Skip = { date: string; reason: string; note: string };
 type Doctor = { id: string; name: string; active: boolean };
 
 /* Login — har doctor apne PIN se sirf apna dashboard dekhe, admin sab kuch.
+   Store manager ko poora desk dikhta hai aur roz ka kaam bhi kar sakta hai,
+   bas do cheezein admin ke paas rehti hain: session count haath se theek karna
+   aur kisi doctor ka dashboard uski tarah kholna.
    PIN code mein fixed hain — app se koi (admin bhi) badal nahi sakta. Badalna ho to yahin badlo. */
-type Who = { role: "admin"; pin: string } | { role: "doctor"; id: string; pin: string };
+type Who = { role: "admin"; pin: string } | { role: "manager"; pin: string } | { role: "doctor"; id: string; pin: string };
 const WHO_KEY = "hjs-physio-who";
 const ADMIN_PIN = "0000";
+const MANAGER_PIN = "9999";   // store manager
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
   ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
@@ -563,14 +567,15 @@ export default function Physio() {
 
   /* ---------- who is looking ---------- */
   const isAdmin = who?.role === "admin";
+  const isManager = who?.role === "manager";
   // Doctor login ho to wahi doctor; admin preview kar raha ho to woh doctor
   const effDoc = who?.role === "doctor" ? who.id : asDoc;
 
   // PIN badal gaya / doctor hat gaya to purana login band
   useEffect(() => {
     if (loading || !who) return;
-    const ok = who.role === "admin"
-      ? who.pin === ADMIN_PIN
+    const ok = who.role === "admin" ? who.pin === ADMIN_PIN
+      : who.role === "manager" ? who.pin === MANAGER_PIN
       : doctors.some((d) => d.id === who.id && d.active !== false && !!pinOf(d) && pinOf(d) === who.pin);
     if (!ok) {
       setWho(null);
@@ -588,6 +593,10 @@ export default function Physio() {
     if (loginAs === "admin") {
       if (pinIn !== ADMIN_PIN) { setPinIn(""); return toast("Wrong PIN"); }
       setWho({ role: "admin", pin: pinIn });
+      setView("today");
+    } else if (loginAs === "manager") {
+      if (pinIn !== MANAGER_PIN) { setPinIn(""); return toast("Wrong PIN"); }
+      setWho({ role: "manager", pin: pinIn });
       setView("today");
     } else {
       const d = doctors.find((x) => x.id === loginAs);
@@ -1492,14 +1501,21 @@ export default function Physio() {
             </div>
           </>
         )}
-        <div className="row2">
-          <Field label="Sessions done (change if the count is wrong)">
-            <input type="number" min={0} max={999} value={doneN} onChange={(e) => setDoneN(e.target.value)} />
-          </Field>
-          <div className="f"><label>&nbsp;</label>
-            <span className="hint" style={{ paddingTop: 8 }}>Counted from sessions: {auto}{p.done_adjust ? ` · corrected by ${p.done_adjust > 0 ? "+" : ""}${p.done_adjust}` : ""}</span>
+        {isAdmin ? (
+          <div className="row2">
+            <Field label="Sessions done (change if the count is wrong)">
+              <input type="number" min={0} max={999} value={doneN} onChange={(e) => setDoneN(e.target.value)} />
+            </Field>
+            <div className="f"><label>&nbsp;</label>
+              <span className="hint" style={{ paddingTop: 8 }}>Counted from sessions: {auto}{p.done_adjust ? ` · corrected by ${p.done_adjust > 0 ? "+" : ""}${p.done_adjust}` : ""}</span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <p className="hint" style={{ margin: "0 0 10px" }}>
+            Sessions done: <b>{Math.max(0, auto + (p.done_adjust || 0))}</b> — counted from sessions.
+            Only the admin can correct this count.
+          </p>
+        )}
         <PackPick v={packN} on={setPackN} label="Sessions in the plan" />
         <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="end">
@@ -2454,7 +2470,7 @@ export default function Physio() {
 
   const DoctorView = () => {
     const d = doc(docId);
-    if (!d) { setView("board"); return null; }
+    if (!d) { setView("doctors"); return null; }
     const st = docStats(d);
     const dayS = liveS.filter((s) => s.doctor_id === d.id && s.session_date === day)
       .sort((a, b) => a.session_time.localeCompare(b.session_time));
@@ -2462,8 +2478,10 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">{d.name}</div>
-          <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open their dashboard</button>
-          <button className="btn sm" onClick={() => setView("board")}>‹ All doctors</button>
+          {isAdmin && (
+            <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open their dashboard</button>
+          )}
+          <button className="btn sm" onClick={() => setView("doctors")}>‹ All doctors</button>
         </div>
         <div className="stats">
           <Stat n={st.ongoing.length} l="Ongoing patients" />
@@ -2827,11 +2845,16 @@ export default function Physio() {
       <div style={{ maxWidth: 520, margin: "6vh auto 0" }}>
         <div className="panel" style={{ padding: "18px 20px" }}>
           <h2 style={{ fontSize: 20, marginBottom: 4 }}>Who is logging in?</h2>
-          <p className="hint" style={{ marginBottom: 12 }}>Doctors see only their own dashboard. Admin sees everything.</p>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Doctors see only their own dashboard. Admin and the store manager see every doctor.
+          </p>
           <div className="dpick" style={{ maxHeight: "none" }}>
             {/* Admin sabse upar */}
             <button className="dopt" onClick={() => { setLoginAs("admin"); setPinIn(""); }}>
               <b>Admin</b><span className="tag load">Full desk</span><span className="hint">›</span>
+            </button>
+            <button className="dopt" onClick={() => { setLoginAs("manager"); setPinIn(""); }}>
+              <b>Store manager</b><span className="tag free">All doctors</span><span className="hint">›</span>
             </button>
             {activeDocs.map((d) => (
               <button key={d.id} className="dopt" onClick={() => { setLoginAs(d.id); setPinIn(""); }}>
@@ -2842,7 +2865,7 @@ export default function Physio() {
         </div>
       </div>
     );
-    const name = loginAs === "admin" ? "Admin" : doc(loginAs)?.name || "";
+    const name = loginAs === "admin" ? "Admin" : loginAs === "manager" ? "Store manager" : doc(loginAs)?.name || "";
     return (
       <div style={{ maxWidth: 380, margin: "6vh auto 0" }}>
         <div className="panel pinpage">
@@ -2866,7 +2889,7 @@ export default function Physio() {
 
   /* ========================= shell ========================= */
   const tab = (v: typeof view, label: string) => (
-    <button className={view === v || (v === "board" && view === "doctor") || (v === "leads" && view === "patient") ? "on" : ""}
+    <button className={view === v || (v === "doctors" && view === "doctor") || (v === "leads" && view === "patient") ? "on" : ""}
       onClick={() => {
         setView(v); setDSel("");
         // har tab aaj se hi khule
@@ -2939,18 +2962,21 @@ export default function Physio() {
                 {myTab("myongoing", "My ongoing patients")}
               </nav>
               {isAdmin
-                ? <button className="btn" onClick={() => { setAsDoc(""); setView("board"); }}>‹ Back to admin</button>
+                ? <button className="btn" onClick={() => { setAsDoc(""); setView("doctors"); }}>‹ Back to admin</button>
                 : <button className="btn" onClick={logout}>Log out</button>}
             </>
           ) : (
             <>
-              <div className="brand">HJS Physio Desk<small>{`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · Admin`}</small></div>
+              <div className="brand">HJS Physio Desk<small>
+                {`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · ${isManager ? "Store manager" : "Admin"}`}
+              </small></div>
               {SearchBox()}
               <nav>
                 {tab("today", "Today's schedule")}
                 {tab("leads", "Sessions")}
                 {tab("ongoing", "Ongoing patients")}
-                {tab("board", "Day view")}
+                {/* Day view abhi ke liye band — wapas chahiye to bas yeh line khol do */}
+                {/* {tab("board", "Day view")} */}
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
