@@ -4304,20 +4304,22 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const [regs, setRegs] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [status, setStatus] = useState("All");
+  // "approved" tab = jo requests decide ho chuki hain; default aaj ki
+  const history = mode === "approved";
+  const [status, setStatus] = useState(history ? "Approved" : "All");
   const [range, setRange] = useState({
-    from: addDays(istToday(), -90), to: addDays(istToday(), 90),
+    from: istToday(), to: istToday(),
   });
-
-  const history = mode === "history";
 
   const load = async () => {
     const [l, r, emps] = await Promise.all([
       history
-        ? supabase.from("leaves").select("*").order("from_date", { ascending: false }).limit(500)
+        ? supabase.from("leaves").select("*").in("status", ["Approved", "Rejected"])
+            .order("approved_at", { ascending: false }).limit(1000)
         : supabase.from("leaves").select("*").eq("status", "Pending").order("from_date"),
       history
-        ? supabase.from("regularizations").select("*").order("work_date", { ascending: false }).limit(500)
+        ? supabase.from("regularizations").select("*").in("status", ["Approved", "Rejected"])
+            .order("approved_at", { ascending: false }).limit(1000)
         : supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
       supabase.from("employees").select("id, emp_code, full_name, designation"),
     ]);
@@ -4371,16 +4373,22 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   };
 
   const inRange = (d: string) => d >= range.from && d <= range.to;
+  // approve/reject kis din hua (IST) — Approved tab is date se filter hota hai.
+  // Pending tab pe koi date filter nahi, sab dikhta hai.
+  const decidedOn = (x: any, fallback: string) => x.approved_at
+    ? new Date(x.approved_at).toLocaleDateString("en-CA", { timeZone: TZ }) : fallback;
+  const dateOk = (x: any, fallback: string) => !history || inRange(decidedOn(x, fallback));
   const stOk = (x: any) => status === "All" || x.status === status;
   const hit = (x: any, extra = "") =>
     !q || `${x.emp?.full_name || ""} ${x.emp?.emp_code || ""} ${x.reason || ""} ${extra}`
       .toLowerCase().includes(q.toLowerCase());
 
-  const shownL = leaves.filter((x) => stOk(x) && inRange(x.from_date)
+  const shownL = leaves.filter((x) => stOk(x) && dateOk(x, x.from_date)
     && hit(x, `${x.leave_type} ${x.status}`));
-  const shownR = regs.filter((x) => stOk(x) && inRange(x.work_date)
+  const shownR = regs.filter((x) => stOk(x) && dateOk(x, x.work_date)
     && hit(x, x.status));
   const total = shownL.length + shownR.length;
+  const isToday = range.from === istToday() && range.to === istToday();
 
   const kill = async (r: any, kind: string) => {
     if (!window.confirm(
@@ -4431,18 +4439,31 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
               <Search placeholder="Search name, code or reason" value={q} onChange={setQ} />
 
       {history && (
+        <div className="att-seg">
+          {["Approved", "Rejected", "All"].map((k) => (
+            <button key={k} className={status === k ? "on" : ""}
+              onClick={() => setStatus(k)}>{k === "All" ? "Both" : k}</button>
+          ))}
+        </div>
+      )}
+
+      {history && (
         <div className="att-range">
           <div className="qk">
-            {["All", "Pending", "Approved", "Rejected", "Cancelled"].map((k) => (
-              <button key={k} className={status === k ? "on" : ""} onClick={() => setStatus(k)}>{k}</button>
-            ))}
+            <button className={isToday ? "on" : ""}
+              onClick={() => setRange({ from: istToday(), to: istToday() })}>Today</button>
+            <button className={range.from === addDays(istToday(), -6) && range.to === istToday() ? "on" : ""}
+              onClick={() => setRange({ from: addDays(istToday(), -6), to: istToday() })}>Last 7 days</button>
+            <button className={range.from === "2000-01-01" ? "on" : ""}
+              onClick={() => setRange({ from: "2000-01-01", to: istToday() })}>All time</button>
           </div>
-          <div className="att-flex" style={{ marginLeft: "auto" }}>
-            <input type="date" value={range.from}
-              onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          <div className="att-flex att-daterange" style={{ marginLeft: "auto" }}>
+            <input type="date" value={range.from === "2000-01-01" ? "" : range.from}
+              max={range.to}
+              onChange={(e) => setRange({ ...range, from: e.target.value || istToday() })} />
             <span className="att-muted">to</span>
-            <input type="date" value={range.to} min={range.from}
-              onChange={(e) => setRange({ ...range, to: e.target.value })} />
+            <input type="date" value={range.to} min={range.from} max={istToday()}
+              onChange={(e) => setRange({ ...range, to: e.target.value || istToday() })} />
           </div>
         </div>
       )}
@@ -4465,7 +4486,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
       {total === 0 && (
         <div className="att-list">
           <p className="att-empty">
-            {history ? "Nothing in this range." : "All clear. Nothing pending."}
+            {history
+              ? (isToday ? "Aaj abhi tak kuch approve/reject nahi hua." : "Is range mein kuch nahi.")
+              : "All clear. Nothing pending."}
           </p>
         </div>
       )}
@@ -4543,60 +4566,6 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
         </div>
       )}
     </div>
-  );
-}
-
-function JoinersTab() {
-  const [q, setQ] = useState("");
-  const [rows, setRows] = useState<any[]>([]);
-  const [busy, setBusy] = useState(true);
-  const [err, setErr] = useState("");
-
-  const load = async () => {
-    const { data, error } = await supabase.rpc("pending_registrations");
-    if (error) setErr(error.message);
-    setRows(data || []); setBusy(false);
-  };
-  useEffect(() => { load(); }, []);
-
-  const decide = async (id: string, ok: boolean) => {
-    setBusy(true);
-    const { error } = await supabase.rpc("decide_registration", { p_emp: id, p_approve: ok });
-    if (error) setErr(error.message);
-    await load(); setBusy(false);
-  };
-
-  return (
-    <>
-      <Note>{err}</Note>
-      <p className="att-muted">
-        Anyone can create an account from the sign-in link. They land here until you approve them.
-      </p>
-              <Search placeholder="Search name or email" value={q} onChange={setQ} />
-      <div className="att-list">
-        {!rows.length && !busy && <p className="att-empty">No one waiting right now.</p>}
-        {rows.filter((r) => !q ||
-          `${r.full_name} ${r.email || ""} ${r.emp_code} ${r.phone || ""}`
-            .toLowerCase().includes(q.toLowerCase()))
-          .map((r) => (
-          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
-            <Avatar name={r.full_name} />
-            <div className="grow" style={{ minWidth: 170 }}>
-              <p><PName id={r.id} code={r.emp_code}><b>{r.full_name}</b></PName>
-                <span className="att-muted"> {r.emp_code}</span></p>
-              <p className="att-muted">{r.email}{r.phone ? ` · ${r.phone}` : ""}</p>
-              <p className="att-muted" style={{ fontSize: 11.5 }}>
-                signed up {r.registered_at ? fmtDate(r.registered_at) : "—"}
-              </p>
-            </div>
-            <button className="att-btn sm green" disabled={busy}
-              onClick={() => decide(r.id, true)}>Approve</button>
-            <button className="att-btn sm grey" disabled={busy}
-              onClick={() => decide(r.id, false)}>Reject</button>
-          </div>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -6242,12 +6211,10 @@ const ALIASES: Record<string, string> = {
   "My pay": "salary payable amount gross my pay",
   "Muster Roll": "attendance register month all staff payroll company",
   "Payroll": "salary pay all staff amount payable gross",
-  "Pending sign-ups": "new joiner approve registration",
   "Half-filled records": "incomplete missing setup needs",
   // scope ke naam (jinme ek hi view hai)
   "Pending": "approve leave request regularisation waiting action inbox",
-  "History": "past approved rejected old requests decisions",
-  "New joiners": "sign up register approve new account",
+  "Approved": "approved rejected history past decided requests today",
   "Needs setup": "incomplete missing department manager email code",
   "Holidays": "holiday list festival calendar public",
   "My Profile": "account settings my details code shift password",
@@ -10141,8 +10108,7 @@ const MODULES: Module[] = [
     k: "approvals", label: "Approvals", icon: "check", approverOnly: true,
     scopes: [
       { k: "pending", label: "Pending", views: [{ k: "all", label: "Awaiting action" }]},
-      { k: "history", label: "History", views: [{ k: "all", label: "All requests" }]},
-      { k: "joiners", label: "New joiners", views: [{ k: "all", label: "Pending sign-ups" }]},
+      { k: "approved", label: "Approved", views: [{ k: "all", label: "Approved requests" }]},
       { k: "setup", label: "Needs setup", views: [{ k: "all", label: "Half-filled records" }]},
     ],
   },
@@ -10295,24 +10261,22 @@ export default function Attendance() {
   useEffect(() => {
     if (!me || !["manager", "admin"].includes(me.role)) return;
     (async () => {
-      const [l, r, j, dir] = await Promise.all([
+      const [l, r, dir] = await Promise.all([
         supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
-        supabase.rpc("pending_registrations"),
         supabase.rpc("directory", {}),
       ]);
 
       const mineOut = (x: any) => me.role === "admin" || x.employee_id !== me.id;
       const approvals = [...(l.data || []), ...(r.data || [])].filter(mineOut).length;
-      const joiners = (j.data || []).length;
       const setup = (dir.data || []).filter((x: any) =>
         String(x.emp_code).startsWith("REG-")
         || !x.team_id || !x.designation
         || (!x.reports_to && !x.co_manager_id && x.designation !== "Co-Founder")
         || !x.email).length;
 
-      setCounts({ pending: approvals, joiners, setup });   // history ka koi badge nahi
-      setPending(approvals + joiners);                      // rail pe kaam wale hi
+      setCounts({ pending: approvals, setup });   // history ka koi badge nahi
+      setPending(approvals);                      // rail pe kaam wale hi
     })();
   }, [me, mod]);
 
@@ -10427,8 +10391,7 @@ export default function Attendance() {
       case "leave/holidays/list":   return <div className="att-wrap att-stack"><HolidaysTab me={me} /></div>;
       // ---- Approvals ----
       case "approvals/pending/all":  return <InboxScreen me={me} onCount={setPending} mode="pending" />;
-      case "approvals/history/all":  return <InboxScreen me={me} onCount={setPending} mode="history" />;
-      case "approvals/joiners/all":  return <div className="att-wrap att-stack"><JoinersTab /></div>;
+      case "approvals/approved/all": return <InboxScreen key="approved" me={me} onCount={setPending} mode="approved" />;
       case "approvals/setup/all":    return <div className="att-wrap att-stack"><NeedsSetupTab me={me} /></div>;
       case "me/me/profile":          return <MeScreen me={me} />;
       // ---- Trainings ----
