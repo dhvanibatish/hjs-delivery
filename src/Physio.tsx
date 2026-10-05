@@ -469,7 +469,7 @@ export default function Physio() {
   const [oDay, setODay] = useState(todayS());   // Ongoing patients kis din ka
   const [bDay, setBDay] = useState(todayS());   // Day view kis din ka
   // Therapy report: kaunsi therapy kitni chali
-  const [thFrom, setThFrom] = useState(addDays(todayS(), -29));
+  const [thFrom, setThFrom] = useState(todayS());   // Reports khulte hi sirf aaj ka
   const [thTo, setThTo] = useState(todayS());
   const [repTab, setRepTab] = useState<"therapy" | "doctor">("therapy");
   const [dFilt, setDFilt] = useState("all");
@@ -2620,7 +2620,8 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">
-            {repTab === "therapy" ? "Therapy use" : "Doctor wise"} · {nice(from)} — {nice(to)}
+            {repTab === "therapy" ? "Therapy use" : "Doctor wise"} ·{" "}
+            {from === to ? `${from === T ? "Today, " : ""}${nice(from)}` : `${nice(from)} — ${nice(to)}`}
           </div>
           {quick(1, "Today")}
           {quick(7, "7 days")}
