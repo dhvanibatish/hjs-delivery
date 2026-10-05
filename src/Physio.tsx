@@ -425,6 +425,8 @@ export default function Physio() {
   const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "therapy" | "patient" | "doctor"
     | "mytoday" | "myongoing">(() => (readWho()?.role === "doctor" ? "mytoday" : "today"));
 
+  const [backTo, setBackTo] = useState<typeof view | "">("");   // patient/doctor page se Back kahan jaye
+
   /* ---------- login ---------- */
   const [who, setWhoS] = useState<Who | null>(readWho);
   const setWho = (w: Who | null) => {
@@ -1671,8 +1673,11 @@ export default function Physio() {
   };
 
   /* ========================= shared bits ========================= */
-  const openPat = (id: string) => { setPtId(id); setView("patient"); };
-  const openDocView = (id: string) => { setDocId(id); setView("doctor"); };
+  // Jahan se click kiya tha wahi yaad rakho — Back usi view par wapas le jayega
+  const openPat = (id: string) => { setBackTo(view); setPtId(id); setView("patient"); };
+  const openDocView = (id: string) => { setBackTo(view); setDocId(id); setView("doctor"); };
+  const goBack = (fallback: typeof view) =>
+    setView(backTo && backTo !== "patient" && backTo !== "doctor" ? backTo : fallback);
 
   // Har view ke upar ek jaisi date patti — Prev / Today / Tomorrow / Next + picker
   const DayNav = ({ d, set, label }: { d: string; set: (x: string) => void; label?: string }) => (
@@ -2559,14 +2564,24 @@ export default function Physio() {
                   <tr key={r.d.id}>
                     <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
                     <td>
-                      {r.pats.length ? r.pats.map(({ p: q, n }) => (
-                        <div key={q!.id} style={{ padding: "2px 0" }}>
-                          <button className="lnk" onClick={() => openPat(q!.id)}>{q!.name}</button>
-                          <span className="hint"> ({n})</span>
-                        </div>
-                      )) : <span className="hint">—</span>}
+                      {r.pats.length ? (
+                        <>
+                          <div className="hint" style={{ marginBottom: 4 }}>
+                            {r.pats.length} patient{r.pats.length === 1 ? "" : "s"}
+                          </div>
+                          {r.pats.map(({ p: q, n }) => (
+                            <div key={q!.id} style={{ padding: "2px 0" }}>
+                              <button className="lnk" onClick={() => openPat(q!.id)}>{q!.name}</button>
+                              <span className="hint"> — {n} session{n === 1 ? "" : "s"}</span>
+                            </div>
+                          ))}
+                        </>
+                      ) : <span className="hint">—</span>}
                     </td>
-                    <td className="unum"><b style={{ fontSize: 16 }}>{r.mine.length}</b></td>
+                    <td className="unum">
+                      <b style={{ fontSize: 16 }}>{r.mine.length}</b>
+                      <div className="hint">total</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2574,7 +2589,8 @@ export default function Physio() {
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          Only completed sessions are counted. Number next to a name = us patient ke kitne session.
+          Sirf completed session gine jaate hain. Har naam ke aage uske apne session hain, aur
+          &quot;Sessions&quot; unka jod hai — isliye agar 6 patient ek-ek baar aaye to total 6 hi aayega.
         </p>
       </>
     );
@@ -2753,7 +2769,7 @@ export default function Physio() {
           {isAdmin && (
             <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open their dashboard</button>
           )}
-          <button className="btn sm" onClick={() => setView("doctors")}>‹ All doctors</button>
+          <button className="btn sm" onClick={() => goBack("doctors")}>‹ Back</button>
         </div>
         <div className="stats">
           <Stat n={st.ongoing.length} l="Ongoing patients" />
@@ -2798,7 +2814,8 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">{p.name}</div>
-          <button className="btn sm" onClick={() => setView(effDoc ? (isOngoing(p) ? "myongoing" : "mytoday") : isOngoing(p) ? "ongoing" : "leads")}>‹ Back</button>
+          <button className="btn sm"
+            onClick={() => goBack(effDoc ? (isOngoing(p) ? "myongoing" : "mytoday") : isOngoing(p) ? "ongoing" : "leads")}>‹ Back</button>
         </div>
         <div className="tools">
           <span className={`pill ${srcCls(p.source)}`}>{p.source}</span>
