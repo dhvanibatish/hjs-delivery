@@ -212,6 +212,10 @@ const CSS = `
 .hjsp .btn.sm { padding:4px 10px; font-size:13px; border-radius:8px; }
 .hjsp .btn.ghost { background:transparent; }
 .hjsp .btn.danger { color:var(--red); border-color:var(--red); }
+/* Header ka "+ New lead" — baaki buttons se alag dikhe */
+.hjsp .btn.newlead { background:var(--green); border-color:var(--green); color:#fff; font-weight:800;
+  padding:9px 18px; box-shadow:0 2px 10px rgba(21,128,61,.35); margin-left:4px; }
+.hjsp .btn.newlead:hover { filter:brightness(1.08); }
 .hjsp .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:18px; }
 .hjsp .stat { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
 .hjsp .stat .n { font-size:28px; font-weight:800; letter-spacing:-.03em; }
@@ -1782,7 +1786,7 @@ export default function Physio() {
     setView(backTo && backTo !== "patient" && backTo !== "doctor" ? backTo : fallback);
 
   // Har view ke upar ek jaisi date patti — Prev / Today / Tomorrow / Next + picker
-  const DayNav = ({ d, set, label }: { d: string; set: (x: string) => void; label?: string }) => (
+  const DayNav = ({ d, set, label, extra }: { d: string; set: (x: string) => void; label?: string; extra?: React.ReactNode }) => (
     <div className="dayhead">
       <div className="d">
         {label ? `${label} · ` : ""}
@@ -1795,6 +1799,7 @@ export default function Physio() {
       <button className="btn sm" onClick={() => set(addDays(d, 1))}>Next ›</button>
       <input type="date" className="btn sm" style={{ width: "auto" }} value={d}
         onChange={(e) => set(e.target.value || T)} />
+      {extra}
     </div>
   );
 
@@ -3365,9 +3370,13 @@ export default function Physio() {
               </small></div>
               {SearchBox()}
               <nav>
-                {myTab("mytoday", "Today")}
+                {myTab("mytoday", "My today schedule")}
                 {myTab("myongoing", "My ongoing patients")}
               </nav>
+              {/* New lead sirf doctor ke today schedule par */}
+              {dv === "mytoday" && (
+                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+              )}
               {isAdmin
                 ? <button className="btn" onClick={() => { setAsDoc(""); setView("doctors"); }}>‹ Back to admin</button>
                 : <button className="btn" onClick={logout}>Log out</button>}
@@ -3390,8 +3399,10 @@ export default function Physio() {
                 {/* Reports admin aur physio admin dono ko */}
                 {(isAdmin || isManager) && tab("therapy", "Reports")}
               </nav>
-              {/* "+ New lead" abhi hata diya — wapas chahiye to yeh line khol do
-              <button className="btn pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button> */}
+              {/* New lead sirf Today's schedule aur Sessions par */}
+              {(view === "today" || view === "leads") && (
+                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+              )}
               <button className="btn" onClick={logout}>Log out</button>
             </>
           )}
