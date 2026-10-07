@@ -738,7 +738,31 @@ export default function Physio() {
   // Patient ki pichhli session jahan hui thi, wahi agli baar default
   const lastPlace = (pid: string): Place => (sessOf(pid).slice(-1)[0]?.place === "home" ? "home" : "clinic");
 
+  /* Ek patient ki ek hi date + time par do session na bane.
+     Supabase se taaza check (dusre tab / dusre doctor ne abhi book kiya ho to bhi pakda jaye),
+     aur "busy" se double-click wali dusri request bhi ruk jaati hai. */
+  const busySlots = React.useRef(new Set<string>());
+  const slotTaken = async (pid: string, date: string, time: string, exceptId?: string) => {
+    const { data } = await supabase.from("physio_sessions").select("*").eq("patient_id", pid).eq("session_date", date);
+    const rows = ((data as Session[]) || liveS.filter((x) => x.patient_id === pid && x.session_date === date));
+    return rows.find((x) => x.status !== "cancelled" && x.id !== exceptId && hhmm(x.session_time) === hhmm(time));
+  };
+  const takenMsg = (date: string, time: string) => `Already booked for ${nice(date)} at ${hhmm(time)} — pick another time`;
+  // Book karne se pehle: slot khali hai? Haan to lock lagao. Baad mein unlock zaroor karo.
+  const lockSlot = async (pid: string, date: string, time: string, exceptId?: string) => {
+    const k = `${pid}|${date}|${hhmm(time)}`;
+    if (busySlots.current.has(k)) return null;                 // wahi slot abhi book ho raha hai
+    busySlots.current.add(k);
+    if (await slotTaken(pid, date, time, exceptId)) { busySlots.current.delete(k); toast(takenMsg(date, time)); return null; }
+    return () => busySlots.current.delete(k);
+  };
+
   const addSession = async (pid: string, did: string | null, date: string, time: string, place: Place = "clinic") => {
+    const unlock = await lockSlot(pid, date, time);
+    if (!unlock) return false;
+    try { return await addSessionRaw(pid, did, date, time, place); } finally { unlock(); }
+  };
+  const addSessionRaw = async (pid: string, did: string | null, date: string, time: string, place: Place) => {
     const seq = sessOf(pid).length + 1;
     return run(
       () =>
@@ -965,6 +989,7 @@ export default function Physio() {
       if (!date || !time) return toast("Pick a date and time");
       if (same) return toast("Pick a different date or time");
       if (!why) return toast("Select a reason");
+      if (await slotTaken(s.patient_id, date, time, s.id)) return toast(takenMsg(date, time));
       // Purana note rakhte hain, uske aage naya — poora trail dikh jaye.
       const line = `${nice(s.session_date)} ${hhmm(s.session_time)} → ${nice(date)} ${time} · ${why}${note.trim() ? `: ${note.trim()}` : ""}`;
       const ok = await updSession(
@@ -1215,7 +1240,9 @@ export default function Physio() {
                   next_follow_up: null, sessions_planned: Number(packN) || null })
         .eq("id", pid);
       if (error) return toast("Could not start treatment");
-      await supabase.from("physio_sessions").insert({ patient_id: pid, doctor_id: did, session_date: date, session_time: time, seq: 1, place });
+      // Lead pehle se isi date + time par booked ho to wahi session chalegi — duplicate nahi
+      if (!(await slotTaken(pid, date, time)))
+        await supabase.from("physio_sessions").insert({ patient_id: pid, doctor_id: did, session_date: date, session_time: time, seq: 1, place });
       await load();
       toast(`Ongoing with ${doc(did)?.name} · ${routineLabel(routine)}`);
       close();
@@ -1316,9 +1343,11 @@ export default function Physio() {
     const [place, setPlace] = useState<Place>(lastPlace(p.id));
     const save = async () => {
       if (!date || !time) return toast("Pick a date and time");
-      await supabase.from("physio_sessions").insert({
+      const unlock = await lockSlot(p.id, date, time);
+      if (!unlock) return;
+      try { await supabase.from("physio_sessions").insert({
         patient_id: p.id, doctor_id: p.doctor_id, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
-      });
+      }); } finally { unlock(); }
       const skips = (p.skips || []).filter((s) => s.date !== date);
       const fu = note ? [...(p.follow_ups || []), { date: T, note: `Coming ${nice(date)} ${time} — ${note}` }].slice(-20) : p.follow_ups || [];
       await supabase.from("physio_patients").update({ skips, follow_ups: fu, usual_time: time }).eq("id", p.id);
