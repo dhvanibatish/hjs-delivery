@@ -336,6 +336,40 @@ const CSS = `
 .hjsp .lnk { font-weight:700; text-decoration:underline; text-decoration-color:var(--line); padding:0; }
 .hjsp .lnk:hover { color:var(--green); }
 .hjsp button:disabled { opacity:.4; cursor:not-allowed; }
+/* My report — pivot */
+.hjsp .rpivot table { width:100%; }
+.hjsp .rpivot th, .hjsp .rpivot td { padding:14px 16px; vertical-align:middle; }
+.hjsp .rpivot th.c, .hjsp .rpivot td.c { text-align:center; }
+.hjsp .rpivot td:first-child { font-weight:700; font-size:16px; white-space:nowrap; }
+.hjsp .rpivot .tot { background:var(--bg); }
+.hjsp .rdot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:10px; vertical-align:middle; }
+.hjsp .rdot.g { background:var(--green); } .hjsp .rdot.r { background:var(--red); } .hjsp .rdot.b { background:var(--blue); }
+.hjsp .rdot.a { background:var(--amber); } .hjsp .rdot.p { background:var(--plum); }
+.hjsp .cnum.big { font-size:20px; font-weight:800; min-width:52px; padding:6px 12px; font-variant-numeric:tabular-nums; }
+.hjsp .cnum.big.zero { display:inline-block; color:var(--muted); font-weight:500; opacity:.5; }
+.hjsp .cnum.big.r { color:var(--red); } .hjsp .cnum.big.a { color:var(--amber); }
+.hjsp .cnum.big.on { color:#fff; }
+/* My report — bade card */
+.hjsp .rcards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin:14px 0 14px; }
+.hjsp .rcard { display:flex; flex-direction:column; gap:6px; padding:20px 20px 16px; border-radius:16px;
+  border:1px solid var(--line); background:var(--panel); min-height:150px; text-align:left;
+  transition:transform .12s ease, box-shadow .12s ease; }
+.hjsp .rcard:not(:disabled):hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(22,48,43,.08); }
+.hjsp .rcard:disabled { opacity:1; cursor:default; }
+.hjsp .rcard .rl { font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+.hjsp .rcard .rn { font-size:48px; line-height:1; font-weight:800; font-variant-numeric:tabular-nums; margin-top:auto; }
+.hjsp .rcard .rs { font-size:13px; color:var(--muted); }
+.hjsp .rcard.g { background:var(--green-soft); border-color:transparent; } .hjsp .rcard.g .rn { color:var(--green); }
+.hjsp .rcard.r { background:var(--red-soft); border-color:transparent; }   .hjsp .rcard.r .rn { color:var(--red); }
+.hjsp .rcard.b { background:var(--blue-soft); border-color:transparent; }  .hjsp .rcard.b .rn { color:var(--blue); }
+.hjsp .rcard.a { background:var(--amber-soft); border-color:transparent; } .hjsp .rcard.a .rn { color:var(--amber); }
+.hjsp .rcard.p { background:var(--plum-soft); border-color:transparent; }  .hjsp .rcard.p .rn { color:var(--plum); }
+.hjsp .rcard.on { border-color:currentColor; box-shadow:0 0 0 2px var(--ink) inset; }
+.hjsp .rcard:disabled .rn { opacity:.45; }
+.hjsp .rlist { padding:18px 20px; }
+.hjsp .rlist h3 { display:flex; align-items:baseline; gap:10px; font-size:18px; margin-bottom:10px; }
+.hjsp .rlist h3 em { font-style:normal; font-size:13px; color:var(--muted); font-weight:600; }
+.hjsp .rgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:4px 24px; }
 .hjsp .cnum { padding:4px 10px; border-radius:8px; min-width:36px; }
 .hjsp .cnum:hover { background:var(--green-soft); color:var(--green); }
 .hjsp .cnum.on { background:var(--green); color:#fff; }
@@ -479,6 +513,7 @@ export default function Physio() {
   const [thFrom, setThFrom] = useState(todayS());   // Reports khulte hi sirf aaj ka
   const [thTo, setThTo] = useState(todayS());
   const [repTab, setRepTab] = useState<"therapy" | "doctor" | "leads">("therapy");
+  const [repSel, setRepSel] = useState("");   // Reports — kaunsa number khula ("doctorId|column")
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
   // Day view: kitne din dikhane hain aur kis patient ka
@@ -1372,6 +1407,66 @@ export default function Physio() {
         <div className="end">
           <button className="btn" onClick={close}>Close</button>
           <button className="btn pri" onClick={save}>Book this slot</button>
+        </div>
+      </Modal>
+    );
+  };
+
+  /* Doctor chhod gaya — Supabase se delete nahi, sirf active = false (purana data/report bacha rahe).
+     Uske chal rahe patient aur aage ki sessions kisi aur doctor ko dene padte hain. */
+  const RemoveDocDlg = ({ d }: { d: Doctor }) => {
+    const pts = patients.filter((p) => p.doctor_id === d.id && (p.status === "ongoing" || p.status === "new"));
+    const fut = liveS.filter((x) => x.doctor_id === d.id && x.status === "scheduled" && x.session_date >= T);
+    const others = activeDocs.filter((x) => x.id !== d.id);
+    const [to, setTo] = useState("");
+    const [sure, setSure] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const need = pts.length + fut.length > 0;
+    const save = async () => {
+      if (need && !to) return toast("Pick the doctor who takes over their patients");
+      if (!sure) return toast("Tick the box to confirm");
+      setBusy(true);
+      if (need) {
+        if (pts.length) await supabase.from("physio_patients").update({ doctor_id: to }).in("id", pts.map((p) => p.id));
+        if (fut.length) await supabase.from("physio_sessions").update({ doctor_id: to }).in("id", fut.map((x) => x.id));
+      }
+      const { error } = await supabase.from("physio_doctors").update({ active: false }).eq("id", d.id);
+      setBusy(false);
+      if (error) return toast("Could not remove — try again");
+      await load();
+      toast(`${d.name} removed${need ? ` · patients moved to ${doc(to)?.name}` : ""}`);
+      close();
+      setView("doctors");
+    };
+    return (
+      <Modal title={`Remove doctor · ${d.name}`}>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          Use this when the doctor has left. They disappear from the desk, doctor lists, reports and login.
+          Nothing is deleted — their past sessions stay saved in the patients&apos; history.
+        </p>
+        {need ? (
+          <>
+            <p style={{ marginBottom: 8 }}>
+              <b>{pts.length}</b> patient{pts.length === 1 ? "" : "s"} (ongoing or new) and <b>{fut.length}</b> upcoming
+              session{fut.length === 1 ? "" : "s"} are still with {d.name}. Move them to:
+            </p>
+            <Field label="New doctor">
+              <select value={to} onChange={(e) => setTo(e.target.value)}>
+                <option value="">— Select doctor —</option>
+                {others.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </Field>
+          </>
+        ) : <p style={{ marginBottom: 8 }}>No ongoing patients or upcoming sessions with {d.name}.</p>}
+        <label style={{ display: "flex", gap: 8, alignItems: "center", margin: "10px 0" }}>
+          <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+          Yes, {d.name} has left — remove from the desk
+        </label>
+        <div className="end">
+          <button className="btn" onClick={close}>Cancel</button>
+          <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }} disabled={busy} onClick={save}>
+            Remove doctor
+          </button>
         </div>
       </Modal>
     );
@@ -2676,39 +2771,57 @@ export default function Physio() {
 
   /* Roster — kaun kis din chhutti par, aur uske session kisko jayenge */
   /* Doctor wise — kis doctor ne kitne session kiye aur kin patients ke */
+  /* Report tables mein naam nahi — sirf number. Number click karo to usi row ke neeche list khulti hai. */
+  const repLine = (q: Patient, extra: string) => (
+    <div key={q.id} style={{ padding: "3px 0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
+      <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
+      <span className="hint">· {extra}</span>
+    </div>
+  );
+  const repSess = (x: Session) => {
+    const q = pat(x.patient_id);
+    return q ? <React.Fragment key={x.id}>{repLine(q, `${nice(x.session_date)} ${hhmm(x.session_time)}`)}</React.Fragment> : null;
+  };
+  // n = number, k = "doctorId|column"; red = laal number (pending / drop-out)
+  const RepNum = ({ n, k, red }: { n: number; k: string; red?: boolean }) => {
+    if (!n) return <span className="cnum hint" style={{ display: "inline-block" }}>0</span>;
+    const on = repSel === k;
+    return (
+      <button className={`cnum${on ? " on" : ""}`} style={red && !on ? { color: "var(--red)" } : undefined}
+        onClick={() => setRepSel(on ? "" : k)}><b>{n}</b></button>
+    );
+  };
+
+  /* Doctor wise — kis doctor ne kitne session kiye */
   const DoctorReport = (from: string, to: string) => {
     const inRange = liveS.filter((x) => x.session_date >= from && x.session_date <= to);
     const done = inRange.filter((x) => x.status === "completed");
+    const sortS = (a: Session, b: Session) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time);
 
     const rows = activeDocs
       .map((d) => {
-        const mine = done.filter((x) => x.doctor_id === d.id);
-        // patient wise jod — naam ke saath kitni baar
+        const mine = done.filter((x) => x.doctor_id === d.id).sort(sortS);
         const byPat: Record<string, number> = {};
         mine.forEach((x) => { byPat[x.patient_id] = (byPat[x.patient_id] || 0) + 1; });
         const pats = Object.entries(byPat)
           .map(([id, n]) => ({ p: pat(id), n }))
           .filter((r) => !!r.p)
           .sort((a, b) => b.n - a.n || (a.p!.name || "").localeCompare(b.p!.name || ""));
-        const open = inRange.filter((x) => x.doctor_id === d.id && x.status === "scheduled");
-        return {
-          d, mine, pats,
-          pend: open.length,
-          late: open.filter(isLate).length,            // time nikal gaya, complete nahi hua
-        };
+        const late = inRange.filter((x) => x.doctor_id === d.id && isLate(x)).sort(sortS);
+        return { d, mine, pats, late };
       })
-      .filter((r) => r.mine.length || r.late)
+      .filter((r) => r.mine.length || r.late.length)
       .sort((a, b) => b.mine.length - a.mine.length || a.d.name.localeCompare(b.d.name));
 
     const totalDone = rows.reduce((n, r) => n + r.mine.length, 0);
-    const totalPats = new Set(done.map((x) => x.patient_id)).size;
+    const totalPats = new Set(done.filter((x) => activeDocs.some((d) => d.id === x.doctor_id)).map((x) => x.patient_id)).size;
 
     return (
       <>
         <div className="stats">
           <Stat n={totalDone} l="Sessions done" />
           <Stat n={totalPats} l="Patients seen" />
-          <Stat n={inRange.filter(isLate).length} l="Pending (time passed)" />
+          <Stat n={rows.reduce((n, r) => n + r.late.length, 0)} l="Pending (time passed)" />
         </div>
         {!rows.length ? (
           <div className="stat"><span className="hint">Nothing in this range.</span></div>
@@ -2716,73 +2829,65 @@ export default function Physio() {
           <div className="tbl">
             <table>
               <thead>
-                <tr><th>Doctor</th><th>Patients</th><th>Done</th><th>Pending</th></tr>
+                <tr><th>Doctor</th><th>Patients seen</th><th>Sessions done</th><th>Pending</th></tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.d.id}>
-                    <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
-                    <td>
-                      {r.pats.length ? (
-                        <>
-                          <div className="hint" style={{ marginBottom: 4 }}>
-                            {r.pats.length} patient{r.pats.length === 1 ? "" : "s"}
-                          </div>
-                          {r.pats.map(({ p: q, n }) => (
-                            <div key={q!.id} style={{ padding: "2px 0" }}>
-                              <button className="lnk" onClick={() => openPat(q!.id)}>{q!.name}</button>
-                              <span className="hint"> — {n} session{n === 1 ? "" : "s"}</span>
-                            </div>
-                          ))}
-                        </>
-                      ) : <span className="hint">—</span>}
-                    </td>
-                    <td className="unum">
-                      <b style={{ fontSize: 16 }}>{r.mine.length}</b>
-                    </td>
-                    <td className="unum">
-                      <b style={{ fontSize: 16, color: r.late ? "var(--red)" : undefined }}>{r.late}</b>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((r) => {
+                  const [sd, col] = repSel.split("|");
+                  return (
+                    <React.Fragment key={r.d.id}>
+                      <tr>
+                        <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
+                        <td><RepNum n={r.pats.length} k={`${r.d.id}|pats`} /></td>
+                        <td><RepNum n={r.mine.length} k={`${r.d.id}|done`} /></td>
+                        <td><RepNum n={r.late.length} k={`${r.d.id}|late`} red /></td>
+                      </tr>
+                      {sd === r.d.id && (
+                        <tr><td colSpan={4} style={{ background: "var(--bg)" }}>
+                          {col === "pats"
+                            ? r.pats.map(({ p: q, n }) => repLine(q!, `${n} session${n === 1 ? "" : "s"}`))
+                            : (col === "done" ? r.mine : r.late).map(repSess)}
+                        </td></tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          Sirf completed session gine jaate hain. Har naam ke aage uske apne session hain, aur
-          &quot;Done&quot; unka jod hai. Pending = jiska time nikal gaya par complete nahi hua.
+          Number par click karo to uski list khulti hai. Pending = jiska time nikal gaya par complete nahi hua.
         </p>
       </>
     );
   };
 
-  /* Leads & drop-outs — har doctor ke paas kitni nayi leads aayi aur kitno ka treatment band hua */
+  /* Patients & drop-outs — har doctor ke paas kitne naye patient aaye aur kitno ka treatment band hua */
   const LeadsReport = (from: string, to: string) => {
     const inR = (d: string) => d >= from && d <= to;
     const newL = patients.filter((p) => inR(createdDay(p)));
     const drops = patients.filter((p) => p.status === "done" && inR(endInfo(p).date));
-    const docRows = [...activeDocs, ...doctors.filter((d) => d.active === false)]
-      .map((d) => {
-        const mineNew = newL.filter((p) => p.doctor_id === d.id);
-        return {
-          d,
-          mineNew,
-          drops: drops.filter((p) => p.doctor_id === d.id)
-            .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date)),
-          active: patients.filter((p) => p.status === "ongoing" && p.doctor_id === d.id).length,
-        };
-      })
-      .filter((r) => r.mineNew.length || r.drops.length || r.active)
+    // Sirf jo doctor abhi kaam kar rahe hain — chhod chuke doctor yahan nahi dikhte
+    const docRows = activeDocs
+      .map((d) => ({
+        d,
+        mineNew: newL.filter((p) => p.doctor_id === d.id),
+        drops: drops.filter((p) => p.doctor_id === d.id)
+          .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date)),
+        on: patients.filter((p) => p.status === "ongoing" && p.doctor_id === d.id)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .filter((r) => r.mineNew.length || r.drops.length || r.on.length)
       .sort((a, b) => b.mineNew.length - a.mineNew.length || a.d.name.localeCompare(b.d.name));
     const noDoc = newL.filter((p) => !p.doctor_id);
 
     return (
       <>
         <div className="stats">
-          <Stat n={newL.length} l="New patients" />
+          <Stat n={docRows.reduce((n, r) => n + r.mineNew.length, 0) + noDoc.length} l="New patients" />
           <Stat n={noDoc.length} l="Patients with no doctor" />
-          <Stat n={drops.length} l="Drop-outs (treatment ended)" />
+          <Stat n={docRows.reduce((n, r) => n + r.drops.length, 0)} l="Drop-outs (treatment ended)" />
         </div>
         {!docRows.length ? (
           <div className="stat"><span className="hint">Nothing in this range.</span></div>
@@ -2793,40 +2898,36 @@ export default function Physio() {
                 <tr><th>Doctor</th><th>New patients</th><th>Drop-outs</th><th>Ongoing now</th></tr>
               </thead>
               <tbody>
-                {docRows.map((r) => (
-                  <tr key={r.d.id}>
-                    <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
-                    <td>
-                      <b style={{ fontSize: 16 }}>{r.mineNew.length}</b>
-                      {r.mineNew.map((q) => (
-                        <div key={q.id} style={{ padding: "2px 0" }}>
-                          <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
-                          <span className="hint"> · {nice(createdDay(q))}</span>
-                        </div>
-                      ))}
-                    </td>
-                    <td>
-                      <b style={{ fontSize: 16, color: r.drops.length ? "var(--red)" : undefined }}>{r.drops.length}</b>
-                      {r.drops.map((q) => {
-                        const e = endInfo(q);
-                        return (
-                          <div key={q.id} style={{ padding: "2px 0" }}>
-                            <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
-                            <span className="hint"> · {nice(e.date)} · {e.reason} · {doneText(q, progress(q).done)}</span>
-                          </div>
-                        );
-                      })}
-                    </td>
-                    <td className="unum"><b style={{ fontSize: 16 }}>{r.active}</b></td>
-                  </tr>
-                ))}
+                {docRows.map((r) => {
+                  const [sd, col] = repSel.split("|");
+                  return (
+                    <React.Fragment key={r.d.id}>
+                      <tr>
+                        <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
+                        <td><RepNum n={r.mineNew.length} k={`${r.d.id}|newp`} /></td>
+                        <td><RepNum n={r.drops.length} k={`${r.d.id}|drops`} red /></td>
+                        <td><RepNum n={r.on.length} k={`${r.d.id}|on`} /></td>
+                      </tr>
+                      {sd === r.d.id && (
+                        <tr><td colSpan={4} style={{ background: "var(--bg)" }}>
+                          {col === "newp" ? r.mineNew.map((q) => repLine(q, nice(createdDay(q))))
+                            : col === "drops" ? r.drops.map((q) => {
+                                const e = endInfo(q);
+                                return repLine(q, `${nice(e.date)} · ${e.reason} · ${doneText(q, progress(q).done)}`);
+                              })
+                            : r.on.map((q) => repLine(q, `${routineLabel(q.routine)} · ${doneText(q, progress(q).done)}`))}
+                        </td></tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          New patients = jo patient is range mein aaya, jis doctor par abhi assigned hai. Drop-out = jiska treatment
-          (End) is range mein band hua, reason aur kitne session hue saath mein. Ongoing now = aaj ki tareekh tak chal rahe patient.
+          Number par click karo to patient dikhenge. New patients = jo is range mein aaya, jis doctor par abhi assigned hai.
+          Drop-out = jiska treatment (End) is range mein band hua. Ongoing now = aaj chal rahe patient.
         </p>
       </>
     );
@@ -3007,6 +3108,9 @@ export default function Physio() {
           <div className="d">{d.name}</div>
           {isAdmin && (
             <button className="btn sm pri" onClick={() => { setAsDoc(d.id); setDay(T); setView("mytoday"); }}>Open their dashboard</button>
+          )}
+          {(isAdmin || isManager) && (
+            <button className="btn sm ghost danger" onClick={() => setDlg(<RemoveDocDlg d={d} />)}>Remove doctor</button>
           )}
           <button className="btn sm" onClick={() => goBack("doctors")}>‹ Back</button>
         </div>
@@ -3329,10 +3433,30 @@ export default function Physio() {
     );
     // Rows = kya gina (session done, pending, …); date upar se chuni jaati hai
     const sortS = (a: Session, b: Session) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time);
-    const MY_ROWS: [string, string, boolean][] = [
-      ["done", "Sessions done", false], ["late", "Sessions pending", true],
-      ["newp", "New patients", false], ["drops", "Drop-outs (treatment ended)", true], ["on", "Ongoing now", false],
+    // [key, heading, (unused), rang, khaali ho to kya likhe]
+    const MY_ROWS: [string, string, boolean, string, string][] = [
+      ["done", "Sessions done", false, "g", "No sessions yet"],
+      ["late", "Sessions pending", true, "r", "Nothing pending"],
+      ["newp", "New patients", false, "b", "No new patients"],
+      ["drops", "Drop-outs", true, "a", "No drop-outs"],
+      ["on", "Ongoing now", false, "p", "No ongoing patients"],
     ];
+    // Mahine ke hafte: 1–7, 8–14, 15–21, 22–28, 29–aakhri
+    const mon = parseYmd(from).toLocaleDateString("en-IN", { month: "short" });
+    const lastDay = Number(to.slice(8, 10));
+    const weeks = [1, 8, 15, 22, 29].filter((d) => d <= lastDay).map((d, i) => {
+      const e = Math.min(d + 6, lastDay);
+      const f = `${from.slice(0, 8)}${String(d).padStart(2, "0")}`;
+      const t2 = `${from.slice(0, 8)}${String(e).padStart(2, "0")}`;
+      return { key: `w${i + 1}`, label: `${d}–${e} ${mon}`, from: f, to: t2 };
+    });
+    // kis cheez ki kaunsi tareekh gini jaaye
+    const dateOf = (k: string, x: Session | Patient) =>
+      k === "done" || k === "late" ? (x as Session).session_date
+        : k === "newp" ? createdDay(x as Patient)
+        : k === "drops" ? endInfo(x as Patient).date : T;
+    const cell = (k: string, f: string, t2: string) =>
+      k === "on" ? rowData.on : rowData[k].filter((x) => { const d = dateOf(k, x); return d >= f && d <= t2; });
     const rowData: Record<string, (Session | Patient)[]> = {
       done: done.slice().sort(sortS),
       late: late.slice().sort(sortS),
@@ -3350,50 +3474,65 @@ export default function Physio() {
           <button className="btn sm" disabled={thisMonth} onClick={() => { setMyMonth(addDays(to, 1)); setMyPvRow(""); }}>Next month ›</button>
         </div>
 
-        <p className="hint" style={{ marginBottom: 8 }}>Change the month above. Click any number to see its list, click again to close.</p>
-        <div className="tbl" style={{ maxWidth: 640 }}>
+        {/* Pivot — rows: kya gina, columns: mahine ke hafte + total. Har number click karo to neeche list. */}
+        <div className="tbl rpivot">
           <table>
             <thead>
-              <tr><th>What</th><th>Count</th></tr>
+              <tr>
+                <th>{monthName}</th>
+                {weeks.map((w) => <th key={w.key} className="c">{w.label}</th>)}
+                <th className="c tot">Total</th>
+              </tr>
             </thead>
             <tbody>
-              {MY_ROWS.map(([k, label, red]) => {
-                const list = rowData[k];
-                const open = myPvRow === k;
-                return (
-                  <React.Fragment key={k}>
-                    <tr>
-                      <td><b>{label}</b></td>
-                      <td>
-                        {list.length ? (
-                          <button className={`cnum${open ? " on" : ""}`}
-                            style={red && !open ? { color: "var(--red)" } : undefined}
-                            onClick={() => setMyPvRow(open ? "" : k)}>
-                            <b>{list.length}</b>
-                          </button>
-                        ) : <span className="cnum hint" style={{ display: "inline-block" }}>0</span>}
+              {MY_ROWS.map(([k, label, , tone]) => (
+                <tr key={k}>
+                  <td><span className={`rdot ${tone}`} />{label}</td>
+                  {[...weeks, { key: "all", label: "Total", from, to }].map((w) => {
+                    const tot = w.key === "all";
+                    if (k === "on" && !tot) return <td key={w.key} className="c"><span className="hint">—</span></td>;
+                    const n = cell(k, w.from, w.to).length;
+                    const id = `${k}|${w.key}`;
+                    const open = myPvRow === id;
+                    return (
+                      <td key={w.key} className={`c${tot ? " tot" : ""}`}>
+                        {n ? (
+                          <button className={`cnum big ${tone}${open ? " on" : ""}`}
+                            onClick={() => setMyPvRow(open ? "" : id)}>{n}</button>
+                        ) : <span className="cnum big zero">0</span>}
                       </td>
-                    </tr>
-                    {open && (
-                      <tr><td colSpan={2} style={{ background: "var(--bg)" }}>
-                        {k === "done" || k === "late"
-                          ? (list as Session[]).map(sRow)
-                          : k === "newp"
-                          ? (list as Patient[]).map((q) => pRow(q, nice(createdDay(q))))
-                          : k === "drops"
-                          ? (list as Patient[]).map((q) => {
-                              const e = endInfo(q);
-                              return pRow(q, `${nice(e.date)} · ${e.reason} · ${doneText(q, progress(q).done)}`);
-                            })
-                          : (list as Patient[]).map((q) => pRow(q, `${routineLabel(q.routine)} · ${doneText(q, progress(q).done)}`))}
-                      </td></tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+                    );
+                  })}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+        <p className="hint" style={{ margin: "8px 0 12px" }}>Click any number to see its list. Click it again to close.</p>
+        {myPvRow && (() => {
+          const [k, wk] = myPvRow.split("|");
+          const w = wk === "all" ? { label: monthName, from, to } : weeks.find((x) => x.key === wk)!;
+          const list = cell(k, w.from, w.to);
+          if (!list.length) return null;
+          const label = MY_ROWS.find((r) => r[0] === k)?.[1] || "";
+          return (
+            <div className="panel rlist">
+              <h3>{label} · {w.label}<em>{list.length}</em></h3>
+              <div className="rgrid">
+                {k === "done" || k === "late"
+                  ? (list as Session[]).map(sRow)
+                  : k === "newp"
+                  ? (list as Patient[]).map((q) => pRow(q, `Joined ${nice(createdDay(q))}`))
+                  : k === "drops"
+                  ? (list as Patient[]).map((q) => {
+                      const e = endInfo(q);
+                      return pRow(q, `${nice(e.date)} · ${e.reason} · ${doneText(q, progress(q).done)}`);
+                    })
+                  : (list as Patient[]).map((q) => pRow(q, `${routineLabel(q.routine)} · ${doneText(q, progress(q).done)}`))}
+              </div>
+            </div>
+          );
+        })()}
       </>
     );
   };
