@@ -1588,7 +1588,11 @@ export default function Physio() {
             <Field label="Notes (optional)">
               <input placeholder="Left knee, 15 min…" value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
-            <PackPick v={packN} on={setPackN} label="How many sessions are they taking?" />
+            {/* Ongoing patient ka session count "Start ongoing" ke waqt hi le liya jaata hai — yahan dobara nahi.
+                Badalna ho to patient edit mein "Sessions in the plan" se. */}
+            {!(p && isOngoing(p)) && (
+              <PackPick v={packN} on={setPackN} label="How many sessions are they taking?" />
+            )}
           </>
         )}
         <div className="end">
@@ -1906,13 +1910,15 @@ export default function Physio() {
     const s = q.trim().toLowerCase();
     const hit = (p: Patient) => `${p.name} ${p.phone || ""} ${p.ailment || ""}`.toLowerCase().includes(s);
 
-    // Session complete hone ke 24 ghante baad lead board se hat jaati hai — search se wapas mil jaati hai
+    // Complete hui lead sirf usi din ke board par dikhe jis din ki session thi.
+    // Kal ki pending aaj complete karo to wo kal ke board par "Completed" jayegi, aaj ke par nahi
+    // (pehle completed_at = abhi ka time dekh ke 24 ghante aaj ke board par dikhti thi).
+    // Search se poori history milti rehti hai.
     const lastDone = (p: Patient) => sessOf(p.id).filter((x) => x.status === "completed").slice(-1)[0];
     const freshDone = (p: Patient) => {
-      const c = lastDone(p);
-      if (!c) return true;
-      const when = c.completed_at ? new Date(c.completed_at).getTime() : parseYmd(c.session_date).getTime() + 864e5;
-      return Date.now() - when < 864e5;
+      const ss = sessOf(p.id);
+      if (!lastDone(p)) return true;                                   // abhi tak koi session complete nahi
+      return ss.some((x) => x.session_date === D || x.status === "scheduled"); // us din ki session ya koi booked baaki
     };
 
     const leads = patients.filter(isNew);
@@ -1926,10 +1932,22 @@ export default function Physio() {
       const ss = sessOf(p.id);
       const on = isOngoing(p);
       const ts = ss.find((x) => x.session_date === D);
-      const done = on ? (ts && ts.status === "completed" ? ts : undefined) : ss.find((x) => x.status === "completed");
-      const booked = on
-        ? ts && ts.status === "scheduled" ? ts : undefined
-        : ss.filter((x) => x.status === "scheduled")[0];
+      if (on) {
+        const done = ts && ts.status === "completed" ? ts : undefined;
+        const booked = ts && ts.status === "scheduled" ? ts : undefined;
+        return { on, done, booked, slot: booked || done };
+      }
+      // Lead: jo din dekh rahe ho usi din ki session se tick lagta hai.
+      // Kal ki session late complete karo to aaj wali "Completed" nahi ho jaati.
+      const dayS = ss.filter((x) => x.session_date === D);
+      if (dayS.length) {
+        const booked = dayS.find((x) => x.status === "scheduled");
+        const done = booked ? undefined : dayS.find((x) => x.status === "completed");
+        return { on, done, booked, slot: booked || done };
+      }
+      // Us din koi session nahi — pehli booked (pending ya aage wali), warna aakhri complete (search ke liye)
+      const booked = ss.find((x) => x.status === "scheduled");
+      const done = booked ? undefined : lastDone(p);
       return { on, done, booked, slot: booked || done };
     };
     const noDoc = rows.filter((p) => !p.doctor_id).length;
