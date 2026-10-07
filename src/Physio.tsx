@@ -335,6 +335,7 @@ const CSS = `
 .hjsp .drow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:5px 0; }
 .hjsp .lnk { font-weight:700; text-decoration:underline; text-decoration-color:var(--line); padding:0; }
 .hjsp .lnk:hover { color:var(--green); }
+.hjsp button:disabled { opacity:.4; cursor:not-allowed; }
 .hjsp .cnum { padding:4px 10px; border-radius:8px; min-width:36px; }
 .hjsp .cnum:hover { background:var(--green-soft); color:var(--green); }
 .hjsp .cnum.on { background:var(--green); color:#fff; }
@@ -427,7 +428,7 @@ export default function Physio() {
   const [msg, setMsg] = useState("");
 
   const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "therapy" | "patient" | "doctor"
-    | "mytoday" | "myongoing">(() => (readWho()?.role === "doctor" ? "mytoday" : "today"));
+    | "mytoday" | "myongoing" | "myreport">(() => (readWho()?.role === "doctor" ? "mytoday" : "today"));
 
   const [backTo, setBackTo] = useState<typeof view | "">("");   // patient/doctor page se Back kahan jaye
 
@@ -473,9 +474,11 @@ export default function Physio() {
   const [oDay, setODay] = useState(todayS());   // Ongoing patients kis din ka
   const [bDay, setBDay] = useState(todayS());   // Day view kis din ka
   // Therapy report: kaunsi therapy kitni chali
+  const [myMonth, setMyMonth] = useState(todayS());   // doctor ki apni report — is mahine ki koi bhi tareekh = woh mahina
+  const [myPvRow, setMyPvRow] = useState("");   // My report — kaunsi row ki list khuli
   const [thFrom, setThFrom] = useState(todayS());   // Reports khulte hi sirf aaj ka
   const [thTo, setThTo] = useState(todayS());
-  const [repTab, setRepTab] = useState<"therapy" | "doctor">("therapy");
+  const [repTab, setRepTab] = useState<"therapy" | "doctor" | "leads">("therapy");
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
   // Day view: kitne din dikhane hain aur kis patient ka
@@ -907,12 +910,12 @@ export default function Physio() {
             notes: f.notes.trim(),
             status: "new",
           }),
-        "Lead saved"
+        "Patient saved"
       );
       if (okDone) close();
     };
     return (
-      <Modal title="New lead">
+      <Modal title="New patient">
         <div className="row2">
           <Field label="Name"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
           <Field label="Mobile"><input inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
@@ -925,7 +928,7 @@ export default function Physio() {
         <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="end">
           <button className="btn" onClick={close}>Cancel</button>
-          <button className="btn pri" onClick={save}>Save lead</button>
+          <button className="btn pri" onClick={save}>Save patient</button>
         </div>
       </Modal>
     );
@@ -1038,26 +1041,26 @@ export default function Physio() {
       const ok = await updPatient(
         p.id,
         { status: "cancelled", cancel_reason: why, cancel_note: note.trim(), cancelled_at: new Date().toISOString() } as Partial<Patient>,
-        `Lead cancelled · ${why}`
+        `Patient cancelled · ${why}`
       );
       if (ok) close();
     };
     return (
-      <Modal title={`Cancel lead · ${p.name}`}>
+      <Modal title={`Cancel patient · ${p.name}`}>
         <p className="hint" style={{ marginBottom: 10 }}>
-          Booked sessions will be cancelled and the lead leaves the list. A reason is required.
+          Booked sessions will be cancelled and the patient leaves the list. A reason is required.
         </p>
         <Field label="Reason *">
           <select value={why} onChange={(e) => setWhy(e.target.value)}>
             <option value="">— Select a reason —</option>
             {["Price too high", "Went to another centre", "Distance / travel", "Not interested now",
-              "Not reachable", "Wrong or duplicate lead", "Health / personal reason", "Other"].map((r) => <option key={r}>{r}</option>)}
+              "Not reachable", "Wrong or duplicate patient", "Health / personal reason", "Other"].map((r) => <option key={r}>{r}</option>)}
           </select>
         </Field>
         <Field label="Remarks *"><textarea rows={2} placeholder="What exactly did they say?" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         <div className="end">
           <button className="btn" onClick={close}>Close</button>
-          <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }} onClick={save}>Cancel this lead</button>
+          <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }} onClick={save}>Cancel this patient</button>
         </div>
       </Modal>
     );
@@ -1183,7 +1186,7 @@ export default function Physio() {
         <p className="hint" style={{ marginBottom: 10 }}>
           Yeh patient aur iske <b>{mine.length}</b> session hamesha ke liye hat jayenge — wapas nahi aayenge,
           aur reports me bhi nahi ginne jayenge. Sirf galti se bani ya duplicate entry ke liye use karo.
-          Treatment band karna ho to &quot;Cancel lead&quot; ya &quot;End treatment&quot; behtar hai.
+          Treatment band karna ho to &quot;Cancel patient&quot; ya &quot;End treatment&quot; behtar hai.
         </p>
         <label className="drow" style={{ cursor: "pointer" }}>
           <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
@@ -1225,7 +1228,7 @@ export default function Physio() {
       const routine: Routine = rt === "daily" ? { type: "daily" } : rt === "alt" ? { type: "alt" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: 2 };
       let pid = pick?.id;
       if (!pid) {
-        if (!f.name.trim()) return toast("Enter a name or pick a lead");
+        if (!f.name.trim()) return toast("Enter a name or pick a patient");
         const { data, error } = await supabase
           .from("physio_patients")
           .insert({ name: f.name.trim(), phone: f.phone.replace(/\D/g, "").slice(-10), source: f.source, status: "new" })
@@ -1253,7 +1256,7 @@ export default function Physio() {
       <Modal title={fresh ? "Add ongoing patient" : `Move to ongoing · ${p?.name}`}>
         {fresh && (
           <>
-            <Field label="Search lead">
+            <Field label="Search patient">
               <input placeholder="Name or mobile…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </Field>
             {pick ? (
@@ -1998,12 +2001,12 @@ export default function Physio() {
       <>
         <DayNav d={D} set={setLDay} label="Sessions" />
         <div className="stats">
-          <Stat n={leads.filter((p) => createdDay(p) === D).length} l={`New leads ${word}`} />
+          <Stat n={leads.filter((p) => createdDay(p) === D).length} l={`New patients ${word}`} />
           <Stat n={todayOn.length} l={`Ongoing coming ${word}`} />
           <Stat n={noDoc} l="Doctor not assigned" />
           <Stat n={noTime} l="Time not scheduled" />
           <Stat n={notDone} l="Session not completed" />
-          <Stat n={cx.length} l="Cancelled leads" on={showCx} onClick={() => setShowCx(!showCx)} />
+          <Stat n={cx.length} l="Cancelled patients" on={showCx} onClick={() => setShowCx(!showCx)} />
         </div>
         <div className="tools">
           <input placeholder="Search any patient — name, mobile, ailment" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
@@ -2022,9 +2025,9 @@ export default function Physio() {
                 <span className="hint">{p.phone}</span>
                 <span className="tag fu">{p.cancel_reason}</span>
                 <span className="hint">{p.cancel_note}</span>
-                <button className="btn sm" onClick={() => updPatient(p.id, { status: "new" }, "Lead reopened")}>Reopen</button>
+                <button className="btn sm" onClick={() => updPatient(p.id, { status: "new" }, "Patient reopened")}>Reopen</button>
               </div>
-            )) : <span className="hint">No cancelled leads</span>}
+            )) : <span className="hint">No cancelled patients</span>}
           </div>
         )}
         {!rows.length ? (
@@ -2223,7 +2226,7 @@ export default function Physio() {
                     <td><b style={{ fontSize: 16 }}>{hhmm(x.session_time)}</b></td>
                     <td>{d ? <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button> : "—"}</td>
                     <td>{isHome(x) ? <span className="pill home">Home</span> : <span className="hint">Clinic</span>}</td>
-                    <td>{p ? (isOngoing(p) ? doneText(p, progress(p).done) : <span className="pill bigin">New lead</span>) : "—"}</td>
+                    <td>{p ? (isOngoing(p) ? doneText(p, progress(p).done) : <span className="pill bigin">New patient</span>) : "—"}</td>
                     <td>
                       <span className={`pill ${x.status === "scheduled" && !isLate(x) ? "" : x.status}`}>
                         {x.status === "completed" ? "done" : isLate(x) ? "pending" : "upcoming"}
@@ -2429,7 +2432,7 @@ export default function Physio() {
         <DayNav d={D} set={setBDay} />
         <div className="stats">
           <Stat n={allOn.length} l="Ongoing patients" on={dSel === "*" && dFilt === "ongoing"} onClick={() => pick("*", "ongoing")} />
-          <Stat n={patients.filter(isNew).length} l="New leads" on={dSel === "*" && dFilt === "leads"} onClick={() => pick("*", "leads")} />
+          <Stat n={patients.filter(isNew).length} l="New patients" on={dSel === "*" && dFilt === "leads"} onClick={() => pick("*", "leads")} />
           <Stat n={dayS.filter((s) => s.status === "scheduled").length} l={`Pending ${word}`} on={dSel === "*" && dFilt === "scheduled"} onClick={() => pick("*", "scheduled")} />
           <Stat n={dayS.filter((s) => s.status === "completed").length} l={`Completed ${word}`} on={dSel === "*" && dFilt === "completed"} onClick={() => pick("*", "completed")} />
           <Stat n={allFu.length} l="Follow-ups needed" on={dSel === "*" && dFilt === "fu"} onClick={() => pick("*", "fu")} />
@@ -2446,7 +2449,7 @@ export default function Physio() {
         <div className="tbl">
           <table>
             <thead>
-              <tr><th>Doctor</th><th>Ongoing</th><th>New leads</th><th>Due {word}</th><th>Pending</th>
+              <tr><th>Doctor</th><th>Ongoing</th><th>New patients</th><th>Due {word}</th><th>Pending</th>
                 <th>Complete</th><th>Upcoming</th><th>Follow-up</th></tr>
             </thead>
             <tbody>
@@ -2687,12 +2690,14 @@ export default function Physio() {
           .map(([id, n]) => ({ p: pat(id), n }))
           .filter((r) => !!r.p)
           .sort((a, b) => b.n - a.n || (a.p!.name || "").localeCompare(b.p!.name || ""));
+        const open = inRange.filter((x) => x.doctor_id === d.id && x.status === "scheduled");
         return {
           d, mine, pats,
-          pend: inRange.filter((x) => x.doctor_id === d.id && x.status === "scheduled").length,
+          pend: open.length,
+          late: open.filter(isLate).length,            // time nikal gaya, complete nahi hua
         };
       })
-      .filter((r) => r.mine.length || r.pend)
+      .filter((r) => r.mine.length || r.late)
       .sort((a, b) => b.mine.length - a.mine.length || a.d.name.localeCompare(b.d.name));
 
     const totalDone = rows.reduce((n, r) => n + r.mine.length, 0);
@@ -2703,7 +2708,7 @@ export default function Physio() {
         <div className="stats">
           <Stat n={totalDone} l="Sessions done" />
           <Stat n={totalPats} l="Patients seen" />
-          <Stat n={inRange.filter((x) => x.status === "scheduled").length} l="Still pending" />
+          <Stat n={inRange.filter(isLate).length} l="Pending (time passed)" />
         </div>
         {!rows.length ? (
           <div className="stat"><span className="hint">Nothing in this range.</span></div>
@@ -2711,7 +2716,7 @@ export default function Physio() {
           <div className="tbl">
             <table>
               <thead>
-                <tr><th>Doctor</th><th>Patients</th><th>Sessions</th></tr>
+                <tr><th>Doctor</th><th>Patients</th><th>Done</th><th>Pending</th></tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
@@ -2734,7 +2739,9 @@ export default function Physio() {
                     </td>
                     <td className="unum">
                       <b style={{ fontSize: 16 }}>{r.mine.length}</b>
-                      <div className="hint">total</div>
+                    </td>
+                    <td className="unum">
+                      <b style={{ fontSize: 16, color: r.late ? "var(--red)" : undefined }}>{r.late}</b>
                     </td>
                   </tr>
                 ))}
@@ -2744,7 +2751,82 @@ export default function Physio() {
         )}
         <p className="hint" style={{ marginTop: 10 }}>
           Sirf completed session gine jaate hain. Har naam ke aage uske apne session hain, aur
-          &quot;Sessions&quot; unka jod hai — isliye agar 6 patient ek-ek baar aaye to total 6 hi aayega.
+          &quot;Done&quot; unka jod hai. Pending = jiska time nikal gaya par complete nahi hua.
+        </p>
+      </>
+    );
+  };
+
+  /* Leads & drop-outs — har doctor ke paas kitni nayi leads aayi aur kitno ka treatment band hua */
+  const LeadsReport = (from: string, to: string) => {
+    const inR = (d: string) => d >= from && d <= to;
+    const newL = patients.filter((p) => inR(createdDay(p)));
+    const drops = patients.filter((p) => p.status === "done" && inR(endInfo(p).date));
+    const docRows = [...activeDocs, ...doctors.filter((d) => d.active === false)]
+      .map((d) => {
+        const mineNew = newL.filter((p) => p.doctor_id === d.id);
+        return {
+          d,
+          mineNew,
+          drops: drops.filter((p) => p.doctor_id === d.id)
+            .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date)),
+          active: patients.filter((p) => p.status === "ongoing" && p.doctor_id === d.id).length,
+        };
+      })
+      .filter((r) => r.mineNew.length || r.drops.length || r.active)
+      .sort((a, b) => b.mineNew.length - a.mineNew.length || a.d.name.localeCompare(b.d.name));
+    const noDoc = newL.filter((p) => !p.doctor_id);
+
+    return (
+      <>
+        <div className="stats">
+          <Stat n={newL.length} l="New patients" />
+          <Stat n={noDoc.length} l="Patients with no doctor" />
+          <Stat n={drops.length} l="Drop-outs (treatment ended)" />
+        </div>
+        {!docRows.length ? (
+          <div className="stat"><span className="hint">Nothing in this range.</span></div>
+        ) : (
+          <div className="tbl">
+            <table>
+              <thead>
+                <tr><th>Doctor</th><th>New patients</th><th>Drop-outs</th><th>Ongoing now</th></tr>
+              </thead>
+              <tbody>
+                {docRows.map((r) => (
+                  <tr key={r.d.id}>
+                    <td><button className="lnk" onClick={() => openDocView(r.d.id)}>{r.d.name}</button></td>
+                    <td>
+                      <b style={{ fontSize: 16 }}>{r.mineNew.length}</b>
+                      {r.mineNew.map((q) => (
+                        <div key={q.id} style={{ padding: "2px 0" }}>
+                          <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
+                          <span className="hint"> · {nice(createdDay(q))}</span>
+                        </div>
+                      ))}
+                    </td>
+                    <td>
+                      <b style={{ fontSize: 16, color: r.drops.length ? "var(--red)" : undefined }}>{r.drops.length}</b>
+                      {r.drops.map((q) => {
+                        const e = endInfo(q);
+                        return (
+                          <div key={q.id} style={{ padding: "2px 0" }}>
+                            <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
+                            <span className="hint"> · {nice(e.date)} · {e.reason} · {doneText(q, progress(q).done)}</span>
+                          </div>
+                        );
+                      })}
+                    </td>
+                    <td className="unum"><b style={{ fontSize: 16 }}>{r.active}</b></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="hint" style={{ marginTop: 10 }}>
+          New patients = jo patient is range mein aaya, jis doctor par abhi assigned hai. Drop-out = jiska treatment
+          (End) is range mein band hua, reason aur kitne session hue saath mein. Ongoing now = aaj ki tareekh tak chal rahe patient.
         </p>
       </>
     );
@@ -2774,7 +2856,7 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">
-            {repTab === "therapy" ? "Therapy use" : "Doctor wise"} ·{" "}
+            {repTab === "therapy" ? "Therapy use" : repTab === "doctor" ? "Doctor wise sessions" : "Patients & drop-outs"} ·{" "}
             {from === to ? `${from === T ? "Today, " : ""}${nice(from)}` : `${nice(from)} — ${nice(to)}`}
           </div>
           {quick(1, "Today")}
@@ -2787,12 +2869,14 @@ export default function Physio() {
           <input type="date" className="btn sm" style={{ width: "auto" }} value={thTo}
             onChange={(e) => setThTo(e.target.value || T)} />
         </div>
-        <div className="seg" style={{ marginBottom: 10, maxWidth: 420 }}>
+        <div className="seg" style={{ marginBottom: 10, maxWidth: 600 }}>
           <button className={repTab === "therapy" ? "on" : ""} onClick={() => setRepTab("therapy")}>Therapy / product use</button>
           <button className={repTab === "doctor" ? "on" : ""}
-            onClick={() => setRepTab("doctor")}>Doctor wise</button>
+            onClick={() => setRepTab("doctor")}>Doctor wise sessions</button>
+          <button className={repTab === "leads" ? "on" : ""}
+            onClick={() => setRepTab("leads")}>Patients &amp; drop-outs</button>
         </div>
-        {repTab === "doctor" ? DoctorReport(from, to) : (
+        {repTab === "doctor" ? DoctorReport(from, to) : repTab === "leads" ? LeadsReport(from, to) : (
           <>
         <div className="stats">
           <Stat n={done.length} l="Sessions completed" />
@@ -2978,7 +3062,7 @@ export default function Physio() {
           {d ? <span className="hint">Doctor: {effDoc ? <b>{d.name}</b> : <button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button>}</span>
              : <span className="hint">No doctor yet</span>}
           {isOngoing(p) ? <span className="rt">{routineLabel(p.routine)}</span>
-            : <span className="pill">{isNew(p) ? "New lead" : p.status === "cancelled" ? "Cancelled" : "Finished"}</span>}
+            : <span className="pill">{isNew(p) ? "New patient" : p.status === "cancelled" ? "Cancelled" : "Finished"}</span>}
           {p.status === "done" && (
             <>
               <span className="tag fu">Ended {nice(endInfo(p).date)} · {endInfo(p).reason}</span>
@@ -2990,7 +3074,7 @@ export default function Physio() {
             <>
               <span className="tag fu">{p.cancel_reason}</span>
               <span className="hint">{p.cancel_note}</span>
-              <button className="btn sm" onClick={() => updPatient(p.id, { status: "new" }, "Lead reopened")}>Reopen lead</button>
+              <button className="btn sm" onClick={() => updPatient(p.id, { status: "new" }, "Patient reopened")}>Reopen patient</button>
             </>
           )}
         </div>
@@ -3011,7 +3095,7 @@ export default function Physio() {
           {isNew(p) && <button className="btn pri" onClick={() => setDlg(<OngoingDlg p={p} />)}>Ongoing</button>}
           <button className="btn" onClick={() => setDlg(<FollowUpDlg p={p} />)}>Log follow-up</button>
           {!!next.length && <button className="btn" onClick={() => setDlg(<RescheduleDlg p={p} />)}>Reschedule</button>}
-          {isNew(p) && <button className="btn ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel lead</button>}
+          {isNew(p) && <button className="btn ghost danger" onClick={() => setDlg(<CancelLeadDlg p={p} />)}>Cancel patient</button>}
           {isOngoing(p) && <button className="btn ghost" onClick={() => endOngoing(p)}>End treatment</button>}
           {/* Duplicate milana — admin aur physio admin dono kar sakte hain */}
           {(isAdmin || isManager) && (
@@ -3108,7 +3192,7 @@ export default function Physio() {
           <input type="date" className="btn sm" style={{ width: "auto" }} value={day}
             onChange={(e) => setDay(e.target.value || T)} />
           {/* "+ New lead" abhi hata diya — wapas chahiye to yeh line khol do
-          <button className="btn sm pri" onClick={() => setDlg(<NewLead />)}>+ New lead</button> */}
+          <button className="btn sm pri" onClick={() => setDlg(<NewLead />)}>+ New patient</button> */}
         </div>
         <div className="stats">
           <Stat n={dayS.length} l={isT ? "Booked today" : "Booked this day"} />
@@ -3119,7 +3203,7 @@ export default function Physio() {
         </div>
 
         {/* 1 — Naye leads */}
-        <h3 style={{ margin: "6px 0 8px" }}>New leads assigned to me</h3>
+        <h3 style={{ margin: "6px 0 8px" }}>New patients assigned to me</h3>
         <div className="tbl">
           <table className="mytoday">
             <thead>
@@ -3155,7 +3239,7 @@ export default function Physio() {
                 );
               })}
               {newLeads.map((p) => (
-                <tr key={`lead-${p.id}`}>
+                <tr key={`patient-${p.id}`}>
                   {nameCell(p)}
                   <td><span className="hint">Not set</span></td>
                   <td><span className={`pill ${srcCls(p.source)}`}>{p.source || "—"}</span></td>
@@ -3170,7 +3254,7 @@ export default function Physio() {
                   </td>
                 </tr>
               ))}
-              {empty(leadS.length + newLeads.length, `No new leads ${isT ? "today" : "this day"}.`)}
+              {empty(leadS.length + newLeads.length, `No new patients ${isT ? "today" : "this day"}.`)}
             </tbody>
           </table>
         </div>
@@ -3215,6 +3299,105 @@ export default function Physio() {
   };
 
   // View 2 — mere saare ongoing patients
+  /* Doctor ki apni report — kitne session kiye / baaki / aage, aur kitni leads aayi, kitne drop-out */
+  const MyReportView = () => {
+    const did = effDoc;
+    const [from, to] = monthEdges(myMonth);               // poora mahina, 1 se aakhri tareekh
+    const thisMonth = from === monthEdges(T)[0];
+    const monthName = parseYmd(from).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+    const inR = (d: string) => d >= from && d <= to;
+    const mineS = liveS.filter((x) => x.doctor_id === did && inR(x.session_date));
+    const done = mineS.filter((x) => x.status === "completed");
+    const late = mineS.filter(isLate);
+
+    const mine = patients.filter((p) => p.doctor_id === did);
+    const newL = mine.filter((p) => inR(createdDay(p)));
+    const drops = mine.filter((p) => p.status === "done" && inR(endInfo(p).date))
+      .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date));
+
+    const sRow = (x: Session) => (
+      <div key={x.id} style={{ padding: "3px 0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
+        <button className="lnk" onClick={() => openPat(x.patient_id)}>{pat(x.patient_id)?.name || "—"}</button>
+        <span className="hint"> · {from === to ? "" : `${nice(x.session_date)} `}{hhmm(x.session_time)}</span>
+      </div>
+    );
+    const pRow = (q: Patient, extra: string) => (
+      <div key={q.id} style={{ padding: "3px 0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
+        <button className="lnk" onClick={() => openPat(q.id)}>{q.name}</button>
+        <span className="hint"> · {extra}</span>
+      </div>
+    );
+    // Rows = kya gina (session done, pending, …); date upar se chuni jaati hai
+    const sortS = (a: Session, b: Session) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time);
+    const MY_ROWS: [string, string, boolean][] = [
+      ["done", "Sessions done", false], ["late", "Sessions pending", true],
+      ["newp", "New patients", false], ["drops", "Drop-outs (treatment ended)", true], ["on", "Ongoing now", false],
+    ];
+    const rowData: Record<string, (Session | Patient)[]> = {
+      done: done.slice().sort(sortS),
+      late: late.slice().sort(sortS),
+      newp: newL,
+      drops,
+      on: mine.filter(isOngoing).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+
+    return (
+      <>
+        <div className="dayhead">
+          <div className="d">My report · {monthName}{thisMonth ? " (this month)" : ""}</div>
+          <button className="btn sm" onClick={() => { setMyMonth(addDays(from, -1)); setMyPvRow(""); }}>‹ Prev month</button>
+          <button className={`btn sm${thisMonth ? " pri" : ""}`} onClick={() => { setMyMonth(T); setMyPvRow(""); }}>This month</button>
+          <button className="btn sm" disabled={thisMonth} onClick={() => { setMyMonth(addDays(to, 1)); setMyPvRow(""); }}>Next month ›</button>
+        </div>
+
+        <p className="hint" style={{ marginBottom: 8 }}>Change the month above. Click any number to see its list, click again to close.</p>
+        <div className="tbl" style={{ maxWidth: 640 }}>
+          <table>
+            <thead>
+              <tr><th>What</th><th>Count</th></tr>
+            </thead>
+            <tbody>
+              {MY_ROWS.map(([k, label, red]) => {
+                const list = rowData[k];
+                const open = myPvRow === k;
+                return (
+                  <React.Fragment key={k}>
+                    <tr>
+                      <td><b>{label}</b></td>
+                      <td>
+                        {list.length ? (
+                          <button className={`cnum${open ? " on" : ""}`}
+                            style={red && !open ? { color: "var(--red)" } : undefined}
+                            onClick={() => setMyPvRow(open ? "" : k)}>
+                            <b>{list.length}</b>
+                          </button>
+                        ) : <span className="cnum hint" style={{ display: "inline-block" }}>0</span>}
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr><td colSpan={2} style={{ background: "var(--bg)" }}>
+                        {k === "done" || k === "late"
+                          ? (list as Session[]).map(sRow)
+                          : k === "newp"
+                          ? (list as Patient[]).map((q) => pRow(q, nice(createdDay(q))))
+                          : k === "drops"
+                          ? (list as Patient[]).map((q) => {
+                              const e = endInfo(q);
+                              return pRow(q, `${nice(e.date)} · ${e.reason} · ${doneText(q, progress(q).done)}`);
+                            })
+                          : (list as Patient[]).map((q) => pRow(q, `${routineLabel(q.routine)} · ${doneText(q, progress(q).done)}`))}
+                      </td></tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
+
   const MyOngoingView = () => {
     const d = doc(effDoc);
     if (!d) return <div className="stat"><span className="hint">Doctor not found.</span></div>;
@@ -3360,9 +3543,9 @@ export default function Physio() {
   );
 
   // Doctor dashboard ke andar sirf yeh teen view
-  const dv = view === "myongoing" || view === "patient" ? view : "mytoday";
+  const dv = view === "myongoing" || view === "myreport" || view === "patient" ? view : "mytoday";
   const me = doc(effDoc);
-  const myTab = (v: "mytoday" | "myongoing", label: string) => (
+  const myTab = (v: "mytoday" | "myongoing" | "myreport", label: string) => (
     <button className={dv === v ? "on" : ""} onClick={() => { setView(v); if (v === "mytoday") setDay(T); }}>{label}</button>
   );
 
@@ -3372,7 +3555,7 @@ export default function Physio() {
     const hits = t
       ? patients.filter((p) => `${p.name} ${p.phone || ""} ${p.ailment || ""}`.toLowerCase().includes(t)).slice(0, 8)
       : [];
-    const tag = (p: Patient) => isOngoing(p) ? "Ongoing" : isNew(p) ? "New lead" : p.status === "done" ? "Ended" : "Cancelled";
+    const tag = (p: Patient) => isOngoing(p) ? "Ongoing" : isNew(p) ? "New patient" : p.status === "done" ? "Ended" : "Cancelled";
     return (
       <div className="gsearch">
         <input id="gsearch" placeholder="Search patient — name or mobile" value={gq} autoComplete="off"
@@ -3419,10 +3602,11 @@ export default function Physio() {
               <nav>
                 {myTab("mytoday", "My today schedule")}
                 {myTab("myongoing", "My ongoing patients")}
+                {myTab("myreport", "My report")}
               </nav>
               {/* New lead sirf doctor ke today schedule par */}
               {dv === "mytoday" && (
-                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New patient</button>
               )}
               {isAdmin
                 ? <button className="btn" onClick={() => { setAsDoc(""); setView("doctors"); }}>‹ Back to admin</button>
@@ -3431,7 +3615,7 @@ export default function Physio() {
           ) : (
             <>
               <div className="brand">HJS Physio Desk<small>
-                {`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} open leads · ${isManager ? "Physio admin" : "Admin"}`}
+                {`${patients.filter(isOngoing).length} ongoing · ${patients.filter(isNew).length} new patients · ${isManager ? "Physio admin" : "Admin"}`}
               </small></div>
               {SearchBox()}
               <nav>
@@ -3448,7 +3632,7 @@ export default function Physio() {
               </nav>
               {/* New lead sirf Today's schedule aur Sessions par */}
               {(view === "today" || view === "leads") && (
-                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New lead</button>
+                <button className="btn newlead" onClick={() => setDlg(<NewLead />)}>+ New patient</button>
               )}
               <button className="btn" onClick={logout}>Log out</button>
             </>
@@ -3460,6 +3644,7 @@ export default function Physio() {
           : !who ? LoginView()
           : effDoc ? (
             dv === "myongoing" ? MyOngoingView()
+              : dv === "myreport" ? MyReportView()
               : dv === "patient" ? PatientView()
               : MyTodayView()
           )
