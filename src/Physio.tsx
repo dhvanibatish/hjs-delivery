@@ -39,7 +39,7 @@ const ADMIN_PIN = "9999";
 const MANAGER_PIN = "0000";   // physio admin
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
-  ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
+  ["sana", "1111"], ["sabrina", "2222"], ["aditi", "4444"],   // arshnoor hata diya — ab login nahi
   ["anshu", "5555"], ["shubham", "6666"], ["vaibhav", "7777"], ["prabhjot", "8888"],
 ];
 const pinOf = (d?: { name: string }) =>
@@ -599,8 +599,16 @@ export default function Physio() {
     s.status === "scheduled" &&
     (s.session_date < T || (s.session_date === T && !!s.session_time && hhmm(s.session_time) <= nowHM));
   const grpCls = (n: string) => grpKey(therapies.find((t) => t.name === n)?.grp || "");
-  const activeDocs = useMemo(() => doctors.filter((d) => d.active !== false), [doctors]);
+  /* Jo doctor chhod gaye — inka naam app mein kahin nahi dikhega (list, roster, calendar, reports, login, dropdown).
+     Supabase mein bhi active = false kar dena. Wapas lana ho to yahan se naam hata do. */
+  const HIDDEN_DOCS = ["arshnoor"];
+  const activeDocs = useMemo(
+    () => doctors.filter((d) => d.active !== false && !HIDDEN_DOCS.some((h) => d.name.toLowerCase().includes(h))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doctors]);
   const doc = (id: string | null) => doctors.find((d) => d.id === id);
+  // Hataya hua (inactive) doctor kahin default na bane — sirf active doctor ki id
+  const liveDoc = (id: string | null | undefined) => (id && activeDocs.some((d) => d.id === id) ? id : "");
   const pat = (id: string) => patients.find((p) => p.id === id);
   const liveS = useMemo(() => sessions.filter((s) => s.status !== "cancelled"), [sessions]);
   const sessOf = (pid: string) =>
@@ -992,7 +1000,7 @@ export default function Physio() {
   const ScheduleDlg = ({ p }: { p: Patient }) => {
     const [date, setDate] = useState(T);
     const [time, setTime] = useState(hhmm(p.usual_time) === "--" ? "10:00" : hhmm(p.usual_time));
-    const [did, setDid] = useState(p.doctor_id || effDoc || "");
+    const [did, setDid] = useState(liveDoc(p.doctor_id) || effDoc || "");
     const [place, setPlace] = useState<Place>(lastPlace(p.id));
     const save = async () => {
       if (!did) return toast("Select a doctor");
@@ -1147,7 +1155,7 @@ export default function Physio() {
         phone: p.phone || pick.phone,
         ailment: p.ailment || pick.ailment,
         source: p.source || pick.source,
-        doctor_id: p.doctor_id || pick.doctor_id,
+        doctor_id: liveDoc(p.doctor_id) || liveDoc(pick.doctor_id) || null,
         routine: p.routine || pick.routine,
         usual_time: p.usual_time || pick.usual_time,
         start_date: [p.start_date, pick.start_date].filter(Boolean).sort()[0] || null,
@@ -1261,7 +1269,7 @@ export default function Physio() {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
-    const [did, setDid] = useState(p?.doctor_id || effDoc || "");
+    const [did, setDid] = useState(liveDoc(p?.doctor_id) || effDoc || "");
     const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">((p?.routine?.type as "daily") || "daily");
     const [days, setDays] = useState<number[]>(
       p?.routine && p.routine.type === "days" ? p.routine.days : [1, 3, 5]
@@ -1410,7 +1418,7 @@ export default function Physio() {
       let insErr: { code?: string } | null = null;
       try {
         ({ error: insErr } = await supabase.from("physio_sessions").insert({
-          patient_id: p.id, doctor_id: p.doctor_id, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
+          patient_id: p.id, doctor_id: liveDoc(p.doctor_id) || null, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
         }));
       } finally { unlock(); }
       if (insErr) return toast(insErr.code === "23505" ? takenMsg(date, time) : "Could not save");
@@ -1769,7 +1777,7 @@ export default function Physio() {
     const [f, setF] = useState({
       name: p.name, phone: p.phone || "", ailment: p.ailment || "", source: p.source || "Walk-in", notes: p.notes || "",
     });
-    const [did, setDid] = useState(p.doctor_id || "");
+    const [did, setDid] = useState(liveDoc(p.doctor_id));
     const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">(r?.type || "daily");
     const auto = autoDone(p);
     const [doneN, setDoneN] = useState(String(Math.max(0, auto + (p.done_adjust || 0))));
