@@ -773,16 +773,30 @@ export default function Physio() {
   const updSession = (id: string, data: Partial<Session>, ok?: string) =>
     run(() => supabase.from("physio_sessions").update(data).eq("id", id), ok);
 
+  /* Patient ka doctor badla → aaj aur aage ki booked (scheduled) sessions naye doctor par.
+     Purani aur completed sessions jis doctor ne ki, usi ke naam rehti hain — reports sahi rahein. */
+  const upcomingOf = (pid: string) =>
+    liveS.filter((x) => x.patient_id === pid && x.status === "scheduled" && x.session_date >= T);
+  const moveUpcoming = async (pid: string, did: string | null) => {
+    const ids = upcomingOf(pid).filter((x) => x.doctor_id !== did).map((x) => x.id);
+    if (!ids.length) return 0;
+    const { error } = await supabase.from("physio_sessions").update({ doctor_id: did }).in("id", ids);
+    return error ? 0 : ids.length;
+  };
+  const moved = (n: number) => (n ? ` · ${n} upcoming session${n === 1 ? "" : "s"} moved` : "");
+
   const assignDoc = async (pid: string, did: string) => {
     if (did === "__new") {
       const name = (window.prompt("Doctor's name") || "").trim();
       if (!name) return;
       const { data, error } = await supabase.from("physio_doctors").insert({ name }).select().single();
       if (error) return toast("Could not save doctor");
-      await updPatient(pid, { doctor_id: (data as Doctor).id }, `Assigned to ${name}`);
+      const n = await moveUpcoming(pid, (data as Doctor).id);
+      await updPatient(pid, { doctor_id: (data as Doctor).id }, `Assigned to ${name}${moved(n)}`);
       return;
     }
-    await updPatient(pid, { doctor_id: did || null }, did ? `Assigned to ${doc(did)?.name}` : "Doctor removed");
+    const n = did ? await moveUpcoming(pid, did) : 0;
+    await updPatient(pid, { doctor_id: did || null }, did ? `Assigned to ${doc(did)?.name}${moved(n)}` : "Doctor removed");
   };
 
   /* ---------- roster ---------- */
@@ -1052,7 +1066,10 @@ export default function Physio() {
       if (!date || !time) return toast("Pick a date and time");
       const o = offOn(did, date);
       if (o && !window.confirm(`${doc(did)?.name} is on ${o.kind === "leave" ? "leave" : "week off"} on ${nice(date)}. Book anyway?`)) return;
-      if (p.doctor_id !== did) await supabase.from("physio_patients").update({ doctor_id: did }).eq("id", p.id);
+      if (p.doctor_id !== did) {
+        await supabase.from("physio_patients").update({ doctor_id: did }).eq("id", p.id);
+        await moveUpcoming(p.id, did);
+      }
       const ok = await addSession(p.id, did, date, time, place);
       if (ok) close();
     };
@@ -1846,7 +1863,8 @@ export default function Physio() {
         data.usual_time = time || null;
         data.start_date = start || null;
       }
-      const ok = await updPatient(p.id, data, `${f.name.trim()} updated`);
+      const n = did && did !== p.doctor_id ? await moveUpcoming(p.id, did) : 0;
+      const ok = await updPatient(p.id, data, `${f.name.trim()} updated${did !== (p.doctor_id || "") && did ? ` · now with ${doc(did)?.name}` : ""}${moved(n)}`);
       if (!ok) return;
       // Sessions done haath se — farak done_adjust mein, taaki aage ki sessions judti rahein
       const want = Math.max(0, Math.round(Number(doneN)));
@@ -1880,6 +1898,17 @@ export default function Physio() {
             {activeDocs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </Field>
+        {!!did && did !== (p.doctor_id || "") && (() => {
+          const up = upcomingOf(p.id).length;
+          const past = liveS.filter((x) => x.patient_id === p.id && (x.status === "completed" || x.session_date < T)).length;
+          return (
+            <p className="hint" style={{ margin: "-4px 0 10px", color: "var(--blue)" }}>
+              {p.name} will show for {doc(did)?.name} from now on.
+              {up ? ` ${up} upcoming session${up === 1 ? "" : "s"} move to them.` : ""}
+              {past ? ` ${past} past session${past === 1 ? "" : "s"} stay with ${doc(p.doctor_id)?.name || "the old doctor"}.` : ""}
+            </p>
+          );
+        })()}
         {on && (
           <>
             <Field label="When do they come in?">
