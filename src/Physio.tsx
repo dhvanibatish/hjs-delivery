@@ -39,7 +39,7 @@ const ADMIN_PIN = "9999";
 const MANAGER_PIN = "0000";   // physio admin
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
-  ["sana", "1111"], ["sabrina", "2222"], ["aditi", "4444"],   // arshnoor hata diya — ab login nahi
+  ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
   ["anshu", "5555"], ["shubham", "6666"], ["vaibhav", "7777"], ["prabhjot", "8888"],
 ];
 const pinOf = (d?: { name: string }) =>
@@ -104,6 +104,18 @@ type Off = {
   off_date: string;
   kind: "off" | "leave";
   note: string | null;
+};
+
+/* Clinic manager ne kisi din ke liye patient doctor ko diya —
+   woh doctor patient ko call karke poochta hai aa raha hai ya nahi, aur khud book karta hai */
+type Assign = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  assign_date: string;
+  status: "pending" | "coming" | "not_coming";
+  note: string | null;
+  session_id: string | null;
 };
 
 /* ========================= helpers ========================= */
@@ -293,6 +305,11 @@ const CSS = `
 .hjsp .seg button { flex:1; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--bg); font-weight:600; cursor:pointer; }
 .hjsp .seg button.on { background:var(--green); border-color:var(--green); color:#fff; }
 .hjsp .seg button.on.home { background:var(--plum); border-color:var(--plum); }
+.hjsp .seg button.on.lv { background:var(--red); border-color:var(--red); }
+.hjsp .offnow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+.hjsp .tag.wk { background:var(--plum-soft); color:var(--plum); }
+.hjsp .savedok { margin-top:10px; padding:10px 12px; border-radius:10px; background:var(--green-soft); color:var(--green); font-weight:700; }
+.hjsp .btn:disabled { opacity:.5; cursor:default; }
 .hjsp .seg.wrap { flex-wrap:wrap; }
 .hjsp .seg.wrap button { flex:0 0 auto; min-width:52px; text-align:center; }
 .hjsp .pill.walk { background:var(--amber-soft); color:var(--amber); }
@@ -300,6 +317,7 @@ const CSS = `
 .hjsp .pill.ref { background:var(--plum-soft); color:var(--plum); }
 .hjsp .pill.scheduled { background:var(--amber-soft); color:var(--amber); }
 .hjsp .pill.completed { background:var(--green-soft); color:var(--green); }
+.hjsp .pill.cancelled { background:var(--red-soft); color:var(--red); }
 .hjsp .pill.ongoing { background:var(--green-soft); color:var(--green); }
 .hjsp .rt { font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--blue-soft); color:var(--blue); }
 .hjsp .tag.fu { font-size:12px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--red-soft); color:var(--red); }
@@ -458,6 +476,7 @@ export default function Physio() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [therapies, setTherapies] = useState<Therapy[]>([]);
   const [offs, setOffs] = useState<Off[]>([]);
+  const [assigns, setAssigns] = useState<Assign[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
@@ -524,6 +543,17 @@ export default function Physio() {
   const [ptId, setPtId] = useState("");
   const [docId, setDocId] = useState("");
   const [dlg, setDlg] = useState<React.ReactNode>(null);
+  // Roaster: kaunsa doctor, kaunsa din chuna, aur har patient ke liye us din ka doctor + time
+  const [rDoc, setRDoc] = useState("");
+  const [rDay, setRDay] = useState(todayS());
+  const [rPick, setRPick] = useState<Record<string, { did: string; time: string }>>({});
+  // Week off / leave: pehle chuno (draft), phir Save — save hone par "Saved ✓" line dikhti rehti hai
+  const [rKind, setRKind] = useState<"off" | "leave" | "">("");
+  const [rNote, setRNote] = useState("");
+  const [rRep, setRRep] = useState(0);
+  const [rSaved, setRSaved] = useState("");
+  const [rBusy, setRBusy] = useState(false);
+  const rReset = () => { setRPick({}); setRKind(""); setRNote(""); setRRep(0); setRSaved(""); };
 
   const toast = (m: string) => {
     setMsg(m);
@@ -532,12 +562,13 @@ export default function Physio() {
 
   /* ---------- load ---------- */
   const load = async () => {
-    const [d, p, s, t, o] = await Promise.all([
+    const [d, p, s, t, o, a] = await Promise.all([
       supabase.from("physio_doctors").select("*").order("name"),
       supabase.from("physio_patients").select("*").order("created_at", { ascending: false }),
       supabase.from("physio_sessions").select("*").order("session_date"),
       supabase.from("physio_therapies").select("*").eq("active", true).order("sort_order"),
       supabase.from("physio_off").select("*"),
+      supabase.from("physio_assign").select("*"),
     ]);
     if (d.error || p.error || s.error) {
       toast("Load failed — check Supabase tables / grants");
@@ -548,7 +579,8 @@ export default function Physio() {
     setPatients((p.data as Patient[]) || []);
     setSessions((s.data as Session[]) || []);
     setTherapies((t.data as Therapy[]) || []);
-    setOffs((o.data as Off[]) || []);   // table na ho to khali — baaki app chalti rahegi
+    setOffs((o.data as Off[]) || []);
+    setAssigns((a.data as Assign[]) || []);   // physio-assign.sql na chala ho to khali   // table na ho to khali — baaki app chalti rahegi
     setLoading(false);
   };
   useEffect(() => {
@@ -559,6 +591,7 @@ export default function Physio() {
       .on("postgres_changes", { event: "*", schema: "public", table: "physio_sessions" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "physio_doctors" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "physio_off" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "physio_assign" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -599,16 +632,8 @@ export default function Physio() {
     s.status === "scheduled" &&
     (s.session_date < T || (s.session_date === T && !!s.session_time && hhmm(s.session_time) <= nowHM));
   const grpCls = (n: string) => grpKey(therapies.find((t) => t.name === n)?.grp || "");
-  /* Jo doctor chhod gaye — inka naam app mein kahin nahi dikhega (list, roster, calendar, reports, login, dropdown).
-     Supabase mein bhi active = false kar dena. Wapas lana ho to yahan se naam hata do. */
-  const HIDDEN_DOCS = ["arshnoor"];
-  const activeDocs = useMemo(
-    () => doctors.filter((d) => d.active !== false && !HIDDEN_DOCS.some((h) => d.name.toLowerCase().includes(h))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doctors]);
+  const activeDocs = useMemo(() => doctors.filter((d) => d.active !== false), [doctors]);
   const doc = (id: string | null) => doctors.find((d) => d.id === id);
-  // Hataya hua (inactive) doctor kahin default na bane — sirf active doctor ki id
-  const liveDoc = (id: string | null | undefined) => (id && activeDocs.some((d) => d.id === id) ? id : "");
   const pat = (id: string) => patients.find((p) => p.id === id);
   const liveS = useMemo(() => sessions.filter((s) => s.status !== "cancelled"), [sessions]);
   const sessOf = (pid: string) =>
@@ -762,26 +787,8 @@ export default function Physio() {
 
   /* ---------- roster ---------- */
   const offOn = (did: string, date: string) => offs.find((o) => o.doctor_id === did && o.off_date === date);
-  const freeDocs = (date: string) => activeDocs.filter((d) => !offOn(d.id, date));
   const dayOf = (did: string, date: string) =>
     liveS.filter((s) => s.doctor_id === did && s.session_date === date);
-
-  // Doctor off hai to us din ke booked sessions baaki doctors mein baant do (jiska load kam, usko pehle)
-  const spreadDay = async (did: string, date: string) => {
-    const mine = dayOf(did, date).filter((s) => s.status === "scheduled");
-    if (!mine.length) return toast("No booked session that day");
-    const pool = freeDocs(date).filter((d) => d.id !== did);
-    if (!pool.length) return toast("Every other doctor is off that day too");
-    const cnt: Record<string, number> = {};
-    pool.forEach((d) => { cnt[d.id] = dayOf(d.id, date).length; });
-    for (const s of mine) {
-      const take = pool.slice().sort((a, b) => cnt[a.id] - cnt[b.id])[0];
-      await supabase.from("physio_sessions").update({ doctor_id: take.id }).eq("id", s.id);
-      cnt[take.id] += 1;
-    }
-    await load();
-    toast(`${mine.length} session${mine.length === 1 ? "" : "s"} moved to ${pool.length === 1 ? pool[0].name : "other doctors"}`);
-  };
 
   // Patient ki pichhli session jahan hui thi, wahi agli baar default
   const lastPlace = (pid: string): Place => (sessOf(pid).slice(-1)[0]?.place === "home" ? "home" : "clinic");
@@ -866,63 +873,101 @@ export default function Physio() {
   /* ========================= dialogs ========================= */
   const close = () => setDlg(null);
 
-  const OffDlg = ({ d, date }: { d: Doctor; date: string }) => {
-    const cur = offOn(d.id, date);
-    const [kind, setKind] = useState<"off" | "leave">(cur?.kind || "off");
-    const [note, setNote] = useState(cur?.note || "");
-    const booked = dayOf(d.id, date).filter((s) => s.status === "scheduled");
-    const others = freeDocs(date).filter((x) => x.id !== d.id);
+  /* ---------- assign → doctor call karta hai ---------- */
+  const assignOf = (pid: string, date: string) => assigns.find((a) => a.patient_id === pid && a.assign_date === date);
+  // Manager: is din yeh patient is doctor ke paas. Booked session ho to woh bhi us doctor par chali jati hai.
+  const assignFor = async (p: Patient, did: string, date: string, s?: Session) => {
+    const { error } = await supabase.from("physio_assign").upsert(
+      { patient_id: p.id, doctor_id: did, assign_date: date, status: "pending", note: null, session_id: s?.id || null },
+      { onConflict: "patient_id,assign_date" });
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error(error);
+      return toast("Could not assign — run physio-assign.sql in Supabase first");
+    }
+    if (s && s.doctor_id !== did) await supabase.from("physio_sessions").update({ doctor_id: did }).eq("id", s.id);
+    await load();
+    toast(`${p.name} → ${doc(did)?.name} · ${nice(date)} · waiting for their call`);
+  };
 
-    const mark = async () => {
-      const ok = await run(
-        () => supabase.from("physio_off")
-          .upsert({ doctor_id: d.id, off_date: date, kind, note: note.trim() || null }, { onConflict: "doctor_id,off_date" }),
-        `${d.name} · ${kind === "leave" ? "Leave" : "Week off"} · ${nice(date)}`
-      );
+  // Doctor: patient aa raha hai — time chuno aur book (pehle se booked ho to bas confirm)
+  const CallComingDlg = ({ a }: { a: Assign }) => {
+    const p = pat(a.patient_id)!;
+    const booked = liveS.find((x) => x.patient_id === p.id && x.session_date === a.assign_date && x.status !== "cancelled");
+    const [time, setTime] = useState(booked ? hhmm(booked.session_time) : hhmm(p.usual_time) === "--" ? "10:00" : hhmm(p.usual_time));
+    const [place, setPlace] = useState<Place>(booked?.place === "home" ? "home" : lastPlace(p.id));
+    const save = async () => {
+      if (!time) return toast("Pick a time");
+      let sid = booked?.id || null;
+      if (booked) {
+        if (hhmm(booked.session_time) !== time || booked.place !== place || booked.doctor_id !== a.doctor_id) {
+          await supabase.from("physio_sessions").update({ session_time: time, place, doctor_id: a.doctor_id }).eq("id", booked.id);
+        }
+      } else {
+        if (!p.doctor_id) await supabase.from("physio_patients").update({ doctor_id: a.doctor_id }).eq("id", p.id);
+        const unlock = await lockSlot(p.id, a.assign_date, time);
+        if (!unlock) return;
+        try {
+          const { data, error } = await supabase.from("physio_sessions")
+            .insert({ patient_id: p.id, doctor_id: a.doctor_id, session_date: a.assign_date, session_time: time,
+              seq: sessOf(p.id).length + 1, place })
+            .select().single();
+          if (error) return toast((error as { code?: string }).code === "23505" ? takenMsg(a.assign_date, time) : "Could not save");
+          sid = (data as Session).id;
+        } finally { unlock(); }
+      }
+      const ok = await run(() => supabase.from("physio_assign").update({ status: "coming", session_id: sid }).eq("id", a.id),
+        `${p.name} coming · ${nice(a.assign_date)} ${time}`);
       if (ok) close();
     };
-    const clear = async () => {
-      const ok = await run(() => supabase.from("physio_off").delete().eq("doctor_id", d.id).eq("off_date", date),
-        `${d.name} is working on ${nice(date)}`);
-      if (ok) close();
-    };
-    const markAndSpread = async () => {
-      await supabase.from("physio_off")
-        .upsert({ doctor_id: d.id, off_date: date, kind, note: note.trim() || null }, { onConflict: "doctor_id,off_date" });
-      await spreadDay(d.id, date);
-      close();
-    };
-
     return (
-      <Modal title={`${d.name} · ${nice(date)}`}>
+      <Modal title={`${p.name} is coming`}>
         <p className="hint" style={{ marginBottom: 10 }}>
-          {booked.length
-            ? `${booked.length} session${booked.length === 1 ? "" : "s"} booked that day. Marking off can hand them to the other doctors.`
-            : "Nothing booked that day."}
+          {nice(a.assign_date)} · {p.phone || "no number"}{booked ? ` · already booked at ${hhmm(booked.session_time)}` : ""}
         </p>
-        <Field label="Mark as">
-          <div className="seg">
-            <button className={kind === "off" ? "on" : ""} onClick={() => setKind("off")}>Week off</button>
-            <button className={kind === "leave" ? "on home" : ""} onClick={() => setKind("leave")}>Leave</button>
-          </div>
-        </Field>
-        <Field label="Note (optional)">
-          <input placeholder="Family function, half day…" value={note} onChange={(e) => setNote(e.target.value)} />
-        </Field>
-        {!!booked.length && (
-          <p className="hint" style={{ marginBottom: 10 }}>
-            {others.length
-              ? `Free that day: ${others.map((x) => x.name).join(", ")}`
-              : "No other doctor is free that day — sessions will stay where they are."}
-          </p>
-        )}
+        <Field label="Time"><input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+        <PlacePick v={place} on={setPlace} />
         <div className="end">
-          {cur && <button className="btn ghost" style={{ marginRight: "auto" }} onClick={clear}>Working (clear)</button>}
           <button className="btn" onClick={close}>Cancel</button>
-          {!!booked.length && !!others.length && (
-            <button className="btn" onClick={markAndSpread}>Mark off + move {booked.length}</button>
-          )}
-          <button className="btn pri" onClick={mark}>Mark {kind === "leave" ? "leave" : "week off"}</button>
+          <button className="btn pri" onClick={save}>{booked ? "Confirm" : "Book session"}</button>
+        </div>
+      </Modal>
+    );
+  };
+
+  // Doctor: patient nahi aa raha — reason zaroori; booked session ho to cancel
+  const CallNotComingDlg = ({ a }: { a: Assign }) => {
+    const p = pat(a.patient_id)!;
+    const booked = liveS.find((x) => x.patient_id === p.id && x.session_date === a.assign_date && x.status === "scheduled");
+    const [why, setWhy] = useState("");
+    const [note, setNote] = useState("");
+    const save = async () => {
+      if (!why) return toast("Pick a reason");
+      const text = note.trim() ? `${why} — ${note.trim()}` : why;
+      if (booked) {
+        await supabase.from("physio_sessions")
+          .update({ status: "cancelled", cancel_reason: "Not coming (confirmed on call)", cancel_note: text }).eq("id", booked.id);
+      }
+      const ok = await run(() => supabase.from("physio_assign").update({ status: "not_coming", note: text }).eq("id", a.id),
+        `${p.name} not coming on ${nice(a.assign_date)}`);
+      if (ok) close();
+    };
+    return (
+      <Modal title={`${p.name} is not coming`}>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          {nice(a.assign_date)}{booked ? ` · the ${hhmm(booked.session_time)} booking will be cancelled` : ""}
+        </p>
+        <Field label="Reason *">
+          <select value={why} onChange={(e) => setWhy(e.target.value)}>
+            <option value="">— Pick a reason —</option>
+            {["Not well / busy today", "Will come another day", "Not reachable", "Wants own doctor only", "Stopping treatment", "Other"]
+              .map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Note"><input placeholder="What the patient said" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <div className="end">
+          <button className="btn" onClick={close}>Cancel</button>
+          <button className="btn pri" onClick={save}>Save</button>
         </div>
       </Modal>
     );
@@ -1000,7 +1045,7 @@ export default function Physio() {
   const ScheduleDlg = ({ p }: { p: Patient }) => {
     const [date, setDate] = useState(T);
     const [time, setTime] = useState(hhmm(p.usual_time) === "--" ? "10:00" : hhmm(p.usual_time));
-    const [did, setDid] = useState(liveDoc(p.doctor_id) || effDoc || "");
+    const [did, setDid] = useState(p.doctor_id || effDoc || "");
     const [place, setPlace] = useState<Place>(lastPlace(p.id));
     const save = async () => {
       if (!did) return toast("Select a doctor");
@@ -1155,7 +1200,7 @@ export default function Physio() {
         phone: p.phone || pick.phone,
         ailment: p.ailment || pick.ailment,
         source: p.source || pick.source,
-        doctor_id: liveDoc(p.doctor_id) || liveDoc(pick.doctor_id) || null,
+        doctor_id: p.doctor_id || pick.doctor_id,
         routine: p.routine || pick.routine,
         usual_time: p.usual_time || pick.usual_time,
         start_date: [p.start_date, pick.start_date].filter(Boolean).sort()[0] || null,
@@ -1269,7 +1314,7 @@ export default function Physio() {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in" });
-    const [did, setDid] = useState(liveDoc(p?.doctor_id) || effDoc || "");
+    const [did, setDid] = useState(p?.doctor_id || effDoc || "");
     const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">((p?.routine?.type as "daily") || "daily");
     const [days, setDays] = useState<number[]>(
       p?.routine && p.routine.type === "days" ? p.routine.days : [1, 3, 5]
@@ -1418,7 +1463,7 @@ export default function Physio() {
       let insErr: { code?: string } | null = null;
       try {
         ({ error: insErr } = await supabase.from("physio_sessions").insert({
-          patient_id: p.id, doctor_id: liveDoc(p.doctor_id) || null, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
+          patient_id: p.id, doctor_id: p.doctor_id, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
         }));
       } finally { unlock(); }
       if (insErr) return toast(insErr.code === "23505" ? takenMsg(date, time) : "Could not save");
@@ -1777,7 +1822,7 @@ export default function Physio() {
     const [f, setF] = useState({
       name: p.name, phone: p.phone || "", ailment: p.ailment || "", source: p.source || "Walk-in", notes: p.notes || "",
     });
-    const [did, setDid] = useState(liveDoc(p.doctor_id));
+    const [did, setDid] = useState(p.doctor_id || "");
     const [rt, setRt] = useState<"daily" | "days" | "week" | "alt">(r?.type || "daily");
     const auto = autoDone(p);
     const [doneN, setDoneN] = useState(String(Math.max(0, auto + (p.done_adjust || 0))));
@@ -3060,74 +3105,260 @@ export default function Physio() {
     );
   };
 
+  /* Roaster — simple: doctor chuno + date chuno → week off / leave lagao →
+     neeche us doctor ke patient, har patient ko us din ke liye doctor assign karo.
+     Patient ka apna doctor (doctor_id) nahi badalta — sirf us din ki session ka doctor badalta hai. */
   const RosterView = () => {
     if (!activeDocs.length) return <div className="stat"><span className="hint">No doctors yet.</span></div>;
-    const days = Array.from({ length: 14 }, (_, i) => addDays(day, i));
-    const offToday = activeDocs.filter((d) => offOn(d.id, T));
+    const d = activeDocs.find((x) => x.id === rDoc) || activeDocs[0];
+    const sel = rDay;
+    const o = offOn(d.id, sel);
+
+    const kindName = (k: string) => (k === "leave" ? "Leave" : "Week off");
+    const kind = rKind || o?.kind || "";                 // abhi kya chuna hua dikhe
+    const note = rKind ? rNote : rNote || o?.note || "";
+    const changed = !!kind && (!o || kind !== o.kind || note.trim() !== (o.note || "") || (kind === "off" && rRep > 0));
+    const saveOff = async () => {
+      if (!kind) return toast("Pick Week off or Leave first");
+      setRBusy(true);
+      const dates = [sel, ...Array.from({ length: kind === "off" ? rRep : 0 }, (_, i) => addDays(sel, 7 * (i + 1)))];
+      const ok = await run(() => supabase.from("physio_off")
+        .upsert(dates.map((dt) => ({ doctor_id: d.id, off_date: dt, kind, note: note.trim() || null })),
+          { onConflict: "doctor_id,off_date" }));
+      setRBusy(false);
+      if (!ok) return setRSaved("");
+      setRKind(""); setRNote(""); setRRep(0);
+      setRSaved(`${d.name} · ${kindName(kind)} · ${nice(sel)}${dates.length > 1
+        ? ` and the next ${dates.length - 1} ${DOW[parseYmd(sel).getDay()]}s` : ""}`);
+    };
+    const removeOff = async () => {
+      if (!o) return;
+      setRBusy(true);
+      const ok = await run(() => supabase.from("physio_off").delete().eq("doctor_id", d.id).eq("off_date", sel));
+      setRBusy(false);
+      if (!ok) return;
+      setRKind(""); setRNote(""); setRRep(0);
+      setRSaved(`${kindName(o.kind)} removed — ${d.name} is working on ${nice(sel)}`);
+    };
+
+    // Us din kis patient ki kaunsi session hai (kisi bhi doctor ke saath)
+    const sessOn = (pid: string) =>
+      liveS.filter((x) => x.patient_id === pid && x.session_date === sel)
+        .sort((a, b) => a.session_time.localeCompare(b.session_time))[0];
+
+    // Is doctor ke patient + jo is din is doctor ke paas cover mein aaye hain
+    const own = patients.filter((p) => p.doctor_id === d.id && (isOngoing(p) || isNew(p)));
+    const covering = liveS
+      .filter((x) => x.doctor_id === d.id && x.session_date === sel && !own.some((p) => p.id === x.patient_id))
+      .map((x) => pat(x.patient_id))
+      .filter((p): p is Patient => !!p);
+    const rank = (p: Patient) => {
+      const s = sessOn(p.id);
+      const a = assignOf(p.id, sel);
+      if (o && s && s.doctor_id === d.id && s.status === "scheduled" && !a) return 0;   // off doctor par booked — pehle
+      if (!s && !a && (isNew(p) || dueOn(p, sel))) return 1;                           // aana hai, kisi ko diya nahi
+      if (a?.status === "pending") return 2;                                            // doctor ki call baaki
+      if (s && s.status === "scheduled") return 3;
+      if (s || a) return 4;
+      return 5;
+    };
+    const list = [...own, ...covering]
+      .filter((p, i, a) => a.findIndex((x) => x.id === p.id) === i)
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+
+    // Dropdown mein kaunsa doctor dikhe: haath se chuna → assign wala → booked session wala → apna doctor
+    const pickOf = (p: Patient) => {
+      if (rPick[p.id]) return rPick[p.id].did;
+      const a = assignOf(p.id, sel);
+      if (a) return a.doctor_id;
+      const s = sessOn(p.id);
+      if (s && !(o && s.doctor_id === d.id)) return s.doctor_id || "";
+      return o ? "" : p.doctor_id || d.id;
+    };
+    const assignNow = async (p: Patient) => {
+      const did = pickOf(p);
+      if (!did) return toast("Pick a doctor for this day");
+      const x = offOn(did, sel);
+      if (x && !window.confirm(`${doc(did)?.name} is on ${x.kind === "leave" ? "leave" : "week off"} on ${nice(sel)}. Assign anyway?`)) return;
+      const s = sessOn(p.id);
+      await assignFor(p, did, sel, s && s.status === "scheduled" ? s : undefined);
+      setRPick((m) => { const n = { ...m }; delete n[p.id]; return n; });
+    };
+
+    const stuck = list.filter((p) => rank(p) === 0);
+    const toBook = list.filter((p) => rank(p) === 1);
+    const waiting = list.filter((p) => assignOf(p.id, sel)?.status === "pending");
+    const awayToday = activeDocs.filter((x) => offOn(x.id, sel));
+    const dayCnt = (did: string) => dayOf(did, sel).filter((y) => y.status !== "cancelled").length;
+
     return (
       <>
         <div className="dayhead">
           <div className="d">Roaster</div>
-          <button className="btn sm" onClick={() => setDay(addDays(day, -7))}>‹ Prev 7 days</button>
-          <button className="btn sm" onClick={() => setDay(T)}>From today</button>
-          <button className="btn sm" onClick={() => setDay(addDays(day, 7))}>Next 7 days ›</button>
-          <input type="date" className="btn sm" style={{ width: "auto" }} value={day} onChange={(e) => setDay(e.target.value || T)} />
         </div>
-        <div className="stats">
-          <Stat n={activeDocs.length - offToday.length} l="Working today" />
-          <Stat n={offToday.length} l="Off today" />
-          <Stat n={offToday.reduce((n, d) => n + dayOf(d.id, T).filter((s) => s.status === "scheduled").length, 0)} l="To reassign today" />
-        </div>
-        <p className="hint" style={{ marginBottom: 10 }}>
-          Tap any box to mark week off or leave. If that doctor already has sessions that day, the dialog can hand them to the other doctors.
-        </p>
-        {offToday.map((d) => {
-          const stuck = dayOf(d.id, T).filter((s) => s.status === "scheduled");
-          if (!stuck.length) return null;
-          return (
-            <div className="panel" key={d.id}>
-              <div className="drow">
-                <b>{d.name} is off today</b>
-                <span className="tag fu">{stuck.length} session{stuck.length === 1 ? "" : "s"} still on them</span>
-                <button className="btn sm pri" onClick={() => spreadDay(d.id, T)}>Share out to other doctors</button>
-              </div>
+
+        <div className="panel">
+          <div className="row2" style={{ alignItems: "end" }}>
+            <Field label="Doctor">
+              <select value={d.id} onChange={(e) => { setRDoc(e.target.value); rReset(); }}>
+                {activeDocs.map((x) => {
+                  const xo = offOn(x.id, sel);
+                  return <option key={x.id} value={x.id}>{x.name}{xo ? (xo.kind === "leave" ? " — on leave" : " — week off") : ""}</option>;
+                })}
+              </select>
+            </Field>
+            <Field label="Date">
+              <input type="date" value={sel} onChange={(e) => { setRDay(e.target.value || T); rReset(); }} />
+            </Field>
+          </div>
+          <div className="drow" style={{ marginTop: 4 }}>
+            <button className="btn sm" onClick={() => { setRDay(T); rReset(); }}>Today</button>
+            <button className="btn sm" onClick={() => { setRDay(addDays(T, 1)); rReset(); }}>Tomorrow</button>
+            <span className="hint">{nice(sel)}{sel === T ? " (today)" : ""}</span>
+          </div>
+
+          {/* Abhi Supabase mein kya saved hai */}
+          <div className="offnow">
+            <span className="hint">Saved for {nice(sel)}:</span>
+            {o ? <span className={`tag ${o.kind === "leave" ? "fu" : "wk"}`}>{kindName(o.kind)}{o.note ? ` · ${o.note}` : ""}</span>
+              : <span className="tag free">Working — no week off / leave</span>}
+          </div>
+
+          <div className="f" style={{ marginTop: 10 }}>
+            <label>Mark {d.name} on {nice(sel)} as</label>
+            <div className="seg" style={{ maxWidth: 360 }}>
+              <button className={kind === "off" ? "on home" : ""} onClick={() => { setRKind("off"); setRSaved(""); }}>Week off</button>
+              <button className={kind === "leave" ? "on lv" : ""} onClick={() => { setRKind("leave"); setRRep(0); setRSaved(""); }}>Leave</button>
             </div>
-          );
-        })}
-        <div className="tbl">
-          <table className="roster">
-            <thead>
-              <tr>
-                <th>Doctor</th>
-                {days.map((dt) => (
-                  <th key={dt} className={dt === T ? "today" : ""}>
-                    {DOW[parseYmd(dt).getDay()]}<br /><span className="hint">{nice(dt).replace(/^\w+, /, "")}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {activeDocs.map((d) => (
-                <tr key={d.id}>
-                  <td><button className="lnk" onClick={() => openDocView(d.id)}>{d.name}</button></td>
-                  {days.map((dt) => {
-                    const o = offOn(d.id, dt);
-                    const n = dayOf(d.id, dt).length;
-                    return (
-                      <td key={dt} className={dt === T ? "today" : ""}>
-                        <button className={`rcell${o ? ` ${o.kind}` : ""}${o && n ? " clash" : ""}`}
-                          onClick={() => setDlg(<OffDlg d={d} date={dt} />)}>
-                          <div className="c">{o ? (o.kind === "leave" ? "Leave" : "Off") : n || "—"}</div>
-                          <div className="k">{o ? (n ? `${n} booked!` : o.note || "free") : n ? "booked" : "no session"}</div>
-                        </button>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          </div>
+          {!!kind && (
+            <div className="row2">
+              <Field label="Note (optional)">
+                <input placeholder="Family function, half day…" value={note}
+                  onChange={(e) => { if (!rKind) setRKind(kind as "off" | "leave"); setRNote(e.target.value); setRSaved(""); }} />
+              </Field>
+              {kind === "off" && (
+                <Field label={`Repeat every ${DOW[parseYmd(sel).getDay()]}`}>
+                  <select value={rRep} onChange={(e) => { if (!rKind) setRKind("off"); setRRep(Number(e.target.value)); setRSaved(""); }}>
+                    <option value={0}>Only this day</option>
+                    <option value={4}>This + next 4 weeks</option>
+                    <option value={8}>This + next 8 weeks</option>
+                    <option value={12}>This + next 12 weeks</option>
+                  </select>
+                </Field>
+              )}
+            </div>
+          )}
+          <div className="drow" style={{ marginTop: 4 }}>
+            <button className="btn pri" disabled={!changed || rBusy} onClick={saveOff}>
+              {rBusy ? "Saving…" : o && !changed ? "Saved" : `Save ${kind ? kindName(kind).toLowerCase() : ""}`.trim()}
+            </button>
+            {o && (
+              <button className="btn ghost danger" disabled={rBusy} onClick={removeOff}>Remove {kindName(o.kind).toLowerCase()}</button>
+            )}
+            {rKind && <button className="btn ghost" onClick={() => { setRKind(""); setRNote(""); setRRep(0); }}>Undo choice</button>}
+          </div>
+          {!!rSaved && <div className="savedok">✓ Saved — {rSaved}</div>}
+          {!!awayToday.length && (
+            <p className="hint" style={{ marginTop: 8 }}>
+              Off on {nice(sel)}: {awayToday.map((x) => `${x.name} (${offOn(x.id, sel)!.kind === "leave" ? "leave" : "week off"})`).join(", ")}
+            </p>
+          )}
         </div>
+
+        {o && !!stuck.length && (
+          <div className="panel" style={{ borderColor: "var(--red)" }}>
+            <div className="drow">
+              <b style={{ color: "var(--red)" }}>{stuck.length} patient{stuck.length === 1 ? "" : "s"} booked with {d.name} on {nice(sel)}</b>
+              <span className="hint">Pick a doctor for each below and tap Assign — that doctor calls the patient.</span>
+            </div>
+          </div>
+        )}
+
+        <div className="stats">
+          <Stat n={list.length} l={`Patients of ${d.name}`} />
+          <Stat n={stuck.length} l="Need another doctor" />
+          <Stat n={toBook.length} l="Due, not assigned" />
+          <Stat n={waiting.length} l="Waiting for doctor's call" />
+        </div>
+
+        {!list.length ? (
+          <div className="stat"><span className="hint">{d.name} has no ongoing or new patients.</span></div>
+        ) : (
+          <div className="tbl">
+            <table>
+              <thead>
+                <tr><th>Patient</th><th>Plan</th><th>On {nice(sel)}</th><th>Doctor for this day</th><th>Call status</th><th></th></tr>
+              </thead>
+              <tbody>
+                {list.map((p) => {
+                  const s = sessOn(p.id);
+                  const a = assignOf(p.id, sel);
+                  const did = pickOf(p);
+                  const due = isNew(p) || dueOn(p, sel);
+                  const needs = rank(p) === 0;
+                  const done = s?.status === "completed";
+                  const same = !!a && a.doctor_id === did && !rPick[p.id];
+                  return (
+                    <tr key={p.id} style={needs ? { background: "var(--red-soft)" } : undefined}>
+                      <td>
+                        <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>
+                        <div className="hint">{p.phone}</div>
+                        {p.doctor_id !== d.id && <div className="hint">Own doctor {doc(p.doctor_id)?.name || "not set"}</div>}
+                        {isNew(p) && <div><span className="tag load">New</span></div>}
+                      </td>
+                      <td className="hint">{isNew(p) ? "Not started" : `${routineLabel(p.routine)} · ${doneText(p, progress(p).done)}`}</td>
+                      <td>
+                        {s ? (
+                          <span className={`tag ${done ? "free" : needs ? "fu" : ""}`}>
+                            {done ? "Done" : "Booked"} {hhmm(s.session_time)}
+                            {s.doctor_id !== d.id ? ` · ${doc(s.doctor_id)?.name || "no doctor"}` : ""}
+                          </span>
+                        ) : due ? <span className="tag fu">Due</span> : <span className="hint">Not due</span>}
+                      </td>
+                      <td>
+                        {done ? <span className="hint">{doc(s!.doctor_id)?.name}</span> : (
+                          <select value={did} style={{ minWidth: 180 }}
+                            onChange={(e) => setRPick((m) => ({ ...m, [p.id]: { did: e.target.value, time: "" } }))}>
+                            <option value="">— Pick doctor —</option>
+                            {activeDocs.map((x) => {
+                              const xo = offOn(x.id, sel);
+                              return (
+                                <option key={x.id} value={x.id}>
+                                  {x.name}{xo ? (xo.kind === "leave" ? " — on leave" : " — week off") : ` (${dayCnt(x.id)})`}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
+                      </td>
+                      <td>
+                        {!a ? <span className="hint">—</span>
+                          : a.status === "pending" ? (isAdmin
+                            // Admin yahin se us doctor ka dashboard khol sakta hai
+                            ? <button className="tag load" title="Open their dashboard"
+                                onClick={() => { setAsDoc(a.doctor_id); setDay(sel); setView("mytoday"); }}>{doc(a.doctor_id)?.name} to call ›</button>
+                            : <span className="tag load">{doc(a.doctor_id)?.name} to call</span>)
+                          : a.status === "coming" ? <span className="tag free">Coming{s ? ` · ${hhmm(s.session_time)}` : ""}</span>
+                          : <span className="tag fu" title={a.note || ""}>Not coming{a.note ? ` · ${a.note}` : ""}</span>}
+                      </td>
+                      <td>
+                        {!done && !same && (
+                          <button className="btn sm pri" onClick={() => assignNow(p)}>{a ? "Re-assign" : "Assign"}</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="hint" style={{ marginTop: 10 }}>
+          Assign gives the patient to that doctor for this day only — the patient keeps their own doctor.
+          The doctor sees them under &quot;Patients to call&quot;, calls to check if they are coming, and books the time.
+          The number next to each doctor is how many sessions they already have that day.
+        </p>
       </>
     );
   };
@@ -3297,6 +3528,10 @@ export default function Physio() {
     const leadS = dayS.filter((x) => !onS.includes(x));
     // Lead mili hai par abhi koi session book nahi hua
     const newLeads = patients.filter((p) => isNew(p) && p.doctor_id === d.id && !sessOf(p.id).length);
+    // Manager se mile: call baaki (aaj ya aage ke) sab, aur is din ke jinka jawab aa gaya
+    const toCall = assigns
+      .filter((a) => a.doctor_id === d.id && (a.status === "pending" ? a.assign_date >= T || a.assign_date === day : a.assign_date === day))
+      .sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || a.assign_date.localeCompare(b.assign_date));
 
     const lastVisit = (p?: Patient) => {
       const l = p ? sessOf(p.id).filter((s) => s.status === "completed" && s.session_date < day).slice(-1)[0] : undefined;
@@ -3341,6 +3576,51 @@ export default function Physio() {
           <Stat n={done.length} l="Completed" />
           <Stat n={mineOn.length} l="My ongoing patients" onClick={() => setView("myongoing")} />
         </div>
+
+        {/* 0 — Clinic manager ne diye patient: call karo, aa rahe hain to book */}
+        {!!toCall.length && (
+          <>
+            <h3 style={{ margin: "6px 0 8px" }}>Patients to call</h3>
+            <p className="hint" style={{ marginBottom: 8 }}>
+              The clinic manager gave you these patients. Call them, ask if they are coming, then book or mark not coming.
+            </p>
+            <div className="tbl" style={{ marginBottom: 14 }}>
+              <table className="mytoday">
+                <thead>
+                  <tr><th>Patient</th><th>For</th><th>Own doctor</th><th>Status</th><th /></tr>
+                </thead>
+                <tbody>
+                  {toCall.map((a) => {
+                    const p = pat(a.patient_id);
+                    if (!p) return null;
+                    const bk = liveS.find((x) => x.patient_id === p.id && x.session_date === a.assign_date && x.status !== "cancelled");
+                    return (
+                      <tr key={a.id} style={a.status === "pending" ? undefined : { opacity: 0.7 }}>
+                        {nameCell(p)}
+                        <td><b>{a.assign_date === T ? "Today" : nice(a.assign_date)}</b>
+                          {bk && <div className="hint">booked {hhmm(bk.session_time)}</div>}</td>
+                        <td className="hint">{p.doctor_id === d.id ? "You" : doc(p.doctor_id)?.name || "—"}</td>
+                        <td>
+                          {a.status === "pending" ? <span className="pill bigin">Call pending</span>
+                            : a.status === "coming" ? <span className="pill completed">Coming ✓</span>
+                            : <span className="pill cancelled" title={a.note || ""}>Not coming</span>}
+                        </td>
+                        <td>
+                          {a.status === "pending" && (
+                            <div className="acts">
+                              <button className="btn sm pri" onClick={() => setDlg(<CallComingDlg a={a} />)}>Coming — book</button>
+                              <button className="btn sm ghost danger" onClick={() => setDlg(<CallNotComingDlg a={a} />)}>Not coming</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
 
         {/* 1 — Naye leads */}
         <h3 style={{ margin: "6px 0 8px" }}>New patients assigned to me</h3>
