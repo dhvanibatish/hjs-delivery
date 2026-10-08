@@ -726,7 +726,9 @@ export default function Physio() {
     if (err) {
       // eslint-disable-next-line no-console
       console.error(err);
-      toast("Could not save");
+      toast((err as { code?: string }).code === "23505"
+        ? "Is mobile number ki is date + time par session pehle se booked hai"
+        : "Could not save");
       return false;
     }
     await load();
@@ -780,18 +782,36 @@ export default function Physio() {
      Supabase se taaza check (dusre tab / dusre doctor ne abhi book kiya ho to bhi pakda jaye),
      aur "busy" se double-click wali dusri request bhi ruk jaati hai. */
   const busySlots = React.useRef(new Set<string>());
+  /* Mobile number se check — same number ki koi bhi patient entry (duplicate bhi)
+     same date + time par do baar book nahi hogi. */
+  const mob = (v?: string | null) => (v || "").replace(/\D/g, "").slice(-10);
+  const sameMobileIds = async (pid: string) => {
+    const { data: me } = await supabase.from("physio_patients").select("phone").eq("id", pid).maybeSingle();
+    const ph = mob((me as { phone: string | null } | null)?.phone ?? pat(pid)?.phone);
+    if (ph.length !== 10) return [pid];
+    const { data } = await supabase.from("physio_patients").select("id").like("phone", `%${ph}`);
+    return [...new Set([pid, ...(((data as { id: string }[]) || []).map((r) => r.id))])];
+  };
   const slotTaken = async (pid: string, date: string, time: string, exceptId?: string) => {
-    const { data } = await supabase.from("physio_sessions").select("*").eq("patient_id", pid).eq("session_date", date);
-    const rows = ((data as Session[]) || liveS.filter((x) => x.patient_id === pid && x.session_date === date));
+    const ids = await sameMobileIds(pid);
+    const { data, error } = await supabase.from("physio_sessions").select("*")
+      .in("patient_id", ids).eq("session_date", date);
+    const rows = error
+      ? liveS.filter((x) => ids.includes(x.patient_id) && x.session_date === date)
+      : ((data as Session[]) || []);
     return rows.find((x) => x.status !== "cancelled" && x.id !== exceptId && hhmm(x.session_time) === hhmm(time));
   };
-  const takenMsg = (date: string, time: string) => `Already booked for ${nice(date)} at ${hhmm(time)} — pick another time`;
+  const takenMsg = (date: string, time: string, hit?: Session) => {
+    const who = hit ? pat(hit.patient_id)?.name : "";
+    return `${who ? `${who} (same mobile)` : "Already booked"} · ${nice(date)} ${hhmm(time)} — pick another time`;
+  };
   // Book karne se pehle: slot khali hai? Haan to lock lagao. Baad mein unlock zaroor karo.
   const lockSlot = async (pid: string, date: string, time: string, exceptId?: string) => {
-    const k = `${pid}|${date}|${hhmm(time)}`;
+    const k = `${mob(pat(pid)?.phone) || pid}|${date}|${hhmm(time)}`;   // lock bhi mobile se
     if (busySlots.current.has(k)) return null;                 // wahi slot abhi book ho raha hai
     busySlots.current.add(k);
-    if (await slotTaken(pid, date, time, exceptId)) { busySlots.current.delete(k); toast(takenMsg(date, time)); return null; }
+    const hit = await slotTaken(pid, date, time, exceptId);
+    if (hit) { busySlots.current.delete(k); toast(takenMsg(date, time, hit)); return null; }
     return () => busySlots.current.delete(k);
   };
 
@@ -1027,7 +1047,8 @@ export default function Physio() {
       if (!date || !time) return toast("Pick a date and time");
       if (same) return toast("Pick a different date or time");
       if (!why) return toast("Select a reason");
-      if (await slotTaken(s.patient_id, date, time, s.id)) return toast(takenMsg(date, time));
+      const hit = await slotTaken(s.patient_id, date, time, s.id);
+      if (hit) return toast(takenMsg(date, time, hit));
       // Purana note rakhte hain, uske aage naya — poora trail dikh jaye.
       const line = `${nice(s.session_date)} ${hhmm(s.session_time)} → ${nice(date)} ${time} · ${why}${note.trim() ? `: ${note.trim()}` : ""}`;
       const ok = await updSession(
@@ -1279,7 +1300,10 @@ export default function Physio() {
         .eq("id", pid);
       if (error) return toast("Could not start treatment");
       // Lead pehle se isi date + time par booked ho to wahi session chalegi — duplicate nahi
-      if (!(await slotTaken(pid, date, time)))
+      // Same mobile ki dusri entry ka us slot par session ho to bata do (apna lead session ho to wahi chalegi)
+      const hit = await slotTaken(pid, date, time);
+      if (hit && hit.patient_id !== pid) toast(takenMsg(date, time, hit));
+      if (!hit)
         await supabase.from("physio_sessions").insert({ patient_id: pid, doctor_id: did, session_date: date, session_time: time, seq: 1, place });
       await load();
       toast(`Ongoing with ${doc(did)?.name} · ${routineLabel(routine)}`);
@@ -1383,9 +1407,13 @@ export default function Physio() {
       if (!date || !time) return toast("Pick a date and time");
       const unlock = await lockSlot(p.id, date, time);
       if (!unlock) return;
-      try { await supabase.from("physio_sessions").insert({
-        patient_id: p.id, doctor_id: p.doctor_id, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
-      }); } finally { unlock(); }
+      let insErr: { code?: string } | null = null;
+      try {
+        ({ error: insErr } = await supabase.from("physio_sessions").insert({
+          patient_id: p.id, doctor_id: p.doctor_id, session_date: date, session_time: time, seq: sessOf(p.id).length + 1, place,
+        }));
+      } finally { unlock(); }
+      if (insErr) return toast(insErr.code === "23505" ? takenMsg(date, time) : "Could not save");
       const skips = (p.skips || []).filter((s) => s.date !== date);
       const fu = note ? [...(p.follow_ups || []), { date: T, note: `Coming ${nice(date)} ${time} — ${note}` }].slice(-20) : p.follow_ups || [];
       await supabase.from("physio_patients").update({ skips, follow_ups: fu, usual_time: time }).eq("id", p.id);
