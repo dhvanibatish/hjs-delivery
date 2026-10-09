@@ -1294,34 +1294,36 @@ export default function Physio() {
     );
   };
 
-  /* Patient ko hamesha ke liye hatana — sirf admin ke paas */
-  const DeletePatientDlg = ({ p }: { p: Patient }) => {
+  /* Ek session hamesha ke liye hatana — sirf admin ke paas (patient delete nahi hota) */
+  const DeleteSessionDlg = ({ s }: { s: Session }) => {
     const [sure, setSure] = useState(false);
-    const mine = sessOf(p.id);
+    const p = pat(s.patient_id);
+    const d = doc(s.doctor_id);
     const del = async () => {
-      if (!sure) return toast("Pehle tick karo");
-      if (mine.length) {
-        const ok1 = await run(() => supabase.from("physio_sessions").delete().eq("patient_id", p.id));
-        if (!ok1) return;
-      }
-      const ok = await run(() => supabase.from("physio_patients").delete().eq("id", p.id), "Patient deleted");
-      if (ok) { close(); setView("leads"); }
+      if (!sure) return toast("Tick the box first");
+      const ok = await run(() => supabase.from("physio_sessions").delete().eq("id", s.id), "Session deleted");
+      if (ok) close();
     };
     return (
-      <Modal title={`Delete patient · ${p.name}`}>
-        <p className="hint" style={{ marginBottom: 10 }}>
-          Yeh patient aur iske <b>{mine.length}</b> session hamesha ke liye hat jayenge — wapas nahi aayenge,
-          aur reports me bhi nahi ginne jayenge. Sirf galti se bani ya duplicate entry ke liye use karo.
-          Treatment band karna ho to &quot;Cancel patient&quot; ya &quot;End treatment&quot; behtar hai.
+      <Modal title={`Delete session · ${p?.name || ""}`}>
+        <div className="drow">
+          <b>{nice(s.session_date)}</b>
+          <span className="hint">{hhmm(s.session_time)}</span>
+          {d && <span className="pill">{d.name}</span>}
+          <span className={`pill ${s.status}`}>{s.status}</span>
+        </div>
+        <p className="hint" style={{ margin: "10px 0" }}>
+          This session will be removed permanently and will no longer count in the doctor&apos;s or patient&apos;s
+          session totals or reports. Use it only for a session entered by mistake or twice. The patient stays.
         </p>
         <label className="drow" style={{ cursor: "pointer" }}>
           <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
-          <span>Haan, mujhe pata hai — permanently delete karo</span>
+          <span>Yes, delete this session permanently</span>
         </label>
         <div className="end">
           <button className="btn" onClick={close}>Close</button>
           <button className="btn pri" style={{ background: "var(--red)", borderColor: "var(--red)" }}
-            onClick={del}>Delete permanently</button>
+            disabled={!sure} onClick={del}>Delete session</button>
         </div>
       </Modal>
     );
@@ -2073,7 +2075,7 @@ export default function Physio() {
     );
   };
 
-  const SList = ({ arr, showDate, showDoctor }: { arr: Session[]; showDate?: boolean; showDoctor?: boolean }) => {
+  const SList = ({ arr, showDate, showDoctor, canDelete }: { arr: Session[]; showDate?: boolean; showDoctor?: boolean; canDelete?: boolean }) => {
     if (!arr.length) return <div className="hint" style={{ padding: "6px 2px" }}>Nothing here</div>;
     return (
       <>
@@ -2097,6 +2099,9 @@ export default function Physio() {
                 </>
               ) : (
                 <span className="pill completed">Done ✓</span>
+              )}
+              {canDelete && isAdmin && (
+                <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>
               )}
             </div>
           );
@@ -3501,13 +3506,9 @@ export default function Physio() {
           {(isAdmin || isManager) && (
             <button className="btn ghost" onClick={() => setDlg(<MergePatientDlg p={p} />)}>Merge duplicate</button>
           )}
-          {/* Delete sirf admin ko — physio admin aur doctor ke paas nahi */}
-          {isAdmin && (
-            <button className="btn ghost danger" onClick={() => setDlg(<DeletePatientDlg p={p} />)}>Delete patient</button>
-          )}
         </div>
         <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>Upcoming sessions</h2>
-        <div className="panel"><SList arr={next} showDate showDoctor /></div>
+        <div className="panel"><SList arr={next} showDate showDoctor canDelete /></div>
         <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>Session history</h2>
         <div className="panel">
           {past.length ? past.map((s) => (
@@ -3518,6 +3519,8 @@ export default function Physio() {
               <span className={`pill ${isHome(s) ? "home" : ""}`}>{placeLabel(s.place)}</span>
               <span className={`pill ${s.status}`}>{s.status === "scheduled" ? "missed / pending" : s.status}</span>
               {s.status === "scheduled" && <button className="btn sm ghost" onClick={() => markSession(s, "completed")}>Mark done</button>}
+              {/* Session delete sirf admin ko */}
+              {isAdmin && <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>}
               {!!(s.therapies || []).length && (
                 <span className="thl">{(s.therapies || []).join(" · ")}{s.therapy_note ? ` — ${s.therapy_note}` : ""}</span>
               )}
