@@ -1294,7 +1294,7 @@ export default function Physio() {
     );
   };
 
-  /* Ek session hamesha ke liye hatana — sirf admin ke paas (patient delete nahi hota) */
+  /* Ek session hamesha ke liye hatana — admin aur physio admin ke paas (patient delete nahi hota) */
   const DeleteSessionDlg = ({ s }: { s: Session }) => {
     const [sure, setSure] = useState(false);
     const p = pat(s.patient_id);
@@ -2100,7 +2100,7 @@ export default function Physio() {
               ) : (
                 <span className="pill completed">Done ✓</span>
               )}
-              {canDelete && isAdmin && (
+              {canDelete && (isAdmin || isManager) && (
                 <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>
               )}
             </div>
@@ -3519,8 +3519,8 @@ export default function Physio() {
               <span className={`pill ${isHome(s) ? "home" : ""}`}>{placeLabel(s.place)}</span>
               <span className={`pill ${s.status}`}>{s.status === "scheduled" ? "missed / pending" : s.status}</span>
               {s.status === "scheduled" && <button className="btn sm ghost" onClick={() => markSession(s, "completed")}>Mark done</button>}
-              {/* Session delete sirf admin ko */}
-              {isAdmin && <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>}
+              {/* Session delete — admin aur physio admin dono */}
+              {(isAdmin || isManager) && <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>}
               {!!(s.therapies || []).length && (
                 <span className="thl">{(s.therapies || []).join(" · ")}{s.therapy_note ? ` — ${s.therapy_note}` : ""}</span>
               )}
