@@ -206,6 +206,19 @@ const CSS = `
 .hjsp .fbcell { display:flex; flex-direction:column; align-items:flex-start; gap:6px; width:100%; }
 .hjsp .fbdone { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
 .hjsp .fbsel { width:100%; }
+/* Feedback calls — poori table screen me fit, sideways scroll nahi */
+.hjsp table.fbtbl { table-layout:fixed; }
+.hjsp table.fbtbl td { white-space:normal; overflow-wrap:anywhere; }
+.hjsp table.fbtbl th:nth-child(1) { width:22%; } .hjsp table.fbtbl th:nth-child(2) { width:24%; }
+.hjsp table.fbtbl th:nth-child(3) { width:16%; } .hjsp table.fbtbl th:nth-child(4) { width:38%; }
+.hjsp table.fbtbl td:first-child { width:auto; min-width:0; max-width:none; }
+.hjsp .fbbtns { display:flex; gap:6px; flex-wrap:wrap; }
+@media (max-width:760px) {
+  .hjsp table.fbtbl, .hjsp table.fbtbl tbody, .hjsp table.fbtbl tr, .hjsp table.fbtbl td { display:block; width:100% !important; }
+  .hjsp table.fbtbl thead { display:none; }
+  .hjsp table.fbtbl td { border-bottom:none; padding:6px 12px; position:static; }
+  .hjsp table.fbtbl tr { border-bottom:1px solid var(--line); padding:6px 0; }
+}
 .hjsp .fbtxt { white-space:pre-wrap; }
 .hjsp .fbt { display:inline-block; padding:3px 10px; border-radius:999px; font-size:13px; font-weight:600; }
 .hjsp .fbt.good { background:var(--green-soft); color:var(--green); }
@@ -2627,9 +2640,9 @@ export default function Physio() {
           <div className="stat"><span className="hint">Nothing in this filter.</span></div>
         ) : (
           <div className="tbl">
-            <table>
+            <table className="fbtbl">
               <thead>
-                <tr><th>Patient</th><th>Session</th><th>Doctor</th><th>How was the session?</th><th /></tr>
+                <tr><th>Patient</th><th>Session</th><th>Doctor</th><th>How was the session?</th></tr>
               </thead>
               <tbody>
                 {list.map(({ p, ss, f, fp, st }) => {
@@ -2650,7 +2663,7 @@ export default function Physio() {
                         {!!th.length && <div className="hint">{th.join(" · ")}</div>}
                       </td>
                       <td>{docs || "—"}</td>
-                      <td style={{ minWidth: 300 }}><div className="fbcell">
+                      <td className="fbcol"><div className="fbcell">
                         {st === "taken" && (
                           <div className="fbdone">
                             <span className={`fbt ${fbTone(fp!.type)}`}>{fp!.type || "Feedback taken"}</span>
@@ -2670,17 +2683,13 @@ export default function Physio() {
                             <textarea id={`fbr-${p.id}`} className="fbbox" rows={2} placeholder="Remarks * — what did the patient say?"
                               value={fbText[p.id] || ""}
                               onChange={(e) => { const v = e.target.value; setFbText((m) => ({ ...m, [p.id]: v })); }} />
+                            <div className="fbbtns">
+                              <button className="btn sm pri" onClick={() => saveFb(p, D, fbPick[p.id] || "", fbText[p.id] || "")}>Save</button>
+                              <button className="btn sm ghost" onClick={() => saveFb(p, D, "No answer", "")}>No answer</button>
+                            </div>
                           </>
                         )}
                       </div></td>
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        {st !== "taken" && (
-                          <>
-                            <button className="btn sm pri" onClick={() => saveFb(p, D, fbPick[p.id] || "", fbText[p.id] || "")}>Save</button>{" "}
-                            <button className="btn sm ghost" onClick={() => saveFb(p, D, "No answer", "")}>No answer</button>
-                          </>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
