@@ -2710,6 +2710,11 @@ function DashboardInner({ deliveries, onOpen }) {
         picked: g.list.filter(metric.picked).length,
         nextN: g.list.filter((x) => inNext(x, upDays)).length,
         next7: g.list.filter((x) => inNext(x, upDays2)).length,
+        // location-wise: is item ki entries kis store se kitni
+        byStore: DASH_STORES.map((st) => ({
+          st,
+          n: g.list.filter((x) => x.branch === st).length,
+        })).filter((b) => b.n > 0),
       }))
       .sort((a, b) => b.total - a.total);
     const q = itemQ.trim().toLowerCase();
@@ -2834,7 +2839,7 @@ function DashboardInner({ deliveries, onOpen }) {
             value={store}
             onChange={(e) => {
               setStore(e.target.value);
-              setSel({ kind: 'all', store: null });
+              setSel(null);
             }}
           >
             <option value="ALL">All stores</option>
@@ -2868,7 +2873,7 @@ function DashboardInner({ deliveries, onOpen }) {
 
       {view === 'store' ? (
       <div className="dash-block">
-        <div className="dash-block-h">Store-wise · {rangeLabel}</div>
+        <div className="dash-block-h">Store-wise{store !== 'ALL' ? ` · ${branchLabel(store)}` : ' · All stores'} · {rangeLabel}</div>
         <div className="dash-table-wrap">
           <table className="dash-table">
             <thead>
@@ -2929,7 +2934,7 @@ function DashboardInner({ deliveries, onOpen }) {
       ) : (
       <div className="dash-block">
         <div className="dash-block-h" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-          <span>Item-wise · {rangeLabel}</span>
+          <span>Item-wise{store !== 'ALL' ? ` · ${branchLabel(store)}` : ' · All stores'} · {rangeLabel}</span>
           <span className="sales-search" style={{ maxWidth: 280, minWidth: 180 }}>
             <Search size={15} color={T.inkSoft} />
             <input
@@ -2940,10 +2945,11 @@ function DashboardInner({ deliveries, onOpen }) {
           </span>
         </div>
         <div className="dash-table-wrap">
-          <table className="dash-table item-table">
+          <table className={store === 'ALL' ? 'dash-table item-table with-stores' : 'dash-table item-table'}>
             <thead>
               <tr>
                 <th>Item</th>
+                {store === 'ALL' && <th>Stores</th>}
                 <th>Total</th>
                 <th>Pending</th>
                 <th>Picked Up</th>
@@ -2976,12 +2982,28 @@ function DashboardInner({ deliveries, onOpen }) {
             <tbody>
               {itemRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="dash-empty">Is duration mein koi entry nahi</td>
+                  <td colSpan={store === 'ALL' ? 7 : 6} className="dash-empty">Is duration mein koi entry nahi</td>
                 </tr>
               ) : (
                 itemRows.map((it) => (
                   <tr key={it.name}>
                     <td className="dash-store">{it.name}</td>
+                    {store === 'ALL' && (
+                      <td style={{ textAlign: 'left', whiteSpace: 'normal' }}>
+                        <div className="item-stores">
+                          {it.byStore.map((b) => (
+                            <button
+                              key={b.st}
+                              className="item-store-chip"
+                              title={`${branchLabel(b.st)} — click karke list dekho`}
+                              onClick={() => setSel({ kind: 'all', item: it.name, store: b.st })}
+                            >
+                              {b.st} <b>{b.n}</b>
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    )}
                     <td className="dash-td-click" onClick={() => setSel({ kind: 'all', item: it.name })}>
                       {it.total}
                     </td>
@@ -8353,7 +8375,12 @@ function StyleTag() {
       .item-table { table-layout: auto; min-width: 640px; }
       .item-table th:first-child, .item-table td:first-child { min-width: 220px; max-width: 340px; white-space: normal; }
       .item-table th:not(:first-child), .item-table td:not(:first-child) { text-align: center; width: 96px; min-width: 96px; }
-      .item-table th:nth-child(5), .item-table th:nth-child(6), .item-table td:nth-child(5), .item-table td:nth-child(6) { width: 120px; min-width: 120px; }
+      .item-table th:nth-last-child(-n+2), .item-table td:nth-last-child(-n+2) { width: 120px; min-width: 120px; }
+      .item-table.with-stores th:nth-child(2), .item-table.with-stores td:nth-child(2) { width: auto; min-width: 200px; max-width: 320px; text-align: left; }
+      .item-stores { display: flex; flex-wrap: wrap; gap: 5px; }
+      .item-store-chip { border: 1px solid ${T.line}; background: ${T.cream}; border-radius: 7px; padding: 3px 7px; font-size: 11px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .item-store-chip b { color: ${T.green}; font-weight: 800; margin-left: 2px; }
+      .item-store-chip:hover { background: ${T.mint}; border-color: ${T.green}; }
       .col-days { border: 1px solid ${T.line}; background: #fff; border-radius: 8px; padding: 5px 6px; font-size: 10.5px; font-weight: 700; font-family: inherit; color: ${T.green}; cursor: pointer; text-transform: none; letter-spacing: 0; max-width: 110px; }
       .col-days:focus { outline: none; border-color: ${T.green}; }
       .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
