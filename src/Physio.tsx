@@ -33,10 +33,23 @@ type Doctor = { id: string; name: string; active: boolean };
    bas do cheezein admin ke paas rehti hain: session count haath se theek karna
    aur kisi doctor ka dashboard uski tarah kholna.
    PIN code mein fixed hain — app se koi (admin bhi) badal nahi sakta. Badalna ho to yahin badlo. */
-type Who = { role: "admin"; pin: string } | { role: "manager"; pin: string } | { role: "doctor"; id: string; pin: string };
+type Who = { role: "admin"; pin: string } | { role: "manager"; pin: string } | { role: "feedback"; pin: string }
+  | { role: "doctor"; id: string; pin: string };
 const WHO_KEY = "hjs-physio-who";
 const ADMIN_PIN = "9999";
 const MANAGER_PIN = "0000";   // physio admin
+const FEEDBACK_PIN = "1212";  // feedback desk — sirf Feedback calls page
+/* Feedback call ka dropdown — data filter karne ke liye. "bad" wale red dikhte hain */
+const FB_TYPES: { v: string; tone: "good" | "mid" | "bad" }[] = [
+  { v: "Very happy", tone: "good" },
+  { v: "Happy", tone: "good" },
+  { v: "Okay", tone: "mid" },
+  { v: "Not happy", tone: "bad" },
+  { v: "Pain not reducing", tone: "bad" },
+  { v: "Wants to stop treatment", tone: "bad" },
+];
+// purane save hue "Complaint …" bhi red hi dikhen
+const fbTone = (t: string) => FB_TYPES.find((x) => x.v === t)?.tone || (t.startsWith("Complaint") ? "bad" : "mid");
 // Naam ka hissa → PIN (naam "Dr. Sana" ho ya "Sana", dono chalega)
 const DOC_PINS: [string, string][] = [
   ["sana", "1111"], ["sabrina", "2222"], ["arshnoor", "3333"], ["aditi", "4444"],
@@ -189,6 +202,16 @@ const dueOnBase = (p: Patient, date: string, last?: string) => {
 
 /* ========================= styles ========================= */
 const CSS = `
+.hjsp .fbbox { width:100%; min-height:52px; resize:vertical; font-size:14px; }
+.hjsp .fbcell { display:flex; flex-direction:column; align-items:flex-start; gap:6px; width:100%; }
+.hjsp .fbdone { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.hjsp .fbsel { width:100%; }
+.hjsp .fbtxt { white-space:pre-wrap; }
+.hjsp .fbt { display:inline-block; padding:3px 10px; border-radius:999px; font-size:13px; font-weight:600; }
+.hjsp .fbt.good { background:var(--green-soft); color:var(--green); }
+.hjsp .fbt.mid { background:var(--amber-soft); color:var(--amber); }
+.hjsp .fbt.bad { background:var(--red-soft); color:var(--red); }
+.hjsp .fbbar.good { color:var(--green); } .hjsp .fbbar.mid { color:var(--amber); } .hjsp .fbbar.bad { color:var(--red); }
 .hjsp, .hjsp * { box-sizing: border-box; margin: 0; padding: 0; }
 .hjsp {
   --bg:#EDF2F0; --panel:#fff; --ink:#16302B; --muted:#5E736E; --line:#D5E0DC;
@@ -480,8 +503,8 @@ export default function Physio() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "therapy" | "patient" | "doctor"
-    | "mytoday" | "myongoing" | "myreport">(() => (readWho()?.role === "doctor" ? "mytoday" : "today"));
+  const [view, setView] = useState<"leads" | "today" | "ongoing" | "board" | "doctors" | "cal" | "roster" | "therapy" | "patient" | "doctor" | "feedback"
+    | "mytoday" | "myongoing" | "myreport">(() => (readWho()?.role === "doctor" ? "mytoday" : readWho()?.role === "feedback" ? "feedback" : "today"));
 
   const [backTo, setBackTo] = useState<typeof view | "">("");   // patient/doctor page se Back kahan jaye
 
@@ -525,13 +548,20 @@ export default function Physio() {
   }, []);
   const [lDay, setLDay] = useState(todayS());   // Sessions board kis din ka
   const [oDay, setODay] = useState(todayS());   // Ongoing patients kis din ka
+  // Feedback calls — kal jinka session hua unko call karke poochna "session kaisa tha"
+  const [fDay, setFDay] = useState(addDays(todayS(), -1));
+  const [fFilt, setFFilt] = useState<"all" | "pending" | "taken" | "noans">("pending");
+  const [fbText, setFbText] = useState<Record<string, string>>({});
+  const [fbPick, setFbPick] = useState<Record<string, string>>({});   // har patient ka chuna hua dropdown
+  const [rfType, setRfType] = useState("");   // Reports › Feedback — type filter
+  const [rfDoc, setRfDoc] = useState("");     // Reports › Feedback — doctor filter
   const [bDay, setBDay] = useState(todayS());   // Day view kis din ka
   // Therapy report: kaunsi therapy kitni chali
   const [myMonth, setMyMonth] = useState(todayS());   // doctor ki apni report — is mahine ki koi bhi tareekh = woh mahina
   const [myPvRow, setMyPvRow] = useState("");   // My report — kaunsi row ki list khuli
   const [thFrom, setThFrom] = useState(todayS());   // Reports khulte hi sirf aaj ka
   const [thTo, setThTo] = useState(todayS());
-  const [repTab, setRepTab] = useState<"therapy" | "doctor" | "leads">("therapy");
+  const [repTab, setRepTab] = useState<"therapy" | "doctor" | "leads" | "feedback">("therapy");
   const [repSel, setRepSel] = useState("");   // Reports — kaunsa number khula ("doctorId|column")
   const [dFilt, setDFilt] = useState("all");
   const [dDoc, setDDoc] = useState("");
@@ -699,6 +729,7 @@ export default function Physio() {
   /* ---------- who is looking ---------- */
   const isAdmin = who?.role === "admin";
   const isManager = who?.role === "manager";
+  const isFeedback = who?.role === "feedback";   // feedback desk — sirf Feedback calls
   // Doctor login ho to wahi doctor; admin preview kar raha ho to woh doctor
   const effDoc = who?.role === "doctor" ? who.id : asDoc;
 
@@ -707,6 +738,7 @@ export default function Physio() {
     if (loading || !who) return;
     const ok = who.role === "admin" ? who.pin === ADMIN_PIN
       : who.role === "manager" ? who.pin === MANAGER_PIN
+      : who.role === "feedback" ? who.pin === FEEDBACK_PIN
       : doctors.some((d) => d.id === who.id && d.active !== false && !!pinOf(d) && pinOf(d) === who.pin);
     if (!ok) {
       setWho(null);
@@ -729,6 +761,11 @@ export default function Physio() {
       if (pinIn !== MANAGER_PIN) { setPinIn(""); return toast("Wrong PIN"); }
       setWho({ role: "manager", pin: pinIn });
       setView("today");
+    } else if (loginAs === "feedback") {
+      if (pinIn !== FEEDBACK_PIN) { setPinIn(""); return toast("Wrong PIN"); }
+      setWho({ role: "feedback", pin: pinIn });
+      setFDay(addDays(todayS(), -1)); setFFilt("pending");
+      setView("feedback");
     } else {
       const d = doctors.find((x) => x.id === loginAs);
       if (!pinOf(d)) { setPinIn(""); return toast("No PIN for this name — ask the admin"); }
@@ -2527,6 +2564,134 @@ export default function Physio() {
     );
   };
 
+  /* ========================= feedback calls =========================
+     Kal (ya chuni hui date) jinka session complete hua — unko call karo, poocho session kaisa tha,
+     box me likh ke Save. Feedback patient ki follow-up history me jata hai (koi naya column nahi). */
+  const fbKey = (d: string) => `Feedback (${nice(d)} session)`;
+  const fbOf = (p: Patient, d: string) =>
+    [...(p.follow_ups || [])].reverse().find((f) => f.note.startsWith(fbKey(d)));
+  // note = "Feedback (Fri, 9 Oct session) — [Happy] remarks"  → { type, text }
+  const fbParse = (note: string, d: string) => {
+    const body = note.slice(fbKey(d).length).replace(/^ — /, "");
+    const m = /^\[(.+?)\]\s*(.*)$/s.exec(body);
+    return m ? { type: m[1], text: m[2] } : { type: body === "No answer" ? "No answer" : "", text: body === "No answer" ? "" : body };
+  };
+  const saveFb = async (p: Patient, d: string, type: string, text: string) => {
+    const t = text.trim();
+    if (type !== "No answer" && !type) return toast("Pick how the session was from the dropdown");
+    if (type !== "No answer" && !t) return toast("Write the remarks — what the patient said");
+    const note = type === "No answer" ? `${fbKey(d)} — No answer` : `${fbKey(d)} — [${type}]${t ? ` ${t}` : ""}`;
+    const fu = [...(p.follow_ups || []), { date: T, note }].slice(-20);
+    const ok = await updPatient(p.id, { follow_ups: fu } as Partial<Patient>, type === "No answer" ? "Marked no answer" : "Feedback saved");
+    if (ok) {
+      setFbText((m) => { const n = { ...m }; delete n[p.id]; return n; });
+      setFbPick((m) => { const n = { ...m }; delete n[p.id]; return n; });
+    }
+  };
+
+  const FeedbackView = () => {
+    const D = fDay;
+    // us din ki completed sessions — patient-wise ek row
+    const byP = new Map<string, Session[]>();
+    liveS.filter((x) => x.session_date === D && x.status === "completed").forEach((x) => {
+      byP.set(x.patient_id, [...(byP.get(x.patient_id) || []), x]);
+    });
+    const rows = [...byP.entries()]
+      .map(([pid, ss]) => ({ p: pat(pid), ss: ss.sort((a, b) => a.session_time.localeCompare(b.session_time)) }))
+      .filter((r): r is { p: Patient; ss: Session[] } => !!r.p)
+      .map((r) => {
+        const f = fbOf(r.p, D);
+        const fp = f ? fbParse(f.note, D) : null;
+        const st: "pending" | "taken" | "noans" = !f ? "pending" : fp!.type === "No answer" ? "noans" : "taken";
+        return { ...r, f, fp, st };
+      });
+    const cnt = (k: "pending" | "taken" | "noans") => rows.filter((r) => r.st === k).length;
+    const list = (fFilt === "all" ? rows : rows.filter((r) => r.st === fFilt)).slice().sort((a, b) => a.ss[0].session_time.localeCompare(b.ss[0].session_time));
+    const word = D === addDays(T, -1) ? "yesterday" : D === T ? "today" : nice(D);
+    // feedback desk login ke paas patient page nahi — naam sirf text
+    const nameOf = (p: Patient) => isFeedback ? <b>{p.name}</b> : <button className="lnk" onClick={() => openPat(p.id)}>{p.name}</button>;
+
+    return (
+      <>
+        <DayNav d={D} set={setFDay} label="Feedback calls"
+          extra={D !== addDays(T, -1) && <button className="btn sm" onClick={() => setFDay(addDays(T, -1))}>Yesterday</button>} />
+        <div className="stats">
+          <Stat n={rows.length} l={`Had a session ${word}`} on={fFilt === "all"} onClick={() => { setFFilt("all"); }} />
+          <Stat n={cnt("pending")} l="To call" on={fFilt === "pending"} onClick={() => { setFFilt("pending"); }} />
+          <Stat n={cnt("taken")} l="Feedback taken" on={fFilt === "taken"} onClick={() => { setFFilt("taken"); }} />
+          <Stat n={cnt("noans")} l="No answer — call again" on={fFilt === "noans"} onClick={() => { setFFilt("noans"); }} />
+        </div>
+        {!rows.length ? (
+          <div className="stat"><span className="hint">No completed sessions on {nice(D)}.</span></div>
+        ) : !list.length ? (
+          <div className="stat"><span className="hint">Nothing in this filter.</span></div>
+        ) : (
+          <div className="tbl">
+            <table>
+              <thead>
+                <tr><th>Patient</th><th>Session</th><th>Doctor</th><th>How was the session?</th><th /></tr>
+              </thead>
+              <tbody>
+                {list.map(({ p, ss, f, fp, st }) => {
+                  const docs = [...new Set(ss.map((x) => doc(x.doctor_id)?.name).filter(Boolean))].join(", ");
+                  const th = [...new Set(ss.flatMap((x) => x.therapies || []))];
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        {nameOf(p)}
+                        <div className="hint">
+                          {p.phone ? <a href={`tel:${p.phone}`}>📞 {p.phone}</a> : "no number"}
+                          {p.ailment ? ` · ${p.ailment}` : ""}
+                        </div>
+                      </td>
+                      <td>
+                        <b>{ss.map((x) => hhmm(x.session_time)).join(", ")}</b>
+                        {ss.some(isHome) && <span className="pill home" style={{ marginLeft: 6 }}>Home</span>}
+                        {!!th.length && <div className="hint">{th.join(" · ")}</div>}
+                      </td>
+                      <td>{docs || "—"}</td>
+                      <td style={{ minWidth: 300 }}><div className="fbcell">
+                        {st === "taken" && (
+                          <div className="fbdone">
+                            <span className={`fbt ${fbTone(fp!.type)}`}>{fp!.type || "Feedback taken"}</span>
+                            {!!fp!.text && <div className="fbtxt">{fp!.text}</div>}
+                            <div className="hint">Saved {nice(f!.date)}</div>
+                          </div>
+                        )}
+                        {st === "noans" && <span className="tag fu">No answer · {nice(f!.date)}</span>}
+                        {st !== "taken" && (
+                          <>
+                            <select id={`fbt-${p.id}`} aria-label="How was the session" className="fbsel"
+                              value={fbPick[p.id] || ""}
+                              onChange={(e) => { const v = e.target.value; setFbPick((m) => ({ ...m, [p.id]: v })); }}>
+                              <option value="">How was the session? *</option>
+                              {FB_TYPES.map((t) => <option key={t.v} value={t.v}>{t.v}</option>)}
+                            </select>
+                            <textarea id={`fbr-${p.id}`} className="fbbox" rows={2} placeholder="Remarks * — what did the patient say?"
+                              value={fbText[p.id] || ""}
+                              onChange={(e) => { const v = e.target.value; setFbText((m) => ({ ...m, [p.id]: v })); }} />
+                          </>
+                        )}
+                      </div></td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {st !== "taken" && (
+                          <>
+                            <button className="btn sm pri" onClick={() => saveFb(p, D, fbPick[p.id] || "", fbText[p.id] || "")}>Save</button>{" "}
+                            <button className="btn sm ghost" onClick={() => saveFb(p, D, "No answer", "")}>No answer</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const OngoingView = () => {
     const D = oDay;
     const word = D === T ? "today" : D === addDays(T, 1) ? "tomorrow" : nice(D);
@@ -3049,6 +3214,147 @@ export default function Physio() {
   };
 
   /* ---------- Reports: therapy kitni chali, aur doctor wise kaam ---------- */
+  /* Reports › Patient feedback — session date ke hisaab se (admin + physio admin).
+     Har patient-din ek call: feedback liya / no answer / abhi call nahi hua */
+  const FeedbackReport = (from: string, to: string) => {
+    const seen = new Map<string, { p: Patient; d: string; ss: Session[] }>();
+    liveS.filter((x) => x.status === "completed" && x.session_date >= from && x.session_date <= to).forEach((x) => {
+      const p = pat(x.patient_id);
+      if (!p) return;
+      const k = `${x.patient_id}|${x.session_date}`;
+      const r = seen.get(k) || { p, d: x.session_date, ss: [] };
+      r.ss.push(x);
+      seen.set(k, r);
+    });
+    const calls = [...seen.values()].map((r) => {
+      const f = fbOf(r.p, r.d);
+      const fp = f ? fbParse(f.note, r.d) : null;
+      const docId = r.ss[0].doctor_id;
+      return { ...r, f, fp, docId, st: !f ? "pending" : fp!.type === "No answer" ? "noans" : "taken" };
+    });
+    const taken = calls.filter((c) => c.st === "taken");
+    const tone = (c: (typeof calls)[number]) => fbTone(c.fp!.type);
+    const good = taken.filter((c) => tone(c) === "good").length;
+    const bad = taken.filter((c) => tone(c) === "bad").length;
+    const pc = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "—");
+
+    // type wise
+    const types = [...FB_TYPES.map((t) => t.v), ...new Set(taken.map((c) => c.fp!.type).filter((t) => !FB_TYPES.some((x) => x.v === t)))];
+    const byType = types.map((t) => [t, taken.filter((c) => c.fp!.type === t).length] as [string, number]).filter(([, n]) => n);
+    const topT = Math.max(1, ...byType.map(([, n]) => n));
+
+    // doctor wise
+    const docIds = [...new Set(calls.map((c) => c.docId || ""))];
+    const byDoc = docIds.map((id) => {
+      const mine = calls.filter((c) => (c.docId || "") === id);
+      const t = mine.filter((c) => c.st === "taken");
+      return {
+        id, name: doc(id)?.name || "No doctor", total: mine.length, taken: t.length,
+        good: t.filter((c) => tone(c) === "good").length,
+        mid: t.filter((c) => tone(c) === "mid").length,
+        bad: t.filter((c) => tone(c) === "bad").length,
+      };
+    }).sort((a, b) => b.taken - a.taken || a.name.localeCompare(b.name));
+
+    // list
+    let list = taken;
+    if (rfType === "__bad") list = list.filter((c) => tone(c) === "bad");
+    else if (rfType) list = list.filter((c) => c.fp!.type === rfType);
+    if (rfDoc) list = list.filter((c) => (c.docId || "") === rfDoc);
+    list = list.slice().sort((a, b) => b.d.localeCompare(a.d) || a.p.name.localeCompare(b.p.name));
+
+    return (
+      <>
+        <div className="stats">
+          <Stat n={calls.length} l="Calls to make" />
+          <Stat n={taken.length} l="Feedback taken" />
+          <Stat n={calls.filter((c) => c.st === "noans").length} l="No answer" />
+          <Stat n={calls.filter((c) => c.st === "pending").length} l="Not called yet" />
+          <StatT v={pc(good, taken.length)} l="Happy" />
+          <Stat n={bad} l="Unhappy" />
+        </div>
+        {!taken.length ? (
+          <div className="stat"><span className="hint">No feedback saved for sessions in this range yet.</span></div>
+        ) : (
+          <>
+            <h2 style={{ margin: "14px 0 8px", fontSize: 18 }}>How patients felt</h2>
+            <div className="tbl">
+              <table>
+                <thead><tr><th>Feedback</th><th className="ucell">Share</th><th>Patients</th><th>%</th></tr></thead>
+                <tbody>
+                  {byType.map(([t, n]) => (
+                    <tr key={t}>
+                      <td><span className={`fbt ${fbTone(t)}`}>{t}</span></td>
+                      <td className={`ucell fbbar ${fbTone(t)}`}>
+                        <div className="ubar"><i style={{ width: `${Math.max(3, (n / topT) * 100)}%` }} /></div>
+                      </td>
+                      <td className="unum"><b style={{ fontSize: 16 }}>{n}</b></td>
+                      <td className="unum hint">{pc(n, taken.length)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>Doctor wise</h2>
+            <div className="tbl">
+              <table>
+                <thead><tr><th>Doctor</th><th>Calls</th><th>Feedback taken</th><th>Happy</th><th>Okay</th><th>Unhappy</th><th>% happy</th></tr></thead>
+                <tbody>
+                  {byDoc.map((r) => (
+                    <tr key={r.id}>
+                      <td><b>{r.name}</b></td>
+                      <td className="unum">{r.total}</td>
+                      <td className="unum">{r.taken}</td>
+                      <td className="unum">{r.good}</td>
+                      <td className="unum">{r.mid}</td>
+                      <td className="unum">{r.bad ? <b style={{ color: "var(--red)" }}>{r.bad}</b> : 0}</td>
+                      <td className="unum"><b>{pc(r.good, r.taken)}</b></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h2 style={{ margin: "18px 0 8px", fontSize: 18 }}>All feedback</h2>
+            <div className="tools">
+              <select id="rf-type" aria-label="Filter by feedback" value={rfType} onChange={(e) => setRfType(e.target.value)}>
+                <option value="">All feedback types</option>
+                <option value="__bad">Unhappy only</option>
+                {byType.map(([t, n]) => <option key={t} value={t}>{t} ({n})</option>)}
+              </select>
+              <select id="rf-doc" aria-label="Filter by doctor" value={rfDoc} onChange={(e) => setRfDoc(e.target.value)}>
+                <option value="">All doctors</option>
+                {byDoc.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              {(rfType || rfDoc) && <button className="btn ghost" onClick={() => { setRfType(""); setRfDoc(""); }}>Clear filter</button>}
+              <span className="hint">{list.length} shown</span>
+            </div>
+            {!list.length ? <div className="stat"><span className="hint">Nothing in this filter.</span></div> : (
+              <div className="tbl">
+                <table>
+                  <thead><tr><th>Session</th><th>Patient</th><th>Doctor</th><th>Feedback</th><th>Remarks</th></tr></thead>
+                  <tbody>
+                    {list.map((c) => (
+                      <tr key={`${c.p.id}|${c.d}`}>
+                        <td style={{ whiteSpace: "nowrap" }}><b>{nice(c.d)}</b><div className="hint">called {nice(c.f!.date)}</div></td>
+                        <td><button className="lnk" onClick={() => openPat(c.p.id)}>{c.p.name}</button>
+                          <div className="hint">{c.p.phone || ""}</div></td>
+                        <td>{doc(c.docId)?.name || "—"}</td>
+                        <td><span className={`fbt ${tone(c)}`}>{c.fp!.type || "—"}</span></td>
+                        <td className="fbtxt" style={{ minWidth: 220 }}>{c.fp!.text || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
+
   const ReportsView = () => {
     const [from, to] = thFrom <= thTo ? [thFrom, thTo] : [thTo, thFrom];
     const done = liveS.filter((x) => x.status === "completed"
@@ -3072,7 +3378,8 @@ export default function Physio() {
       <>
         <div className="dayhead">
           <div className="d">
-            {repTab === "therapy" ? "Therapy use" : repTab === "doctor" ? "Doctor wise sessions" : "Patients & drop-outs"} ·{" "}
+            {repTab === "therapy" ? "Therapy use" : repTab === "doctor" ? "Doctor wise sessions"
+              : repTab === "feedback" ? "Patient feedback" : "Patients & drop-outs"} ·{" "}
             {from === to ? `${from === T ? "Today, " : ""}${nice(from)}` : `${nice(from)} — ${nice(to)}`}
           </div>
           {quick(1, "Today")}
@@ -3085,14 +3392,17 @@ export default function Physio() {
           <input type="date" className="btn sm" style={{ width: "auto" }} value={thTo}
             onChange={(e) => setThTo(e.target.value || T)} />
         </div>
-        <div className="seg" style={{ marginBottom: 10, maxWidth: 600 }}>
+        <div className="seg" style={{ marginBottom: 10, maxWidth: 780 }}>
           <button className={repTab === "therapy" ? "on" : ""} onClick={() => setRepTab("therapy")}>Therapy / product use</button>
           <button className={repTab === "doctor" ? "on" : ""}
             onClick={() => setRepTab("doctor")}>Doctor wise sessions</button>
           <button className={repTab === "leads" ? "on" : ""}
             onClick={() => setRepTab("leads")}>Patients &amp; drop-outs</button>
+          <button className={repTab === "feedback" ? "on" : ""}
+            onClick={() => setRepTab("feedback")}>Patient feedback</button>
         </div>
-        {repTab === "doctor" ? DoctorReport(from, to) : repTab === "leads" ? LeadsReport(from, to) : (
+        {repTab === "doctor" ? DoctorReport(from, to) : repTab === "leads" ? LeadsReport(from, to)
+          : repTab === "feedback" ? FeedbackReport(from, to) : (
           <>
         <div className="stats">
           <Stat n={done.length} l="Sessions completed" />
@@ -3976,6 +4286,7 @@ export default function Physio() {
           <h2 style={{ fontSize: 20, marginBottom: 4 }}>Who is logging in?</h2>
           <p className="hint" style={{ marginBottom: 12 }}>
             Doctors see only their own dashboard. Admin and the physio admin see every doctor.
+            The feedback desk sees only the feedback calls.
           </p>
           <div className="dpick" style={{ maxHeight: "none" }}>
             {/* Admin sabse upar */}
@@ -3984,6 +4295,9 @@ export default function Physio() {
             </button>
             <button className="dopt" onClick={() => { setLoginAs("manager"); setPinIn(""); }}>
               <b>Physio admin</b><span className="tag free">All doctors</span><span className="hint">›</span>
+            </button>
+            <button className="dopt" onClick={() => { setLoginAs("feedback"); setPinIn(""); }}>
+              <b>Feedback desk</b><span className="tag fu">Patient calls</span><span className="hint">›</span>
             </button>
             {activeDocs.map((d) => (
               <button key={d.id} className="dopt" onClick={() => { setLoginAs(d.id); setPinIn(""); }}>
@@ -3994,7 +4308,8 @@ export default function Physio() {
         </div>
       </div>
     );
-    const name = loginAs === "admin" ? "Admin" : loginAs === "manager" ? "Physio admin" : doc(loginAs)?.name || "";
+    const name = loginAs === "admin" ? "Admin" : loginAs === "manager" ? "Physio admin"
+      : loginAs === "feedback" ? "Feedback desk" : doc(loginAs)?.name || "";
     return (
       <div style={{ maxWidth: 380, margin: "6vh auto 0" }}>
         <div className="panel pinpage">
@@ -4026,6 +4341,7 @@ export default function Physio() {
         if (v === "leads") setLDay(todayS());
         if (v === "ongoing") setODay(todayS());
         if (v === "board") setBDay(todayS());
+        if (v === "feedback") { setFDay(addDays(todayS(), -1)); setFFilt("pending"); }
       }}>{label}</button>
   );
 
@@ -4080,6 +4396,12 @@ export default function Physio() {
             <div className="brand">HJS Physio Desk<small>Loading…</small></div>
           ) : !who ? (
             <div className="brand">HJS Physio Desk<small>Log in to continue</small></div>
+          ) : isFeedback ? (
+            <>
+              <div className="brand">Feedback desk<small>HJS Physio Desk · patient feedback calls</small></div>
+              <nav><button className="on">Feedback calls</button></nav>
+              <button className="btn" onClick={logout}>Log out</button>
+            </>
           ) : effDoc ? (
             <>
               <div className="brand">{me?.name || "Doctor"}<small>
@@ -4114,6 +4436,7 @@ export default function Physio() {
                 {tab("doctors", "Doctors")}
                 {tab("cal", "Calendar")}
                 {tab("roster", "Roaster")}
+                {tab("feedback", "Feedback calls")}
                 {/* Reports admin aur physio admin dono ko */}
                 {(isAdmin || isManager) && tab("therapy", "Reports")}
               </nav>
@@ -4129,6 +4452,7 @@ export default function Physio() {
       <main>
         {loading ? <div className="stat"><span className="hint">Loading…</span></div>
           : !who ? LoginView()
+          : isFeedback ? FeedbackView()
           : effDoc ? (
             dv === "myongoing" ? MyOngoingView()
               : dv === "myreport" ? MyReportView()
@@ -4142,6 +4466,7 @@ export default function Physio() {
           : view === "doctors" ? DoctorsView()
           : view === "cal" ? CalView()
           : view === "roster" ? RosterView()
+          : view === "feedback" ? FeedbackView()
           : view === "therapy" ? (isAdmin || isManager ? ReportsView() : TodayView())
           : view === "doctor" ? DoctorView()
           : view === "patient" ? PatientView()
