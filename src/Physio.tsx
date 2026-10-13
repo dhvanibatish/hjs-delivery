@@ -1379,6 +1379,64 @@ export default function Physio() {
     );
   };
 
+  /* Purani (ya koi bhi) session ka record theek karna — doctor, date, time, jagah.
+     Sirf isi ek session pe asar; patient ka doctor nahi badalta, reports me session naye doctor ke naam. */
+  const EditSessionDlg = ({ s }: { s: Session }) => {
+    const p = pat(s.patient_id);
+    const [did, setDid] = useState(s.doctor_id || "");
+    const [date, setDate] = useState(s.session_date);
+    const [time, setTime] = useState(hhmm(s.session_time) === "--" ? "10:00" : hhmm(s.session_time));
+    const [place, setPlace] = useState<Place>(s.place === "home" ? "home" : "clinic");
+    const [busy, setBusy] = useState(false);
+    // Doctor list me current doctor zaroor rahe, chahe ab active na ho
+    const cur = doc(s.doctor_id);
+    const list = cur && !activeDocs.some((d) => d.id === cur.id) ? [cur, ...activeDocs] : activeDocs;
+    const slotChanged = date !== s.session_date || time !== hhmm(s.session_time);
+    const changed = slotChanged || did !== (s.doctor_id || "") || place !== (s.place === "home" ? "home" : "clinic");
+    const save = async () => {
+      if (!did) return toast("Select a doctor");
+      if (!date || !time) return toast("Pick a date and time");
+      if (!changed) return toast("Nothing changed");
+      setBusy(true);
+      if (slotChanged) {
+        const hit = await slotTaken(s.patient_id, date, time, s.id);
+        if (hit) { setBusy(false); return toast(takenMsg(date, time, hit)); }
+      }
+      const ok = await updSession(s.id, { doctor_id: did, session_date: date, session_time: time, place }, "Session updated");
+      setBusy(false);
+      if (ok) close();
+    };
+    return (
+      <Modal title={`Edit session · ${p?.name || ""}`}>
+        <div className="drow">
+          <b>{nice(s.session_date)}</b>
+          <span className="hint">{hhmm(s.session_time)}</span>
+          {cur && <span className="pill">{cur.name}</span>}
+          <span className={`pill ${s.status}`}>{s.status}</span>
+        </div>
+        <Field label="Doctor who took this session">
+          <select value={did} onChange={(e) => setDid(e.target.value)}>
+            <option value="">— Select doctor —</option>
+            {list.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </Field>
+        <div className="row2">
+          <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          <Field label="Time"><input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+        </div>
+        <PlacePick v={place} on={setPlace} />
+        <p className="hint" style={{ margin: "10px 0" }}>
+          Only this session changes. The patient&apos;s main doctor stays the same, and this session will count
+          for the doctor selected here in reports.
+        </p>
+        <div className="end">
+          <button className="btn" onClick={close}>Close</button>
+          <button className="btn pri" disabled={!changed || busy} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </Modal>
+    );
+  };
+
   const OngoingDlg =({ p, fresh }: { p?: Patient; fresh?: boolean }) => {
     const [pick, setPick] = useState<Patient | undefined>(p);
     const [search, setSearch] = useState("");
@@ -3838,7 +3896,8 @@ export default function Physio() {
               <span className={`pill ${isHome(s) ? "home" : ""}`}>{placeLabel(s.place)}</span>
               <span className={`pill ${s.status}`}>{s.status === "scheduled" ? "missed / pending" : s.status}</span>
               {s.status === "scheduled" && <button className="btn sm ghost" onClick={() => markSession(s, "completed")}>Mark done</button>}
-              {/* Session delete — admin aur physio admin dono */}
+              {/* Session edit (doctor/date/time/jagah) + delete — admin aur physio admin dono */}
+              {(isAdmin || isManager) && <button className="btn sm ghost" onClick={() => setDlg(<EditSessionDlg s={s} />)}>Edit</button>}
               {(isAdmin || isManager) && <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>}
               {!!(s.therapies || []).length && (
                 <span className="thl">{(s.therapies || []).join(" · ")}{s.therapy_note ? ` — ${s.therapy_note}` : ""}</span>
