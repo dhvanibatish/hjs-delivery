@@ -907,6 +907,20 @@ function makeClosedEvent(flag, remarks, atStage) {
     ...actorStamp(),
   };
 }
+/* cancel ka kaaran: naya cancel_reason column, warna app_log ka aakhri
+   cancel event (jab log list ke saath aaya ho) */
+function cardCancelReason(d) {
+  const r = d && d._raw;
+  if (!r) return '';
+  if (r.cancel_reason) return String(r.cancel_reason);
+  const log = Array.isArray(r.app_log) ? r.app_log : [];
+  for (let i = log.length - 1; i >= 0; i--) {
+    const e = log[i];
+    if (e && e.stage === 'cancelled' && e.fields && e.fields.Remarks)
+      return String(e.fields.Remarks);
+  }
+  return '';
+}
 const existingLog = (d) =>
   d && d._raw && Array.isArray(d._raw.app_log) ? d._raw.app_log : [];
 
@@ -1721,6 +1735,9 @@ export default function App({
     const patch = {
       status: CLOSED_STATUS[flag],
       updated_at: new Date().toISOString(),
+      // cancel ka kaaran alag column mein bhi — taaki table / Analytics /
+      // n8n sync mein seedha mile, app_log ka JSON khodna na pade
+      ...(flag === 'cancelled' ? { cancel_reason: remarks || null } : {}),
       app_log: [
         ...(Array.isArray(baseLog) ? baseLog : existingLog(cur)),
         makeClosedEvent(flag, remarks, cur && cur.stage),
@@ -1808,7 +1825,9 @@ export default function App({
     // pehli stage ka dropdown: reschedule / cancel alag raaste
     if (toStage === 'talked' && mode === 'move') {
       if (fields.flow === 'cancelled')
-        return closeEntry(invoiceId, 'cancelled', fields.remarks);
+        // cancelOrder se — wo pehle app_log fetch karta hai (list _lite hoti hai),
+        // warna inline card se cancel karne pe purani timeline mit jaati thi
+        return cancelOrder(invoiceId, fields.remarks);
       if (fields.flow === 'resched')
         return rescheduleEntry(invoiceId, fields.remarks);
     }
@@ -5229,13 +5248,25 @@ function Card({ d, stage, onOpen, onMove, onCommit, onCancel }) {
         </div>
       )}
       {closed ? (
-        <div
-          className="card-done"
-          style={{ color: stage.color, background: stage.soft }}
-        >
-          {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
-          {stage.short}
-        </div>
+        <>
+          <div
+            className="card-done"
+            style={{ color: stage.color, background: stage.soft }}
+          >
+            {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
+            {stage.short}
+          </div>
+          {/* cancel ka kaaran card pe hi — drawer kholne ki zaroorat nahi */}
+          {cancelled && cardCancelReason(d) && (
+            <div
+              className="ellip"
+              title={cardCancelReason(d)}
+              style={{ fontSize: 11.5, marginTop: 4, color: stage.color, fontWeight: 600 }}
+            >
+              Kaaran: {cardCancelReason(d)}
+            </div>
+          )}
+        </>
       ) : next ? (
         <>
           <button
@@ -5518,7 +5549,9 @@ function Drawer({
     ? [...rawLog].reverse().find((e) => e && CLOSED[e.stage])
     : null;
   const closedFields = (closedEv && closedEv.fields) || {};
-  const closedReason = closedFields.Remarks || '';
+  // log abhi load nahi hua ho to bhi kaaran turant dikhe — column se
+  const closedReason =
+    closedFields.Remarks || (d._raw && d._raw.cancel_reason) || '';
   const closedAtStage = closedFields['Cancel at stage'] || '';
 
   return (
