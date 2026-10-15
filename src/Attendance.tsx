@@ -298,26 +298,20 @@ const CSS = `
 .hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 .hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
 .hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
-.hjsatt .att-sheet { width: auto; font-size: 12.5px; }
-.hjsatt .att-sheet th { padding: 6px 4px; font-size: 10.5px; text-align: center;
+.hjsatt .att-regsheet { width: auto; font-size: 12.5px; }
+.hjsatt .att-regsheet th { padding: 6px 4px; font-size: 10.5px; text-align: center;
   white-space: normal; line-height: 1.2; max-width: 64px; vertical-align: bottom; }
-.hjsatt .att-sheet td { padding: 2px 3px; vertical-align: middle; }
-.hjsatt .att-sheet td.sr { color: #6b7280; text-align: center; width: 30px; }
-.hjsatt .att-sheet td.name { min-width: 140px; max-width: 170px; padding: 2px 8px;
+.hjsatt .att-regsheet td { padding: 2px 3px; vertical-align: middle; }
+.hjsatt .att-regsheet td.sr { color: #6b7280; text-align: center; width: 30px; }
+.hjsatt .att-regsheet td.name { min-width: 140px; max-width: 170px; padding: 2px 8px;
   overflow: hidden; text-overflow: ellipsis; }
-.hjsatt .att-sheet td.name b { font-size: 13px; }
-.hjsatt .att-sheet input { min-height: 26px; height: 26px; width: 50px; padding: 0 4px;
+.hjsatt .att-regsheet td.name b { font-size: 13px; }
+.hjsatt .att-regsheet input { min-height: 26px; height: 26px; width: 50px; padding: 0 4px;
   font-size: 13px; text-align: center; border-radius: 5px; border-color: #e3e6ea; }
-.hjsatt .att-sheet input:focus { border-color: #2563eb; }
-.hjsatt .att-sheet input.wide { width: 110px; text-align: left; }
-.hjsatt .att-sheet input.neg { color: #b42318; font-weight: 700; }
-.hjsatt .att-sheet th.hl, .hjsatt .att-sheet td.hl { background: #fff7c2; }
-/* Desktop: input pe focus se poora shell khisak jaata tha (rail + tabs gayab).
-   clip se browser us shell ko scroll hi nahi kar sakta. */
-@media (min-width: 900px) {
-  .hjsatt { overflow: clip; }
-  .hjsatt .att-body { overflow: clip; }
-}
+.hjsatt .att-regsheet input:focus { border-color: #2563eb; }
+.hjsatt .att-regsheet input.wide { width: 110px; text-align: left; }
+.hjsatt .att-regsheet input.neg { color: #b42318; font-weight: 700; }
+.hjsatt .att-regsheet th.hl, .hjsatt .att-regsheet td.hl { background: #fff7c2; }
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
 .hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
@@ -5704,7 +5698,7 @@ function AttSheetTab() {
       ) : (
         <div className="att-card" style={{ padding: 0, overflow: "hidden" }}>
           <div className="att-scroll">
-            <table className="att-table att-sheet">
+            <table className="att-table att-regsheet">
               <thead>
                 <tr>
                   <th>Sr.</th>
