@@ -298,15 +298,26 @@ const CSS = `
 .hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 .hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
 .hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
-.hjsatt .att-sheet td { padding: 6px 6px; vertical-align: middle; }
-.hjsatt .att-sheet th { text-align: center; }
-.hjsatt .att-sheet td.sr { color: #6b7280; text-align: center; }
-.hjsatt .att-sheet input { min-height: 34px; width: 74px; padding: 5px 6px; font-size: 14px;
-  text-align: center; border-radius: 6px; }
-.hjsatt .att-sheet input.wide { width: 150px; text-align: left; }
+.hjsatt .att-sheet { width: auto; font-size: 12.5px; }
+.hjsatt .att-sheet th { padding: 6px 4px; font-size: 10.5px; text-align: center;
+  white-space: normal; line-height: 1.2; max-width: 64px; vertical-align: bottom; }
+.hjsatt .att-sheet td { padding: 2px 3px; vertical-align: middle; }
+.hjsatt .att-sheet td.sr { color: #6b7280; text-align: center; width: 30px; }
+.hjsatt .att-sheet td.name { min-width: 140px; max-width: 170px; padding: 2px 8px;
+  overflow: hidden; text-overflow: ellipsis; }
+.hjsatt .att-sheet td.name b { font-size: 13px; }
+.hjsatt .att-sheet input { min-height: 26px; height: 26px; width: 50px; padding: 0 4px;
+  font-size: 13px; text-align: center; border-radius: 5px; border-color: #e3e6ea; }
+.hjsatt .att-sheet input:focus { border-color: #2563eb; }
+.hjsatt .att-sheet input.wide { width: 110px; text-align: left; }
 .hjsatt .att-sheet input.neg { color: #b42318; font-weight: 700; }
 .hjsatt .att-sheet th.hl, .hjsatt .att-sheet td.hl { background: #fff7c2; }
-.hjsatt .att-sheet td.name { min-width: 170px; }
+/* Desktop: input pe focus se poora shell khisak jaata tha (rail + tabs gayab).
+   clip se browser us shell ko scroll hi nahi kar sakta. */
+@media (min-width: 900px) {
+  .hjsatt { overflow: clip; }
+  .hjsatt .att-body { overflow: clip; }
+}
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
 .hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
@@ -5525,7 +5536,7 @@ function SpecialPostPicker({ emp, card = false }: any) {
     }
   }, [emp?.id]);
 
-  if (!emp?.id || (!head && !val)) return null;
+  if (!emp?.id || !head) return null;   // sirf Attendance Heads ko dikhta hai
 
   const change = async (v: string) => {
     const prev = val;
@@ -5542,19 +5553,13 @@ function SpecialPostPicker({ emp, card = false }: any) {
   const inner = (
     <div>
       <label>Special post</label>
-      {head ? (
-        <>
-          <select value={val} disabled={busy} onChange={(e) => change(e.target.value)}>
-            <option value="">— none —</option>
-            <option value="Attendance Head">Attendance Head</option>
-          </select>
-          <p className="att-muted" style={{ marginTop: 6 }}>
-            Saves straight away. Only Attendance Heads can change this.
-          </p>
-        </>
-      ) : (
-        <p style={{ fontWeight: 600 }}>{val}</p>
-      )}
+      <select value={val} disabled={busy} onChange={(e) => change(e.target.value)}>
+        <option value="">— none —</option>
+        <option value="Attendance Head">Attendance Head</option>
+      </select>
+      <p className="att-muted" style={{ marginTop: 6 }}>
+        Saves straight away. Only Attendance Heads can see or change this.
+      </p>
       <Note>{msg.err}</Note>
       <Note kind="ok">{msg.ok}</Note>
     </div>
@@ -5663,9 +5668,8 @@ function AttSheetTab() {
       <div className="att-rephd">
         <div style={{ flex: 1, minWidth: 180 }}>
           <b style={{ fontSize: 16 }}>Attendance sheet · {monthLabel}</b>
-          <p className="att-muted" style={{ whiteSpace: "normal" }}>
-            Every cell can be edited and saves on its own. Worked, Effect and Total Credit
-            update when you change the numbers they come from — you can still overwrite them.
+          <p className="att-muted" style={{ whiteSpace: "normal", fontSize: 12.5 }}>
+            Every cell is editable and saves on its own.
           </p>
         </div>
         <input type="month" value={month} className="att-repmonth"
@@ -5718,7 +5722,7 @@ function AttSheetTab() {
                     <td className="sr">{i + 1}</td>
                     <td className="name">
                       <b>{r.full_name}</b>
-                      <span className="att-muted" style={{ display: "block", fontSize: 11.5 }}>
+                      <span className="att-muted" style={{ display: "block", fontSize: 10.5 }}>
                         {r.emp_code}{saving[r.employee_id] ? " · saving…" : ""}
                       </span>
                     </td>
