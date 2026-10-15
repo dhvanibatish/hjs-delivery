@@ -298,27 +298,49 @@ const CSS = `
 .hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 .hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
 .hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
-.hjsatt .att-regsheet { width: auto; font-size: 12.5px; }
-.hjsatt .att-regsheet th { padding: 6px 4px; font-size: 10.5px; text-align: center;
-  white-space: normal; line-height: 1.2; max-width: 64px; vertical-align: bottom; }
-.hjsatt .att-regsheet td { padding: 2px 3px; vertical-align: middle; }
-.hjsatt .att-regsheet td.sr { color: #6b7280; text-align: center; width: 30px; }
-.hjsatt .att-regsheet td.name { min-width: 140px; max-width: 170px; padding: 2px 8px;
-  overflow: hidden; text-overflow: ellipsis; }
-.hjsatt .att-regsheet td.name b { font-size: 13px; }
-.hjsatt .att-regsheet input { min-height: 26px; height: 26px; width: 50px; padding: 0 4px;
-  font-size: 13px; text-align: center; border-radius: 5px; border-color: #e3e6ea; }
-.hjsatt .att-regsheet input:focus { border-color: #2563eb; }
-.hjsatt .att-regsheet input.wide { width: 110px; text-align: left; }
-.hjsatt .att-regsheet input.neg { color: #b42318; font-weight: 700; }
-.hjsatt .att-regsheet th.hl, .hjsatt .att-regsheet td.hl { background: #fff7c2; }
-.hjsatt .att-regsheet th.ded, .hjsatt .att-regsheet td.ded { background: #fef3f2; }
-.hjsatt .att-regsheet .att-thplus { display: inline-block; margin-left: 4px; width: 18px;
-  height: 18px; line-height: 16px; border-radius: 4px; border: 1px solid #fda29b;
-  color: #b42318; font-size: 13px; font-weight: 700; text-align: center; vertical-align: middle; }
+.hjsatt .att-regsheet { width: auto; font-size: 13px; border-collapse: separate; border-spacing: 0; }
+.hjsatt .att-regsheet th { padding: 7px 4px; font-size: 11.5px; font-weight: 650; color: #475467;
+  text-transform: none; letter-spacing: 0; text-align: center; white-space: nowrap;
+  border-bottom: 1px solid #e4e7ec; background: #f9fafb; }
+.hjsatt .att-regsheet tr.grp th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  padding: 6px 4px 4px; border-bottom: 0; color: #667085; }
+.hjsatt .att-regsheet tr.grp th.g-cr  { color: #067647; }
+.hjsatt .att-regsheet tr.grp th.g-ded { color: #b42318; }
+.hjsatt .att-regsheet th.name { text-align: left; vertical-align: bottom; padding-left: 12px;
+  border-bottom: 1px solid #e4e7ec; }
+.hjsatt .att-regsheet th.rmk { vertical-align: bottom; border-bottom: 1px solid #e4e7ec; }
+.hjsatt .att-regsheet td { padding: 3px 3px; vertical-align: middle; border-top: 0;
+  border-bottom: 1px solid #f2f4f7; background: #fff; }
+.hjsatt .att-regsheet .gs { border-left: 1px solid #e4e7ec; }
+.hjsatt .att-regsheet tbody tr:hover td { background: #f9fafb; }
+.hjsatt .att-regsheet td.hl, .hjsatt .att-regsheet th.hl { background: #fffbe6; }
+.hjsatt .att-regsheet tbody tr:hover td.hl { background: #fff6cc; }
+.hjsatt .att-regsheet td.name { min-width: 190px; max-width: 230px; padding: 6px 10px; z-index: 1; }
+.hjsatt .att-regsheet td.name .nm { display: flex; align-items: center; gap: 8px; }
+.hjsatt .att-regsheet td.name .sr { width: 20px; flex-shrink: 0; text-align: right;
+  color: #98a2b3; font-size: 11.5px; font-weight: 500; }
+.hjsatt .att-regsheet td.name b { display: block; font-size: 13px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.hjsatt .att-regsheet td.name .code { display: block; font-size: 10.5px; font-weight: 500; }
+.hjsatt .att-regsheet input { min-height: 28px; height: 28px; width: 54px; padding: 0 4px;
+  font-size: 13.5px; text-align: center; border-radius: 5px; border: 1px solid transparent;
+  background: transparent; color: #1f2328; }
+.hjsatt .att-regsheet input:hover { border-color: #d0d5dd; background: #fff; }
+.hjsatt .att-regsheet input:focus { border-color: #2563eb; background: #fff;
+  box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+.hjsatt .att-regsheet input::placeholder { color: #d0d5dd; }
+.hjsatt .att-regsheet input.b { font-weight: 700; }
+.hjsatt .att-regsheet input.neg { color: #b42318; }
+.hjsatt .att-regsheet input.wide { width: 170px; text-align: left; font-size: 13px; }
+.hjsatt .att-regsheet .att-thplus { margin-left: 6px; padding: 1px 6px; border-radius: 4px;
+  border: 1px dashed #fda29b; color: #b42318; font-size: 10.5px; font-weight: 650;
+  text-transform: none; letter-spacing: 0; vertical-align: middle; }
+.hjsatt .att-regsheet .att-thplus:hover { background: #fef3f2; }
 .hjsatt .att-regsheet .att-rmbtn { width: 24px; height: 24px; border-radius: 5px;
-  color: #98a2b3; font-size: 12px; text-align: center; }
+  color: #98a2b3; font-size: 12px; text-align: center; opacity: 0; }
+.hjsatt .att-regsheet tr:hover .att-rmbtn { opacity: 1; }
 .hjsatt .att-regsheet .att-rmbtn:hover { background: #fef3f2; color: #b42318; }
+@media (hover: none) { .hjsatt .att-regsheet .att-rmbtn { opacity: .6; } }
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
 .hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
@@ -5635,6 +5657,15 @@ const SHEET_NUM: [string, string][] = [
   ["ded_this", "Deduction This Month"],
   ["ded_next", "Deduction Next Month"],
 ];
+// Table ke andar chhote naam + upar group heading (Excel jaisa)
+const SHEET_SHORT: Record<string, string> = {
+  total_days: "Total", week_off: "Week Off", leave_days: "Leave", effect: "Effect",
+  worked: "Worked", lm_credit: "L.M", cm_credit: "C.M", total_credit: "Total",
+  ded_this: "This Month", ded_next: "Next Month",
+};
+const SHEET_GROUP = (c: string) =>
+  ["lm_credit", "cm_credit", "total_credit"].includes(c) ? "cr"
+    : c.startsWith("ded_") ? "ded" : "days";
 
 // Koi number badla to us pe tike columns dobara nikal do.
 // Worked = Total − Week Off − Leave · Effect = −Leave · Total Credit = L.M + C.M − Leave
@@ -5802,42 +5833,64 @@ function AttSheetTab() {
           <div className="att-scroll">
             <table className="att-table att-regsheet">
               <thead>
+                <tr className="grp">
+                  <th className="name" rowSpan={2}>Employee</th>
+                  {[["days", "Days"], ["cr", "Leave Credit"], ["ded", "Deduction"]].map(([g, l]) => {
+                    const n = cols.filter(([c]) => SHEET_GROUP(c) === g).length;
+                    return (
+                      <th key={g} colSpan={n} className={`g-${g} gs`}>
+                        {l}
+                        {g === "ded" && !showNext && (
+                          <button className="att-thplus" title="Add Deduction Next Month"
+                            onClick={() => setNextOn(true)}>+ Next month</button>
+                        )}
+                      </th>
+                    );
+                  })}
+                  <th rowSpan={2} className="gs rmk">Remarks</th>
+                  <th rowSpan={2}></th>
+                </tr>
                 <tr>
-                  <th>Sr.</th>
-                  <th className="name">Name</th>
-                  {cols.map(([c, l]) => (
-                    <th key={c} className={c === "worked" ? "hl" : c.startsWith("ded_") ? "ded" : ""}>
-                      {l}
-                      {c === "ded_this" && !showNext && (
-                        <button className="att-thplus" title="Add Deduction Next Month"
-                          onClick={() => setNextOn(true)}>+</button>
-                      )}
-                    </th>
-                  ))}
-                  <th>Remarks</th>
-                  <th></th>
+                  {cols.map(([c], i) => {
+                    const gs = i === 0 || SHEET_GROUP(cols[i - 1][0]) !== SHEET_GROUP(c);
+                    return (
+                      <th key={c} className={`${gs ? "gs " : ""}${c === "worked" ? "hl" : ""}`}>
+                        {SHEET_SHORT[c]}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={r.employee_id}>
-                    <td className="sr">{i + 1}</td>
                     <td className="name">
-                      <b>{r.full_name}</b>
-                      <span className="att-muted" style={{ display: "block", fontSize: 10.5 }}>
-                        {r.emp_code}{saving[r.employee_id] ? " · saving…" : ""}
-                      </span>
+                      <div className="nm">
+                        <span className="sr">{i + 1}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <b>{r.full_name}</b>
+                          <span className="att-muted code">
+                            {r.emp_code}{saving[r.employee_id] ? " · saving…" : ""}
+                          </span>
+                        </div>
+                      </div>
                     </td>
-                    {cols.map(([c]) => (
-                      <td key={c} className={c === "worked" ? "hl" : c.startsWith("ded_") ? "ded" : ""}>
-                        <input type="text" inputMode="decimal"
-                          className={c === "total_credit" && Number(r[c]) < 0 ? "neg" : ""}
-                          value={r[c] ?? ""}
-                          onChange={(e) => edit(r.employee_id, c, e.target.value)} />
-                      </td>
-                    ))}
-                    <td>
-                      <input className="wide" value={r.remarks || ""}
+                    {cols.map(([c], j) => {
+                      const gs = j === 0 || SHEET_GROUP(cols[j - 1][0]) !== SHEET_GROUP(c);
+                      const strong = c === "worked" || c === "total_credit";
+                      const neg = (c === "total_credit" || c === "effect") && Number(r[c]) < 0;
+                      return (
+                        <td key={c} className={`${gs ? "gs " : ""}${c === "worked" ? "hl" : ""}`}>
+                          <input type="text" inputMode="decimal"
+                            className={`${strong ? "b " : ""}${neg ? "neg" : ""}`}
+                            placeholder={c.startsWith("ded_") ? "–" : ""}
+                            value={r[c] ?? ""}
+                            onChange={(e) => edit(r.employee_id, c, e.target.value)} />
+                        </td>
+                      );
+                    })}
+                    <td className="gs">
+                      <input className="wide" placeholder="Add remark" value={r.remarks || ""}
                         onChange={(e) => edit(r.employee_id, "remarks", e.target.value)} />
                     </td>
                     <td>
