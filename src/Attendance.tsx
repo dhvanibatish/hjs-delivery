@@ -337,6 +337,8 @@ const CSS = `
   font-size: 14px; font-weight: 700; text-align: center; vertical-align: middle; }
 .hjsatt .att-regsheet .att-thplus:hover { background: #fef3f2; }
 .hjsatt .att-regsheet .att-thplus.on { background: #fef3f2; }
+.hjsatt .att-regsheet .att-thplus.minus { margin-left: 3px; }
+.hjsatt .att-regsheet .att-thplus:disabled { opacity: .35; cursor: default; background: #fff; }
 .hjsatt .att-regsheet .att-rmbtn { width: 24px; height: 24px; border-radius: 5px;
   color: #98a2b3; font-size: 12px; text-align: center; opacity: 0; }
 .hjsatt .att-regsheet tr:hover .att-rmbtn { opacity: 1; }
@@ -5788,6 +5790,27 @@ function AttSheetTab() {
     ...Array.from({ length: nFuture }, (_, i) => [`plan:${i + 1}`, ""] as [string, string]),
   ];
   useEffect(() => { setExtra(0); }, [month]);
+
+  // − : sabse aakhri aage wala mahina hatao (usme bhare numbers bhi saaf)
+  const removeLastMonth = () => {
+    if (nFuture < 1) return;
+    const key = planKey(nFuture);
+    const filled = rows.filter((r) => Number((r.ded_plan || {})[key]));
+    if (filled.length && !window.confirm(
+      `${filled.length} ${filled.length === 1 ? "person has" : "people have"} a deduction in ${shortMon(nFuture)}. Remove the column and clear those numbers?`)) return;
+    if (filled.length) {
+      const next = rows.map((r) => {
+        if (!Number((r.ded_plan || {})[key])) return r;
+        const plan = { ...(r.ded_plan || {}) };
+        delete plan[key];
+        const nr = { ...r, ded_plan: plan };
+        queueSave(nr);
+        return nr;
+      });
+      setRows(next);
+    }
+    setExtra(nFuture - 1);
+  };
   const cellVal = (r: any, c: string) =>
     c.startsWith("plan:") ? (r.ded_plan || {})[planKey(Number(c.slice(5)))] ?? "" : r[c] ?? "";
 
@@ -5885,10 +5908,16 @@ function AttSheetTab() {
                       <th key={g} colSpan={n} className={`g-${g} gs`}>
                         {l}
                         {g === "ded" && (
-                          <button className="att-thplus"
-                            title={`Add ${shortMon(nFuture + 1)} column`}
-                            disabled={nFuture >= 12}
-                            onClick={() => setExtra(nFuture + 1)}>+</button>
+                          <>
+                            <button className="att-thplus"
+                              title={`Add ${shortMon(nFuture + 1)} column`}
+                              disabled={nFuture >= 12}
+                              onClick={() => setExtra(nFuture + 1)}>+</button>
+                            <button className="att-thplus minus"
+                              title={nFuture ? `Remove ${shortMon(nFuture)} column` : "No extra month to remove"}
+                              disabled={nFuture < 1}
+                              onClick={removeLastMonth}>−</button>
+                          </>
                         )}
                       </th>
                     );
