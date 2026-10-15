@@ -3787,9 +3787,17 @@ function TeamLeavesTab({ me }: any) {
 function HolidaysTab({ me }: any) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<any[]>([]);
-  const [f, setF] = useState({ hol_date: istToday(), name: "" });
+  const [f, setF] = useState({ hol_date: istToday(), name: "", comp_off: false });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const isAdmin = me.role === "admin";
+  // 26 Jan, 15 Aug, 2 Oct par comp off hamesha milta hai (SQL mein fixed)
+  const fixedComp = (d: string) => ["01-26", "08-15", "10-02"].includes(String(d).slice(5, 10));
+  const toggleComp = async (r: any) => {
+    const { error } = await supabase.from("holidays")
+      .update({ comp_off: !r.comp_off }).eq("id", r.id);
+    if (error) { setMsg({ err: error.message, ok: "" }); return; }
+    load();
+  };
   const load = async () => {
     const { data } = await supabase.from("holidays").select("*").order("hol_date");
     setRows(data || []);
@@ -3798,7 +3806,7 @@ function HolidaysTab({ me }: any) {
   const add = async () => {
     const { error } = await supabase.from("holidays").insert(f);
     if (error) setMsg({ err: error.message, ok: "" });
-    else { setMsg({ err: "", ok: "Added." }); setF({ ...f, name: "" }); load(); }
+    else { setMsg({ err: "", ok: "Added." }); setF({ ...f, name: "", comp_off: false }); load(); }
   };
   const del = async (id: string) => {
     const { error } = await supabase.from("holidays").delete().eq("id", id);
@@ -3819,6 +3827,14 @@ function HolidaysTab({ me }: any) {
             <input placeholder="Name" value={f.name}
               onChange={(e) => setF({ ...f, name: e.target.value })} />
           </div>
+          <label className="att-check">
+            <input type="checkbox" checked={f.comp_off || fixedComp(f.hol_date)}
+              disabled={fixedComp(f.hol_date)}
+              onChange={(e) => setF({ ...f, comp_off: e.target.checked })} />
+            <span>
+              Comp off milega (is din kaam kiya to 2 off — Holi, Diwali ke liye tick karo)
+            </span>
+          </label>
           <Note>{msg.err}</Note>
           <Note kind="ok">{msg.ok}</Note>
           <button className="att-btn sm" onClick={add} disabled={!f.name.trim()}>Add</button>
@@ -3839,6 +3855,14 @@ function HolidaysTab({ me }: any) {
                 { day: "2-digit", month: "short", weekday: "short" })}
             </span>
             <span className="grow">{r.name}</span>
+            {(r.comp_off || fixedComp(r.hol_date)) && (
+              <span className="att-pill p-Leave">Comp off</span>
+            )}
+            {isAdmin && !fixedComp(r.hol_date) && (
+              <button className="att-muted" onClick={() => toggleComp(r)}>
+                {r.comp_off ? "Comp off hatao" : "Comp off do"}
+              </button>
+            )}
             {isAdmin && <button className="att-muted" onClick={() => del(r.id)}>Remove</button>}
           </div>
         ))}
@@ -3906,7 +3930,7 @@ function LeavesScreen({ me, tab }: any) {
 
   const cancel = async (id: string) => {
     const { error } = await supabase.rpc("delete_leave", { p_id: id, p_hard: false });
-    if (error) { setMsg({ err: error.message, ok: "" }); return; }
+    if (error) { alert(error.message); return; }
     load();
   };
 
@@ -4232,10 +4256,28 @@ const LEAVE_RULES: Record<string, {
            note: "Single day only, counts as a quarter day. Reason is required." },
   HALF:  { single: true, fixedDays: 0.5, reasonReq: true, pastDays: 7, futureDays: 30,
            note: "Single day only, counts as half a day. Reason is required." },
+  // ---- corporate policy (Head Office + Noida Showroom) ----
+  COMP:  { reasonReq: true, pastDays: 7, futureDays: 31,
+           note: "Holiday pe kaam ke badle. Usi mahine mein lena hai, warna lapse." },
+  FLEX:  { single: true, reasonReq: true, pastDays: 7, futureDays: 31,
+           note: "2+ saal walon ke liye, mahine mein 1. Week off ke saath jod sakte ho; EL ke saath chipki to EL ginegi." },
+  BDAY:  { single: true, fixedDays: 1, reasonReq: true, pastDays: 31, futureDays: 31,
+           note: "Birthday wale mahine mein kabhi bhi 1 din. Paid hai, EL se nahi katti." },
+  ANNIV: { single: true, fixedDays: 1, reasonReq: true, pastDays: 31, futureDays: 31,
+           note: "Anniversary wale mahine mein kabhi bhi 1 din. Paid hai, EL se nahi katti." },
 };
 
-function ApplyLeaveSheet({ me, types, onClose }: any) {
+// Sirf corporate staff ko dikhne wale leave types
+const CORP_ONLY_TYPES = ["COMP", "FLEX", "BDAY", "ANNIV"];
+const CORP_EXCLUDED_DEPTS = ["Mohali Store", "Noida Store"];
+const isCorporate = (emp: any) =>
+  !!emp?.branches?.corporate_policy && !CORP_EXCLUDED_DEPTS.includes(emp?.teams?.name);
+
+function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const today = istToday();
+  const corp = isCorporate(me);
+  const types = useMemo(() => (allTypes || []).filter((t: any) =>
+    corp || !CORP_ONLY_TYPES.includes(t.code)), [allTypes, corp]);
   const [form, setForm] = useState<any>({
     leave_type: types[0]?.code || "", from_date: today, to_date: today, reason: "",
     from_time: nowHM(), to_time: addMins(nowHM(), 60),
@@ -4299,6 +4341,17 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
       return "This leave type is for a single day only.";
     if (!form.reason.trim()) return "Please write why you need this leave.";
     if (days > 60) return "One request can't be longer than 60 days.";
+    // birthday / anniversary sirf usi mahine mein
+    if (form.leave_type === "BDAY" || form.leave_type === "ANNIV") {
+      const ref = form.leave_type === "BDAY" ? me.date_of_birth : me.marriage_anniversary;
+      const lbl = form.leave_type === "BDAY" ? "Birthday" : "Anniversary";
+      if (!ref) return `${lbl} date record mein nahi hai. HR se add karwao.`;
+      if (String(ref).slice(5, 7) !== form.from_date.slice(5, 7)) {
+        const mon = new Date(String(ref).slice(0, 10) + "T00:00:00")
+          .toLocaleDateString("en-GB", { month: "long" });
+        return `${lbl} leave sirf ${mon} mahine mein li ja sakti hai.`;
+      }
+    }
     return "";
   }, [form, rule, days, minDate, maxDate]);
 
@@ -4387,6 +4440,14 @@ function ApplyLeaveSheet({ me, types, onClose }: any) {
           </button>
         </div>
         {problem && !msg.err && <p className="att-muted">{problem}</p>}
+        {corp && !rule.fixedDays && days > 5 && (
+          <div className="att-note err">
+            <span>
+              Yeh long leave hai (5 din se zyada). Saal mein sirf ek baar mil sakti hai,
+              aur week off / holiday beech mein aaye to woh bhi gine jaayenge.
+            </span>
+          </div>
+        )}
       </div>
     </Sheet>
   );
@@ -4920,7 +4981,7 @@ function StaffTab({ me }: any) {
 
   const load = async () => {
     const [e, b, t, d] = await Promise.all([
-      supabase.from("employees").select("*, branches(name), teams(name)").order("full_name"),
+      supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)").order("full_name"),
       supabase.from("branches").select("*").order("name"),
       supabase.from("teams").select("*").order("name"),
       supabase.from("designations").select("*").eq("active", true)
@@ -5038,6 +5099,7 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         date_of_birth: f.date_of_birth || null,
         date_of_joining: f.date_of_joining || null,
         date_of_leaving: f.date_of_leaving || null,
+        marriage_anniversary: f.marriage_anniversary || null,
         employment_type: f.employment_type || null,
         employee_status: f.employee_status || null,
         source_of_hire: f.source_of_hire || null,
@@ -5270,7 +5332,14 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
               Sirf resign / exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
             </p>
           </div>
-          <div></div>
+          <div>
+            <label>Marriage anniversary</label>
+            <input type="date" value={f.marriage_anniversary || ""}
+              onChange={(e) => setF({ ...f, marriage_anniversary: e.target.value || null })} />
+            <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Shaadishuda ho to bharo — us mahine 1 paid off milta hai.
+            </p>
+          </div>
         </div>
         <div className="att-row2">
           <div>
@@ -5759,14 +5828,6 @@ function AttSheetTab() {
   const edit = (id: string, k: string, v: string) => {
     const r = rows.find((x) => x.employee_id === id);
     if (!r) return;
-    // number wale cells mein sirf 0-9, ek "." aur shuru mein "-" — letters type hi nahi honge
-    if (k !== "remarks") {
-      const neg = v.trim().startsWith("-");
-      let t = v.replace(/[^0-9.]/g, "");
-      const dot = t.indexOf(".");
-      if (dot !== -1) t = t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, "");
-      v = (neg ? "-" : "") + t;
-    }
     let nr = k.startsWith("plan:")
       ? { ...r, ded_plan: { ...(r.ded_plan || {}), [planKey(Number(k.slice(5)))]: v } }
       : { ...r, [k]: v };
@@ -6906,7 +6967,9 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
           <dd>{lv.created_at ? fmtDate(lv.created_at) : "—"}</dd>
           {lv.status !== "Pending" && (
             <>
-              <dt>{lv.status} by</dt><dd>{lv.approver_name || "—"}</dd>
+              <dt>{lv.status} by</dt>
+              <dd>{lv.approver_name
+                || (/^\s*Auto-/.test(String(lv.approver_note || "")) ? "System" : "—")}</dd>
               <dt>{lv.status} on</dt>
               <dd>{lv.approved_at ? fmtDate(lv.approved_at) : "—"}</dd>
             </>
@@ -10778,7 +10841,7 @@ export default function Attendance() {
 
   useEffect(() => {
     if (!session) { setMe(null); return; }
-    supabase.from("employees").select("*, branches(name), teams(name)")
+    supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)")
       .eq("auth_user_id", session.user.id).maybeSingle()
       .then(({ data, error }) => {
         if (error) console.error("employee lookup failed:", error);
