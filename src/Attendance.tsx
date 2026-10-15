@@ -332,10 +332,11 @@ const CSS = `
 .hjsatt .att-regsheet input.b { font-weight: 700; }
 .hjsatt .att-regsheet input.neg { color: #b42318; }
 .hjsatt .att-regsheet input.wide { width: 170px; text-align: left; font-size: 13px; }
-.hjsatt .att-regsheet .att-thplus { margin-left: 6px; padding: 1px 6px; border-radius: 4px;
-  border: 1px dashed #fda29b; color: #b42318; font-size: 10.5px; font-weight: 650;
-  text-transform: none; letter-spacing: 0; vertical-align: middle; }
+.hjsatt .att-regsheet .att-thplus { margin-left: 6px; width: 18px; height: 18px; line-height: 15px;
+  padding: 0; border-radius: 4px; border: 1px solid #fda29b; color: #b42318; background: #fff;
+  font-size: 14px; font-weight: 700; text-align: center; vertical-align: middle; }
 .hjsatt .att-regsheet .att-thplus:hover { background: #fef3f2; }
+.hjsatt .att-regsheet .att-thplus.on { background: #fef3f2; }
 .hjsatt .att-regsheet .att-rmbtn { width: 24px; height: 24px; border-radius: 5px;
   color: #98a2b3; font-size: 12px; text-align: center; opacity: 0; }
 .hjsatt .att-regsheet tr:hover .att-rmbtn { opacity: 1; }
@@ -5750,8 +5751,11 @@ function AttSheetTab() {
     queueSave(nr);
   };
 
+  // naam ke hisaab se A-Z
   const shown = rows.filter((r) =>
-    !q || `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
+    !q || `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((x, y) => String(x.full_name || "").trim()
+      .localeCompare(String(y.full_name || "").trim(), "en", { sensitivity: "base" }));
 
   // Next month wala column: + dabane pe, ya jab kisi row mein value ho
   const showNext = nextOn || rows.some((r) => Number(r.ded_next) > 0);
@@ -5761,9 +5765,20 @@ function AttSheetTab() {
   const monthLabel = new Date(`${month}-01T00:00:00`)
     .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 
+  // Deduction ke columns pe mahine ka naam: "Oct 26", "Nov 26"
+  const shortMon = (offset: number) => {
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1 + offset, 1)
+      .toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  };
+  const colLabel = (c: string) =>
+    c === "ded_this" ? shortMon(0) : c === "ded_next" ? shortMon(1) : SHEET_SHORT[c];
+
   const exportCsv = () => downloadCsv(shown.map((r, i) => {
     const o: any = { "Sr. No.": i + 1, "Emp Code": r.emp_code, Name: r.full_name };
-    cols.forEach(([c, l]) => { o[l] = r[c] ?? ""; });
+    cols.forEach(([c, l]) => {
+      o[c.startsWith("ded_") ? `Deduction ${colLabel(c)}` : l] = r[c] ?? "";
+    });
     o.Remarks = r.remarks || "";
     return o;
   }), `HJS_attendance_sheet_${month}.csv`);
@@ -5840,9 +5855,10 @@ function AttSheetTab() {
                     return (
                       <th key={g} colSpan={n} className={`g-${g} gs`}>
                         {l}
-                        {g === "ded" && !showNext && (
-                          <button className="att-thplus" title="Add Deduction Next Month"
-                            onClick={() => setNextOn(true)}>+ Next month</button>
+                        {g === "ded" && (
+                          <button className={`att-thplus ${showNext ? "on" : ""}`}
+                            title={showNext ? `${shortMon(1)} column is open` : `Add ${shortMon(1)} column`}
+                            onClick={() => setNextOn(true)}>+</button>
                         )}
                       </th>
                     );
@@ -5855,7 +5871,7 @@ function AttSheetTab() {
                     const gs = i === 0 || SHEET_GROUP(cols[i - 1][0]) !== SHEET_GROUP(c);
                     return (
                       <th key={c} className={`${gs ? "gs " : ""}${c === "worked" ? "hl" : ""}`}>
-                        {SHEET_SHORT[c]}
+                        {colLabel(c)}
                       </th>
                     );
                   })}
