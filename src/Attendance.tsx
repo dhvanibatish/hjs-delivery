@@ -312,6 +312,9 @@ const CSS = `
 .hjsatt .att-regsheet input.wide { width: 110px; text-align: left; }
 .hjsatt .att-regsheet input.neg { color: #b42318; font-weight: 700; }
 .hjsatt .att-regsheet th.hl, .hjsatt .att-regsheet td.hl { background: #fff7c2; }
+.hjsatt .att-regsheet .att-rmbtn { width: 24px; height: 24px; border-radius: 5px;
+  color: #98a2b3; font-size: 12px; text-align: center; }
+.hjsatt .att-regsheet .att-rmbtn:hover { background: #fef3f2; color: #b42318; }
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
 .hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
@@ -3832,6 +3835,7 @@ function LeavesScreen({ me, tab }: any) {
   const [editBal, setEditBal] = useState<any>(null);
   const [pickLeave, setPickLeave] = useState<any>(null);
   const [busyReg, setBusyReg] = useState("");
+  const [sheet, setSheet] = useState<any>(null);   // attendance sheet ka EL credit
   const [span, setSpan] = useState<"year" | "month" | "custom">("month");
   const [period, setPeriod] = useState({
     y: Number(istToday().slice(0, 4)),
@@ -3859,6 +3863,15 @@ function LeavesScreen({ me, tab }: any) {
     ]);
     setTypes(t.data || []); setBal(b.data || []); setMine(l.data || []);
     setRegs(r.data || []); setHols(h.data || []);
+
+    // Attendance Head ki sheet mein jo credit hai, wahi EL card pe dikhe
+    const upto = span === "month"
+      ? `${period.y}-${String(period.m).padStart(2, "0")}-01`
+      : span === "year"
+        ? (String(period.y) === istToday().slice(0, 4) ? istToday() : `${period.y}-12-01`)
+        : range.to;
+    const sc = await supabase.rpc("att_sheet_credit", { p_employee: null, p_month: upto });
+    setSheet(sc.error ? null : sc.data || null);
   };
   useEffect(() => { load(); }, [span, period.y, period.m, range.from, range.to]);
 
@@ -4051,7 +4064,45 @@ function LeavesScreen({ me, tab }: any) {
       </div>
 
       <div className="att-lvgrid">
-        {bal.map((b) => {
+        {(!sheet ? bal
+          : bal.some((b) => b.leave_type === "EL")
+            ? bal.map((b) => (b.leave_type === "EL" ? { ...b, _sheet: sheet } : b))
+            : [...bal, { leave_type: "EL", name: "Earned Leave", pending: 0, _sheet: sheet }]
+        ).map((b: any) => {
+          if (b._sheet) {
+            const s = b._sheet;
+            const [bg, fg] = LV_TINT.EL;
+            const tot = Number(s.total_credit || 0);
+            return (
+              <div className="att-lv" key="EL">
+                <div className="att-balhd"><h4>{b.name || "Earned Leave"}</h4></div>
+                <div className="att-lvic" style={{ background: bg, color: fg }}>EL</div>
+                <hr />
+                <div className="att-lvrow">
+                  <span className="att-muted">Last month</span><b>{Number(s.lm_credit || 0)}</b>
+                </div>
+                <div className="att-lvrow">
+                  <span className="att-muted">This month</span><b>{Number(s.cm_credit || 0)}</b>
+                </div>
+                <div className="att-lvrow">
+                  <span className="att-muted">Booked</span><b>{Number(s.leave_days || 0)}</b>
+                </div>
+                <div className="att-lvrow">
+                  <span className="att-muted">Available</span>
+                  <b style={{ color: tot < 0 ? "#dc2626" : "#16a34a" }}>{tot}</b>
+                </div>
+                {b.pending > 0 && (
+                  <div className="att-lvrow">
+                    <span className="att-muted">Pending</span><b style={{ color: "#b54708" }}>{b.pending}</b>
+                  </div>
+                )}
+                <p className="att-muted" style={{ fontSize: 11, marginTop: 6 }}>
+                  From attendance sheet · {new Date(String(s.month) + "T00:00:00")
+                    .toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                </p>
+              </div>
+            );
+          }
           const [bg, fg] = LV_TINT[b.leave_type] || ["#f2f4f7", "#475467"];
           return (
             <div className="att-lv" key={b.leave_type}>
@@ -4085,7 +4136,7 @@ function LeavesScreen({ me, tab }: any) {
             </div>
           );
         })}
-        {!bal.length && <p className="att-empty">No balance set yet — ask your admin.</p>}
+        {!bal.length && !sheet && <p className="att-empty">No balance set yet — ask your admin.</p>}
       </div>
 
       {editBal && (
@@ -5601,7 +5652,26 @@ function AttSheetTab() {
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [askRefill, setAskRefill] = useState(false);
+  const [hidden, setHidden] = useState<any[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
   const timers = useRef<Record<string, any>>({});
+
+  const loadHidden = async () => {
+    const { data } = await supabase.rpc("att_sheet_hidden");
+    setHidden(Array.isArray(data) ? data : []);
+  };
+  useEffect(() => { loadHidden(); }, []);
+
+  // sheet se hatao / wapas laao — har mahine ke liye lagu
+  const setExcluded = async (r: any, ex: boolean) => {
+    if (ex && !window.confirm(`Remove ${r.full_name} from the attendance sheet? You can bring them back from "Removed".`)) return;
+    const { error } = await supabase.rpc("att_sheet_set_excluded",
+      { p_emp: r.employee_id, p_excluded: ex });
+    if (error) { setErr(error.message); return; }
+    if (ex) setRows((rs) => rs.filter((x) => x.employee_id !== r.employee_id));
+    await loadHidden();
+    if (!ex) load();
+  };
 
   const load = async (refresh = false) => {
     setBusy(true); setErr("");
@@ -5672,7 +5742,28 @@ function AttSheetTab() {
           Refill from attendance
         </button>
         <button className="att-btn sm line" onClick={exportCsv} disabled={!shown.length}>CSV</button>
+        <button className="att-btn sm line" onClick={() => setShowHidden(!showHidden)}>
+          Removed ({hidden.length})
+        </button>
       </div>
+
+      {showHidden && (
+        <div className="att-list">
+          <div className="att-hd"><b>Removed from the sheet</b></div>
+          {!hidden.length && <p className="att-empty">No one has been removed.</p>}
+          {hidden.map((h) => (
+            <div className="att-row" key={h.employee_id}>
+              <div className="grow">
+                <p>{h.full_name}</p>
+                <p className="att-muted">{h.emp_code}</p>
+              </div>
+              <button className="att-btn sm line" onClick={() => setExcluded(h, false)}>
+                Add back
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {askRefill && (
         <div className="att-note err">
@@ -5708,6 +5799,7 @@ function AttSheetTab() {
                   ))}
                   <th>Signature</th>
                   <th>Remarks</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -5735,6 +5827,10 @@ function AttSheetTab() {
                     <td>
                       <input className="wide" value={r.remarks || ""}
                         onChange={(e) => edit(r.employee_id, "remarks", e.target.value)} />
+                    </td>
+                    <td>
+                      <button className="att-rmbtn" title="Remove from sheet"
+                        onClick={() => setExcluded(r, true)}>✕</button>
                     </td>
                   </tr>
                 ))}
@@ -7192,10 +7288,18 @@ function LeaveBalanceSheet({ me }: any) {
   const [histFor, setHistFor] = useState<any>(null);
   const isAdmin = me.role === "admin";
 
+  const [sheetCr, setSheetCr] = useState<Record<string, any>>({});
+
   const load = async () => {
     setBusy(true); setErr("");
-    const { data, error } = await supabase.rpc("leave_balance_matrix", { p_year: year });
+    const [{ data, error }, sc] = await Promise.all([
+      supabase.rpc("leave_balance_matrix", { p_year: year }),
+      supabase.rpc("att_sheet_credits", { p_year: year }),
+    ]);
     if (error) setErr(error.message);
+    const m: Record<string, any> = {};
+    (Array.isArray(sc.data) ? sc.data : []).forEach((r: any) => { m[r.employee_id] = r; });
+    setSheetCr(m);
     setRows(data || []); setBusy(false);
   };
 
@@ -7263,6 +7367,13 @@ function LeaveBalanceSheet({ me }: any) {
               Branch: p.branch || "", Team: p.team || "" };
             types.forEach((t) => {
               const c = p.cells[t.code] || {};
+              const sc = t.code === "EL" ? sheetCr[p.employee_id] : null;
+              if (sc) {
+                o[`${t.name} given`]   = Number(sc.lm_credit || 0) + Number(sc.cm_credit || 0);
+                o[`${t.name} used`]    = Number(sc.leave_days || 0);
+                o[`${t.name} balance`] = Number(sc.total_credit || 0);
+                return;
+              }
               o[`${t.name} given`]   = Number(c.given || 0);
               o[`${t.name} used`]    = Number(c.used || 0);
               o[`${t.name} balance`] = Number(c.balance || 0);
@@ -7331,6 +7442,27 @@ function LeaveBalanceSheet({ me }: any) {
                     </td>
                     {types.map((t) => {
                       const c = p.cells[t.code] || {};
+                      // EL ke liye attendance sheet ka credit sabse upar
+                      const sc = t.code === "EL" ? sheetCr[p.employee_id] : null;
+                      if (sc) {
+                        const tot = Number(sc.total_credit || 0);
+                        return (
+                          <td key={t.code} style={{ textAlign: "center" }}>
+                            <b style={{ fontSize: 15,
+                              color: tot > 0 ? "#067647" : tot < 0 ? "#b42318" : "#667085" }}>
+                              {tot}
+                            </b>
+                            <div className="att-muted" style={{ fontSize: 11 }}>
+                              {Number(sc.lm_credit || 0)} L.M + {Number(sc.cm_credit || 0)} C.M
+                              {" − "}{Number(sc.leave_days || 0)} leave
+                            </div>
+                            <div className="att-muted" style={{ fontSize: 10.5 }}>
+                              sheet · {new Date(String(sc.month) + "T00:00:00")
+                                .toLocaleDateString("en-GB", { month: "short" })}
+                            </div>
+                          </td>
+                        );
+                      }
                       const bal = Number(c.balance || 0);
                       const given = Number(c.given || 0);
                       const used = Number(c.used || 0);
