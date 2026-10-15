@@ -934,6 +934,54 @@ export default function Physio() {
     };
   };
 
+  /* Reports ke liye duplicate hatana — ek mobile number = ek patient.
+     Same number ki 2-3 entry (Bigin + walk-in, n8n do baar, +91 wala number) report mein ek hi giné. */
+  const patKey = (p: Patient) => (mob(p.phone).length === 10 ? mob(p.phone) : `id:${p.id}`);
+  /* New patient = jiska pehla session (pehli visit) is range mein hua. Purana patient kabhi new nahi:
+     - source "Existing customer", ya haath se pehle ke session jode (done_adjust), ya
+     - pehla session hi Books se aaya continuing session ho (seq 2, 3, … — jaise 12/20).
+     Same mobile ki saari entries saath dekhi jaati hain. Jo lead abhi aaya hi nahi, wo new patient nahi. */
+  const firstVisits = useMemo(() => {
+    const byKey = new Map<string, Patient[]>();
+    for (const p of patients) byKey.set(patKey(p), [...(byKey.get(patKey(p)) || []), p]);
+    const out: { p: Patient; date: string }[] = [];
+    for (const list of byKey.values()) {
+      if (list.some((p) => p.source === "Existing customer" || (p.done_adjust || 0) > 0)) continue;
+      const ids = new Set(list.map((p) => p.id));
+      const first = liveS
+        .filter((x) => ids.has(x.patient_id) && x.status === "completed")
+        .sort((a, b) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time))[0];
+      if (!first || (first.seq || 0) > 1) continue;
+      const p = list.find((q) => q.id === first.patient_id)!;
+      // report usi doctor ke naam jo abhi patient ka doctor hai; na ho to jisne pehla session liya
+      out.push({ p: p.doctor_id ? p : { ...p, doctor_id: first.doctor_id }, date: first.session_date });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patients, liveS]);
+  const firstDay = (p: Patient) => firstVisits.find((f) => f.p.id === p.id)?.date || createdDay(p);
+  const newIn = (from: string, to: string) =>
+    firstVisits.filter((f) => f.date >= from && f.date <= to).map((f) => f.p);
+  // Drop-outs: har number ek baar (sabse taaza End). Agar usi number ki koi entry abhi
+  // ongoing / new hai to wo drop-out nahi — wo bas duplicate entry band ki gayi thi.
+  const uniqDrops = (list: Patient[]) => {
+    const live = new Set(patients.filter((p) => p.status === "ongoing" || p.status === "new").map(patKey));
+    const best = new Map<string, Patient>();
+    for (const p of list) {
+      const k = patKey(p);
+      if (live.has(k)) continue;
+      const cur = best.get(k);
+      if (!cur || endInfo(p).date > endInfo(cur).date) best.set(k, p);
+    }
+    return [...best.values()];
+  };
+  // Ongoing now: same number ki do ongoing entry ho to ek hi giné
+  const uniqOn = (list: Patient[]) => {
+    const best = new Map<string, Patient>();
+    for (const p of list) if (!best.has(patKey(p))) best.set(patKey(p), p);
+    return [...best.values()];
+  };
+
   /* ========================= dialogs ========================= */
   const close = () => setDlg(null);
 
@@ -1071,7 +1119,7 @@ export default function Physio() {
     const save = async () => {
       if (!f.name.trim()) return toast("Enter a name");
       const phone = f.phone.replace(/\D/g, "").slice(-10);
-      const dup = patients.find((p) => phone && p.phone === phone && p.status !== "done");
+      const dup = patients.find((p) => phone.length === 10 && mob(p.phone) === phone && p.status !== "done");
       if (dup && !window.confirm(`${dup.name} (${dup.phone}) is already in the list. Add anyway?`)) return;
       const okDone = await run(
         () =>
@@ -3213,8 +3261,9 @@ export default function Physio() {
   /* Patients & drop-outs — har doctor ke paas kitne naye patient aaye aur kitno ka treatment band hua */
   const LeadsReport = (from: string, to: string) => {
     const inR = (d: string) => d >= from && d <= to;
-    const newL = patients.filter((p) => inR(createdDay(p)));
-    const drops = patients.filter((p) => p.status === "done" && inR(endInfo(p).date));
+    const newL = newIn(from, to);
+    const drops = uniqDrops(patients.filter((p) => p.status === "done" && inR(endInfo(p).date)));
+    const onAll = uniqOn(patients.filter((p) => p.status === "ongoing"));
     // Sirf jo doctor abhi kaam kar rahe hain — chhod chuke doctor yahan nahi dikhte
     const docRows = activeDocs
       .map((d) => ({
@@ -3222,7 +3271,7 @@ export default function Physio() {
         mineNew: newL.filter((p) => p.doctor_id === d.id),
         drops: drops.filter((p) => p.doctor_id === d.id)
           .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date)),
-        on: patients.filter((p) => p.status === "ongoing" && p.doctor_id === d.id)
+        on: onAll.filter((p) => p.doctor_id === d.id)
           .sort((a, b) => a.name.localeCompare(b.name)),
       }))
       .filter((r) => r.mineNew.length || r.drops.length || r.on.length)
@@ -3257,7 +3306,7 @@ export default function Physio() {
                       </tr>
                       {sd === r.d.id && (
                         <tr><td colSpan={4} style={{ background: "var(--bg)" }}>
-                          {col === "newp" ? r.mineNew.map((q) => repLine(q, nice(createdDay(q))))
+                          {col === "newp" ? r.mineNew.map((q) => repLine(q, `First visit ${nice(firstDay(q))}`))
                             : col === "drops" ? r.drops.map((q) => {
                                 const e = endInfo(q);
                                 return repLine(q, `${nice(e.date)} · ${e.reason} · ${doneText(q, progress(q).done)}`);
@@ -3273,7 +3322,7 @@ export default function Physio() {
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          Number par click karo to patient dikhenge. New patients = jo is range mein aaya, jis doctor par abhi assigned hai.
+          Number par click karo to patient dikhenge. New patients = jinka pehla session (pehli visit) is range mein hua — purane / Books wale continuing patient nahi gine jaate.
           Drop-out = jiska treatment (End) is range mein band hua. Ongoing now = aaj chal rahe patient.
         </p>
       </>
@@ -4140,9 +4189,9 @@ export default function Physio() {
     const done = mineS.filter((x) => x.status === "completed");
     const late = mineS.filter(isLate);
 
-    const mine = patients.filter((p) => p.doctor_id === did);
-    const newL = mine.filter((p) => inR(createdDay(p)));
-    const drops = mine.filter((p) => p.status === "done" && inR(endInfo(p).date))
+    const newL = newIn(from, to).filter((p) => p.doctor_id === did);
+    const drops = uniqDrops(patients.filter((p) => p.status === "done" && inR(endInfo(p).date)))
+      .filter((p) => p.doctor_id === did)
       .sort((a, b) => endInfo(b).date.localeCompare(endInfo(a).date));
 
     const sRow = (x: Session) => (
@@ -4179,7 +4228,7 @@ export default function Physio() {
     // kis cheez ki kaunsi tareekh gini jaaye
     const dateOf = (k: string, x: Session | Patient) =>
       k === "done" || k === "late" ? (x as Session).session_date
-        : k === "newp" ? createdDay(x as Patient)
+        : k === "newp" ? firstDay(x as Patient)
         : k === "drops" ? endInfo(x as Patient).date : T;
     const cell = (k: string, f: string, t2: string) =>
       k === "on" ? rowData.on : rowData[k].filter((x) => { const d = dateOf(k, x); return d >= f && d <= t2; });
@@ -4188,7 +4237,7 @@ export default function Physio() {
       late: late.slice().sort(sortS),
       newp: newL,
       drops,
-      on: mine.filter(isOngoing).sort((a, b) => a.name.localeCompare(b.name)),
+      on: uniqOn(patients.filter(isOngoing)).filter((p) => p.doctor_id === did).sort((a, b) => a.name.localeCompare(b.name)),
     };
 
     return (
@@ -4248,7 +4297,7 @@ export default function Physio() {
                 {k === "done" || k === "late"
                   ? (list as Session[]).map(sRow)
                   : k === "newp"
-                  ? (list as Patient[]).map((q) => pRow(q, `Joined ${nice(createdDay(q))}`))
+                  ? (list as Patient[]).map((q) => pRow(q, `First visit ${nice(firstDay(q))}`))
                   : k === "drops"
                   ? (list as Patient[]).map((q) => {
                       const e = endInfo(q);
