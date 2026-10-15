@@ -312,6 +312,10 @@ const CSS = `
 .hjsatt .att-regsheet input.wide { width: 110px; text-align: left; }
 .hjsatt .att-regsheet input.neg { color: #b42318; font-weight: 700; }
 .hjsatt .att-regsheet th.hl, .hjsatt .att-regsheet td.hl { background: #fff7c2; }
+.hjsatt .att-regsheet th.ded, .hjsatt .att-regsheet td.ded { background: #fef3f2; }
+.hjsatt .att-regsheet .att-thplus { display: inline-block; margin-left: 4px; width: 18px;
+  height: 18px; line-height: 16px; border-radius: 4px; border: 1px solid #fda29b;
+  color: #b42318; font-size: 13px; font-weight: 700; text-align: center; vertical-align: middle; }
 .hjsatt .att-regsheet .att-rmbtn { width: 24px; height: 24px; border-radius: 5px;
   color: #98a2b3; font-size: 12px; text-align: center; }
 .hjsatt .att-regsheet .att-rmbtn:hover { background: #fef3f2; color: #b42318; }
@@ -5628,6 +5632,8 @@ const SHEET_NUM: [string, string][] = [
   ["lm_credit", "L.M Credit"],
   ["cm_credit", "C.M Credit"],
   ["total_credit", "Total Credit"],
+  ["ded_this", "Deduction This Month"],
+  ["ded_next", "Deduction Next Month"],
 ];
 
 // Koi number badla to us pe tike columns dobara nikal do.
@@ -5654,6 +5660,7 @@ function AttSheetTab() {
   const [askRefill, setAskRefill] = useState(false);
   const [hidden, setHidden] = useState<any[]>([]);
   const [showHidden, setShowHidden] = useState(false);
+  const [nextOn, setNextOn] = useState(false);   // "Deduction Next Month" column
   const timers = useRef<Record<string, any>>({});
 
   const loadHidden = async () => {
@@ -5692,7 +5699,6 @@ function AttSheetTab() {
       const num = (x: any) =>
         x === "" || x == null || isNaN(Number(x)) ? null : Number(x);
       const payload: any = {
-        signature: String(r.signature || "").trim() || null,
         remarks: String(r.remarks || "").trim() || null,
       };
       SHEET_NUM.forEach(([c]) => { payload[c] = num(r[c]); });
@@ -5716,13 +5722,17 @@ function AttSheetTab() {
   const shown = rows.filter((r) =>
     !q || `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
 
+  // Next month wala column: + dabane pe, ya jab kisi row mein value ho
+  const showNext = nextOn || rows.some((r) => Number(r.ded_next) > 0);
+  const cols = SHEET_NUM.filter(([c]) => c !== "ded_next" || showNext);
+  useEffect(() => { setNextOn(false); }, [month]);
+
   const monthLabel = new Date(`${month}-01T00:00:00`)
     .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 
   const exportCsv = () => downloadCsv(shown.map((r, i) => {
     const o: any = { "Sr. No.": i + 1, "Emp Code": r.emp_code, Name: r.full_name };
-    SHEET_NUM.forEach(([c, l]) => { o[l] = r[c] ?? ""; });
-    o.Signature = r.signature || "";
+    cols.forEach(([c, l]) => { o[l] = r[c] ?? ""; });
     o.Remarks = r.remarks || "";
     return o;
   }), `HJS_attendance_sheet_${month}.csv`);
@@ -5733,7 +5743,8 @@ function AttSheetTab() {
         <div style={{ flex: 1, minWidth: 180 }}>
           <b style={{ fontSize: 16 }}>Attendance sheet · {monthLabel}</b>
           <p className="att-muted" style={{ whiteSpace: "normal", fontSize: 12.5 }}>
-            Every cell is editable and saves on its own.
+            Every cell is editable and saves on its own. Deduction Next Month moves into next
+            month&apos;s Deduction This Month. Remarks start fresh each month — pick a month to see its remarks.
           </p>
         </div>
         <input type="month" value={month} className="att-repmonth"
@@ -5794,10 +5805,15 @@ function AttSheetTab() {
                 <tr>
                   <th>Sr.</th>
                   <th className="name">Name</th>
-                  {SHEET_NUM.map(([c, l]) => (
-                    <th key={c} className={c === "worked" ? "hl" : ""}>{l}</th>
+                  {cols.map(([c, l]) => (
+                    <th key={c} className={c === "worked" ? "hl" : c.startsWith("ded_") ? "ded" : ""}>
+                      {l}
+                      {c === "ded_this" && !showNext && (
+                        <button className="att-thplus" title="Add Deduction Next Month"
+                          onClick={() => setNextOn(true)}>+</button>
+                      )}
+                    </th>
                   ))}
-                  <th>Signature</th>
                   <th>Remarks</th>
                   <th></th>
                 </tr>
@@ -5812,18 +5828,14 @@ function AttSheetTab() {
                         {r.emp_code}{saving[r.employee_id] ? " · saving…" : ""}
                       </span>
                     </td>
-                    {SHEET_NUM.map(([c]) => (
-                      <td key={c} className={c === "worked" ? "hl" : ""}>
+                    {cols.map(([c]) => (
+                      <td key={c} className={c === "worked" ? "hl" : c.startsWith("ded_") ? "ded" : ""}>
                         <input type="text" inputMode="decimal"
                           className={c === "total_credit" && Number(r[c]) < 0 ? "neg" : ""}
                           value={r[c] ?? ""}
                           onChange={(e) => edit(r.employee_id, c, e.target.value)} />
                       </td>
                     ))}
-                    <td>
-                      <input className="wide" value={r.signature || ""}
-                        onChange={(e) => edit(r.employee_id, "signature", e.target.value)} />
-                    </td>
                     <td>
                       <input className="wide" value={r.remarks || ""}
                         onChange={(e) => edit(r.employee_id, "remarks", e.target.value)} />
@@ -6561,7 +6573,7 @@ const ALIASES: Record<string, string> = {
   "My attendance": "my report month days present absent",
   "My pay": "salary payable amount gross my pay",
   "Muster Roll": "attendance register month all staff payroll company",
-  "Monthly Sheet": "attendance sheet head week off worked credit l.m c.m total credit signature register",
+  "Monthly Sheet": "attendance sheet head week off worked credit l.m c.m total credit deduction remarks register",
   "Payroll": "salary pay all staff amount payable gross",
   "Half-filled records": "incomplete missing setup needs",
   // scope ke naam (jinme ek hi view hai)
