@@ -5759,6 +5759,14 @@ function AttSheetTab() {
   const edit = (id: string, k: string, v: string) => {
     const r = rows.find((x) => x.employee_id === id);
     if (!r) return;
+    // number wale cells mein sirf 0-9, ek "." aur shuru mein "-" — letters type hi nahi honge
+    if (k !== "remarks") {
+      const neg = v.trim().startsWith("-");
+      let t = v.replace(/[^0-9.]/g, "");
+      const dot = t.indexOf(".");
+      if (dot !== -1) t = t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, "");
+      v = (neg ? "-" : "") + t;
+    }
     let nr = k.startsWith("plan:")
       ? { ...r, ded_plan: { ...(r.ded_plan || {}), [planKey(Number(k.slice(5)))]: v } }
       : { ...r, [k]: v };
