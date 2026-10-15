@@ -4276,8 +4276,54 @@ const isCorporate = (emp: any) =>
 function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const today = istToday();
   const corp = isCorporate(me);
-  const types = useMemo(() => (allTypes || []).filter((t: any) =>
-    corp || !CORP_ONLY_TYPES.includes(t.code)), [allTypes, corp]);
+  // Is mahine kya-kya milta hai: birthday/anniversary month, comp off (holiday pe kaam), flex (2+ saal)
+  const [elig, setElig] = useState<any>(null);
+  useEffect(() => {
+    if (!corp) { setElig({}); return; }
+    (async () => {
+      const ym = today.slice(0, 7);
+      const mFrom = `${ym}-01`, mTo = lastDayOf(mFrom);
+      const yFrom = `${today.slice(0, 4)}-01-01`;
+      const [lv, ss, hl] = await Promise.all([
+        supabase.from("leaves").select("leave_type, from_date, days, status")
+          .eq("employee_id", me.id).in("status", ["Approved", "Pending"])
+          .in("leave_type", ["BDAY", "ANNIV", "COMP", "FLEX"]).gte("from_date", yFrom),
+        supabase.from("attendance_sessions").select("work_date")
+          .eq("employee_id", me.id).gte("work_date", yFrom).lte("work_date", mTo),
+        supabase.from("holidays").select("hol_date").eq("comp_off", true)
+          .gte("hol_date", yFrom).lte("hol_date", mTo),
+      ]);
+      const L = lv.data || [];
+      const worked = new Set((ss.data || []).map((x: any) => x.work_date));
+      const compDays = new Set<string>((hl.data || []).map((x: any) => String(x.hol_date)));
+      ["01-26", "08-15", "10-02"].forEach((md) => {
+        const d = `${today.slice(0, 4)}-${md}`;
+        if (d <= mTo) compDays.add(d);
+      });
+      // saal mein jin comp-off holidays pe kaam kiya — sirf pehle 3 ginte hain
+      const workedHol = Array.from(compDays).filter((d) => worked.has(d)).sort().slice(0, 3);
+      const thisMonthHol = workedHol.filter((d) => d.startsWith(ym)).length;
+      const compUsed = L.filter((x: any) => x.leave_type === "COMP" && x.from_date.startsWith(ym))
+        .reduce((a: number, x: any) => a + Number(x.days || 0), 0);
+      const md = (v: any) => (v ? String(v).slice(5, 7) : "");
+      const doj = me.date_of_joining ? String(me.date_of_joining).slice(0, 10) : "";
+      setElig({
+        BDAY: md(me.date_of_birth) === today.slice(5, 7)
+          && !L.some((x: any) => x.leave_type === "BDAY"),
+        ANNIV: md(me.marriage_anniversary) === today.slice(5, 7)
+          && !L.some((x: any) => x.leave_type === "ANNIV"),
+        COMP: Math.max(0, thisMonthHol * 2 - compUsed),
+        FLEX: !!doj && doj <= addDays(today, -730)
+          && !L.some((x: any) => x.leave_type === "FLEX" && x.from_date.startsWith(ym)),
+      });
+    })();
+  }, [corp, me.id]);
+
+  const types = useMemo(() => (allTypes || []).filter((t: any) => {
+    if (!CORP_ONLY_TYPES.includes(t.code)) return true;
+    if (!corp || !elig) return false;
+    return t.code === "COMP" ? elig.COMP > 0 : !!elig[t.code];
+  }), [allTypes, corp, elig]);
   const [form, setForm] = useState<any>({
     leave_type: types[0]?.code || "", from_date: today, to_date: today, reason: "",
     from_time: nowHM(), to_time: addMins(nowHM(), 60),
@@ -4341,6 +4387,14 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       return "This leave type is for a single day only.";
     if (!form.reason.trim()) return "Please write why you need this leave.";
     if (days > 60) return "One request can't be longer than 60 days.";
+    // comp off: isi mahine mein, aur jitne bache hain usse zyada nahi
+    if (form.leave_type === "COMP") {
+      const ym = today.slice(0, 7);
+      if (!form.from_date.startsWith(ym) || !form.to_date.startsWith(ym))
+        return "Comp off isi mahine mein lena hai — agle mahine lapse ho jaata hai.";
+      if (days > (elig?.COMP || 0))
+        return `Aapke paas sirf ${elig?.COMP || 0} comp off bache hain.`;
+    }
     // birthday / anniversary sirf usi mahine mein
     if (form.leave_type === "BDAY" || form.leave_type === "ANNIV") {
       const ref = form.leave_type === "BDAY" ? me.date_of_birth : me.marriage_anniversary;
@@ -4353,7 +4407,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       }
     }
     return "";
-  }, [form, rule, days, minDate, maxDate]);
+  }, [form, rule, days, minDate, maxDate, elig]);
 
   const submit = async () => {
     if (problem || sent) { setMsg({ err: problem, ok: "" }); return; }
