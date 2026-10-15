@@ -5656,17 +5656,16 @@ const SHEET_NUM: [string, string][] = [
   ["cm_credit", "C.M Credit"],
   ["total_credit", "Total Credit"],
   ["ded_this", "Deduction This Month"],
-  ["ded_next", "Deduction Next Month"],
 ];
 // Table ke andar chhote naam + upar group heading (Excel jaisa)
 const SHEET_SHORT: Record<string, string> = {
   total_days: "Total", week_off: "Week Off", leave_days: "Leave", effect: "Effect",
   worked: "Worked", lm_credit: "L.M", cm_credit: "C.M", total_credit: "Total",
-  ded_this: "This Month", ded_next: "Next Month",
+  ded_this: "This Month",
 };
 const SHEET_GROUP = (c: string) =>
   ["lm_credit", "cm_credit", "total_credit"].includes(c) ? "cr"
-    : c.startsWith("ded_") ? "ded" : "days";
+    : c.startsWith("ded_") || c.startsWith("plan:") ? "ded" : "days";
 
 // Koi number badla to us pe tike columns dobara nikal do.
 // Worked = Total − Week Off − Leave · Effect = −Leave · Total Credit = L.M + C.M − Leave
@@ -5692,8 +5691,15 @@ function AttSheetTab() {
   const [askRefill, setAskRefill] = useState(false);
   const [hidden, setHidden] = useState<any[]>([]);
   const [showHidden, setShowHidden] = useState(false);
-  const [nextOn, setNextOn] = useState(false);   // "Deduction Next Month" column
+  const [extra, setExtra] = useState(0);   // + se kitne aage ke mahine khule hain
   const timers = useRef<Record<string, any>>({});
+
+  // "2026-10" + 2 -> "2026-12-01"
+  const planKey = (off: number) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + off, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  };
 
   const loadHidden = async () => {
     const { data } = await supabase.rpc("att_sheet_hidden");
@@ -5734,6 +5740,13 @@ function AttSheetTab() {
         remarks: String(r.remarks || "").trim() || null,
       };
       SHEET_NUM.forEach(([c]) => { payload[c] = num(r[c]); });
+      // aage ke mahino ka deduction plan — khaali/0 wale hata do
+      const plan: Record<string, number> = {};
+      Object.entries(r.ded_plan || {}).forEach(([k, v]) => {
+        const n = num(v);
+        if (n) plan[k] = n;
+      });
+      payload.ded_plan = plan;
       const { error } = await supabase.from("attendance_sheet").update(payload)
         .eq("month", `${month}-01`).eq("employee_id", id);
       if (error) setErr(`${r.full_name}: ${error.message}`);
@@ -5744,7 +5757,9 @@ function AttSheetTab() {
   const edit = (id: string, k: string, v: string) => {
     const r = rows.find((x) => x.employee_id === id);
     if (!r) return;
-    let nr = { ...r, [k]: v };
+    let nr = k.startsWith("plan:")
+      ? { ...r, ded_plan: { ...(r.ded_plan || {}), [planKey(Number(k.slice(5)))]: v } }
+      : { ...r, [k]: v };
     const isNum = SHEET_NUM.some(([c]) => c === k);
     if (isNum && v.trim() !== "" && !isNaN(Number(v))) nr = sheetRecalc(nr, k);
     setRows(rows.map((x) => (x.employee_id === id ? nr : x)));
@@ -5757,10 +5772,24 @@ function AttSheetTab() {
     .sort((x, y) => String(x.full_name || "").trim()
       .localeCompare(String(y.full_name || "").trim(), "en", { sensitivity: "base" }));
 
-  // Next month wala column: + dabane pe, ya jab kisi row mein value ho
-  const showNext = nextOn || rows.some((r) => Number(r.ded_next) > 0);
-  const cols = SHEET_NUM.filter(([c]) => c !== "ded_next" || showNext);
-  useEffect(() => { setNextOn(false); }, [month]);
+  // Aage ke mahine: jitne + se khole, ya jitne aage tak kisi row ke plan mein value hai
+  const planMax = rows.reduce((mx, r) => {
+    Object.entries(r.ded_plan || {}).forEach(([k, v]) => {
+      const [y, m] = month.split("-").map(Number);
+      const [ky, km] = String(k).split("-").map(Number);
+      const off = (ky - y) * 12 + (km - m);
+      if (off > mx && Number(v)) mx = off;
+    });
+    return mx;
+  }, 0);
+  const nFuture = Math.max(extra, planMax);
+  const cols: [string, string][] = [
+    ...SHEET_NUM,
+    ...Array.from({ length: nFuture }, (_, i) => [`plan:${i + 1}`, ""] as [string, string]),
+  ];
+  useEffect(() => { setExtra(0); }, [month]);
+  const cellVal = (r: any, c: string) =>
+    c.startsWith("plan:") ? (r.ded_plan || {})[planKey(Number(c.slice(5)))] ?? "" : r[c] ?? "";
 
   const monthLabel = new Date(`${month}-01T00:00:00`)
     .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
@@ -5772,12 +5801,12 @@ function AttSheetTab() {
       .toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
   };
   const colLabel = (c: string) =>
-    c === "ded_this" ? shortMon(0) : c === "ded_next" ? shortMon(1) : SHEET_SHORT[c];
+    c === "ded_this" ? shortMon(0) : c.startsWith("plan:") ? shortMon(Number(c.slice(5))) : SHEET_SHORT[c];
 
   const exportCsv = () => downloadCsv(shown.map((r, i) => {
     const o: any = { "Sr. No.": i + 1, "Emp Code": r.emp_code, Name: r.full_name };
     cols.forEach(([c, l]) => {
-      o[c.startsWith("ded_") ? `Deduction ${colLabel(c)}` : l] = r[c] ?? "";
+      o[c === "ded_this" || c.startsWith("plan:") ? `Deduction ${colLabel(c)}` : l] = cellVal(r, c);
     });
     o.Remarks = r.remarks || "";
     return o;
@@ -5856,9 +5885,10 @@ function AttSheetTab() {
                       <th key={g} colSpan={n} className={`g-${g} gs`}>
                         {l}
                         {g === "ded" && (
-                          <button className={`att-thplus ${showNext ? "on" : ""}`}
-                            title={showNext ? `${shortMon(1)} column is open` : `Add ${shortMon(1)} column`}
-                            onClick={() => setNextOn(true)}>+</button>
+                          <button className="att-thplus"
+                            title={`Add ${shortMon(nFuture + 1)} column`}
+                            disabled={nFuture >= 12}
+                            onClick={() => setExtra(nFuture + 1)}>+</button>
                         )}
                       </th>
                     );
@@ -5899,8 +5929,8 @@ function AttSheetTab() {
                         <td key={c} className={`${gs ? "gs " : ""}${c === "worked" ? "hl" : ""}`}>
                           <input type="text" inputMode="decimal"
                             className={`${strong ? "b " : ""}${neg ? "neg" : ""}`}
-                            placeholder={c.startsWith("ded_") ? "–" : ""}
-                            value={r[c] ?? ""}
+                            placeholder={c === "ded_this" || c.startsWith("plan:") ? "–" : ""}
+                            value={cellVal(r, c)}
                             onChange={(e) => edit(r.employee_id, c, e.target.value)} />
                         </td>
                       );
