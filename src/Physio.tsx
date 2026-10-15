@@ -509,6 +509,8 @@ const CSS = `
 export default function Physio() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
+  // Books ki pehli physio invoice — mobile (last 10) → date. physio_first_invoice table (n8n roz bharta hai)
+  const [firstInv, setFirstInv] = useState<Map<string, string>>(new Map());
   const [sessions, setSessions] = useState<Session[]>([]);
   const [therapies, setTherapies] = useState<Therapy[]>([]);
   const [offs, setOffs] = useState<Off[]>([]);
@@ -626,6 +628,20 @@ export default function Physio() {
     setAssigns((a.data as Assign[]) || []);   // physio-assign.sql na chala ho to khali   // table na ho to khali — baaki app chalti rahegi
     setLoading(false);
   };
+  useEffect(() => {
+    // 1000-1000 karke — Supabase ek baar mein 1000 se zyada row nahi deta. Table na ho to khali map.
+    (async () => {
+      const m = new Map<string, string>();
+      for (let i = 0; i < 50; i++) {
+        const { data, error } = await supabase.from("physio_first_invoice")
+          .select("phone, first_invoice").order("phone").range(i * 1000, i * 1000 + 999);
+        if (error || !data?.length) break;
+        for (const r of data as { phone: string; first_invoice: string }[]) m.set(r.phone, r.first_invoice);
+        if (data.length < 1000) break;
+      }
+      setFirstInv(m);
+    })();
+  }, []);
   useEffect(() => {
     load();
     const ch = supabase
@@ -937,28 +953,35 @@ export default function Physio() {
   /* Reports ke liye duplicate hatana — ek mobile number = ek patient.
      Same number ki 2-3 entry (Bigin + walk-in, n8n do baar, +91 wala number) report mein ek hi giné. */
   const patKey = (p: Patient) => (mob(p.phone).length === 10 ? mob(p.phone) : `id:${p.id}`);
-  /* New patient = jiska pehla session (pehli visit) is range mein hua. Purana patient kabhi new nahi:
-     - source "Existing customer", ya haath se pehle ke session jode (done_adjust), ya
-     - pehla session hi Books se aaya continuing session ho (seq 2, 3, … — jaise 12/20).
-     Same mobile ki saari entries saath dekhi jaati hain. Jo lead abhi aaya hi nahi, wo new patient nahi. */
+  /* New patient = jiski pehli visit is range mein hui. Pehli visit = in dono mein jo pehle ho:
+       - Books mein us mobile ki pehli physio invoice (physio_first_invoice), ya
+       - desk par pehla completed session.
+     Isliye jiski is range se pehle physio invoice ban chuki hai (purana / continuing patient) wo new nahi.
+     Sirf doctor check (consultation) wala bhi gina jaata hai — uski invoice banti hai.
+     Safety: "Existing customer" source, done_adjust, ya Books wala continuing session (seq > 1) = purana.
+     Same mobile ki saari entries saath dekhi jaati hain. Na invoice, na session = abhi aaya nahi, new nahi. */
   const firstVisits = useMemo(() => {
     const byKey = new Map<string, Patient[]>();
     for (const p of patients) byKey.set(patKey(p), [...(byKey.get(patKey(p)) || []), p]);
     const out: { p: Patient; date: string }[] = [];
-    for (const list of byKey.values()) {
+    for (const [key, list] of byKey) {
       if (list.some((p) => p.source === "Existing customer" || (p.done_adjust || 0) > 0)) continue;
       const ids = new Set(list.map((p) => p.id));
       const first = liveS
         .filter((x) => ids.has(x.patient_id) && x.status === "completed")
         .sort((a, b) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time))[0];
-      if (!first || (first.seq || 0) > 1) continue;
-      const p = list.find((q) => q.id === first.patient_id)!;
+      if (first && (first.seq || 0) > 1) continue;
+      const inv = key.startsWith("id:") ? undefined : firstInv.get(key);
+      const dates = [inv, first?.session_date].filter(Boolean) as string[];
+      if (!dates.length) continue;
+      const date = dates.sort()[0];
+      const p = (first && list.find((q) => q.id === first.patient_id)) || list.find((q) => q.doctor_id) || list[0];
       // report usi doctor ke naam jo abhi patient ka doctor hai; na ho to jisne pehla session liya
-      out.push({ p: p.doctor_id ? p : { ...p, doctor_id: first.doctor_id }, date: first.session_date });
+      out.push({ p: p.doctor_id || !first ? p : { ...p, doctor_id: first.doctor_id }, date });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patients, liveS]);
+  }, [patients, liveS, firstInv]);
   const firstDay = (p: Patient) => firstVisits.find((f) => f.p.id === p.id)?.date || createdDay(p);
   const newIn = (from: string, to: string) =>
     firstVisits.filter((f) => f.date >= from && f.date <= to).map((f) => f.p);
@@ -3322,7 +3345,7 @@ export default function Physio() {
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          Number par click karo to patient dikhenge. New patients = jinka pehla session (pehli visit) is range mein hua — purane / Books wale continuing patient nahi gine jaate.
+          Number par click karo to patient dikhenge. New patients = jinki pehli visit (pehli physio invoice ya pehla session) is range mein hui — jiski pehle invoice ban chuki, wo purana.
           Drop-out = jiska treatment (End) is range mein band hua. Ongoing now = aaj chal rahe patient.
         </p>
       </>
