@@ -952,7 +952,12 @@ export default function Physio() {
 
   /* Reports ke liye duplicate hatana — ek mobile number = ek patient.
      Same number ki 2-3 entry (Bigin + walk-in, n8n do baar, +91 wala number) report mein ek hi giné. */
-  const patKey = (p: Patient) => (mob(p.phone).length === 10 ? mob(p.phone) : `id:${p.id}`);
+  // Clinic / staff numbers kai patients par lage hote hain (form mein alternate number) — inse merge nahi karna
+  const HUB_PHONES = new Set(["8639371990", "9682193902", "9910610723", "6239949209"]);
+  const patKey = (p: Patient) => {
+    const ph = mob(p.phone);
+    return ph.length === 10 && !HUB_PHONES.has(ph) ? ph : `id:${p.id}`;
+  };
   /* New patient = jiski pehli visit is range mein hui. Pehli visit = in dono mein jo pehle ho:
        - Books mein us mobile ki pehli physio invoice (physio_first_invoice), ya
        - desk par pehla completed session.
@@ -965,13 +970,15 @@ export default function Physio() {
     for (const p of patients) byKey.set(patKey(p), [...(byKey.get(patKey(p)) || []), p]);
     const out: { p: Patient; date: string }[] = [];
     for (const [key, list] of byKey) {
-      if (list.some((p) => p.source === "Existing customer" || (p.done_adjust || 0) > 0)) continue;
       const ids = new Set(list.map((p) => p.id));
       const first = liveS
         .filter((x) => ids.has(x.patient_id) && x.status === "completed")
         .sort((a, b) => (a.session_date + a.session_time).localeCompare(b.session_date + b.session_time))[0];
-      if (first && (first.seq || 0) > 1) continue;
       const inv = key.startsWith("id:") ? undefined : firstInv.get(key);
+      // Invoice ki date pata ho to wahi faisla karti hai (5 Oct ko "Existing customer" bane kuch patient
+      // asal mein 1–4 Oct ke naye the). Invoice na mile tabhi purane wale nishaan dekho.
+      if (!inv && (list.some((p) => p.source === "Existing customer" || (p.done_adjust || 0) > 0)
+        || (first && (first.seq || 0) > 1))) continue;
       const dates = [inv, first?.session_date].filter(Boolean) as string[];
       if (!dates.length) continue;
       const date = dates.sort()[0];
@@ -1139,11 +1146,14 @@ export default function Physio() {
 
   const NewLead = () => {
     const [f, setF] = useState({ name: "", phone: "", source: "Walk-in", notes: "" });
+    const saving = React.useRef(false);   // double-click se do entry na banein
     const save = async () => {
+      if (saving.current) return;
       if (!f.name.trim()) return toast("Enter a name");
       const phone = f.phone.replace(/\D/g, "").slice(-10);
       const dup = patients.find((p) => phone.length === 10 && mob(p.phone) === phone && p.status !== "done");
       if (dup && !window.confirm(`${dup.name} (${dup.phone}) is already in the list. Add anyway?`)) return;
+      saving.current = true;
       const okDone = await run(
         () =>
           supabase.from("physio_patients").insert({
@@ -1155,6 +1165,7 @@ export default function Physio() {
           }),
         "Patient saved"
       );
+      saving.current = false;
       if (okDone) close();
     };
     return (
@@ -1530,8 +1541,14 @@ export default function Physio() {
       return list.slice(0, 6);
     }, [search, patients]);
 
+    const saving = React.useRef(false);   // double-click se do entry na banein
     const save = async () => {
+      if (saving.current) return;
       if (!did) return toast("Pick a doctor");
+      saving.current = true;
+      try { await saveInner(); } finally { saving.current = false; }
+    };
+    const saveInner = async () => {
       const routine: Routine = rt === "daily" ? { type: "daily" } : rt === "alt" ? { type: "alt" } : rt === "days" ? { type: "days", days } : { type: "week", perWeek: 2 };
       let pid = pick?.id;
       if (!pid) {
