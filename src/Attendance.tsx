@@ -298,6 +298,15 @@ const CSS = `
 .hjsatt .att-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 .hjsatt .att-scroll::-webkit-scrollbar-track { background: #f1f2f4; }
 .hjsatt .att-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.hjsatt .att-sheet td { padding: 6px 6px; vertical-align: middle; }
+.hjsatt .att-sheet th { text-align: center; }
+.hjsatt .att-sheet td.sr { color: #6b7280; text-align: center; }
+.hjsatt .att-sheet input { min-height: 34px; width: 74px; padding: 5px 6px; font-size: 14px;
+  text-align: center; border-radius: 6px; }
+.hjsatt .att-sheet input.wide { width: 150px; text-align: left; }
+.hjsatt .att-sheet input.neg { color: #b42318; font-weight: 700; }
+.hjsatt .att-sheet th.hl, .hjsatt .att-sheet td.hl { background: #fff7c2; }
+.hjsatt .att-sheet td.name { min-width: 170px; }
 .hjsatt .att-table th { padding: 9px 11px; background: #f9fafb; color: #6b7280;
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; }
 .hjsatt .att-table td { padding: 9px 11px; border-top: 1px solid #f1f2f4;
@@ -2843,6 +2852,8 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
         </dl>
       </div>
 
+      <SpecialPostPicker emp={p} card />
+
       {canEdit && (
         <div className="att-card" style={{ marginTop: 12 }}>
           <Note>{msg.err}</Note>
@@ -5045,6 +5056,7 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             </select>
           </div>
         </div>
+        {!isNew && <SpecialPostPicker emp={row} />}
         <div className="att-row2">
           <div>
             <label>Team</label>
@@ -5489,6 +5501,251 @@ function OrgTab() {
         }}
       />
     </>
+  );
+}
+
+/* ============================================================
+   SPECIAL POST (v56) — "Attendance Head"
+   Dropdown sirf Attendance Head ko dikhta hai, aur turant save hota hai
+   (set_special_post RPC). Baaki logon ko sirf naam dikhta hai.
+   ============================================================ */
+function SpecialPostPicker({ emp, card = false }: any) {
+  const [head, setHead] = useState(false);
+  const [val, setVal] = useState<string>(emp?.special_post || "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ err: "", ok: "" });
+
+  useEffect(() => {
+    if (!emp?.id) return;
+    supabase.rpc("is_attendance_head").then(({ data }) => setHead(!!data));
+    // directory wale row mein special_post nahi aata — wahan se khud le aao
+    if (emp.special_post === undefined) {
+      supabase.from("employees").select("special_post").eq("id", emp.id).maybeSingle()
+        .then(({ data }) => setVal(data?.special_post || ""));
+    }
+  }, [emp?.id]);
+
+  if (!emp?.id || (!head && !val)) return null;
+
+  const change = async (v: string) => {
+    const prev = val;
+    setVal(v); setBusy(true); setMsg({ err: "", ok: "" });
+    const { error } = await supabase.rpc("set_special_post", { p_emp: emp.id, p_post: v || null });
+    if (error) { setVal(prev); setMsg({ err: error.message, ok: "" }); }
+    else {
+      setMsg({ err: "", ok: v ? `${emp.full_name} is now ${v}.` : "Special post removed." });
+      window.dispatchEvent(new CustomEvent("hjs:employee-updated"));
+    }
+    setBusy(false);
+  };
+
+  const inner = (
+    <div>
+      <label>Special post</label>
+      {head ? (
+        <>
+          <select value={val} disabled={busy} onChange={(e) => change(e.target.value)}>
+            <option value="">— none —</option>
+            <option value="Attendance Head">Attendance Head</option>
+          </select>
+          <p className="att-muted" style={{ marginTop: 6 }}>
+            Saves straight away. Only Attendance Heads can change this.
+          </p>
+        </>
+      ) : (
+        <p style={{ fontWeight: 600 }}>{val}</p>
+      )}
+      <Note>{msg.err}</Note>
+      <Note kind="ok">{msg.ok}</Note>
+    </div>
+  );
+  return card ? <div className="att-card" style={{ marginTop: 12 }}>{inner}</div> : inner;
+}
+
+/* ============================================================
+   ATTENDANCE SHEET (v57) — sirf Attendance Head
+   Mahine ka register: Total Day, Week Off, Leave, Effect, Worked,
+   L.M Credit, C.M Credit, Total Credit, Signature.
+   Pehli baar kholne pe server attendance se bhar deta hai.
+   Har cell editable hai aur khud save hota hai.
+   ============================================================ */
+const SHEET_NUM: [string, string][] = [
+  ["total_days", "Total Day"],
+  ["week_off", "Week Off"],
+  ["leave_days", "Leave in the Month"],
+  ["effect", "Effect"],
+  ["worked", "Worked"],
+  ["lm_credit", "L.M Credit"],
+  ["cm_credit", "C.M Credit"],
+  ["total_credit", "Total Credit"],
+];
+
+// Koi number badla to us pe tike columns dobara nikal do.
+// Worked = Total − Week Off − Leave · Effect = −Leave · Total Credit = L.M + C.M − Leave
+// Derived columns bhi haath se badle ja sakte hain — tab kuch recalc nahi hota.
+const sheetRecalc = (r: any, k: string) => {
+  const n = (x: any) => Number(x) || 0;
+  const x = { ...r };
+  if (["total_days", "week_off", "leave_days"].includes(k))
+    x.worked = +(n(x.total_days) - n(x.week_off) - n(x.leave_days)).toFixed(2);
+  if (k === "leave_days") x.effect = +(-n(x.leave_days)).toFixed(2);
+  if (["leave_days", "lm_credit", "cm_credit"].includes(k))
+    x.total_credit = +(n(x.lm_credit) + n(x.cm_credit) - n(x.leave_days)).toFixed(2);
+  return x;
+};
+
+function AttSheetTab() {
+  const [month, setMonth] = useState(istToday().slice(0, 7));
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [askRefill, setAskRefill] = useState(false);
+  const timers = useRef<Record<string, any>>({});
+
+  const load = async (refresh = false) => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("att_sheet_get", {
+      p_month: `${month}-01`, p_refresh: refresh,
+    });
+    if (error) setErr(error.message);
+    setRows(Array.isArray(data) ? data : []);
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, [month]);
+
+  const queueSave = (r: any) => {
+    const id = r.employee_id;
+    clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(async () => {
+      setSaving((s) => ({ ...s, [id]: true }));
+      const num = (x: any) =>
+        x === "" || x == null || isNaN(Number(x)) ? null : Number(x);
+      const payload: any = {
+        signature: String(r.signature || "").trim() || null,
+        remarks: String(r.remarks || "").trim() || null,
+      };
+      SHEET_NUM.forEach(([c]) => { payload[c] = num(r[c]); });
+      const { error } = await supabase.from("attendance_sheet").update(payload)
+        .eq("month", `${month}-01`).eq("employee_id", id);
+      if (error) setErr(`${r.full_name}: ${error.message}`);
+      setSaving((s) => ({ ...s, [id]: false }));
+    }, 700);
+  };
+
+  const edit = (id: string, k: string, v: string) => {
+    const r = rows.find((x) => x.employee_id === id);
+    if (!r) return;
+    let nr = { ...r, [k]: v };
+    const isNum = SHEET_NUM.some(([c]) => c === k);
+    if (isNum && v.trim() !== "" && !isNaN(Number(v))) nr = sheetRecalc(nr, k);
+    setRows(rows.map((x) => (x.employee_id === id ? nr : x)));
+    queueSave(nr);
+  };
+
+  const shown = rows.filter((r) =>
+    !q || `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()));
+
+  const monthLabel = new Date(`${month}-01T00:00:00`)
+    .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+
+  const exportCsv = () => downloadCsv(shown.map((r, i) => {
+    const o: any = { "Sr. No.": i + 1, "Emp Code": r.emp_code, Name: r.full_name };
+    SHEET_NUM.forEach(([c, l]) => { o[l] = r[c] ?? ""; });
+    o.Signature = r.signature || "";
+    o.Remarks = r.remarks || "";
+    return o;
+  }), `HJS_attendance_sheet_${month}.csv`);
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <b style={{ fontSize: 16 }}>Attendance sheet · {monthLabel}</b>
+          <p className="att-muted" style={{ whiteSpace: "normal" }}>
+            Every cell can be edited and saves on its own. Worked, Effect and Total Credit
+            update when you change the numbers they come from — you can still overwrite them.
+          </p>
+        </div>
+        <input type="month" value={month} className="att-repmonth"
+          onChange={(e) => e.target.value && setMonth(e.target.value)} />
+        <button className="att-btn sm line" onClick={() => setAskRefill(true)}>
+          Refill from attendance
+        </button>
+        <button className="att-btn sm line" onClick={exportCsv} disabled={!shown.length}>CSV</button>
+      </div>
+
+      {askRefill && (
+        <div className="att-note err">
+          <span>
+            This recalculates Total Day, Week Off, Leave, Effect, Worked, L.M Credit and
+            Total Credit for every row of {monthLabel} from attendance and leaves, and
+            overwrites your edits in those columns. C.M Credit, Signature and Remarks stay.
+          </span>
+          <div className="att-flex" style={{ marginTop: 10 }}>
+            <button className="att-btn sm" onClick={() => { setAskRefill(false); load(true); }}>
+              Yes, refill
+            </button>
+            <button className="att-btn sm grey" onClick={() => setAskRefill(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <Search placeholder="Search name, code or department" value={q} onChange={setQ} />
+      <Note>{err}</Note>
+
+      {busy ? <p className="att-muted">Loading…</p> : !shown.length ? (
+        <p className="att-muted">No one to show for this month.</p>
+      ) : (
+        <div className="att-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div className="att-scroll">
+            <table className="att-table att-sheet">
+              <thead>
+                <tr>
+                  <th>Sr.</th>
+                  <th className="name">Name</th>
+                  {SHEET_NUM.map(([c, l]) => (
+                    <th key={c} className={c === "worked" ? "hl" : ""}>{l}</th>
+                  ))}
+                  <th>Signature</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((r, i) => (
+                  <tr key={r.employee_id}>
+                    <td className="sr">{i + 1}</td>
+                    <td className="name">
+                      <b>{r.full_name}</b>
+                      <span className="att-muted" style={{ display: "block", fontSize: 11.5 }}>
+                        {r.emp_code}{saving[r.employee_id] ? " · saving…" : ""}
+                      </span>
+                    </td>
+                    {SHEET_NUM.map(([c]) => (
+                      <td key={c} className={c === "worked" ? "hl" : ""}>
+                        <input type="text" inputMode="decimal"
+                          className={c === "total_credit" && Number(r[c]) < 0 ? "neg" : ""}
+                          value={r[c] ?? ""}
+                          onChange={(e) => edit(r.employee_id, c, e.target.value)} />
+                      </td>
+                    ))}
+                    <td>
+                      <input className="wide" value={r.signature || ""}
+                        onChange={(e) => edit(r.employee_id, "signature", e.target.value)} />
+                    </td>
+                    <td>
+                      <input className="wide" value={r.remarks || ""}
+                        onChange={(e) => edit(r.employee_id, "remarks", e.target.value)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -6210,6 +6467,7 @@ const ALIASES: Record<string, string> = {
   "My attendance": "my report month days present absent",
   "My pay": "salary payable amount gross my pay",
   "Muster Roll": "attendance register month all staff payroll company",
+  "Monthly Sheet": "attendance sheet head week off worked credit l.m c.m total credit signature register",
   "Payroll": "salary pay all staff amount payable gross",
   "Half-filled records": "incomplete missing setup needs",
   // scope ke naam (jinme ek hi view hai)
@@ -7983,7 +8241,7 @@ function LinkAccount({ session, err: outerErr }: any) {
 /* ========================= shell ========================= */
 // Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
 type View = { k: string; label: string; adminOnly?: boolean };
-type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean };
+type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean; headOnly?: boolean };
 type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
 
 
@@ -10087,6 +10345,10 @@ const MODULES: Module[] = [
         { k: "matrix", label: "Monthly Grid" },
         { k: "dash", label: "Dashboard" },
       ]},
+      // Sirf "Attendance Head" special post walon ko dikhta hai (v56/v57)
+      { k: "sheet", label: "Attendance Sheet", headOnly: true, views: [
+        { k: "month", label: "Monthly Sheet" },
+      ]},
     ],
   },
   {
@@ -10324,11 +10586,12 @@ export default function Attendance() {
   // non-admin ko sirf apni row milti hai (v44). Isliye tab chhupane
   // ki zaroorat nahi.
   const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
+  const isHead = me.special_post === "Attendance Head";
   const mods = MODULES.filter((m) => !m.approverOnly || approver)
     .map((m) => ({
       ...m,
       scopes: m.scopes
-        .filter((sc) => !sc.adminOnly || topAdmin)
+        .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead))
         .map((sc) => ({ ...sc, views: sc.views.filter((v) => !v.adminOnly || topAdmin) })),
     }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
@@ -10381,6 +10644,7 @@ export default function Attendance() {
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
+      case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
       case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
       case "leave/mydata/requests": return <LeavesScreen me={me} tab="requests" />;
