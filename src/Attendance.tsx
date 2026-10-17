@@ -4246,8 +4246,8 @@ const LEAVE_RULES: Record<string, {
 }> = {
   SL:    { reasonReq: true, pastDays: 30, futureDays: 7,
            note: "Can be applied up to 30 days back. Reason is required." },
-  CL:    { reasonReq: true, pastDays: 0, futureDays: 365,
-           note: "Apply in advance — backdated casual leave isn't allowed." },
+  CL:    { reasonReq: true, pastDays: 7, futureDays: 1,
+           note: "Sirf emergency ke liye (medical / personal). Aaj ya pichhle 7 din ki lag sakti hai. Credit nahi hai to unpaid." },
   EL:    { reasonReq: true, pastDays: 0, futureDays: 365,
            note: "Apply in advance — backdated earned leave isn't allowed." },
   LV:    { reasonReq: true, pastDays: 30, futureDays: 365,
@@ -4260,7 +4260,7 @@ const LEAVE_RULES: Record<string, {
   COMP:  { reasonReq: true, pastDays: 7, futureDays: 31,
            note: "Holiday pe kaam ke badle. Usi mahine mein lena hai, warna lapse." },
   FLEX:  { single: true, reasonReq: true, pastDays: 7, futureDays: 31,
-           note: "2+ saal walon ke liye, mahine mein 1. Week off ke saath jod sakte ho; EL ke saath chipki to EL ginegi." },
+           note: "Collapsable leave — 2+ saal walon ko har mahine 1. Isi mahine lo, warna lapse; aage nahi judti. Week off ke saath jod sakte ho; EL ke saath chipki to EL ginegi." },
   BDAY:  { single: true, fixedDays: 1, reasonReq: true, pastDays: 31, futureDays: 31,
            note: "Birthday wale mahine mein kabhi bhi 1 din. Paid hai, EL se nahi katti." },
   ANNIV: { single: true, fixedDays: 1, reasonReq: true, pastDays: 31, futureDays: 31,
@@ -4269,9 +4269,8 @@ const LEAVE_RULES: Record<string, {
 
 // Sirf corporate staff ko dikhne wale leave types
 const CORP_ONLY_TYPES = ["COMP", "FLEX", "BDAY", "ANNIV"];
-const CORP_EXCLUDED_DEPTS = ["Mohali Store", "Noida Store"];
-const isCorporate = (emp: any) =>
-  !!emp?.branches?.corporate_policy && !CORP_EXCLUDED_DEPTS.includes(emp?.teams?.name);
+// Policy ab saari branches / stores pe — sirf branch ka flag dekhte hain
+const isCorporate = (emp: any) => !!emp?.branches?.corporate_policy;
 
 function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const today = istToday();
