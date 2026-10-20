@@ -268,7 +268,7 @@ const branchLabel = (code) => BRANCH_NAMES[code] || code;
 
 /* Store managers (branch → name) */
 const STORE_MANAGERS = {
-  GGN: 'Hemant - 9773641804',
+  GGN: 'Ankit - 7357862627',
   CHD: 'Niranjan - 9811069030',
   NCR: 'Dharmendra Singh - 9315573166',
   LDH: 'Gursajan - 8360687306',
@@ -307,8 +307,8 @@ const DP = {
   GGN: [
     'Hemant - 9773641804',
     'Amit - 9934973249',
-    'Arjun - 7042496461',
     'Gunjan Kumar - 7632972410',
+    'Manirul Miya - 9560843152',
     'MBC',
   ],
   LDH: [
@@ -339,11 +339,11 @@ const DP = {
     'MBC',
   ],
   NWD: [
-    'Rahul Kumar - 8750245247',
     'Rahul - 9359521911',
     'Nitin Singh - 7007413101',
     'Karan Gupta - 7838465084',
     'Uday - 8595759588',
+    'Arjun - 7042496461',
     'MBC',
   ],
   JKP: [
@@ -351,6 +351,7 @@ const DP = {
     'Nitish - 9911814167',
     'Rajankumar Jha - 8595353451',
     'Anil - 8178680581',
+    'Rahul Kumar - 8750245247',
     'MBC',
   ],
 };
