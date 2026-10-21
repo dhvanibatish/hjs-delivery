@@ -4319,6 +4319,8 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   }, [corp, me.id]);
 
   const types = useMemo(() => (allTypes || []).filter((t: any) => {
+    // LV (Leave unpaid) band — uski jagah Casual Leave hai
+    if (t.code === "LV") return false;
     if (!CORP_ONLY_TYPES.includes(t.code)) return true;
     if (!corp || !elig) return false;
     return t.code === "COMP" ? elig.COMP > 0 : !!elig[t.code];
