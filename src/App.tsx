@@ -370,10 +370,8 @@ const DP = {
     'MBC',
   ],
   NWD: [
-    'Rahul - 9359521911',
     'Nitin Singh - 7007413101',
     'Karan Gupta - 7838465084',
-    'Uday - 8595759588',
     'Arjun - 7042496461',
     'MBC',
   ],
@@ -383,6 +381,7 @@ const DP = {
     'Rajankumar Jha - 8595353451',
     'Anil - 8178680581',
     'Rahul Kumar - 8750245247',
+    'Rahul - 9359521911',
     'MBC',
   ],
 };
