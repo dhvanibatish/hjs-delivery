@@ -2450,12 +2450,16 @@ function MatrixTab({ me }: any) {
     A: "Absent", W: "Week off", F: "Holiday",
   };
 
+  const isAdmin = me.role === "admin";
+
   const openDay = async (code: string, d: string, mark: string) => {
-    if (!mark) return;
+    // admin khaali din (aage ki date) pe bhi leave laga sakta hai
+    if (!mark && !isAdmin) return;
     const emp = empByCode[code];
     if (!emp) return;
     setPickEmp(emp);
-    setPick({ d, mark, label: MARK_LABEL[mark] || `${mark} leave`, log: null });
+    setPick({ d, mark, label: !mark ? "Nothing recorded"
+      : MARK_LABEL[mark] || `${mark} leave`, log: null });
     // us ek din ka log yahin la lo — poore mahine ka pehle se laane ki zaroorat nahi
     const { data } = await supabase.from("attendance_logs").select("*")
       .eq("employee_id", emp.id).eq("work_date", d).maybeSingle();
@@ -2516,7 +2520,7 @@ function MatrixTab({ me }: any) {
       </p>
 
       {pick && pickEmp && (
-        <DaySheet d={pick} me={pickEmp}
+        <DaySheet d={pick} me={pickEmp} admin={isAdmin} onChanged={load}
           onClose={() => { setPick(null); setPickEmp(null); }} />
       )}
 
@@ -2560,8 +2564,9 @@ function MatrixTab({ me }: any) {
                       </td>
                       {dates.map((d) => (
                         <td key={d} style={{ textAlign: "center",
-                          cursor: r.marks[d] ? "pointer" : "default" }}
-                          title={r.marks[d] ? "Open this day" : undefined}
+                          cursor: r.marks[d] || isAdmin ? "pointer" : "default" }}
+                          title={isAdmin ? "Open / change this day"
+                            : r.marks[d] ? "Open this day" : undefined}
                           onClick={() => openDay(r.code, d, r.marks[d])}>
                           <span className={markClass(r.marks[d])}>{markText(r.marks[d]) || "·"}</span>
                         </td>
@@ -6816,6 +6821,7 @@ const ALIASES: Record<string, string> = {
   "Who's In Today": "team present absent today live status",
   "Monthly Grid": "matrix month team attendance grid",
   "Dashboard": "charts stats trend team",
+  "Daily Report": "absent today aaj kaun nahi aaya mark present leave admin report",
   "Leave Summary": "balance available casual earned cl el remaining",
   "Leave Requests": "apply leave my requests pending cancel",
   "Balance & History": "ledger given granted carried lapsed adjusted entries all staff leave balance allotment quota remaining hr sheet",
@@ -6870,16 +6876,317 @@ const LEDGER_KIND: Record<string, { label: string; bg: string; fg: string }> = {
   lapse:      { label: "Lapsed",   bg: "#f2f4f7", fg: "#667085" },
 };
 
+/* ================= admin: kisi bhi din ko badlo ================= */
+// Present / Half day / Leave / Absent — sab admin_set_day RPC se.
+// Purani leave us din se hat jaati hai (lambi leave ho to beech se tootti hai).
+function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone }: any) {
+  const s0 = String(emp?.shift_start || "10:00").slice(0, 5);
+  const s1 = String(emp?.shift_end || "19:00").slice(0, 5);
+  const [st, setSt] = useState<string>(initial);
+  const [tin, setTin] = useState(s0);
+  const [tout, setTout] = useState(s1);
+  const [lt, setLt] = useState("EL");
+  const [types, setTypes] = useState<any[]>([]);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    supabase.from("leave_types").select("code, name").order("code")
+      .then(({ data }) => setTypes((data || []).filter((t: any) => t.code !== "SHORT")));
+  }, []);
+
+  // half day chuna to out time apne aap 4 ghante baad
+  const pick = (k: string) => {
+    setSt(k);
+    if (k === "Half Day") { setTin(s0); setTout(addMins(s0, 240)); }
+    if (k === "Present") { setTin(s0); setTout(s1); }
+  };
+
+  const save = async () => {
+    if ((st === "Present" || st === "Half Day") && tout <= tin)
+      return setErr("Out time, in time ke baad hona chahiye.");
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("admin_set_day", {
+      p_emp: emp.id, p_date: date, p_status: st,
+      p_leave_type: st === "Leave" ? lt : null,
+      p_note: note.trim() || null,
+      p_in: st === "Present" || st === "Half Day" ? tin : null,
+      p_out: st === "Present" || st === "Half Day" ? tout : null,
+    });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    onDone && onDone();
+  };
+
+  const pretty = new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+    { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+  return (
+    <Sheet title={`Change day · ${emp?.full_name || ""}`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <p className="att-muted">
+          {pretty}{current ? <> · abhi: <b>{current}</b></> : null}
+        </p>
+
+        <div>
+          <label>Mark this day as</label>
+          <div className="att-seg">
+            {[["Present", "Present"], ["Half Day", "Half day"],
+              ["Leave", "Leave"], ["Absent", "Absent"]].map(([k, l]) => (
+              <button key={k} className={st === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        {(st === "Present" || st === "Half Day") && (
+          <div className="att-row2">
+            <div>
+              <label>Check-in</label>
+              <input type="time" lang="en-US" value={tin} onChange={(e) => setTin(e.target.value)} />
+            </div>
+            <div>
+              <label>Check-out</label>
+              <input type="time" lang="en-US" value={tout} onChange={(e) => setTout(e.target.value)} />
+            </div>
+          </div>
+        )}
+
+        {st === "Leave" && (
+          <div>
+            <label>Leave type</label>
+            <select value={lt} onChange={(e) => setLt(e.target.value)}>
+              {types.map((t: any) => (
+                <option key={t.code} value={t.code}>{t.name} ({t.code})</option>
+              ))}
+            </select>
+            <p className="att-muted" style={{ marginTop: 6 }}>
+              Seedha Approved lagegi. Balance kam hua to baaki din UL ban jaayenge.
+            </p>
+          </div>
+        )}
+
+        {st === "Absent" && (
+          <div className="att-note err">
+            <span>Us din ki check-in aur leave dono hat jaayengi — din A dikhega.</span>
+          </div>
+        )}
+
+        <div>
+          <label>Note <span className="att-muted">(optional)</span></label>
+          <input value={note} placeholder="Jaise: phone kharab tha, office aaya tha"
+            onChange={(e) => setNote(e.target.value)} />
+        </div>
+
+        <Note>{err}</Note>
+        <button className="att-btn" disabled={busy} onClick={save}>
+          {busy ? "Saving…" : `Save as ${st === "Half Day" ? "Half day" : st}`}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ================= admin: roz ki attendance report ================= */
+function DailyReportTab() {
+  const [date, setDate] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState("absent");
+  const [q, setQ] = useState("");
+  const [edit, setEdit] = useState<any>(null);
+  const [quick, setQuick] = useState("");
+  const [ok, setOk] = useState("");
+
+  const load = async () => {
+    setBusy(true); setErr("");
+    const [em, lg, lv, hl] = await Promise.all([
+      supabase.from("employees")
+        .select("id, emp_code, full_name, designation, week_off_days, branch_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving, teams(name)")
+        .eq("active", true),
+      supabase.from("attendance_logs").select("*").eq("work_date", date),
+      supabase.from("leaves").select("*").in("status", ["Approved", "Pending"])
+        .lte("from_date", date).gte("to_date", date),
+      supabase.from("holidays").select("*").eq("hol_date", date),
+    ]);
+    if (em.error) setErr(em.error.message);
+    const dow = new Date(date + "T00:00:00").getDay();
+    const out = (em.data || [])
+      .filter((e: any) => (e.approval_status || "Approved") === "Approved")
+      .filter((e: any) => !e.date_of_joining || String(e.date_of_joining) <= date)
+      .filter((e: any) => !e.date_of_leaving || String(e.date_of_leaving) >= date)
+      .map((e: any) => {
+        const log = (lg.data || []).find((x: any) => x.employee_id === e.id);
+        const lvs = (lv.data || []).filter((x: any) => x.employee_id === e.id);
+        const appr = lvs.find((x: any) => x.status === "Approved" && x.leave_type !== "SHORT");
+        const pend = lvs.find((x: any) => x.status === "Pending");
+        const hol = (hl.data || []).find((h: any) => !h.branch_id || h.branch_id === e.branch_id);
+        const off = (e.week_off_days || []).includes(dow);
+        const kind = log && log.punch_in_at ? "present"
+          : appr ? "leave"
+          : hol || off ? "off"
+          : pend ? "pending"
+          : "absent";
+        return { ...e, team: e.teams?.name || "—", log, appr, pend, hol, off, kind };
+      });
+    setRows(out); setBusy(false);
+  };
+  useEffect(() => { load(); setOk(""); }, [date]);
+
+  // ek tap: shift ke time se present
+  const markPresent = async (r: any) => {
+    setQuick(r.id); setErr(""); setOk("");
+    const { error } = await supabase.rpc("admin_set_day", {
+      p_emp: r.id, p_date: date, p_status: "Present", p_leave_type: null,
+      p_note: "Daily report se present kiya",
+      p_in: String(r.shift_start || "10:00").slice(0, 5),
+      p_out: String(r.shift_end || "19:00").slice(0, 5),
+    });
+    setQuick("");
+    if (error) return setErr(`${r.full_name}: ${error.message}`);
+    setOk(`${r.full_name} — Present mark ho gaya.`);
+    load();
+  };
+
+  const count = (k: string) => rows.filter((r) => r.kind === k).length;
+  const shown = rows
+    .filter((r) => filter === "all" || r.kind === filter)
+    .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.team} ${r.designation || ""}`
+      .toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+  const groups: Record<string, any[]> = {};
+  shown.forEach((r) => { (groups[r.team] = groups[r.team] || []).push(r); });
+  const teams = Object.keys(groups).sort();
+
+  const TAG: Record<string, [string, string]> = {
+    present: ["Present", "p-Present"], leave: ["On leave", "p-Leave"],
+    pending: ["Leave pending", "p-Pending"], absent: ["Absent", "p-Absent"],
+    off: ["Off", "p-Off"],
+  };
+  const isToday = date === istToday();
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-rephd">
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <b style={{ fontSize: 16 }}>Daily attendance report</b>
+          <p className="att-muted">
+            {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
+              { weekday: "long", day: "2-digit", month: "long" })}
+            {isToday ? " · today" : ""}
+          </p>
+        </div>
+        <div className="att-flex">
+          <button className="att-btn sm line" onClick={() => setDate(addDays(date, -1))}>‹</button>
+          <input type="date" value={date} max={istToday()} className="att-repmonth"
+            onChange={(e) => e.target.value && setDate(e.target.value)} />
+          <button className="att-btn sm line" disabled={date >= istToday()}
+            onClick={() => setDate(addDays(date, 1))}>›</button>
+          <button className="att-btn sm line" disabled={!shown.length}
+            onClick={() => downloadCsv(shown.map((r) => ({
+              Code: r.emp_code, Name: r.full_name, Department: r.team,
+              Status: TAG[r.kind][0],
+              In: r.log?.punch_in_at ? fmtTime(r.log.punch_in_at) : "",
+              Out: r.log?.punch_out_at ? fmtTime(r.log.punch_out_at) : "",
+              Leave: (r.appr || r.pend)?.leave_type || "",
+            })), `HJS_daily_${date}.csv`)}>CSV</button>
+        </div>
+      </div>
+
+      <div className="att-stats">
+        {[["absent", "Absent", "#dc2626"], ["pending", "Leave pending", "#b54708"],
+          ["leave", "On leave", "#2563eb"], ["present", "Present", "#16a34a"],
+          ["off", "Week off / holiday", "#667085"], ["all", "Everyone", "#1849a9"]]
+          .map(([k, l, c]) => (
+          <button key={k} className="att-stat clk" onClick={() => setFilter(k)}
+            style={filter === k ? { borderColor: c, background: "#fafbff" } : undefined}>
+            <b style={{ color: c }}>{k === "all" ? rows.length : count(k)}</b><span>{l}</span>
+          </button>
+        ))}
+      </div>
+
+      <Search placeholder="Search name, code or department" value={q} onChange={setQ} />
+      <Note>{err}</Note>
+      <Note kind="ok">{ok}</Note>
+      {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && !shown.length && (
+        <div className="att-list"><p className="att-empty">
+          {filter === "absent" ? "Koi absent nahi. Sab aaye ya leave pe hain." : "Is list mein koi nahi."}
+        </p></div>
+      )}
+
+      {!busy && teams.map((tn) => (
+        <div className="att-list" key={tn}>
+          <div className="att-hd"><b>{tn}</b><span className="att-chip">{groups[tn].length}</span></div>
+          {groups[tn].map((r) => (
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <Avatar name={r.full_name} />
+              <div className="grow" style={{ minWidth: 160 }}>
+                <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
+                <p className="att-muted">
+                  {r.designation || "—"}
+                  {r.log?.punch_in_at ? ` · ${fmtTime(r.log.punch_in_at)}${
+                    r.log.punch_out_at ? ` – ${fmtTime(r.log.punch_out_at)}` : " – still in"}` : ""}
+                  {r.appr ? ` · ${r.appr.leave_type}` : ""}
+                  {r.pend && !r.appr ? ` · ${r.pend.leave_type} applied, approval pending` : ""}
+                  {r.kind === "off" ? ` · ${r.hol ? r.hol.name : "Week off"}` : ""}
+                </p>
+              </div>
+              <span className={`att-pill ${TAG[r.kind][1]}`}>{TAG[r.kind][0]}</span>
+              <div className="att-flex">
+                {(r.kind === "absent" || r.kind === "pending") && (
+                  <>
+                    <button className="att-btn sm green" disabled={quick === r.id}
+                      onClick={() => markPresent(r)}>
+                      {quick === r.id ? "…" : "Present"}
+                    </button>
+                    <button className="att-btn sm"
+                      onClick={() => setEdit({ r, initial: "Leave" })}>Leave</button>
+                  </>
+                )}
+                <button className="att-btn sm line"
+                  onClick={() => setEdit({ r, initial: r.kind === "present" ? "Present" : "Leave" })}>
+                  Change
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {edit && (
+        <DaySetSheet emp={edit.r} date={date} current={TAG[edit.r.kind][0]}
+          initial={edit.initial}
+          onClose={() => setEdit(null)}
+          onDone={() => { setOk(`${edit.r.full_name} ka din badal gaya.`); setEdit(null); load(); }} />
+      )}
+    </div>
+  );
+}
+
 /* ================= ek din ki poori detail ================= */
-function DaySheet({ d, me, onClose }: any) {
+function DaySheet({ d, me, onClose, admin = false, onChanged }: any) {
   const [sess, setSess] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
+  const [edit, setEdit] = useState(false);
 
   useEffect(() => {
     supabase.from("attendance_sessions").select("*")
       .eq("employee_id", me.id).eq("work_date", d.d).order("in_at")
       .then(({ data }) => { setSess(data || []); setBusy(false); });
   }, [d.d]);
+
+  // admin ne din badla -> wapas list pe aur list taaza
+  if (edit) {
+    return (
+      <DaySetSheet emp={me} date={d.d} current={d.label}
+        onClose={() => setEdit(false)}
+        onDone={() => { setEdit(false); onChanged && onChanged(); onClose(); }} />
+    );
+  }
 
   const pretty = new Date(d.d + "T00:00:00").toLocaleDateString("en-GB",
     { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
@@ -6893,6 +7200,13 @@ function DaySheet({ d, me, onClose }: any) {
           </span>
           <b style={{ fontSize: 15 }}>{d.label}</b>
         </div>
+
+        {admin && (
+          <button className="att-btn sm" style={{ alignSelf: "flex-start" }}
+            onClick={() => setEdit(true)}>
+            Change this day (Present / Leave / Absent)
+          </button>
+        )}
 
         {d.log && (
           <dl className="att-dl">
@@ -10738,6 +11052,7 @@ const MODULES: Module[] = [
       ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Who's In Today" },
+        { k: "daily", label: "Daily Report", adminOnly: true },
         { k: "matrix", label: "Monthly Grid" },
         { k: "dash", label: "Dashboard" },
       ]},
@@ -11039,7 +11354,8 @@ export default function Attendance() {
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
-      case "att/team/dash":         return <div className="att-wrap att-stack"><DashTab /></div>;
+      case "att/team/daily":        return <DailyReportTab />;
+      case "att/team/dash":        return <div className="att-wrap att-stack"><DashTab /></div>;
       case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
       case "leave/mydata/summary":  return <LeavesScreen me={me} tab="summary" />;
