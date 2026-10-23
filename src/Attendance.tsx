@@ -6821,7 +6821,7 @@ const ALIASES: Record<string, string> = {
   "Who's In Today": "team present absent today live status",
   "Monthly Grid": "matrix month team attendance grid",
   "Dashboard": "charts stats trend team",
-  "Daily Report": "absent today aaj kaun nahi aaya mark present leave admin report",
+  "Daily Absent Report": "absent today aaj kaun nahi aaya mark present leave admin report",
   "Leave Summary": "balance available casual earned cl el remaining",
   "Leave Requests": "apply leave my requests pending cancel",
   "Balance & History": "ledger given granted carried lapsed adjusted entries all staff leave balance allotment quota remaining hr sheet",
@@ -7001,16 +7001,19 @@ function DailyReportTab() {
 
   const load = async () => {
     setBusy(true); setErr("");
-    const [em, lg, lv, hl] = await Promise.all([
+    const [em, lg, lv, hl, tm] = await Promise.all([
       supabase.from("employees")
-        .select("id, emp_code, full_name, designation, week_off_days, branch_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving, teams(name)")
+        .select("id, emp_code, full_name, designation, week_off_days, branch_id, team_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving")
         .eq("active", true),
       supabase.from("attendance_logs").select("*").eq("work_date", date),
       supabase.from("leaves").select("*").in("status", ["Approved", "Pending"])
         .lte("from_date", date).gte("to_date", date),
       supabase.from("holidays").select("*").eq("hol_date", date),
+      supabase.from("teams").select("id, name"),
     ]);
     if (em.error) setErr(em.error.message);
+    const teamName: Record<string, string> = {};
+    (tm.data || []).forEach((t: any) => { teamName[t.id] = t.name; });
     const dow = new Date(date + "T00:00:00").getDay();
     const out = (em.data || [])
       .filter((e: any) => (e.approval_status || "Approved") === "Approved")
@@ -7028,7 +7031,7 @@ function DailyReportTab() {
           : hol || off ? "off"
           : pend ? "pending"
           : "absent";
-        return { ...e, team: e.teams?.name || "—", log, appr, pend, hol, off, kind };
+        return { ...e, team: teamName[e.team_id] || "No department", log, appr, pend, hol, off, kind };
       });
     setRows(out); setBusy(false);
   };
@@ -7071,7 +7074,7 @@ function DailyReportTab() {
     <div className="att-wrap att-stack">
       <div className="att-rephd">
         <div style={{ flex: 1, minWidth: 160 }}>
-          <b style={{ fontSize: 16 }}>Daily attendance report</b>
+          <b style={{ fontSize: 16 }}>Daily absent report</b>
           <p className="att-muted">
             {new Date(date + "T00:00:00").toLocaleDateString("en-GB",
               { weekday: "long", day: "2-digit", month: "long" })}
@@ -11052,7 +11055,7 @@ const MODULES: Module[] = [
       ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Who's In Today" },
-        { k: "daily", label: "Daily Report", adminOnly: true },
+        { k: "daily", label: "Daily Absent Report", adminOnly: true },
         { k: "matrix", label: "Monthly Grid" },
         { k: "dash", label: "Dashboard" },
       ]},
@@ -11303,7 +11306,8 @@ export default function Attendance() {
       ...m,
       scopes: m.scopes
         .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead))
-        .map((sc) => ({ ...sc, views: sc.views.filter((v) => !v.adminOnly || topAdmin) })),
+        .map((sc) => ({ ...sc, views: sc.views.filter((v) =>
+          (!v.adminOnly || topAdmin) && (v.k !== "daily" || me.role === "admin")) })),
     }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
   const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
@@ -11354,7 +11358,7 @@ export default function Attendance() {
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
-      case "att/team/daily":        return <DailyReportTab />;
+      case "att/team/daily":        return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
       case "att/team/dash":        return <div className="att-wrap att-stack"><DashTab /></div>;
       case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
