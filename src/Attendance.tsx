@@ -11064,8 +11064,11 @@ const MODULES: Module[] = [
       ]},
       // Sirf "Attendance Head" special post walon ko dikhta hai (v56/v57)
       { k: "sheet", label: "Attendance Sheet", headOnly: true, views: [
-        { k: "month", label: "Monthly Sheet", headOnly: true },
-        { k: "daily", label: "Daily Absent Report", adminOnly: true },
+        { k: "month", label: "Monthly Sheet" },
+      ]},
+      // Attendance Sheet ke bagal mein, sirf admin (role = admin)
+      { k: "absent", label: "Daily Absent Report", adminOnly: true, views: [
+        { k: "daily", label: "Daily Absent Report" },
       ]},
     ],
   },
@@ -11309,8 +11312,8 @@ export default function Attendance() {
     .map((m) => ({
       ...m,
       scopes: m.scopes
-        .filter((sc) => (!sc.adminOnly || topAdmin)
-          && (!sc.headOnly || isHead || (sc.k === "sheet" && me.role === "admin")))
+        .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead)
+          && (sc.k !== "absent" || me.role === "admin"))
         .map((sc) => ({ ...sc, views: sc.views.filter((v) =>
           (!v.adminOnly || topAdmin) && (!v.headOnly || isHead)
           && (v.k !== "daily" || me.role === "admin")) }))
@@ -11365,7 +11368,7 @@ export default function Attendance() {
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
-      case "att/sheet/daily":       return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
+      case "att/absent/daily":      return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
       case "att/team/dash":        return <div className="att-wrap att-stack"><DashTab /></div>;
       case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
