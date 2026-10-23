@@ -6988,6 +6988,8 @@ function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone 
 }
 
 /* ================= admin: roz ki attendance report ================= */
+// Founders aur Nishita mam is report mein nahi dikhte
+const HIDE_IN_ABSENT = /saket\s+agarwal|jatinder\s+verma|nishita/i;
 function DailyReportTab() {
   const [date, setDate] = useState(istToday());
   const [rows, setRows] = useState<any[]>([]);
@@ -7017,6 +7019,8 @@ function DailyReportTab() {
     const dow = new Date(date + "T00:00:00").getDay();
     const out = (em.data || [])
       .filter((e: any) => (e.approval_status || "Approved") === "Approved")
+      .filter((e: any) => !HIDE_IN_ABSENT.test(e.full_name || "")
+        && !["VGN-E001", "VGN-E002", "VGN-E010"].includes(e.emp_code))
       .filter((e: any) => !e.date_of_joining || String(e.date_of_joining) <= date)
       .filter((e: any) => !e.date_of_leaving || String(e.date_of_leaving) >= date)
       .map((e: any) => {
@@ -8953,7 +8957,7 @@ function LinkAccount({ session, err: outerErr }: any) {
 
 /* ========================= shell ========================= */
 // Zoho jaisa 3-level nav:  rail (module) -> top bar (scope) -> sub-tabs (view)
-type View = { k: string; label: string; adminOnly?: boolean };
+type View = { k: string; label: string; adminOnly?: boolean; headOnly?: boolean };
 type Scope = { k: string; label: string; views: View[]; adminOnly?: boolean; headOnly?: boolean };
 type Module = { k: string; label: string; icon: string; scopes: Scope[]; approverOnly?: boolean };
 
@@ -11055,13 +11059,13 @@ const MODULES: Module[] = [
       ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Who's In Today" },
-        { k: "daily", label: "Daily Absent Report", adminOnly: true },
         { k: "matrix", label: "Monthly Grid" },
         { k: "dash", label: "Dashboard" },
       ]},
       // Sirf "Attendance Head" special post walon ko dikhta hai (v56/v57)
       { k: "sheet", label: "Attendance Sheet", headOnly: true, views: [
-        { k: "month", label: "Monthly Sheet" },
+        { k: "month", label: "Monthly Sheet", headOnly: true },
+        { k: "daily", label: "Daily Absent Report", adminOnly: true },
       ]},
     ],
   },
@@ -11305,9 +11309,12 @@ export default function Attendance() {
     .map((m) => ({
       ...m,
       scopes: m.scopes
-        .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead))
+        .filter((sc) => (!sc.adminOnly || topAdmin)
+          && (!sc.headOnly || isHead || (sc.k === "sheet" && me.role === "admin")))
         .map((sc) => ({ ...sc, views: sc.views.filter((v) =>
-          (!v.adminOnly || topAdmin) && (v.k !== "daily" || me.role === "admin")) })),
+          (!v.adminOnly || topAdmin) && (!v.headOnly || isHead)
+          && (v.k !== "daily" || me.role === "admin")) }))
+        .filter((sc) => sc.views.length > 0),
     }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
   const rawScope = curMod.scopes.find((sc) => sc.k === scope) || curMod.scopes[0];
@@ -11358,7 +11365,7 @@ export default function Attendance() {
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
-      case "att/team/daily":        return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
+      case "att/sheet/daily":       return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
       case "att/team/dash":        return <div className="att-wrap att-stack"><DashTab /></div>;
       case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
