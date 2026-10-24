@@ -7,7 +7,7 @@ import ComplaintApp from './ComplaintApp.tsx'
 import Attendance from './Attendance.tsx'
 import Physio from './Physio.tsx'
 // Pickup Test — alag file, sirf ?pickuptest pe load hoti hai (baaki app pe asar nahi)
-const PickupTest = lazy(() => import('./PickupTest.tsx'))
+const PickupTest = lazy(() => import('./pickup_test.tsx'))
 
 const params = new URLSearchParams(window.location.search)
 const isPickup = params.has('pickups')
