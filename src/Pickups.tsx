@@ -7558,72 +7558,74 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="drawer pa-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="pa-nav">
-          <button className="icon-btn" disabled={!hasPrev} style={!hasPrev ? { opacity: 0.35 } : null} onClick={onPrev} title="Pichhli (←)"><ArrowLeft size={16} color={T.ink} /></button>
-          <span className="pa-pos">{pos}</span>
-          <button className="icon-btn" disabled={!hasNext} style={!hasNext ? { opacity: 0.35 } : null} onClick={onNext} title="Agli (→)"><ArrowRight size={16} color={T.ink} /></button>
-          <span style={{ flex: 1 }} />
-          <button className="icon-btn" onClick={onClose} title="Band (Esc)"><X size={18} color={T.ink} /></button>
+      {/* 3 hisse: upar header fixed, beech mein scroll, neeche buttons fixed */}
+      <div className="pa-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="pa-phead">
+          <div className="pa-nav">
+            <button className="icon-btn" disabled={!hasPrev} style={!hasPrev ? { opacity: 0.35 } : null} onClick={onPrev} title="Pichhli"><ArrowLeft size={16} color={T.ink} /></button>
+            <span className="pa-pos">{pos}</span>
+            <button className="icon-btn" disabled={!hasNext} style={!hasNext ? { opacity: 0.35 } : null} onClick={onNext} title="Agli"><ArrowRight size={16} color={T.ink} /></button>
+            <span style={{ flex: 1 }} />
+            <button className="icon-btn" onClick={onClose} title="Band"><X size={18} color={T.ink} /></button>
+          </div>
+          <div className="pa-ptitle ellip">{x.customer}</div>
+          <div className="pa-psub ellip">#{x.id} · {branchLabel(x.branch)}</div>
         </div>
 
-        <div style={{ fontWeight: 800, fontSize: 19, letterSpacing: -0.3 }}>{x.customer}</div>
-        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>#{x.id} · {branchLabel(x.branch)} · {x.equipment}</div>
-
-        {check && (
-          <div className="flag-note" style={{ marginTop: 12, ...(check.status === 'verified'
-            ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }) }}>
-            <b>{check.status === 'verified' ? 'Verified' : 'Issue mark kiya'}</b> · {fmtFullDateTime(check.at)}
-            {check.note && <div style={{ marginTop: 2 }}>Note: {check.note}</div>}
-          </div>
-        )}
-
-        {/* photo sabse upar aur badi — asli saboot yahi hai */}
-        <div className="pa-hero">
-          {photos.length ? (
-            <a href={photos[big]} target="_blank" rel="noreferrer"><img src={photos[big]} alt="pickup" /></a>
-          ) : (
-            <div className="pa-hero-none"><Camera size={26} /><div>Store ne koi photo nahi lagayi</div></div>
+        <div className="pa-pbody">
+          {check && (
+            <div className="flag-note" style={check.status === 'verified'
+              ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
+              <b>{check.status === 'verified' ? 'Verified' : 'Issue mark kiya'}</b> · {fmtFullDateTime(check.at)}
+              {check.note && <div style={{ marginTop: 2 }}>Note: {check.note}</div>}
+            </div>
           )}
+
+          <div className="pa-hero">
+            {photos.length ? (
+              <a href={photos[big]} target="_blank" rel="noreferrer" title="Badi photo kholo"><img src={photos[big]} alt="pickup" /></a>
+            ) : (
+              <div className="pa-hero-none"><Camera size={22} /><div>Store ne koi photo nahi lagayi</div></div>
+            )}
+          </div>
+          {photos.length > 1 && (
+            <div className="pa-strip">
+              {photos.map((u, i) => (
+                <button key={i} className={i === big ? 'pa-strip-i on' : 'pa-strip-i'} onClick={() => setBig(i)}><img src={u} alt="" /></button>
+              ))}
+            </div>
+          )}
+
+          {flags.length > 0 ? (
+            <div className="flag-note" style={{ background: T.amberSoft, color: T.amber }}>
+              <b>Dhyan do</b>
+              {flags.map((f) => <div key={f} style={{ marginTop: 2 }}>• {f}</div>)}
+            </div>
+          ) : (
+            <div className="flag-note" style={{ background: T.mint, color: T.green }}>
+              <b>Sab theek dikh raha hai</b>
+            </div>
+          )}
+
+          <div className="pa-list">
+            <div><span>Item</span><b>{x.equipment}</b></div>
+            <div><span>Pickup boy</span><b>{pp.name}{pp.phone ? ` · ${pp.phone}` : ''}</b></div>
+            <div><span>Vehicle</span><b>{x.vehicle || '—'}</b></div>
+            <div><span>Slot tay hua</span><b>{slot}</b></div>
+            <div><span>Actual pickup</span><b>{niceDate(r.actual_pickup_date) || '—'}</b></div>
+            <div><span>Inspected</span><b style={{ color: r.item_inspected ? T.green : T.red }}>{r.item_inspected ? 'Haan' : 'Nahi'}</b></div>
+            <div><span>Charges liye</span><b>{money(r.pickup_charges_collected)}</b></div>
+            <div><span>Pending tha</span><b style={{ color: x.pending > 0 ? T.red : T.ink }}>{x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'}</b></div>
+            <div><span>Pending collect</span><b>{money(r.pending_collected)}</b></div>
+            <div><span>Customer phone</span><b>{x.phone}</b></div>
+            <div><span>Store manager</span><b>{x.manager}</b></div>
+            {r.stage4_remarks && r.stage4_remarks !== 'null' && <div><span>Remarks</span><b>{r.stage4_remarks}</b></div>}
+          </div>
+
+          <button className="pa-link" onClick={onFull}><History size={14} /> Poori entry + timeline</button>
         </div>
-        {photos.length > 1 && (
-          <div className="pa-strip">
-            {photos.map((u, i) => (
-              <button key={i} className={i === big ? 'pa-strip-i on' : 'pa-strip-i'} onClick={() => setBig(i)}><img src={u} alt="" /></button>
-            ))}
-          </div>
-        )}
 
-        {flags.length > 0 ? (
-          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginTop: 12 }}>
-            <b>Dhyan do</b>
-            {flags.map((f) => <div key={f} style={{ marginTop: 2 }}>• {f}</div>)}
-          </div>
-        ) : (
-          <div className="flag-note" style={{ background: T.mint, color: T.green, marginTop: 12 }}>
-            <b>Sab theek dikh raha hai</b> — photo hai, item inspected hai, paisa clear.
-          </div>
-        )}
-
-        <div className="pa-facts">
-          <div><span>Pickup boy</span><b>{pp.name}</b>{pp.phone && <em>{pp.phone}</em>}</div>
-          <div><span>Vehicle</span><b>{x.vehicle || '—'}</b></div>
-          <div><span>Slot tay hua</span><b>{slot}</b></div>
-          <div><span>Actual pickup</span><b>{niceDate(r.actual_pickup_date) || '—'}</b></div>
-          <div><span>Inspected</span><b style={{ color: r.item_inspected ? T.green : T.red }}>{r.item_inspected ? 'Haan' : 'Nahi'}</b></div>
-          <div><span>Charges liye</span><b>{money(r.pickup_charges_collected)}</b></div>
-          <div><span>Pending tha</span><b style={{ color: x.pending > 0 ? T.red : T.ink }}>{x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'}</b></div>
-          <div><span>Pending collect</span><b>{money(r.pending_collected)}</b></div>
-          <div><span>Customer phone</span><b>{x.phone}</b></div>
-          <div><span>Store manager</span><b>{x.manager}</b></div>
-        </div>
-        {r.stage4_remarks && r.stage4_remarks !== 'null' && (
-          <div className="pa-remark">“{r.stage4_remarks}”</div>
-        )}
-
-        <button className="edit-btn" onClick={onFull}><History size={15} /> Poori entry + timeline kholo</button>
-
-        <div className="pa-actions">
+        <div className="pa-pfoot">
           {check ? (
             <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
               <RotateCcw size={15} /> Undo — wapas "check baaki"
@@ -7644,12 +7646,10 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
               </div>
             </>
           ) : (
-            <>
-              <div className="pa-btnrow">
-                <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify &amp; agla</button>
-                <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
-              </div>
-            </>
+            <div className="pa-btnrow">
+              <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify</button>
+              <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
+            </div>
           )}
         </div>
       </div>
@@ -7707,12 +7707,26 @@ function PaStyle() {
       .pa-mrow { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 10px 12px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
       .pa-mtop { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
       .pa-mbot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: ${T.inkSoft}; }
-      .pa-drawer { width: 520px; }
+      .pa-panel { margin-left: auto; width: 460px; max-width: 100vw; height: 100%; background: ${T.cream}; display: flex; flex-direction: column; animation: slidein .24s cubic-bezier(.2,.8,.2,1); text-align: left; box-shadow: -10px 0 30px rgba(20,57,43,.12); }
+      .pa-phead { flex-shrink: 0; padding: 14px 18px 12px; background: #fff; border-bottom: 1px solid ${T.line}; }
+      .pa-phead .pa-nav { margin-bottom: 8px; }
+      .pa-ptitle { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; color: ${T.ink}; }
+      .pa-psub { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; }
+      .pa-pbody { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+      .pa-pbody > * { flex-shrink: 0; }
+      .pa-pfoot { flex-shrink: 0; padding: 12px 18px 14px; background: #fff; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 8px; }
+      .pa-list { background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 2px 14px; }
+      .pa-list > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px solid ${T.cream}; }
+      .pa-list > div:last-child { border-bottom: none; }
+      .pa-list span { font-size: 12.5px; color: ${T.inkSoft}; flex-shrink: 0; }
+      .pa-list b { font-size: 13px; font-weight: 700; color: ${T.ink}; text-align: right; overflow-wrap: anywhere; }
+      .pa-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 2px 0; font-family: inherit; font-size: 12.5px; font-weight: 700; color: ${T.green}; cursor: pointer; }
+      .pa-link:hover { text-decoration: underline; }
       .pa-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
       .pa-pos { font-size: 12.5px; font-weight: 800; color: ${T.inkSoft}; min-width: 56px; text-align: center; }
-      .pa-hero { margin-top: 14px; border-radius: 14px; overflow: hidden; border: 1px solid ${T.line}; background: #fff; }
-      .pa-hero img { width: 100%; max-height: 340px; object-fit: contain; display: block; background: #111; }
-      .pa-hero-none { height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: ${T.violet}; background: ${T.violetSoft}; font-size: 13px; font-weight: 700; }
+      .pa-hero { flex-shrink: 0; border-radius: 14px; overflow: hidden; border: 1px solid ${T.line}; background: #fff; }
+      .pa-hero img { width: 100%; height: 220px; object-fit: contain; display: block; background: #111; }
+      .pa-hero-none { height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: ${T.violet}; background: ${T.violetSoft}; font-size: 13px; font-weight: 700; }
       .pa-strip { display: flex; gap: 7px; margin-top: 8px; overflow-x: auto; }
       .pa-strip-i { width: 58px; height: 58px; flex-shrink: 0; border-radius: 9px; overflow: hidden; border: 2px solid transparent; padding: 0; cursor: pointer; background: none; }
       .pa-strip-i.on { border-color: ${T.green}; }
