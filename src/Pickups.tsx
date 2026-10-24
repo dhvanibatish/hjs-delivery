@@ -6613,11 +6613,11 @@ function stepTime(log, stageId) {
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
 /* ═══════════════════════════════════════════════ RENEWAL TEAM (Kanu Mam)
-   ?review link pe khulta hai. Store app ka koi code isse touch nahi hota.
+   Link: ?pickups&review. Store app ka koi code isse touch nahi hota.
    BUILD MODE: 002 SQL abhi Supabase pe nahi chala, isliye RPC fail hote hi
    page DEMO data pe chalta hai aur approve/reject sirf screen pe hota hai —
    Supabase mein kuch nahi likha jaata. 002 chalne ke baad yahi page live
-   RPC se data lega. */
+   RPC se data lega (naam RV_FN mein). */
 const RV_FN = {
   login: 'settle_approver_login', // p_pin → ok
   pickups: 'approval_pending_pickups', // p_pin → rows
@@ -6626,25 +6626,38 @@ const RV_FN = {
   decideDamage: 'approval_decide_damage', // p_pin, p_id, p_decision, p_amount, p_reason
 };
 const RV_UNDO_DAYS = 7;
+const rvAgo = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 const RV_DEMO_PICKUPS = [
-  { id: 'd1', invoice_number: 'MOH/26-27/1042', customer_name: 'Baldev Raj', item_name: 'Oxygen Concentrator 5L', security_amount: 5000, pending_amount: 1200, created_at: new Date(Date.now() - 2 * 3600e3).toISOString() },
-  { id: 'd2', invoice_number: 'CHD/26-27/0877', customer_name: 'Anil Kapoor', item_name: 'BiPAP', security_amount: 10000, pending_amount: 0, created_at: new Date(Date.now() - 26 * 3600e3).toISOString() },
-  { id: 'd3', invoice_number: 'GGN/26-27/0311', customer_name: 'Ravi Menon', item_name: 'Hospital Bed (Manual)', security_amount: 3000, pending_amount: 800, created_at: new Date(Date.now() - 5 * 3600e3).toISOString() },
+  { id: 'd1', invoice_number: 'MOH/26-27/1042', customer_name: 'Baldev Raj', phone: '+9198150xxxxx', address: 'House 221, Phase 7, Mohali', item_name: 'Oxygen Concentrator 5L', security_amount: 5000, security_type: 'Online', pending_amount: 1200, total_amount: 6200, sale_person: 'Aditya', mentioned_pickup_date: '2026-10-26', remarks: 'Customer ne 26 Oct ko pickup bola', created_at: rvAgo(2) },
+  { id: 'd2', invoice_number: 'CHD/26-27/0877', customer_name: 'Anil Kapoor', phone: '+9198140xxxxx', address: 'Sector 35-C, Chandigarh', item_name: 'BiPAP', security_amount: 10000, security_type: 'Cheque', pending_amount: 0, total_amount: 14500, sale_person: 'Arvind', mentioned_pickup_date: '2026-10-25', remarks: '', created_at: rvAgo(26) },
+  { id: 'd3', invoice_number: 'GGN/26-27/0311', customer_name: 'Ravi Menon', phone: '+9198110xxxxx', address: 'DLF Phase 3, Gurgaon', item_name: 'Hospital Bed (Manual) | Over-bed table', security_amount: 3000, security_type: 'Cash', pending_amount: 800, total_amount: 4800, sale_person: 'Lavi', mentioned_pickup_date: '2026-10-27', remarks: 'Renewal nahi chahiye', created_at: rvAgo(5) },
 ];
 const RV_DEMO_DAMAGE = [
-  { id: 'm1', invoice_number: 'NCR/26-27/0450', customer_name: 'Sunita Rao', item_name: 'Wheelchair', security_amount: 2500, damage_amount: 900, damage_note: 'Footrest toota hua, ek wheel ka rubber ghis gaya', photos: '' },
+  { id: 'm1', invoice_number: 'NCR/26-27/0450', customer_name: 'Sunita Rao', phone: '+9198220xxxxx', address: 'Sector 62, Noida', item_name: 'Wheelchair', security_amount: 2500, security_type: 'Online', pending_amount: 0, pending_collected: 0, pickup_charges: 300, total_amount: 3200, sale_person: 'Aditya', damage_amount: 900, damage_note: 'Footrest toota hua, ek wheel ka rubber ghis gaya', photos: '', inspected_by: 'Shiva - 7303916944', created_at: rvAgo(3) },
 ];
 
+const rvMoney = (n) => (n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : '—');
+const rvNum = (n) => (n == null || n === '' ? 0 : Number(n) || 0);
+/* Plan ka formula: Security − (Pending − Pending collected) − Pickup charges − Damage */
+function rvBalance(r, damage) {
+  const owed = Math.max(0, rvNum(r.pending_amount) - rvNum(r.pending_collected));
+  return rvNum(r.security_amount) - owed - rvNum(r.pickup_charges) - rvNum(damage);
+}
+
 function ReviewPage() {
+  const isMobile = useIsMobile();
   const [pin, setPin] = useState('');
   const [ok, setOk] = useState(false);
   const [demo, setDemo] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('pickup'); // pickup | damage
+  const [tab, setTab] = useState('pickup'); // pickup | damage | history
+  const [q, setQ] = useState('');
+  const [store, setStore] = useState('ALL');
   const [pick, setPick] = useState([]);
   const [dmg, setDmg] = useState([]);
-  const [done, setDone] = useState([]); // decided items (undo ke liye)
+  const [done, setDone] = useState([]); // decided (undo ke liye)
+  const [openId, setOpenId] = useState(null); // drawer
   const [toast, setToast] = useState('');
   const ping = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
 
@@ -6685,6 +6698,7 @@ function ReviewPage() {
     if (kind === 'pickup') setPick((l) => l.filter((x) => x.id !== row.id));
     else setDmg((l) => l.filter((x) => x.id !== row.id));
     setDone((l) => [{ kind, row, decision, ...extra, at: Date.now() }, ...l]);
+    setOpenId(null);
     ping(`${decision === 'approved' ? 'Approved' : 'Rejected'} ✓${demo ? ' (demo)' : ''}`);
   };
 
@@ -6693,24 +6707,17 @@ function ReviewPage() {
     if (d.kind === 'pickup') setPick((l) => [d.row, ...l]);
     else setDmg((l) => [d.row, ...l]);
     setDone((l) => l.filter((x) => x !== d));
+    setOpenId(null);
     ping('Undo ho gaya');
   };
 
-  const money = (n) => (n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : '—');
-
+  /* ── LOGIN ── */
   if (!ok)
     return (
       <div className="track-wrap" style={{ fontFamily: FONT }}>
         <StyleTag />
-        <div className="track-topbar">
-          <div className="brand">
-            <div className="brand-badge"><ShieldCheck size={20} color="#fff" /></div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>Healthy Jeena Sikho</div>
-              <div style={{ fontSize: 11.5, color: T.inkSoft }}>Renewal Team</div>
-            </div>
-          </div>
-        </div>
+        <RvStyle />
+        <RvTop />
         <div className="track-body">
           <div className="track-card">
             <h1 className="track-h1">Renewal Team login</h1>
@@ -6729,165 +6736,375 @@ function ReviewPage() {
       </div>
     );
 
-  const list = tab === 'pickup' ? pick : dmg;
-  const recent = done.filter((d) => d.kind === tab && Date.now() - d.at < RV_UNDO_DAYS * 864e5);
+  /* ── LIST ── */
+  const recent = done.filter((d) => Date.now() - d.at < RV_UNDO_DAYS * 864e5);
+  const base =
+    tab === 'pickup'
+      ? pick.map((r) => ({ kind: 'pickup', r, key: 'p' + r.id }))
+      : tab === 'damage'
+        ? dmg.map((r) => ({ kind: 'damage', r, key: 'd' + r.id }))
+        : recent.map((d, i) => ({ kind: d.kind, r: d.row, d, key: 'h' + i + d.row.id }));
+  const term = q.trim().toLowerCase();
+  const rows = base.filter(({ r }) => {
+    if (store !== 'ALL' && deriveBranch(r) !== store) return false;
+    if (!term) return true;
+    return `${r.customer_name} ${r.invoice_number} ${r.phone || ''} ${equipmentText(r)}`.toLowerCase().includes(term);
+  });
+  const stores = [...new Set([...pick, ...dmg].map((r) => deriveBranch(r)))];
+  const open = rows.find((x) => x.key === openId) || null;
+
+  const secAtStake = pick.reduce((a, r) => a + rvNum(r.security_amount), 0) + dmg.reduce((a, r) => a + rvNum(r.security_amount), 0);
+  const dmgClaimed = dmg.reduce((a, r) => a + rvNum(r.damage_amount), 0);
+  const todayDone = done.filter((d) => dayStr(d.at) === todayStr()).length;
+
+  const cards = [
+    { id: 'pickup', label: 'Pickup approval pending', n: pick.length, icon: RotateCcw, color: T.blue, soft: T.blueSoft },
+    { id: 'damage', label: 'Damage claim pending', n: dmg.length, sub: dmgClaimed ? rvMoney(dmgClaimed) + ' claimed' : '', icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { id: null, label: 'Security in pending items', n: rvMoney(secAtStake), icon: ShieldCheck, color: T.forestSoft, soft: T.mint },
+    { id: 'history', label: 'Aaj decide kiye', n: todayDone, icon: CheckCircle2, color: T.green, soft: T.mint },
+  ];
 
   return (
     <div className="track-wrap" style={{ fontFamily: FONT }}>
       <StyleTag />
-      <div className="track-topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="brand">
-          <div className="brand-badge"><ShieldCheck size={20} color="#fff" /></div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>Renewal Team</div>
-            <div style={{ fontSize: 11.5, color: T.inkSoft }}>Kanu Mam · approvals</div>
-          </div>
-        </div>
-        <button className="icon-btn" title="Logout" onClick={() => { setOk(false); setPin(''); setDone([]); }}>
-          <LogOut size={17} color={T.ink} />
-        </button>
-      </div>
-      <div className="track-body">
+      <RvStyle />
+      <RvTop onLogout={() => { setOk(false); setPin(''); setDone([]); setOpenId(null); }} />
+      <div className="rv-body">
         {demo && (
-          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 14 }}>
+          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
             <b>Demo mode</b> — approval RPC abhi Supabase pe nahi hai. Ye sample data hai,
             approve/reject sirf screen pe hota hai, kahin save nahi hota.
           </div>
         )}
-        <div className="layout-toggle" style={{ marginBottom: 14 }}>
-          <button className={tab === 'pickup' ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab('pickup')}>
-            <RotateCcw size={14} /> Pickup Approval · {pick.length}
-          </button>
-          <button className={tab === 'damage' ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab('damage')}>
-            <AlertTriangle size={14} /> Damage Approval · {dmg.length}
-          </button>
+
+        <div className="rv-head">
+          <div>
+            <div className="dash-sub">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+            <h2 style={{ margin: '2px 0 0', fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>Approvals</h2>
+          </div>
         </div>
 
-        {list.length === 0 ? (
-          <div className="track-msg">Kuch pending nahi.</div>
-        ) : (
-          <div className="sales-list" style={{ marginTop: 0 }}>
-            {list.map((r) => (
-              <RvCard key={r.id} r={r} kind={tab} money={money}
-                onApprove={(extra) => decide(tab, r, 'approved', extra)}
-                onReject={(reason) => decide(tab, r, 'rejected', { reason })} />
+        <div className="rv-cards">
+          {cards.map((c) => (
+            <button key={c.label} className={c.id && tab === c.id ? 'dash-card on' : 'dash-card'}
+              style={{ ...(c.id && tab === c.id ? { borderColor: c.color } : {}), ...(c.id ? {} : { cursor: 'default' }) }}
+              onClick={() => c.id && (setTab(c.id), setOpenId(null))}>
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
+              <div className="dash-card-n" style={{ color: c.color }}>{c.n}</div>
+              <div className="dash-card-l">{c.label}</div>
+              {c.sub && <div className="rv-card-sub">{c.sub}</div>}
+            </button>
+          ))}
+        </div>
+
+        <div className="rv-toolbar">
+          <div className="layout-toggle">
+            {[
+              ['pickup', 'Pickup', pick.length],
+              ['damage', 'Damage', dmg.length],
+              ['history', 'History', recent.length],
+            ].map(([id, label, n]) => (
+              <button key={id} className={tab === id ? 'lt-btn active' : 'lt-btn'} onClick={() => { setTab(id); setOpenId(null); }}>
+                {label} <span className="rv-count">{n}</span>
+              </button>
             ))}
           </div>
-        )}
+          <div className="rv-search">
+            <Search size={15} color={T.inkSoft} />
+            <input placeholder="Customer, invoice, phone, item…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <select className="dash-inp" value={store} onChange={(e) => setStore(e.target.value)}>
+            <option value="ALL">All stores</option>
+            {stores.map((s) => <option key={s} value={s}>{branchLabel(s)}</option>)}
+          </select>
+        </div>
 
-        {recent.length > 0 && (
-          <>
-            <div className="sec-title" style={{ marginTop: 22 }}>
-              <History size={14} /> Abhi decide kiye · {RV_UNDO_DAYS} din tak undo
+        {rows.length === 0 ? (
+          <div className="rv-empty">
+            <CheckCircle2 size={26} color={T.green} />
+            <div>{tab === 'history' ? 'Abhi tak kuch decide nahi kiya.' : 'Sab clear — kuch pending nahi.'}</div>
+          </div>
+        ) : isMobile ? (
+          <div className="rv-mlist">
+            {rows.map((x) => <RvMobileRow key={x.key} x={x} onOpen={() => setOpenId(x.key)} />)}
+          </div>
+        ) : (
+          <div className="dash-block" style={{ padding: 0 }}>
+            <div className="dash-table-wrap">
+              <table className="dash-table rv-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Store</th>
+                    <th>Item</th>
+                    <th className="rv-r">Security</th>
+                    <th className="rv-r">{tab === 'pickup' ? 'Pending' : tab === 'damage' ? 'Damage claim' : 'Amount'}</th>
+                    <th>{tab === 'history' ? 'Decided' : 'Aayi'}</th>
+                    <th>Status</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((x) => {
+                    const { r, kind, d } = x;
+                    const st = rvStatus(kind, d);
+                    return (
+                      <tr key={x.key} className="dash-row" onClick={() => setOpenId(x.key)}>
+                        <td>
+                          <div className="rv-cust">{r.customer_name}</div>
+                          <div className="rv-inv">#{r.invoice_number}</div>
+                        </td>
+                        <td>{branchLabel(deriveBranch(r))}</td>
+                        <td className="ellip" style={{ maxWidth: 220 }}>{equipmentText(r)}</td>
+                        <td className="rv-r">{rvMoney(r.security_amount)}</td>
+                        <td className="rv-r" style={{ fontWeight: 800, color: kind === 'damage' ? T.red : rvNum(r.pending_amount) > 0 ? T.red : T.ink }}>
+                          {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? rvMoney(r.damage_amount) : rvMoney(r.pending_amount)}
+                        </td>
+                        <td style={{ color: T.inkSoft }}>{d ? fmtDateTime(new Date(d.at).toISOString()) : r.created_at ? `${agoText(r.created_at)} pehle` : '—'}</td>
+                        <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
+                        <td style={{ width: 30 }}><ChevronRight size={16} color={T.inkSoft} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <div className="sales-list" style={{ marginTop: 0 }}>
-              {recent.map((d, i) => (
-                <div key={i} className="sales-row" style={{ cursor: 'default' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="sales-row-top">
-                      <span className="ellip" style={{ fontWeight: 800 }}>{d.row.customer_name}</span>
-                      <span className="sales-chip" style={d.decision === 'approved'
-                        ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
-                        {d.decision === 'approved' ? 'Approved' : 'Rejected'}
-                      </span>
-                    </div>
-                    <div className="sales-sub">
-                      {d.row.invoice_number}
-                      {d.amount != null ? ` · Damage ${money(d.amount)}` : ''}
-                      {d.reason ? ` · ${d.reason}` : ''}
-                    </div>
-                  </div>
-                  <button className="btn-ghost" onClick={() => undo(d)}>Undo</button>
-                </div>
-              ))}
-            </div>
-          </>
+          </div>
         )}
         <div className="track-foot">Healthy Jeena Sikho · Renewal Team</div>
       </div>
+
+      {open && (
+        <RvDrawer x={open} onClose={() => setOpenId(null)}
+          onApprove={(extra) => decide(open.kind, open.r, 'approved', extra)}
+          onReject={(reason) => decide(open.kind, open.r, 'rejected', { reason })}
+          onUndo={() => undo(open.d)} />
+      )}
       {toast && <Toast msg={toast} />}
     </div>
   );
 }
 
-function RvCard({ r, kind, money, onApprove, onReject }) {
+function rvStatus(kind, d) {
+  if (d) return d.decision === 'approved'
+    ? { label: 'Approved', color: T.green, soft: T.mint }
+    : { label: 'Rejected', color: T.red, soft: T.redSoft };
+  return kind === 'damage'
+    ? { label: 'Damage review', color: T.red, soft: T.redSoft }
+    : { label: 'Approval pending', color: T.amber, soft: T.amberSoft };
+}
+
+function RvTop({ onLogout }) {
+  return (
+    <div className="track-topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="brand">
+        <div className="brand-badge"><ShieldCheck size={20} color="#fff" /></div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>Renewal Team</div>
+          <div style={{ fontSize: 11.5, color: T.inkSoft }}>Kanu Mam · approvals</div>
+        </div>
+      </div>
+      {onLogout && (
+        <button className="icon-btn" title="Logout" onClick={onLogout}><LogOut size={17} color={T.ink} /></button>
+      )}
+    </div>
+  );
+}
+
+function RvMobileRow({ x, onOpen }) {
+  const { r, kind, d } = x;
+  const st = rvStatus(kind, d);
+  const amt = d && d.amount != null ? d.amount : kind === 'damage' ? r.damage_amount : r.pending_amount;
+  return (
+    <button className="rv-mrow" onClick={onOpen}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="rv-mtop">
+          <span className="rv-cust ellip">{r.customer_name}</span>
+          <span className="rv-mamt" style={{ color: kind === 'damage' || rvNum(amt) > 0 ? T.red : T.ink }}>{rvMoney(amt)}</span>
+        </div>
+        <div className="rv-inv ellip">{equipmentText(r)}</div>
+        <div className="rv-mbot">
+          <span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span>
+          <span>{branchLabel(deriveBranch(r))}</span>
+          <span>#{r.invoice_number}</span>
+        </div>
+      </div>
+      <ChevronRight size={16} color={T.inkSoft} />
+    </button>
+  );
+}
+
+function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
+  const { r, kind, d } = x;
   const [mode, setMode] = useState(null); // null | reject | edit
   const [reason, setReason] = useState('');
   const [amt, setAmt] = useState(r.damage_amount != null ? String(r.damage_amount) : '');
+  const st = rvStatus(kind, d);
   const photos = String(r.photos || '').split(',').map((u) => u.trim()).filter((u) => u && u !== 'null');
-  const equip = equipmentText({ line_items: r.line_items, item_name: r.item_name });
+  const items = equipmentList(r);
+  const Icon = equipIcon(items[0]);
+  const br = deriveBranch(r);
+  const dmgNow = mode === 'edit' ? rvNum(amt) : d && d.amount != null ? d.amount : rvNum(r.damage_amount);
+  const bal = rvBalance(r, kind === 'damage' ? dmgNow : 0);
+  const owed = Math.max(0, rvNum(r.pending_amount) - rvNum(r.pending_collected));
+
   return (
-    <div className="sales-row" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-      <div className="sales-row-top">
-        <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>{r.customer_name}</span>
-        <span className="sales-chip" style={{ background: T.slateSoft, color: T.slate }}>
-          {branchLabel(deriveBranch(r))}
+    <div className="overlay" onClick={onClose}>
+      <div className="drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
+            <div className="eq-ico" style={{ width: 42, height: 42, background: st.soft }}><Icon size={21} color={st.color} /></div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{r.customer_name}</div>
+              <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>#{r.invoice_number} · {branchLabel(br)}</div>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
+        </div>
+        <span className="stage-badge" style={{ background: st.soft, color: st.color }}>
+          <span className="col-pip" style={{ background: st.color }} /> {kind === 'damage' ? 'Damage claim' : 'New pickup'} · {st.label}
         </span>
-      </div>
-      <div className="sales-sub">{equip}</div>
-      <div className="sales-meta">
-        <span>#{r.invoice_number}</span>
-        <span>Security {money(r.security_amount)}</span>
-        {kind === 'pickup' && <span>Pending {money(r.pending_amount)}</span>}
-        {kind === 'pickup' && r.created_at && <span>Aayi {agoText(r.created_at)} pehle</span>}
-      </div>
-      {kind === 'damage' && (
-        <div className="flag-note" style={{ background: T.redSoft, color: T.red, marginTop: 10 }}>
-          <b>Store claim: {money(r.damage_amount)}</b>
-          {r.damage_note ? <div style={{ marginTop: 2 }}>{r.damage_note}</div> : null}
-        </div>
-      )}
-      {photos.length > 0 && (
-        <div className="photo-grid" style={{ marginTop: 10 }}>
-          {photos.map((u, i) => (
-            <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="damage" /></a>
-          ))}
-        </div>
-      )}
 
-      {mode === 'reject' && (
-        <div style={{ marginTop: 10 }}>
-          <textarea className="inp" rows={2} autoFocus placeholder="Reject ka kaaran (store ko dikhega)…"
-            value={reason} onChange={(e) => setReason(e.target.value)} />
-        </div>
-      )}
-      {mode === 'edit' && (
-        <div style={{ marginTop: 10 }}>
-          <Field label="Approved damage amount (₹)">
-            <input className="inp" inputMode="numeric" value={amt}
-              onChange={(e) => setAmt(e.target.value.replace(/[^0-9]/g, ''))} />
-          </Field>
-        </div>
-      )}
+        {d && (
+          <div className="flag-note" style={{ marginTop: 14, background: st.soft, color: st.color }}>
+            <b>{st.label}</b> · {fmtFullDateTime(d.at)}
+            {d.amount != null && <div style={{ marginTop: 2 }}>Approved damage: {rvMoney(d.amount)}</div>}
+            {d.reason && <div style={{ marginTop: 2 }}>Kaaran: {d.reason}</div>}
+          </div>
+        )}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-        {mode === 'reject' ? (
+        {/* Settlement summary — pehle paise, kyunki decision isi pe hota hai */}
+        <div className="sec-title" style={{ marginTop: 18 }}><IndianRupee size={14} /> Settlement</div>
+        <div className="rv-calc">
+          <div className="rv-calc-row"><span>Security li thi</span><b>{rvMoney(r.security_amount)}</b></div>
+          <div className="rv-calc-row"><span>Pending bakaya</span><b>− {rvMoney(owed)}</b></div>
+          {rvNum(r.pickup_charges) > 0 && <div className="rv-calc-row"><span>Pickup charges</span><b>− {rvMoney(r.pickup_charges)}</b></div>}
+          {kind === 'damage' && <div className="rv-calc-row" style={{ color: T.red }}><span>Damage {mode === 'edit' ? '(naya amount)' : ''}</span><b>− {rvMoney(dmgNow)}</b></div>}
+          <div className="rv-calc-row rv-calc-total" style={{ color: bal > 0 ? T.green : bal < 0 ? T.red : T.ink }}>
+            <span>{bal > 0 ? 'Customer ko refund' : bal < 0 ? 'Customer se lena hai' : 'Nil settlement'}</span>
+            <b>{rvMoney(Math.abs(bal))}</b>
+          </div>
+        </div>
+        {kind === 'pickup' && (
+          <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 6 }}>
+            Abhi ka andaza — pickup charges aur damage inspection ke baad judenge.
+          </div>
+        )}
+
+        {kind === 'damage' && (
           <>
-            <button className="btn-danger" disabled={!reason.trim()} style={!reason.trim() ? { opacity: 0.5 } : null}
-              onClick={() => onReject(reason.trim())}>Haan, reject</button>
-            <button className="btn-ghost" onClick={() => setMode(null)}>Rehne do</button>
-          </>
-        ) : mode === 'edit' ? (
-          <>
-            <button className="btn-primary" disabled={amt === ''} onClick={() => onApprove({ amount: Number(amt) })}>
-              <Check size={15} /> Approve {money(amt)}
-            </button>
-            <button className="btn-ghost" onClick={() => setMode(null)}>Rehne do</button>
-          </>
-        ) : (
-          <>
-            <button className="btn-primary" onClick={() =>
-              onApprove(kind === 'damage' ? { amount: Number(r.damage_amount || 0) } : {})}>
-              <Check size={15} /> Approve
-            </button>
-            {kind === 'damage' && (
-              <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
-            )}
-            <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
+            <div className="sec-title"><AlertTriangle size={14} /> Store ka damage claim</div>
+            <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
+              <b>{rvMoney(r.damage_amount)}</b>
+              {r.damage_note && <div style={{ marginTop: 3, fontWeight: 600 }}>{r.damage_note}</div>}
+              {r.inspected_by && <div style={{ marginTop: 3, opacity: 0.85 }}>Inspect kiya: {r.inspected_by}</div>}
+            </div>
+            <div className="photo-grid" style={{ marginTop: 10 }}>
+              {photos.length ? photos.map((u, i) => (
+                <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="damage" /></a>
+              )) : <div className="block-next-note" style={{ marginTop: 0, gridColumn: "1 / -1" }}>Photos abhi nahi lagi (demo).</div>}
+            </div>
           </>
         )}
+
+        <div className="sec-title"><User size={14} /> Customer &amp; order</div>
+        <div className="kv-grid">
+          <KV label="Phone" value={show(r.phone)} />
+          <KV label="Salesperson" value={show(r.sale_person)} />
+          <KV label="Address" value={show(r.address)} full />
+          <KV label="Items" value={items.join(', ')} full />
+          <KV label="Invoice total" value={rvMoney(r.total_amount)} />
+          <KV label="Pending amount" value={rvMoney(r.pending_amount)} />
+          <KV label="Security mode" value={show(r.security_type)} />
+          <KV label="Pickup date (bola)" value={niceDate(r.mentioned_pickup_date) || '—'} />
+          <KV label="Store" value={branchLabel(br)} />
+          <KV label="Store manager" value={STORE_MANAGERS[br] || '—'} />
+          {r.remarks ? <KV label="Remarks" value={r.remarks} full /> : null}
+        </div>
+        <div className="created-note">Entry aayi: <b>{fmtFullDateTime(r.created_at) || '—'}</b></div>
+
+        {/* actions — drawer ke neeche chipke rehte hain */}
+        <div className="rv-actions">
+          {d ? (
+            <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
+              <RotateCcw size={15} /> Undo — wapas pending mein
+            </button>
+          ) : mode === 'reject' ? (
+            <>
+              <textarea className="inp" rows={2} autoFocus placeholder="Reject ka kaaran (store ko dikhega)…"
+                value={reason} onChange={(e) => setReason(e.target.value)} />
+              <div className="rv-btnrow">
+                <button className="btn-danger" disabled={!reason.trim()} style={!reason.trim() ? { opacity: 0.5 } : null}
+                  onClick={() => onReject(reason.trim())}><X size={15} /> Haan, reject</button>
+                <button className="btn-ghost" onClick={() => setMode(null)}>Rehne do</button>
+              </div>
+            </>
+          ) : mode === 'edit' ? (
+            <>
+              <Field label="Approved damage amount (₹)">
+                <input className="inp" inputMode="numeric" autoFocus value={amt}
+                  onChange={(e) => setAmt(e.target.value.replace(/[^0-9]/g, ''))} />
+              </Field>
+              <div className="rv-btnrow">
+                <button className="btn-primary" disabled={amt === ''} onClick={() => onApprove({ amount: Number(amt) })}>
+                  <Check size={15} /> Approve {rvMoney(amt)}
+                </button>
+                <button className="btn-ghost" onClick={() => { setMode(null); setAmt(String(r.damage_amount ?? '')); }}>Rehne do</button>
+              </div>
+            </>
+          ) : (
+            <div className="rv-btnrow">
+              <button className="btn-primary" onClick={() => onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
+                <Check size={15} /> Approve
+              </button>
+              {kind === 'damage' && (
+                <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
+              )}
+              <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function RvStyle() {
+  return (
+    <style>{`
+      .rv-body { max-width: 1180px; margin: 0 auto; padding: 24px 24px 60px; }
+      .rv-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
+      .rv-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+      .rv-card-sub { font-size: 11px; font-weight: 700; color: ${T.red}; margin-top: 3px; }
+      .rv-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+      .rv-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: rgba(0,0,0,.08); font-size: 11px; }
+      .lt-btn.active .rv-count { background: rgba(255,255,255,.2); }
+      .rv-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; flex: 1; min-width: 200px; }
+      .rv-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .rv-table td { vertical-align: middle; }
+      .rv-r { text-align: right !important; }
+      .rv-cust { font-weight: 800; font-size: 13.5px; color: ${T.ink}; }
+      .rv-inv { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .rv-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; border: 1px dashed ${T.line}; border-radius: 16px; padding: 40px 16px; font-size: 13.5px; font-weight: 700; color: ${T.inkSoft}; }
+      .rv-mlist { display: flex; flex-direction: column; gap: 8px; }
+      .rv-mrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .rv-mtop { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+      .rv-mamt { font-weight: 800; font-size: 14px; flex-shrink: 0; }
+      .rv-mbot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 7px; font-size: 11px; color: ${T.inkSoft}; }
+      .rv-calc { background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px 14px; }
+      .rv-calc-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; font-size: 13.5px; border-bottom: 1px solid ${T.cream}; }
+      .rv-calc-row b { font-weight: 800; }
+      .rv-calc-total { border-bottom: none; border-top: 1.5px solid ${T.line}; font-size: 15px; font-weight: 800; }
+      .rv-actions { position: sticky; bottom: -22px; margin: 22px -22px -22px; padding: 14px 22px 18px; background: ${T.cream}; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 10px; }
+      .rv-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+      .rv-btnrow > button { flex: 1 1 auto; }
+      @media (max-width: 900px) { .rv-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+      @media (max-width: 760px) {
+        .rv-body { padding: 16px 12px 50px; }
+        .rv-search { flex: 1 1 100%; order: 3; }
+        .rv-actions { bottom: -18px; margin: 22px -16px -18px; padding: 12px 16px 16px; }
+      }
+    `}</style>
   );
 }
 
