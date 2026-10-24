@@ -7489,11 +7489,10 @@ function PickupAdmin({ deliveries, onOpen }) {
                       <td>{niceDate(paPickDate(x)) || '—'}</td>
                       <td style={{ textAlign: 'right' }}>{x.charges != null ? `₹${x.charges.toLocaleString('en-IN')}` : '—'}</td>
                       <td><FlagChip x={x} /></td>
-                      <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                      <td style={{ textAlign: 'right' }}>
+                        {/* seedha verify nahi — pehle entry khol ke photo/details dekhni hain */}
                         {st === 'todo' ? (
-                          <button className="pa-quick" onClick={() => mark(x, 'verified')} title="Seedha verify karo">
-                            <Check size={14} /> Verify
-                          </button>
+                          <span className="pa-quick">Kholo <ChevronRight size={14} /></span>
                         ) : (
                           <span className="dash-chip" style={{ background: chip.soft, color: chip.color }}>{chip.label}</span>
                         )}
