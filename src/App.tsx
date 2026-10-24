@@ -1446,6 +1446,7 @@ export default function App() {
   // Pickups module SLA page pe bhi mount hota hai — pickup SLA wahin banti hai
   const showPickups =
     page === 'pickups' ||
+    (isAllStores && page === 'pickupadmin') ||
     (page === 'dashboard' && dashKind === 'pickups') ||
     (page === 'sla' && slaKind === 'pickups');
   const showComplaints =
@@ -2063,7 +2064,9 @@ export default function App() {
                       ? 'dashboard'
                       : page === 'sla'
                         ? 'sla'
-                        : 'board'
+                        : page === 'pickupadmin'
+                          ? 'admin'
+                          : 'board'
                   }
                   reloadKey={reloadTick}
                   openLogKey={page === 'pickups' ? logTick : 0}
@@ -4595,6 +4598,8 @@ function Sidebar({ session, page, onNav }) {
     { id: 'deliveries', icon: LayoutDashboard, label: 'Deliveries' },
     // Pickups har store ke liye khula hai (RPC ab store-scoped hai)
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+    // Pickup Admin — supervisor check, sirf head login
+    ...(isAll ? [{ id: 'pickupadmin', icon: ShieldCheck, label: 'Pickup Admin' }] : []),
     ...(isAll
       ? [
           { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
@@ -4727,6 +4732,7 @@ function Topbar({
       >
         <option value="deliveries">Deliveries</option>
         <option value="pickups">Pickups</option>
+        {session.isHead && <option value="pickupadmin">Pickup Admin</option>}
         {session.isHead && <option value="complaints">Complaints</option>}
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
