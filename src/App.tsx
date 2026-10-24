@@ -495,6 +495,7 @@ const STAGE_COLS = {
     amount_type: null,
     security_collected: 0,
     security_type: null,
+    delivery_charges_collected: null,
     stage4_remarks: null,
   },
 };
@@ -862,6 +863,7 @@ function stageFields(toStage, f) {
       Delivered: f.delivered ? 'Yes' : 'No',
       Amount: `₹${f.amount || 0} · ${f.amountType || '—'}`,
       Security: `₹${f.security || 0} · ${f.securityType || '—'}`,
+      'Delivery charges': `₹${f.deliveryCharges || 0}`,
       ...rmk,
     };
   return {};
@@ -1667,6 +1669,8 @@ export default function App() {
         patch.amount_type = f.amountType || null;
         patch.security_collected = Number(f.security) || 0;
         patch.security_type = f.securityType || null;
+        // MBC — gaadi nahi lagi, isliye delivery charge hamesha 0
+        patch.delivery_charges_collected = 0;
         patch.stage4_remarks = f.remarks || null;
       }
     } else if (toStage === 'dispatched') {
@@ -1678,6 +1682,11 @@ export default function App() {
       patch.amount_type = f.amountType || null;
       patch.security_collected = Number(f.security) || 0;
       patch.security_type = f.securityType || null;
+      // Delivery charges — pickup jaisa hi. Kuch nahi liya to 0.
+      patch.delivery_charges_collected =
+        f.deliveryCharges === '' || f.deliveryCharges == null
+          ? null
+          : Number(f.deliveryCharges);
       patch.stage4_remarks = f.remarks || null;
     }
     return patch;
@@ -6140,6 +6149,12 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
         : '',
     securityType:
       r.security_type && r.security_type !== 'null' ? r.security_type : 'Cash',
+    deliveryCharges:
+      r.delivery_charges_collected != null &&
+      r.delivery_charges_collected !== '' &&
+      r.delivery_charges_collected !== 'null'
+        ? r.delivery_charges_collected
+        : '',
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   // Chrome mein date/time input pe click se picker khud nahi khulta —
@@ -6182,7 +6197,8 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                 String(f.amount).trim() !== '' &&
                 f.amountType &&
                 String(f.security).trim() !== '' &&
-                f.securityType
+                f.securityType &&
+                String(f.deliveryCharges).trim() !== ''
               )
             : true;
 
@@ -6527,6 +6543,23 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
                   </select>
                 </Field>
               </div>
+              <Field label="Delivery charges collected (₹) *">
+                <input
+                  className="inp"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="0"
+                  value={f.deliveryCharges}
+                  onChange={(e) =>
+                    set('deliveryCharges', e.target.value.replace(/[^0-9]/g, ''))
+                  }
+                />
+              </Field>
+              {String(f.deliveryCharges).trim() === '' && (
+                <div className="req-note">
+                  Delivery charges bharna zaroori hai — kuch nahi liya to 0 daal do.
+                </div>
+              )}
             </>
           )}
 
