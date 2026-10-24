@@ -6673,8 +6673,14 @@ function ReviewPage({ embedded = false } = {}) {
   const [dmg, setDmg] = useState(embedded ? RV_DEMO_DAMAGE : []);
   const [done, setDone] = useState([]); // decided (undo ke liye)
   const [openId, setOpenId] = useState(null); // drawer
-  const [toast, setToast] = useState('');
-  const ping = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+  const [toast, setToast] = useState(null); // {msg, d}
+  const toastT = React.useRef(null);
+  const ping = (m, d) => {
+    clearTimeout(toastT.current);
+    setToast({ msg: m, d: d || null });
+    toastT.current = setTimeout(() => setToast(null), 4000);
+  };
+  const rowsRef = React.useRef([]); // render ki list — "agla" nikalne ke liye
 
   // RPC deploy hi nahi hua (404 / function nahi mila) → demo mode
   const missing = (e) => /404|PGRST202|could not find|does not exist/i.test(String((e && e.message) || e));
@@ -6701,7 +6707,12 @@ function ReviewPage({ embedded = false } = {}) {
     setBusy(false);
   };
 
-  const decide = async (kind, row, decision, extra = {}) => {
+  const decide = async (kind, row, decision, extra = {}, goNext = false) => {
+    // agli entry pehle hi nikal lo — decide hote hi ye list se hat jaayegi
+    const list = rowsRef.current;
+    const at = list.findIndex((x) => x.r.id === row.id && x.kind === kind);
+    const rest = list.filter((x) => !(x.r.id === row.id && x.kind === kind));
+    const next = goNext && at >= 0 ? rest[Math.min(at, rest.length - 1)] : null;
     if (!demo) {
       try {
         if (kind === 'pickup')
@@ -6712,9 +6723,10 @@ function ReviewPage({ embedded = false } = {}) {
     }
     if (kind === 'pickup') setPick((l) => l.filter((x) => x.id !== row.id));
     else setDmg((l) => l.filter((x) => x.id !== row.id));
-    setDone((l) => [{ kind, row, decision, ...extra, at: Date.now() }, ...l]);
-    setOpenId(null);
-    ping(`${decision === 'approved' ? 'Approved' : 'Rejected'} ✓${demo ? ' (demo)' : ''}`);
+    const rec = { kind, row, decision, ...extra, at: Date.now() };
+    setDone((l) => [rec, ...l]);
+    setOpenId(next ? next.key : null);
+    ping(`${row.customer_name} · ${decision === 'approved' ? 'Approved ✓' : 'Rejected'}${demo ? ' (demo)' : ''}`, rec);
   };
 
   const undo = (d) => {
@@ -6723,7 +6735,7 @@ function ReviewPage({ embedded = false } = {}) {
     else setDmg((l) => [d.row, ...l]);
     setDone((l) => l.filter((x) => x !== d));
     setOpenId(null);
-    ping('Undo ho gaya');
+    setToast(null);
   };
 
   /* ── LOGIN ── */
@@ -6766,16 +6778,14 @@ function ReviewPage({ embedded = false } = {}) {
     return `${r.customer_name} ${r.invoice_number} ${r.phone || ''} ${equipmentText(r)}`.toLowerCase().includes(term);
   });
   const stores = [...new Set([...pick, ...dmg].map((r) => deriveBranch(r)))];
-  const open = rows.find((x) => x.key === openId) || null;
+  rowsRef.current = rows;
+  const oIdx = rows.findIndex((x) => x.key === openId);
+  const open = oIdx >= 0 ? rows[oIdx] : null;
+  const goTo = (d) => { const n = rows[oIdx + d]; if (n) setOpenId(n.key); };
 
   const dmgClaimed = dmg.reduce((a, r) => a + rvNum(r.damage_amount), 0);
   const todayDone = done.filter((d) => dayStr(d.at) === todayStr()).length;
 
-  const cards = [
-    { id: 'pickup', label: 'Pickup approval pending', n: pick.length, icon: RotateCcw, color: T.blue, soft: T.blueSoft },
-    { id: 'damage', label: 'Damage claim pending', n: dmg.length, sub: dmgClaimed ? rvMoney(dmgClaimed) + ' claimed' : '', icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { id: 'history', label: 'Aaj decide kiye', n: todayDone, icon: CheckCircle2, color: T.green, soft: T.mint },
-  ];
 
   return (
     <div className={embedded ? 'rv-embed' : 'track-wrap'} style={embedded ? undefined : { fontFamily: FONT }}>
@@ -6797,17 +6807,21 @@ function ReviewPage({ embedded = false } = {}) {
           </div>
         </div>
 
-        <div className="rv-cards">
-          {cards.map((c) => (
-            <button key={c.label} className={c.id && tab === c.id ? 'dash-card on' : 'dash-card'}
-              style={{ ...(c.id && tab === c.id ? { borderColor: c.color } : {}), ...(c.id ? {} : { cursor: 'default' }) }}
-              onClick={() => c.id && (setTab(c.id), setOpenId(null))}>
-              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
-              <div className="dash-card-n" style={{ color: c.color }}>{c.n}</div>
-              <div className="dash-card-l">{c.label}</div>
-              {c.sub && <div className="rv-card-sub">{c.sub}</div>}
-            </button>
-          ))}
+        <div className="kpi">
+          <div className="kpi-main">
+            <span className="kpi-n" style={{ color: pick.length + dmg.length ? T.amber : T.green }}>{pick.length + dmg.length}</span>
+            <span className="kpi-l">
+              {pick.length + dmg.length ? 'approval pending' : 'kuch pending nahi'}
+              {dmgClaimed > 0 && <em><AlertTriangle size={11} /> {rvMoney(dmgClaimed)} damage claim</em>}
+            </span>
+          </div>
+          <div className="kpi-right">
+            <div className="kpi-legend">
+              <button onClick={() => { setTab('pickup'); setOpenId(null); }}><span style={{ background: T.blue }} />Nayi pickup <b>{pick.length}</b></button>
+              <button onClick={() => { setTab('damage'); setOpenId(null); }}><span style={{ background: T.red }} />Damage <b>{dmg.length}</b></button>
+              <button onClick={() => { setTab('history'); setOpenId(null); }}><span style={{ background: T.green }} />Aaj decide <b>{todayDone}</b></button>
+            </div>
+          </div>
         </div>
 
         <div className="rv-toolbar">
@@ -6854,7 +6868,7 @@ function ReviewPage({ embedded = false } = {}) {
                     <th className="rv-r">{tab === 'pickup' ? 'Pending' : tab === 'damage' ? 'Damage claim' : 'Amount'}</th>
                     <th>{tab === 'history' ? 'Decided' : 'Aayi'}</th>
                     <th>Status</th>
-                    <th />
+                    <th style={{ textAlign: 'right' }}>{tab === 'history' ? '' : 'Action'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -6875,7 +6889,18 @@ function ReviewPage({ embedded = false } = {}) {
                         </td>
                         <td style={{ color: T.inkSoft }}>{d ? fmtDateTime(new Date(d.at).toISOString()) : r.created_at ? `${agoText(r.created_at)} pehle` : '—'}</td>
                         <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
-                        <td style={{ width: 30 }}><ChevronRight size={16} color={T.inkSoft} /></td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                          {d ? (
+                            <button className="rv-quick ghost" onClick={() => undo(d)}><RotateCcw size={13} /> Undo</button>
+                          ) : (
+                            <>
+                              <button className="rv-quick" onClick={() => decide(kind, r, 'approved', kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
+                                <Check size={14} /> Approve
+                              </button>
+                              <button className="rv-quick no" title="Reject (kaaran chahiye)" onClick={() => setOpenId(x.key)}><X size={14} /></button>
+                            </>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -6889,11 +6914,18 @@ function ReviewPage({ embedded = false } = {}) {
 
       {open && (
         <RvDrawer x={open} onClose={() => setOpenId(null)}
-          onApprove={(extra) => decide(open.kind, open.r, 'approved', extra)}
-          onReject={(reason) => decide(open.kind, open.r, 'rejected', { reason })}
+          pos={`${oIdx + 1} / ${rows.length}`} hasPrev={oIdx > 0} hasNext={oIdx < rows.length - 1}
+          onPrev={() => goTo(-1)} onNext={() => goTo(1)}
+          onApprove={(extra) => decide(open.kind, open.r, 'approved', extra, true)}
+          onReject={(reason) => decide(open.kind, open.r, 'rejected', { reason }, true)}
           onUndo={() => undo(open.d)} />
       )}
-      {toast && <Toast msg={toast} />}
+      {toast && (
+        <div className="toast">
+          <CheckCircle2 size={17} color={T.greenBright} /> {toast.msg}
+          {toast.d && <button className="rv-undo" onClick={() => undo(toast.d)}>Undo</button>}
+        </div>
+      )}
     </div>
   );
 }
@@ -6947,11 +6979,35 @@ function RvMobileRow({ x, onOpen }) {
   );
 }
 
-function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
+const RV_REASONS = {
+  pickup: ['Customer renewal chahta hai', 'Rent pending — pehle collect karo', 'Galat / duplicate entry', 'Customer se confirm nahi hua'],
+  damage: ['Photo mein damage nahi dikh raha', 'Normal wear & tear hai', 'Amount zyada lag raha hai', 'Aur photo chahiye'],
+};
+
+function RvDrawer({ x, pos, hasPrev, hasNext, onPrev, onNext, onClose, onApprove, onReject, onUndo }) {
   const { r, kind, d } = x;
   const [mode, setMode] = useState(null); // null | reject | edit
   const [reason, setReason] = useState('');
   const [amt, setAmt] = useState(r.damage_amount != null ? String(r.damage_amount) : '');
+  // nayi entry khule to form reset
+  useEffect(() => {
+    setMode(null); setReason('');
+    setAmt(r.damage_amount != null ? String(r.damage_amount) : '');
+    // eslint-disable-next-line
+  }, [r.id, kind]);
+  // keyboard: A approve, R reject, ← → agli/pichhli, Esc band
+  useEffect(() => {
+    const k = (e) => {
+      if (/input|textarea|select/i.test((e.target && e.target.tagName) || '')) return;
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowRight' && hasNext) onNext && onNext();
+      else if (e.key === 'ArrowLeft' && hasPrev) onPrev && onPrev();
+      else if (!d && !mode && (e.key === 'a' || e.key === 'A')) onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {});
+      else if (!d && !mode && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); setMode('reject'); }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
   const st = rvStatus(kind, d);
   const photos = String(r.photos || '').split(',').map((u) => u.trim()).filter((u) => u && u !== 'null');
   const items = equipmentList(r);
@@ -6964,6 +7020,13 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
+        {pos && (
+          <div className="rv-nav">
+            <button className="icon-btn" disabled={!hasPrev} style={!hasPrev ? { opacity: 0.35 } : null} onClick={onPrev} title="Pichhli (←)"><ArrowLeft size={16} color={T.ink} /></button>
+            <span className="rv-pos">{pos}</span>
+            <button className="icon-btn" disabled={!hasNext} style={!hasNext ? { opacity: 0.35 } : null} onClick={onNext} title="Agli (→)"><ArrowRight size={16} color={T.ink} /></button>
+          </div>
+        )}
         <div className="drawer-head">
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
             <div className="eq-ico" style={{ width: 42, height: 42, background: st.soft }}><Icon size={21} color={st.color} /></div>
@@ -7045,7 +7108,12 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
             </button>
           ) : mode === 'reject' ? (
             <>
-              <textarea className="inp" rows={2} autoFocus placeholder="Reject ka kaaran (store ko dikhega)…"
+              <div className="rv-chips">
+                {(RV_REASONS[kind] || []).map((t) => (
+                  <button key={t} className={reason === t ? 'rv-chip on' : 'rv-chip'} onClick={() => setReason(t)}>{t}</button>
+                ))}
+              </div>
+              <textarea className="inp" rows={2} placeholder="Ya apna kaaran likho (store ko dikhega)…"
                 value={reason} onChange={(e) => setReason(e.target.value)} />
               <div className="rv-btnrow">
                 <button className="btn-danger" disabled={!reason.trim()} style={!reason.trim() ? { opacity: 0.5 } : null}
@@ -7067,15 +7135,18 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
               </div>
             </>
           ) : (
-            <div className="rv-btnrow">
-              <button className="btn-primary" onClick={() => onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
-                <Check size={15} /> Approve
-              </button>
-              {kind === 'damage' && (
-                <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
-              )}
-              <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
-            </div>
+            <>
+              <div className="rv-btnrow">
+                <button className="btn-primary" onClick={() => onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
+                  <Check size={15} /> Approve{hasNext ? ' & agla' : ''}
+                </button>
+                {kind === 'damage' && (
+                  <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
+                )}
+                <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
+              </div>
+              <div className="rv-keys">Shortcut: <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>←</kbd><kbd>→</kbd> agli/pichhli</div>
+            </>
           )}
         </div>
       </div>
@@ -7113,6 +7184,36 @@ function RvStyle() {
       .rv-actions { position: sticky; bottom: -22px; margin: 22px -22px -22px; padding: 14px 22px 18px; background: ${T.cream}; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 10px; }
       .rv-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
       .rv-btnrow > button { flex: 1 1 auto; }
+      .kpi { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; background: #fff; border: 1px solid ${T.line}; border-radius: 16px; padding: 14px 18px; margin-bottom: 14px; }
+      .kpi-main { display: flex; align-items: center; gap: 12px; }
+      .kpi-n { font-size: 34px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+      .kpi-l { display: flex; flex-direction: column; font-size: 13.5px; font-weight: 700; color: ${T.ink}; }
+      .kpi-l em { display: inline-flex; align-items: center; gap: 4px; font-style: normal; font-size: 11.5px; font-weight: 700; color: ${T.amber}; margin-top: 3px; }
+      .kpi-right { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 9px; }
+      .kpi-bar { display: flex; height: 8px; border-radius: 6px; background: ${T.line}; overflow: hidden; }
+      .kpi-bar i { display: block; height: 100%; transition: width .3s; }
+      .kpi-legend { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+      .kpi-legend button { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 0; font-family: inherit; font-size: 12.5px; font-weight: 600; color: ${T.inkSoft}; cursor: pointer; }
+      .kpi-legend button:hover { color: ${T.ink}; }
+      .kpi-legend span { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+      .kpi-legend b { color: ${T.ink}; font-weight: 800; }
+      .kpi-legend em { font-style: normal; font-size: 11.5px; color: ${T.inkSoft}; margin-left: auto; }
+      .rv-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .rv-pos { font-size: 12.5px; font-weight: 800; color: ${T.inkSoft}; min-width: 56px; text-align: center; }
+      .rv-quick { display: inline-flex; align-items: center; gap: 5px; border: 1px solid ${T.green}; background: #fff; color: ${T.green}; border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 800; font-family: inherit; cursor: pointer; }
+      .rv-quick:hover { background: ${T.green}; color: #fff; }
+      .rv-quick.no { margin-left: 6px; padding: 6px 8px; border-color: #E3C3B8; color: ${T.red}; }
+      .rv-quick.no:hover { background: ${T.red}; color: #fff; }
+      .rv-quick.ghost { border-color: ${T.line}; color: ${T.inkSoft}; }
+      .rv-quick.ghost:hover { background: ${T.cream}; color: ${T.ink}; }
+      .rv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .rv-chip { border: 1px solid ${T.line}; background: #fff; border-radius: 999px; padding: 6px 11px; font-size: 12px; font-weight: 700; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .rv-chip:hover { border-color: ${T.red}; }
+      .rv-chip.on { background: ${T.redSoft}; border-color: ${T.red}; color: ${T.red}; }
+      .rv-keys { font-size: 11px; color: ${T.inkSoft}; text-align: center; }
+      .rv-keys kbd { font-family: inherit; font-size: 10.5px; font-weight: 800; background: #fff; border: 1px solid ${T.line}; border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; margin: 0 1px; }
+      .rv-undo { margin-left: 8px; background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 4px 10px; font-weight: 800; font-family: inherit; cursor: pointer; }
+      @media (max-width: 760px) { .rv-keys { display: none; } }
       @media (max-width: 900px) { .rv-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 760px) {
         .rv-body { padding: 16px 12px 50px; }
@@ -7136,6 +7237,9 @@ const PA_PHOTOS = (x) =>
     .split(',')
     .map((u) => u.trim())
     .filter((u) => u && u !== 'null');
+/* Pickup Check isi din se shuru — isse pehle Picked Up hui entries yahan nahi
+   aati (wo purani hain, unka check nahi hona). Date badalni ho to yahin. */
+const PA_START = '2026-10-24';
 function paPickDate(x) {
   const r = (x && x._raw) || {};
   const v = r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : null;
@@ -7168,25 +7272,21 @@ const paStChip = (s) =>
 
 function PickupAdmin({ deliveries, onOpen }) {
   const isMobile = useIsMobile();
-  const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
+  const [range, setRange] = useState('all'); // today | all (PA_START se)
   const [store, setStore] = useState('ALL');
   const [tab, setTab] = useState('todo'); // todo | verified | issue | all
   const [sort, setSort] = useState('flag'); // flag (shak wali pehle) | new
-  const [section, setSection] = useState('check'); // check | approval
   const [q, setQ] = useState('');
   const [checks, setChecks] = useState({}); // invoice_id → {status, note, at}
   const [openId, setOpenId] = useState(null);
   const [toast, setToast] = useState(null); // {msg, undoId}
   const toastT = React.useRef(null);
 
+  // PA_START se pehle ki koi entry kabhi nahi
   const bounds = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    if (range === 'today') return [dayStr(t), dayStr(t)];
-    if (range === 'yesterday') { const y = new Date(t); y.setDate(y.getDate() - 1); return [dayStr(y), dayStr(y)]; }
-    if (range === '7d') { const s = new Date(t); s.setDate(s.getDate() - 6); return [dayStr(s), dayStr(t)]; }
-    if (range === 'month') return [dayStr(new Date(t.getFullYear(), t.getMonth(), 1)), dayStr(t)];
-    return ['0000-01-01', '9999-12-31'];
+    const t = todayStr();
+    if (range === 'today') return [t < PA_START ? PA_START : t, t];
+    return [PA_START, '9999-12-31'];
   }, [range]);
 
   // sirf Picked Up entries, us duration mein jab pickup hui
@@ -7289,19 +7389,12 @@ function PickupAdmin({ deliveries, onOpen }) {
         <div>
           <div className="dash-sub">All stores · Supervisor check</div>
           <h2 style={{ margin: '2px 0 0' }}>Pickup Admin</h2>
-          <div className="pa-sub">
-            {section === 'check'
-              ? <>Store manager ne jo pickups <b>Picked Up</b> mark ki, unhe yahan confirm karo.</>
-              : <>Nayi pickup aur damage claim — Kanu Mam yahan approve / reject karti hain.</>}
-          </div>
+          <div className="pa-sub">Store manager ne jo pickups <b>Picked Up</b> mark ki, unhe yahan confirm karo.</div>
         </div>
-        <div className="dash-filters" style={section === 'check' ? undefined : { display: 'none' }}>
+        <div className="dash-filters">
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
-            <option value="today">Aaj</option>
-            <option value="yesterday">Kal</option>
-            <option value="7d">Pichhle 7 din</option>
-            <option value="month">Is mahine</option>
-            <option value="all">Sabhi</option>
+            <option value="all">{niceDate(PA_START)} se sab</option>
+            <option value="today">Sirf aaj</option>
           </select>
           <select className="dash-inp" value={store} onChange={(e) => setStore(e.target.value)}>
             <option value="ALL">All stores</option>
@@ -7310,62 +7403,9 @@ function PickupAdmin({ deliveries, onOpen }) {
         </div>
       </div>
 
-      <div className="pa-sections">
-        <button className={section === 'check' ? 'pa-sec on' : 'pa-sec'} onClick={() => setSection('check')}>
-          <ClipboardCheck size={16} />
-          <span><b>Pickup Check</b><em>Picked Up sach mein hui?</em></span>
-          <i>{counts.todo}</i>
-        </button>
-        <button className={section === 'approval' ? 'pa-sec on' : 'pa-sec'} onClick={() => setSection('approval')}>
-          <ShieldCheck size={16} />
-          <span><b>Approvals</b><em>Nayi pickup + damage claim</em></span>
-        </button>
-      </div>
-
-      {/* dono section mounted rehte hain — switch karne pe kiya hua kaam nahi khota */}
-      <div style={section === 'approval' ? undefined : { display: 'none' }}>
-        <ReviewPage embedded />
-      </div>
-      <div style={section === 'check' ? undefined : { display: 'none' }}>
       <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
-        <b>Build mode</b> — Verified / Issue abhi sirf is screen pe hai, kahin save nahi hota
-        (refresh pe hat jayega). Pickups ka data sirf padha ja raha hai, badla nahi.
+        <b>Build mode</b> — Verified / Issue abhi save nahi hota, refresh pe hat jayega.
       </div>
-
-      <div className="pa-top">
-        <div className="pa-cards">
-          {cards.map((c) => (
-            <button key={c.label} className={tab === c.id ? 'dash-card on' : 'dash-card'}
-              style={tab === c.id ? { borderColor: c.color } : {}} onClick={() => setTab(c.id)}>
-              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
-              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>{c.n}</div>
-              <div className="dash-card-l">{c.label}</div>
-              {c.sub && <div className="pa-card-sub">{c.sub}</div>}
-            </button>
-          ))}
-        </div>
-        <div className="pa-progress dash-card" style={{ cursor: 'default' }}>
-          <div className="dash-card-l" style={{ marginTop: 0 }}>Progress</div>
-          <div className="dash-card-n" style={{ fontSize: 22, marginTop: 6 }}>
-            {doneN}<span style={{ color: T.inkSoft, fontSize: 15 }}> / {total}</span>
-          </div>
-          <div className="pa-bar"><div style={{ width: total ? `${(doneN / total) * 100}%` : 0 }} /></div>
-          <div className="dash-card-l">{total ? Math.round((doneN / total) * 100) : 0}% check ho gaya</div>
-        </div>
-      </div>
-
-      {storeTodo.length > 0 && (
-        <div className="pa-stores">
-          <button className={store === 'ALL' ? 'pa-st on' : 'pa-st'} onClick={() => setStore('ALL')}>
-            All <b>{inRange.filter((x) => statusOf(x) === 'todo').length}</b>
-          </button>
-          {storeTodo.map((s) => (
-            <button key={s.st} className={store === s.st ? 'pa-st on' : 'pa-st'} onClick={() => setStore(store === s.st ? 'ALL' : s.st)}>
-              {branchLabel(s.st)} <b>{s.n}</b>
-            </button>
-          ))}
-        </div>
-      )}
 
       <div className="pa-toolbar">
         <div className="layout-toggle">
@@ -7379,10 +7419,6 @@ function PickupAdmin({ deliveries, onOpen }) {
           <Search size={15} color={T.inkSoft} />
           <input placeholder="Customer, invoice, phone, pickup boy…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        <select className="dash-inp" value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="flag">Warning wali pehle</option>
-          <option value="new">Nayi pehle</option>
-        </select>
       </div>
 
       {rows.length === 0 ? (
@@ -7481,13 +7517,13 @@ function PickupAdmin({ deliveries, onOpen }) {
           onUndo={() => unmark(open.invoice_id)}
           onFull={() => { setOpenId(null); onOpen(open); }} />
       )}
-      </div>
       {toast && (
         <div className="toast">
           <CheckCircle2 size={17} color={T.greenBright} /> {toast.msg}
-          <button className="pa-undo" onClick={() => unmark(toast.undoId)}>Undo</button>
+          {toast.undoId && <button className="pa-undo" onClick={() => unmark(toast.undoId)}>Undo</button>}
         </div>
       )}
+      <RvStyle />
       <PaStyle />
     </div>
   );
@@ -7579,19 +7615,13 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
           <div><span>Charges liye</span><b>{money(r.pickup_charges_collected)}</b></div>
           <div><span>Pending tha</span><b style={{ color: x.pending > 0 ? T.red : T.ink }}>{x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'}</b></div>
           <div><span>Pending collect</span><b>{money(r.pending_collected)}</b></div>
+          <div><span>Customer phone</span><b>{x.phone}</b></div>
+          <div><span>Store manager</span><b>{x.manager}</b></div>
         </div>
         {r.stage4_remarks && r.stage4_remarks !== 'null' && (
           <div className="pa-remark">“{r.stage4_remarks}”</div>
         )}
 
-        <div className="sec-title"><User size={14} /> Customer</div>
-        <div className="kv-grid">
-          <KV label="Phone" value={x.phone} />
-          <KV label="Store manager" value={x.manager} />
-          <KV label="Address" value={x.area} full />
-          <KV label="Security" value={x.securityAmount != null ? `₹${x.securityAmount.toLocaleString('en-IN')}${x.securityType ? ' · ' + x.securityType : ''}` : '—'} />
-          <KV label="Invoice total" value={x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'} />
-        </div>
         <button className="edit-btn" onClick={onFull}><History size={15} /> Poori entry + timeline kholo</button>
 
         <div className="pa-actions">
@@ -7601,7 +7631,12 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
             </button>
           ) : issueOpen ? (
             <>
-              <textarea className="inp" rows={2} autoFocus placeholder="Kya gadbad lagi? (jaise: photo customer ke ghar ki nahi lag rahi)"
+              <div className="rv-chips">
+                {['Photo saaf nahi / galat jagah ki', 'Photo nahi lagi', 'Item inspect nahi hua', 'Pending paisa nahi liya', 'Date galat lag rahi'].map((t) => (
+                  <button key={t} className={note === t ? 'rv-chip on' : 'rv-chip'} onClick={() => setNote(t)}>{t}</button>
+                ))}
+              </div>
+              <textarea className="inp" rows={2} placeholder="Ya apna note likho…"
                 value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="pa-btnrow">
                 <button className="btn-danger" disabled={!note.trim()} style={!note.trim() ? { opacity: 0.5 } : null}
@@ -7615,7 +7650,6 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
                 <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify &amp; agla</button>
                 <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
               </div>
-              <div className="pa-keys">Shortcut: <kbd>V</kbd> verify · <kbd>I</kbd> issue · <kbd>←</kbd><kbd>→</kbd> agli/pichhli</div>
             </>
           )}
         </div>
@@ -7629,6 +7663,8 @@ function PaStyle() {
     <style>{`
       .pa-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 4px; }
       .pa-sub b { color: ${T.green}; }
+      .pa-bulk { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: ${T.mint}; border: 1px solid #CFE3D1; color: ${T.green}; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 13px; }
+      .pa-bulk b { font-weight: 800; }
       .pa-sections { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
       .pa-sec { display: flex; align-items: center; gap: 11px; flex: 1 1 240px; max-width: 360px; text-align: left; background: #fff; border: 1.5px solid ${T.line}; border-radius: 14px; padding: 12px 14px; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .pa-sec span { display: flex; flex-direction: column; flex: 1; min-width: 0; }
