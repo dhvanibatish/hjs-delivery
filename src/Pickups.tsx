@@ -7570,6 +7570,34 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
           </div>
           <div className="pa-ptitle ellip">{x.customer}</div>
           <div className="pa-psub ellip">#{x.id} · {branchLabel(x.branch)}</div>
+          {/* buttons header mein — Zoho frame mein neeche ka hissa screen se bahar chala jaata hai */}
+          <div className="pa-pact">
+            {check ? (
+              <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
+                <RotateCcw size={15} /> Undo — wapas "check baaki"
+              </button>
+            ) : issueOpen ? (
+              <>
+                <div className="rv-chips">
+                  {['Photo saaf nahi / galat jagah ki', 'Photo nahi lagi', 'Item inspect nahi hua', 'Pending paisa nahi liya', 'Date galat lag rahi'].map((t) => (
+                    <button key={t} className={note === t ? 'rv-chip on' : 'rv-chip'} onClick={() => setNote(t)}>{t}</button>
+                  ))}
+                </div>
+                <textarea className="inp" rows={2} placeholder="Ya apna note likho…"
+                  value={note} onChange={(e) => setNote(e.target.value)} />
+                <div className="pa-btnrow">
+                  <button className="btn-danger" disabled={!note.trim()} style={!note.trim() ? { opacity: 0.5 } : null}
+                    onClick={() => onIssue(note.trim())}><AlertTriangle size={15} /> Issue mark karo</button>
+                  <button className="btn-ghost" onClick={() => setIssueOpen(false)}>Rehne do</button>
+                </div>
+              </>
+            ) : (
+              <div className="pa-btnrow">
+                <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify</button>
+                <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="pa-pbody">
@@ -7625,33 +7653,6 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
           <button className="pa-link" onClick={onFull}><History size={14} /> Poori entry + timeline</button>
         </div>
 
-        <div className="pa-pfoot">
-          {check ? (
-            <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
-              <RotateCcw size={15} /> Undo — wapas "check baaki"
-            </button>
-          ) : issueOpen ? (
-            <>
-              <div className="rv-chips">
-                {['Photo saaf nahi / galat jagah ki', 'Photo nahi lagi', 'Item inspect nahi hua', 'Pending paisa nahi liya', 'Date galat lag rahi'].map((t) => (
-                  <button key={t} className={note === t ? 'rv-chip on' : 'rv-chip'} onClick={() => setNote(t)}>{t}</button>
-                ))}
-              </div>
-              <textarea className="inp" rows={2} placeholder="Ya apna note likho…"
-                value={note} onChange={(e) => setNote(e.target.value)} />
-              <div className="pa-btnrow">
-                <button className="btn-danger" disabled={!note.trim()} style={!note.trim() ? { opacity: 0.5 } : null}
-                  onClick={() => onIssue(note.trim())}><AlertTriangle size={15} /> Issue mark karo</button>
-                <button className="btn-ghost" onClick={() => setIssueOpen(false)}>Rehne do</button>
-              </div>
-            </>
-          ) : (
-            <div className="pa-btnrow">
-              <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify</button>
-              <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -7714,7 +7715,9 @@ function PaStyle() {
       .pa-psub { font-size: 12px; color: ${T.inkSoft}; margin-top: 2px; }
       .pa-pbody { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
       .pa-pbody > * { flex-shrink: 0; }
-      .pa-pfoot { flex-shrink: 0; padding: 12px 18px 14px; background: #fff; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 8px; }
+      /* Zoho frame mein neeche ~150px screen se bahar — aakhri details bhi scroll karke dikh jaayein */
+      .hjs-embed .pa-pbody { padding-bottom: 170px; }
+      .pa-pact { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
       .pa-list { background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 2px 14px; }
       .pa-list > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px solid ${T.cream}; }
       .pa-list > div:last-child { border-bottom: none; }
