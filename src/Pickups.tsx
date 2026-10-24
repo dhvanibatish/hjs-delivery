@@ -1396,6 +1396,8 @@ export default function App({
   // nahi chahiye — customer apna registered phone daale, uska latest order
   // ka timeline khul jaata hai. Isse har invoice ka alag link banane ki
   // zarurat khatam (Meta ke dynamic-URL suffix ka jhanjhat nahi).
+  // Renewal Team (Kanu Mam) — sirf ?review link pe. Store app pe koi asar nahi.
+  if (!hosted && params.has('review')) return <ReviewPage />;
   if (!hosted && inv) return <TrackPage invoice={inv} />;
   if (!hosted && (params.has('order') || params.has('my')))
     return <TrackPage invoice="" />;
@@ -6610,6 +6612,285 @@ function stepTime(log, stageId) {
    /track → sales team ek customer ka number daale, us number ki saari
    deliveries (latest → old) dekhe, kisi pe click kare to wahi tracking
    timeline khul jaaye (customer wala TrackResult reuse hota hai).        */
+/* ═══════════════════════════════════════════════ RENEWAL TEAM (Kanu Mam)
+   ?review link pe khulta hai. Store app ka koi code isse touch nahi hota.
+   BUILD MODE: 002 SQL abhi Supabase pe nahi chala, isliye RPC fail hote hi
+   page DEMO data pe chalta hai aur approve/reject sirf screen pe hota hai —
+   Supabase mein kuch nahi likha jaata. 002 chalne ke baad yahi page live
+   RPC se data lega. */
+const RV_FN = {
+  login: 'settle_approver_login', // p_pin → ok
+  pickups: 'approval_pending_pickups', // p_pin → rows
+  damage: 'approval_pending_damage', // p_pin → rows
+  decidePickup: 'approval_decide_pickup', // p_pin, p_id, p_decision, p_reason
+  decideDamage: 'approval_decide_damage', // p_pin, p_id, p_decision, p_amount, p_reason
+};
+const RV_UNDO_DAYS = 7;
+const RV_DEMO_PICKUPS = [
+  { id: 'd1', invoice_number: 'MOH/26-27/1042', customer_name: 'Baldev Raj', item_name: 'Oxygen Concentrator 5L', security_amount: 5000, pending_amount: 1200, created_at: new Date(Date.now() - 2 * 3600e3).toISOString() },
+  { id: 'd2', invoice_number: 'CHD/26-27/0877', customer_name: 'Anil Kapoor', item_name: 'BiPAP', security_amount: 10000, pending_amount: 0, created_at: new Date(Date.now() - 26 * 3600e3).toISOString() },
+  { id: 'd3', invoice_number: 'GGN/26-27/0311', customer_name: 'Ravi Menon', item_name: 'Hospital Bed (Manual)', security_amount: 3000, pending_amount: 800, created_at: new Date(Date.now() - 5 * 3600e3).toISOString() },
+];
+const RV_DEMO_DAMAGE = [
+  { id: 'm1', invoice_number: 'NCR/26-27/0450', customer_name: 'Sunita Rao', item_name: 'Wheelchair', security_amount: 2500, damage_amount: 900, damage_note: 'Footrest toota hua, ek wheel ka rubber ghis gaya', photos: '' },
+];
+
+function ReviewPage() {
+  const [pin, setPin] = useState('');
+  const [ok, setOk] = useState(false);
+  const [demo, setDemo] = useState(false);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState('pickup'); // pickup | damage
+  const [pick, setPick] = useState([]);
+  const [dmg, setDmg] = useState([]);
+  const [done, setDone] = useState([]); // decided items (undo ke liye)
+  const [toast, setToast] = useState('');
+  const ping = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+
+  // RPC deploy hi nahi hua (404 / function nahi mila) → demo mode
+  const missing = (e) => /404|PGRST202|could not find|does not exist/i.test(String((e && e.message) || e));
+
+  const login = async () => {
+    if (!pin.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      await sbRpc(RV_FN.login, { p_pin: pin.trim() });
+      const [a, b] = await Promise.all([
+        sbRpc(RV_FN.pickups, { p_pin: pin.trim() }),
+        sbRpc(RV_FN.damage, { p_pin: pin.trim() }),
+      ]);
+      setPick(hideTest(a || [])); setDmg(hideTest(b || []));
+      setDemo(false); setOk(true);
+    } catch (e) {
+      if (missing(e)) {
+        setPick(RV_DEMO_PICKUPS); setDmg(RV_DEMO_DAMAGE);
+        setDemo(true); setOk(true);
+      } else {
+        setErr(/unauthor|pin|denied/i.test(e.message || '') ? 'Galat PIN.' : 'Login error: ' + e.message);
+      }
+    }
+    setBusy(false);
+  };
+
+  const decide = async (kind, row, decision, extra = {}) => {
+    if (!demo) {
+      try {
+        if (kind === 'pickup')
+          await sbRpc(RV_FN.decidePickup, { p_pin: pin, p_id: row.id, p_decision: decision, p_reason: extra.reason || null });
+        else
+          await sbRpc(RV_FN.decideDamage, { p_pin: pin, p_id: row.id, p_decision: decision, p_amount: extra.amount ?? null, p_reason: extra.reason || null });
+      } catch (e) { ping('Save nahi hua: ' + e.message); return; }
+    }
+    if (kind === 'pickup') setPick((l) => l.filter((x) => x.id !== row.id));
+    else setDmg((l) => l.filter((x) => x.id !== row.id));
+    setDone((l) => [{ kind, row, decision, ...extra, at: Date.now() }, ...l]);
+    ping(`${decision === 'approved' ? 'Approved' : 'Rejected'} ✓${demo ? ' (demo)' : ''}`);
+  };
+
+  const undo = (d) => {
+    // demo mein sirf wapas list mein. Live undo RPC 002 ke saath judega.
+    if (d.kind === 'pickup') setPick((l) => [d.row, ...l]);
+    else setDmg((l) => [d.row, ...l]);
+    setDone((l) => l.filter((x) => x !== d));
+    ping('Undo ho gaya');
+  };
+
+  const money = (n) => (n != null && n !== '' ? `₹${Number(n).toLocaleString('en-IN')}` : '—');
+
+  if (!ok)
+    return (
+      <div className="track-wrap" style={{ fontFamily: FONT }}>
+        <StyleTag />
+        <div className="track-topbar">
+          <div className="brand">
+            <div className="brand-badge"><ShieldCheck size={20} color="#fff" /></div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>Healthy Jeena Sikho</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft }}>Renewal Team</div>
+            </div>
+          </div>
+        </div>
+        <div className="track-body">
+          <div className="track-card">
+            <h1 className="track-h1">Renewal Team login</h1>
+            <p className="track-sub">Pickup aur damage approvals ke liye apna PIN daalo.</p>
+            <Field label="PIN">
+              <input className="inp" type="password" inputMode="numeric" placeholder="••••" value={pin} autoFocus
+                onChange={(e) => { setPin(e.target.value.replace(/\D/g, '')); setErr(''); }}
+                onKeyDown={(e) => e.key === 'Enter' && login()} />
+            </Field>
+            {err && <div className="login-err">{err}</div>}
+            <button className="btn-primary" style={{ width: '100%' }} disabled={!pin || busy} onClick={login}>
+              {busy ? 'Checking…' : <>Enter <ArrowRight size={17} /></>}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+  const list = tab === 'pickup' ? pick : dmg;
+  const recent = done.filter((d) => d.kind === tab && Date.now() - d.at < RV_UNDO_DAYS * 864e5);
+
+  return (
+    <div className="track-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="track-topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="brand">
+          <div className="brand-badge"><ShieldCheck size={20} color="#fff" /></div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: T.ink }}>Renewal Team</div>
+            <div style={{ fontSize: 11.5, color: T.inkSoft }}>Kanu Mam · approvals</div>
+          </div>
+        </div>
+        <button className="icon-btn" title="Logout" onClick={() => { setOk(false); setPin(''); setDone([]); }}>
+          <LogOut size={17} color={T.ink} />
+        </button>
+      </div>
+      <div className="track-body">
+        {demo && (
+          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 14 }}>
+            <b>Demo mode</b> — approval RPC abhi Supabase pe nahi hai. Ye sample data hai,
+            approve/reject sirf screen pe hota hai, kahin save nahi hota.
+          </div>
+        )}
+        <div className="layout-toggle" style={{ marginBottom: 14 }}>
+          <button className={tab === 'pickup' ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab('pickup')}>
+            <RotateCcw size={14} /> Pickup Approval · {pick.length}
+          </button>
+          <button className={tab === 'damage' ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab('damage')}>
+            <AlertTriangle size={14} /> Damage Approval · {dmg.length}
+          </button>
+        </div>
+
+        {list.length === 0 ? (
+          <div className="track-msg">Kuch pending nahi.</div>
+        ) : (
+          <div className="sales-list" style={{ marginTop: 0 }}>
+            {list.map((r) => (
+              <RvCard key={r.id} r={r} kind={tab} money={money}
+                onApprove={(extra) => decide(tab, r, 'approved', extra)}
+                onReject={(reason) => decide(tab, r, 'rejected', { reason })} />
+            ))}
+          </div>
+        )}
+
+        {recent.length > 0 && (
+          <>
+            <div className="sec-title" style={{ marginTop: 22 }}>
+              <History size={14} /> Abhi decide kiye · {RV_UNDO_DAYS} din tak undo
+            </div>
+            <div className="sales-list" style={{ marginTop: 0 }}>
+              {recent.map((d, i) => (
+                <div key={i} className="sales-row" style={{ cursor: 'default' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="sales-row-top">
+                      <span className="ellip" style={{ fontWeight: 800 }}>{d.row.customer_name}</span>
+                      <span className="sales-chip" style={d.decision === 'approved'
+                        ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
+                        {d.decision === 'approved' ? 'Approved' : 'Rejected'}
+                      </span>
+                    </div>
+                    <div className="sales-sub">
+                      {d.row.invoice_number}
+                      {d.amount != null ? ` · Damage ${money(d.amount)}` : ''}
+                      {d.reason ? ` · ${d.reason}` : ''}
+                    </div>
+                  </div>
+                  <button className="btn-ghost" onClick={() => undo(d)}>Undo</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="track-foot">Healthy Jeena Sikho · Renewal Team</div>
+      </div>
+      {toast && <Toast msg={toast} />}
+    </div>
+  );
+}
+
+function RvCard({ r, kind, money, onApprove, onReject }) {
+  const [mode, setMode] = useState(null); // null | reject | edit
+  const [reason, setReason] = useState('');
+  const [amt, setAmt] = useState(r.damage_amount != null ? String(r.damage_amount) : '');
+  const photos = String(r.photos || '').split(',').map((u) => u.trim()).filter((u) => u && u !== 'null');
+  const equip = equipmentText({ line_items: r.line_items, item_name: r.item_name });
+  return (
+    <div className="sales-row" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
+      <div className="sales-row-top">
+        <span className="ellip" style={{ fontWeight: 800, fontSize: 14.5 }}>{r.customer_name}</span>
+        <span className="sales-chip" style={{ background: T.slateSoft, color: T.slate }}>
+          {branchLabel(deriveBranch(r))}
+        </span>
+      </div>
+      <div className="sales-sub">{equip}</div>
+      <div className="sales-meta">
+        <span>#{r.invoice_number}</span>
+        <span>Security {money(r.security_amount)}</span>
+        {kind === 'pickup' && <span>Pending {money(r.pending_amount)}</span>}
+        {kind === 'pickup' && r.created_at && <span>Aayi {agoText(r.created_at)} pehle</span>}
+      </div>
+      {kind === 'damage' && (
+        <div className="flag-note" style={{ background: T.redSoft, color: T.red, marginTop: 10 }}>
+          <b>Store claim: {money(r.damage_amount)}</b>
+          {r.damage_note ? <div style={{ marginTop: 2 }}>{r.damage_note}</div> : null}
+        </div>
+      )}
+      {photos.length > 0 && (
+        <div className="photo-grid" style={{ marginTop: 10 }}>
+          {photos.map((u, i) => (
+            <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="damage" /></a>
+          ))}
+        </div>
+      )}
+
+      {mode === 'reject' && (
+        <div style={{ marginTop: 10 }}>
+          <textarea className="inp" rows={2} autoFocus placeholder="Reject ka kaaran (store ko dikhega)…"
+            value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+      )}
+      {mode === 'edit' && (
+        <div style={{ marginTop: 10 }}>
+          <Field label="Approved damage amount (₹)">
+            <input className="inp" inputMode="numeric" value={amt}
+              onChange={(e) => setAmt(e.target.value.replace(/[^0-9]/g, ''))} />
+          </Field>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        {mode === 'reject' ? (
+          <>
+            <button className="btn-danger" disabled={!reason.trim()} style={!reason.trim() ? { opacity: 0.5 } : null}
+              onClick={() => onReject(reason.trim())}>Haan, reject</button>
+            <button className="btn-ghost" onClick={() => setMode(null)}>Rehne do</button>
+          </>
+        ) : mode === 'edit' ? (
+          <>
+            <button className="btn-primary" disabled={amt === ''} onClick={() => onApprove({ amount: Number(amt) })}>
+              <Check size={15} /> Approve {money(amt)}
+            </button>
+            <button className="btn-ghost" onClick={() => setMode(null)}>Rehne do</button>
+          </>
+        ) : (
+          <>
+            <button className="btn-primary" onClick={() =>
+              onApprove(kind === 'damage' ? { amount: Number(r.damage_amount || 0) } : {})}>
+              <Check size={15} /> Approve
+            </button>
+            {kind === 'damage' && (
+              <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
+            )}
+            <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PickupSalesPage() {
   // Matrix flow: salesperson (rows) × store (cols) counts → cell click → list → detail.
   const [range, setRange] = useState('today');
