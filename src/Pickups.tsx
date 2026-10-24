@@ -1434,7 +1434,9 @@ export default function App({
       ? 'dashboard'
       : view === 'sla'
         ? 'sla'
-        : 'pickups'
+        : view === 'admin'
+          ? 'admin'
+          : 'pickups'
     : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const [showLog, setShowLog] = useState(false); // activity log panel
@@ -1955,7 +1957,12 @@ export default function App({
     return (
       <div className="hjs-pickups">
         <StyleTag />
-        {page === 'sla' ? (
+        {page === 'admin' && session.isHead ? (
+          <PickupAdmin
+            deliveries={allStoresData}
+            onOpen={(x) => setActiveId(x.invoice_id)}
+          />
+        ) : page === 'sla' ? (
           <SlaReport
             deliveries={allStoresData}
             logsLoaded={logsLoaded}
@@ -2101,7 +2108,12 @@ export default function App({
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {session.branch === 'ALL' && page === 'sla' ? (
+            {session.branch === 'ALL' && page === 'admin' ? (
+              <PickupAdmin
+                deliveries={allStoresData}
+                onOpen={(x) => setActiveId(x.invoice_id)}
+              />
+            ) : session.branch === 'ALL' && page === 'sla' ? (
               <SlaReport
                 deliveries={allStoresData}
                 logsLoaded={logsLoaded}
@@ -4513,6 +4525,7 @@ function Sidebar({ session, page, onNav }) {
       },
     },
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
+    ...(isAll ? [{ id: 'admin', icon: ShieldCheck, label: 'Pickup Admin' }] : []),
     ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
     ...(isAll ? [{ id: 'sla', icon: Clock, label: 'Process & SLA' }] : []),
     { icon: MessageSquareWarning, label: 'Complaints', soon: true },
@@ -4665,6 +4678,7 @@ function Topbar({
           onChange={(e) => onNav && onNav(e.target.value)}
         >
           <option value="pickups">Pickups</option>
+          <option value="admin">Pickup Admin</option>
           <option value="dashboard">Dashboard</option>
         </select>
       )}
@@ -7104,6 +7118,362 @@ function RvStyle() {
         .rv-search { flex: 1 1 100%; order: 3; }
         .rv-actions { bottom: -18px; margin: 22px -16px -18px; padding: 12px 16px 16px; }
       }
+    `}</style>
+  );
+}
+
+/* ═══════════════════════════════════════════════ PICKUP ADMIN (supervisor)
+   Head login ke sidebar mein "Pickup Admin". Jo pickup "Picked Up" ho chuki
+   hai, Mam (supervisor) yahan photo + details dekh ke confirm karti hain ki
+   pickup sach mein hui hai — Verified ya Issue.
+   BUILD MODE: verification abhi kahin SAVE nahi hoti (naya table baad mein
+   banega). Sirf is screen pe rehti hai, refresh pe hat jaati hai. pickups
+   table mein kuch nahi likha jaata — data sirf padha jaata hai. */
+const PA_PHOTOS = (x) =>
+  String((x && x._raw && x._raw.pickup_image) || '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter((u) => u && u !== 'null');
+function paPickDate(x) {
+  const r = (x && x._raw) || {};
+  const v = r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : null;
+  return v ? String(v).slice(0, 10) : dayStr(deliveredTs(x));
+}
+
+function PickupAdmin({ deliveries, onOpen }) {
+  const isMobile = useIsMobile();
+  const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
+  const [store, setStore] = useState('ALL');
+  const [tab, setTab] = useState('todo'); // todo | verified | issue | all
+  const [q, setQ] = useState('');
+  const [checks, setChecks] = useState({}); // invoice_id → {status, note, at}
+  const [openId, setOpenId] = useState(null);
+
+  const bounds = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    if (range === 'today') return [dayStr(t), dayStr(t)];
+    if (range === 'yesterday') { const y = new Date(t); y.setDate(y.getDate() - 1); return [dayStr(y), dayStr(y)]; }
+    if (range === '7d') { const s = new Date(t); s.setDate(s.getDate() - 6); return [dayStr(s), dayStr(t)]; }
+    if (range === 'month') return [dayStr(new Date(t.getFullYear(), t.getMonth(), 1)), dayStr(t)];
+    return ['0000-01-01', '9999-12-31'];
+  }, [range]);
+
+  // sirf Picked Up entries, us duration mein jab pickup hui
+  const picked = useMemo(() => {
+    const [s, e] = bounds;
+    return deliveries
+      .filter((x) => x.stage === 'delivered')
+      .filter((x) => { const d = paPickDate(x); return d && d >= s && d <= e; })
+      .filter((x) => store === 'ALL' || x.branch === store)
+      .sort((a, b) => String(paPickDate(b)).localeCompare(String(paPickDate(a))));
+  }, [deliveries, bounds, store]);
+
+  const statusOf = (x) => (checks[x.invoice_id] && checks[x.invoice_id].status) || 'todo';
+  const counts = {
+    todo: picked.filter((x) => statusOf(x) === 'todo').length,
+    verified: picked.filter((x) => statusOf(x) === 'verified').length,
+    issue: picked.filter((x) => statusOf(x) === 'issue').length,
+    nophoto: picked.filter((x) => PA_PHOTOS(x).length === 0).length,
+  };
+  const term = q.trim().toLowerCase();
+  const rows = picked.filter((x) => {
+    if (tab !== 'all' && statusOf(x) !== tab) return false;
+    if (!term) return true;
+    return `${x.customer} ${x.id} ${x.phone} ${x.person || ''} ${x.equipment}`.toLowerCase().includes(term);
+  });
+  const open = deliveries.find((x) => x.invoice_id === openId) || null;
+
+  const mark = (x, status, note) => {
+    setChecks((c) => ({ ...c, [x.invoice_id]: { status, note: note || '', at: Date.now() } }));
+    setOpenId(null);
+  };
+  const unmark = (x) => {
+    setChecks((c) => { const n = { ...c }; delete n[x.invoice_id]; return n; });
+  };
+
+  const cards = [
+    { id: 'todo', label: 'Check karna baaki', n: counts.todo, icon: ClipboardCheck, color: T.amber, soft: T.amberSoft },
+    { id: 'verified', label: 'Verified', n: counts.verified, icon: CheckCircle2, color: T.green, soft: T.mint },
+    { id: 'issue', label: 'Issue mila', n: counts.issue, icon: AlertTriangle, color: T.red, soft: T.redSoft },
+    { id: null, label: 'Photo nahi lagi', n: counts.nophoto, icon: Camera, color: T.violet, soft: T.violetSoft },
+  ];
+  const stChip = (s) =>
+    s === 'verified' ? { label: 'Verified', color: T.green, soft: T.mint }
+      : s === 'issue' ? { label: 'Issue', color: T.red, soft: T.redSoft }
+        : { label: 'Check baaki', color: T.amber, soft: T.amberSoft };
+
+  return (
+    <div>
+      <div className="dash-head">
+        <div>
+          <div className="dash-sub">All stores · Supervisor check</div>
+          <h2 style={{ margin: '2px 0 0' }}>Pickup Admin</h2>
+        </div>
+        <div className="dash-filters">
+          <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
+            <option value="today">Aaj</option>
+            <option value="yesterday">Kal</option>
+            <option value="7d">Pichhle 7 din</option>
+            <option value="month">Is mahine</option>
+            <option value="all">Sabhi</option>
+          </select>
+          <select className="dash-inp" value={store} onChange={(e) => setStore(e.target.value)}>
+            <option value="ALL">All stores</option>
+            {DASH_STORES.map((s) => <option key={s} value={s}>{branchLabel(s)}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
+        <b>Build mode</b> — Verified / Issue abhi sirf is screen pe hai, kahin save nahi hota
+        (refresh pe hat jayega). Pickups ka data sirf padha ja raha hai, badla nahi.
+      </div>
+
+      <div className="pa-cards">
+        {cards.map((c) => (
+          <button key={c.label} className={c.id && tab === c.id ? 'dash-card on' : 'dash-card'}
+            style={{ ...(c.id && tab === c.id ? { borderColor: c.color } : {}), ...(c.id ? {} : { cursor: 'default' }) }}
+            onClick={() => c.id && setTab(c.id)}>
+            <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
+            <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>{c.n}</div>
+            <div className="dash-card-l">{c.label}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="pa-toolbar">
+        <div className="layout-toggle">
+          {[['todo', 'Check baaki', counts.todo], ['verified', 'Verified', counts.verified], ['issue', 'Issue', counts.issue], ['all', 'Sab', picked.length]].map(([id, label, n]) => (
+            <button key={id} className={tab === id ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab(id)}>
+              {label} <span className="pa-count">{n}</span>
+            </button>
+          ))}
+        </div>
+        <div className="pa-search">
+          <Search size={15} color={T.inkSoft} />
+          <input placeholder="Customer, invoice, phone, pickup boy…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="pa-empty">
+          <CheckCircle2 size={26} color={T.green} />
+          <div>{tab === 'todo' ? 'Is duration ki saari pickups check ho gayi.' : 'Koi entry nahi.'}</div>
+        </div>
+      ) : isMobile ? (
+        <div className="pa-mlist">
+          {rows.map((x) => {
+            const st = stChip(statusOf(x));
+            const ph = PA_PHOTOS(x).length;
+            return (
+              <button key={x.invoice_id} className="pa-mrow" onClick={() => setOpenId(x.invoice_id)}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="pa-mtop">
+                    <span className="pa-cust ellip">{x.customer}</span>
+                    <span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span>
+                  </div>
+                  <div className="pa-inv ellip">{x.equipment}</div>
+                  <div className="pa-mbot">
+                    <span>{branchLabel(x.branch)}</span>
+                    <span>{niceDate(paPickDate(x)) || '—'}</span>
+                    <span style={{ color: ph ? T.inkSoft : T.violet, fontWeight: ph ? 500 : 800 }}>
+                      <Camera size={11} /> {ph || 'No photo'}
+                    </span>
+                  </div>
+                </div>
+                <ChevronRight size={16} color={T.inkSoft} />
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="dash-block" style={{ padding: 0 }}>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Store</th>
+                  <th>Item</th>
+                  <th>Pickup boy</th>
+                  <th>Pickup date</th>
+                  <th>Photo</th>
+                  <th style={{ textAlign: 'right' }}>Charges</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((x) => {
+                  const st = stChip(statusOf(x));
+                  const ph = PA_PHOTOS(x).length;
+                  return (
+                    <tr key={x.invoice_id} className="dash-row" onClick={() => setOpenId(x.invoice_id)}>
+                      <td>
+                        <div className="pa-cust">{x.customer}</div>
+                        <div className="pa-inv">#{x.id}</div>
+                      </td>
+                      <td>{branchLabel(x.branch)}</td>
+                      <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
+                      <td className="ellip" style={{ maxWidth: 160 }}>{x.person || '—'}</td>
+                      <td>{niceDate(paPickDate(x)) || '—'}</td>
+                      <td style={{ color: ph ? T.ink : T.violet, fontWeight: 700 }}>{ph ? `${ph} photo` : 'Nahi'}</td>
+                      <td style={{ textAlign: 'right' }}>{x.charges != null ? `₹${x.charges.toLocaleString('en-IN')}` : '—'}</td>
+                      <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
+                      <td style={{ width: 30 }}><ChevronRight size={16} color={T.inkSoft} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {open && (
+        <PaDrawer x={open} check={checks[open.invoice_id]} onClose={() => setOpenId(null)}
+          onVerify={() => mark(open, 'verified')}
+          onIssue={(note) => mark(open, 'issue', note)}
+          onUndo={() => unmark(open)}
+          onFull={() => { setOpenId(null); onOpen(open); }} />
+      )}
+      <PaStyle />
+    </div>
+  );
+}
+
+function PaDrawer({ x, check, onClose, onVerify, onIssue, onUndo, onFull }) {
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const r = x._raw || {};
+  const photos = PA_PHOTOS(x);
+  const Icon = equipIcon(x.equipment);
+  const slot = r.confirmed_date && r.confirmed_date !== 'null'
+    ? `${niceDate(r.confirmed_date)}${r.confirmed_time && r.confirmed_time !== 'null' ? ', ' + niceTime(r.confirmed_time) : ''}`
+    : '—';
+  const money = (v) => (v != null && v !== '' && v !== 'null' ? `₹${Number(v).toLocaleString('en-IN')}` : '—');
+  // jo cheezein shak paida karein — supervisor ki nazar pehle yahan
+  const flags = [];
+  if (!photos.length) flags.push('Pickup photo nahi lagi');
+  if (!r.item_inspected) flags.push('Item inspected tick nahi hua');
+  if (r.actual_pickup_date && r.confirmed_date && String(r.actual_pickup_date).slice(0, 10) < String(r.confirmed_date).slice(0, 10))
+    flags.push('Pickup date, tay hui date se pehle ki hai');
+  if (x.pending != null && x.pending > 0 && !(Number(r.pending_collected) > 0))
+    flags.push(`₹${x.pending.toLocaleString('en-IN')} pending tha, collect nahi dikha`);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
+            <div className="eq-ico" style={{ width: 42, height: 42, background: T.mint }}><Icon size={21} color={T.green} /></div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>{x.customer}</div>
+              <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>#{x.id} · {branchLabel(x.branch)}</div>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
+        </div>
+
+        {check && (
+          <div className="flag-note" style={check.status === 'verified'
+            ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
+            <b>{check.status === 'verified' ? 'Verified' : 'Issue mark kiya'}</b> · {fmtFullDateTime(check.at)}
+            {check.note && <div style={{ marginTop: 2 }}>Note: {check.note}</div>}
+          </div>
+        )}
+
+        {flags.length > 0 && (
+          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginTop: 12 }}>
+            <b>Dhyan do</b>
+            {flags.map((f) => <div key={f} style={{ marginTop: 2 }}>• {f}</div>)}
+          </div>
+        )}
+
+        <div className="sec-title" style={{ marginTop: 18 }}><Camera size={14} /> Pickup photo</div>
+        {photos.length ? (
+          <div className="photo-grid">
+            {photos.map((u, i) => (
+              <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="pickup" /></a>
+            ))}
+          </div>
+        ) : (
+          <div className="block-next-note" style={{ marginTop: 0 }}>Store ne koi photo nahi lagayi.</div>
+        )}
+
+        <div className="sec-title"><Truck size={14} /> Pickup kaise hui</div>
+        <div className="kv-grid">
+          <KV label="Pickup boy" value={x.person || '—'} />
+          <KV label="Vehicle" value={x.vehicle || '—'} />
+          <KV label="Slot tay hua" value={slot} />
+          <KV label="Actual pickup" value={niceDate(r.actual_pickup_date) || '—'} />
+          <KV label="Item inspected" value={r.item_inspected ? 'Haan' : 'Nahi'} />
+          <KV label="Picked up tick" value={r.pickup_done ? 'Haan' : 'Nahi'} />
+          <KV label="Pickup charges" value={money(r.pickup_charges_collected)} />
+          <KV label="Pending collected" value={money(r.pending_collected)} />
+          <KV label="Remarks" value={show(r.stage4_remarks)} full />
+        </div>
+
+        <div className="sec-title"><User size={14} /> Customer</div>
+        <div className="kv-grid">
+          <KV label="Phone" value={x.phone} />
+          <KV label="Store manager" value={x.manager} />
+          <KV label="Address" value={x.area} full />
+          <KV label="Items" value={x.equipment} full />
+          <KV label="Pending amount" value={x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'} />
+          <KV label="Security" value={x.securityAmount != null ? `₹${x.securityAmount.toLocaleString('en-IN')}${x.securityType ? ' · ' + x.securityType : ''}` : '—'} />
+        </div>
+        <button className="edit-btn" onClick={onFull}><History size={15} /> Poori entry + timeline kholo</button>
+
+        <div className="pa-actions">
+          {check ? (
+            <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
+              <RotateCcw size={15} /> Undo — wapas "check baaki"
+            </button>
+          ) : issueOpen ? (
+            <>
+              <textarea className="inp" rows={2} autoFocus placeholder="Kya gadbad lagi? (jaise: photo customer ke ghar ki nahi lag rahi)"
+                value={note} onChange={(e) => setNote(e.target.value)} />
+              <div className="pa-btnrow">
+                <button className="btn-danger" disabled={!note.trim()} style={!note.trim() ? { opacity: 0.5 } : null}
+                  onClick={() => onIssue(note.trim())}><AlertTriangle size={15} /> Issue mark karo</button>
+                <button className="btn-ghost" onClick={() => setIssueOpen(false)}>Rehne do</button>
+              </div>
+            </>
+          ) : (
+            <div className="pa-btnrow">
+              <button className="btn-primary" onClick={onVerify}><Check size={15} /> Pickup sahi hai · Verified</button>
+              <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaStyle() {
+  return (
+    <style>{`
+      .pa-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
+      .pa-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+      .pa-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: rgba(0,0,0,.08); font-size: 11px; }
+      .lt-btn.active .pa-count { background: rgba(255,255,255,.2); }
+      .pa-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; flex: 1; min-width: 200px; }
+      .pa-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .pa-cust { font-weight: 800; font-size: 13.5px; color: ${T.ink}; }
+      .pa-inv { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
+      .pa-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; border: 1px dashed ${T.line}; border-radius: 16px; padding: 40px 16px; font-size: 13.5px; font-weight: 700; color: ${T.inkSoft}; }
+      .pa-mlist { display: flex; flex-direction: column; gap: 8px; }
+      .pa-mrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .pa-mtop { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+      .pa-mbot { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: ${T.inkSoft}; }
+      .pa-actions { position: sticky; bottom: -22px; margin: 22px -22px -22px; padding: 14px 22px 18px; background: ${T.cream}; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 10px; }
+      .pa-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+      .pa-btnrow > button { flex: 1 1 auto; }
+      @media (max-width: 900px) { .pa-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+      @media (max-width: 760px) { .pa-search { flex: 1 1 100%; } .pa-actions { bottom: -18px; margin: 22px -16px -18px; padding: 12px 16px 16px; } }
     `}</style>
   );
 }
