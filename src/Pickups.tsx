@@ -6658,18 +6658,19 @@ function rvBalance(r, damage) {
   return rvNum(r.security_amount) - owed - rvNum(r.pickup_charges) - rvNum(damage);
 }
 
-function ReviewPage() {
+function ReviewPage({ embedded = false } = {}) {
   const isMobile = useIsMobile();
   const [pin, setPin] = useState('');
-  const [ok, setOk] = useState(false);
-  const [demo, setDemo] = useState(false);
+  // embedded = Pickup Admin ke andar (head pehle se logged in) — PIN nahi
+  const [ok, setOk] = useState(embedded);
+  const [demo, setDemo] = useState(embedded);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('pickup'); // pickup | damage | history
   const [q, setQ] = useState('');
   const [store, setStore] = useState('ALL');
-  const [pick, setPick] = useState([]);
-  const [dmg, setDmg] = useState([]);
+  const [pick, setPick] = useState(embedded ? RV_DEMO_PICKUPS : []);
+  const [dmg, setDmg] = useState(embedded ? RV_DEMO_DAMAGE : []);
   const [done, setDone] = useState([]); // decided (undo ke liye)
   const [openId, setOpenId] = useState(null); // drawer
   const [toast, setToast] = useState('');
@@ -6767,22 +6768,20 @@ function ReviewPage() {
   const stores = [...new Set([...pick, ...dmg].map((r) => deriveBranch(r)))];
   const open = rows.find((x) => x.key === openId) || null;
 
-  const secAtStake = pick.reduce((a, r) => a + rvNum(r.security_amount), 0) + dmg.reduce((a, r) => a + rvNum(r.security_amount), 0);
   const dmgClaimed = dmg.reduce((a, r) => a + rvNum(r.damage_amount), 0);
   const todayDone = done.filter((d) => dayStr(d.at) === todayStr()).length;
 
   const cards = [
     { id: 'pickup', label: 'Pickup approval pending', n: pick.length, icon: RotateCcw, color: T.blue, soft: T.blueSoft },
     { id: 'damage', label: 'Damage claim pending', n: dmg.length, sub: dmgClaimed ? rvMoney(dmgClaimed) + ' claimed' : '', icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { id: null, label: 'Security in pending items', n: rvMoney(secAtStake), icon: ShieldCheck, color: T.forestSoft, soft: T.mint },
     { id: 'history', label: 'Aaj decide kiye', n: todayDone, icon: CheckCircle2, color: T.green, soft: T.mint },
   ];
 
   return (
-    <div className="track-wrap" style={{ fontFamily: FONT }}>
-      <StyleTag />
+    <div className={embedded ? 'rv-embed' : 'track-wrap'} style={embedded ? undefined : { fontFamily: FONT }}>
+      {!embedded && <StyleTag />}
       <RvStyle />
-      <RvTop onLogout={() => { setOk(false); setPin(''); setDone([]); setOpenId(null); }} />
+      {!embedded && <RvTop onLogout={() => { setOk(false); setPin(''); setDone([]); setOpenId(null); }} />}
       <div className="rv-body">
         {demo && (
           <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
@@ -6791,7 +6790,7 @@ function ReviewPage() {
           </div>
         )}
 
-        <div className="rv-head">
+        <div className="rv-head" style={embedded ? { display: 'none' } : undefined}>
           <div>
             <div className="dash-sub">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
             <h2 style={{ margin: '2px 0 0', fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>Approvals</h2>
@@ -6851,7 +6850,7 @@ function ReviewPage() {
                     <th>Customer</th>
                     <th>Store</th>
                     <th>Item</th>
-                    <th className="rv-r">Security</th>
+                    {tab !== 'pickup' && <th className="rv-r">Security</th>}
                     <th className="rv-r">{tab === 'pickup' ? 'Pending' : tab === 'damage' ? 'Damage claim' : 'Amount'}</th>
                     <th>{tab === 'history' ? 'Decided' : 'Aayi'}</th>
                     <th>Status</th>
@@ -6870,7 +6869,7 @@ function ReviewPage() {
                         </td>
                         <td>{branchLabel(deriveBranch(r))}</td>
                         <td className="ellip" style={{ maxWidth: 220 }}>{equipmentText(r)}</td>
-                        <td className="rv-r">{rvMoney(r.security_amount)}</td>
+                        {tab !== 'pickup' && <td className="rv-r">{rvMoney(r.security_amount)}</td>}
                         <td className="rv-r" style={{ fontWeight: 800, color: kind === 'damage' ? T.red : rvNum(r.pending_amount) > 0 ? T.red : T.ink }}>
                           {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? rvMoney(r.damage_amount) : rvMoney(r.pending_amount)}
                         </td>
@@ -6885,7 +6884,7 @@ function ReviewPage() {
             </div>
           </div>
         )}
-        <div className="track-foot">Healthy Jeena Sikho · Renewal Team</div>
+        {!embedded && <div className="track-foot">Healthy Jeena Sikho · Renewal Team</div>}
       </div>
 
       {open && (
@@ -6987,6 +6986,9 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
           </div>
         )}
 
+        {/* Settlement / refund — sirf damage claim pe. Nayi pickup approval pe security-refund nahi dikhana */}
+        {kind === 'damage' && (
+          <>
         {/* Settlement summary — pehle paise, kyunki decision isi pe hota hai */}
         <div className="sec-title" style={{ marginTop: 18 }}><IndianRupee size={14} /> Settlement</div>
         <div className="rv-calc">
@@ -6999,10 +7001,8 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
             <b>{rvMoney(Math.abs(bal))}</b>
           </div>
         </div>
-        {kind === 'pickup' && (
-          <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 6 }}>
-            Abhi ka andaza — pickup charges aur damage inspection ke baad judenge.
-          </div>
+
+          </>
         )}
 
         {kind === 'damage' && (
@@ -7029,7 +7029,7 @@ function RvDrawer({ x, onClose, onApprove, onReject, onUndo }) {
           <KV label="Items" value={items.join(', ')} full />
           <KV label="Invoice total" value={rvMoney(r.total_amount)} />
           <KV label="Pending amount" value={rvMoney(r.pending_amount)} />
-          <KV label="Security mode" value={show(r.security_type)} />
+          {kind === 'damage' && <KV label="Security mode" value={show(r.security_type)} />}
           <KV label="Pickup date (bola)" value={niceDate(r.mentioned_pickup_date) || '—'} />
           <KV label="Store" value={branchLabel(br)} />
           <KV label="Store manager" value={STORE_MANAGERS[br] || '—'} />
@@ -7087,8 +7087,9 @@ function RvStyle() {
   return (
     <style>{`
       .rv-body { max-width: 1180px; margin: 0 auto; padding: 24px 24px 60px; }
+      .rv-embed .rv-body { max-width: none; padding: 0; }
       .rv-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
-      .rv-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
+      .rv-cards { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-bottom: 20px; }
       .rv-card-sub { font-size: 11px; font-weight: 700; color: ${T.red}; margin-top: 3px; }
       .rv-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
       .rv-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: rgba(0,0,0,.08); font-size: 11px; }
@@ -7123,9 +7124,10 @@ function RvStyle() {
 }
 
 /* ═══════════════════════════════════════════════ PICKUP ADMIN (supervisor)
-   Head login ke sidebar mein "Pickup Admin". Jo pickup "Picked Up" ho chuki
-   hai, Mam (supervisor) yahan photo + details dekh ke confirm karti hain ki
-   pickup sach mein hui hai — Verified ya Issue.
+   Head login ke sidebar mein "Pickup Admin". Store manager jab pickup ko
+   "Picked Up" pe move karta hai, tab entry yahan aati hai. Mam (supervisor)
+   photo + details dekh ke confirm karti hain ki pickup sach mein hui —
+   Verified ya Issue.
    BUILD MODE: verification abhi kahin SAVE nahi hoti (naya table baad mein
    banega). Sirf is screen pe rehti hai, refresh pe hat jaati hai. pickups
    table mein kuch nahi likha jaata — data sirf padha jaata hai. */
@@ -7139,15 +7141,43 @@ function paPickDate(x) {
   const v = r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : null;
   return v ? String(v).slice(0, 10) : dayStr(deliveredTs(x));
 }
+/* "Manirul Miya - 9560843152" → naam + number alag */
+function paPerson(p) {
+  const s = String(p || '').trim();
+  if (!s || s === 'null') return { name: '—', phone: '' };
+  const m = s.match(/^(.*?)\s*-\s*(\d{6,})$/);
+  return m ? { name: m[1], phone: m[2] } : { name: s, phone: '' };
+}
+/* jo cheezein shak paida karein — supervisor ki nazar pehle yahan */
+function paFlags(x) {
+  const r = (x && x._raw) || {};
+  const f = [];
+  if (!PA_PHOTOS(x).length) f.push('Pickup photo nahi lagi');
+  if (!r.item_inspected) f.push('Item inspected tick nahi hua');
+  if (r.actual_pickup_date && r.confirmed_date && r.confirmed_date !== 'null' &&
+      String(r.actual_pickup_date).slice(0, 10) < String(r.confirmed_date).slice(0, 10))
+    f.push('Pickup date, tay hui date se pehle ki hai');
+  if (x.pending != null && x.pending > 0 && !(Number(r.pending_collected) > 0))
+    f.push(`₹${x.pending.toLocaleString('en-IN')} pending tha, collect nahi dikha`);
+  return f;
+}
+const paStChip = (s) =>
+  s === 'verified' ? { label: 'Verified', color: T.green, soft: T.mint }
+    : s === 'issue' ? { label: 'Issue', color: T.red, soft: T.redSoft }
+      : { label: 'Check baaki', color: T.amber, soft: T.amberSoft };
 
 function PickupAdmin({ deliveries, onOpen }) {
   const isMobile = useIsMobile();
   const [range, setRange] = useState('7d'); // today|yesterday|7d|month|all
   const [store, setStore] = useState('ALL');
   const [tab, setTab] = useState('todo'); // todo | verified | issue | all
+  const [sort, setSort] = useState('flag'); // flag (shak wali pehle) | new
+  const [section, setSection] = useState('check'); // check | approval
   const [q, setQ] = useState('');
   const [checks, setChecks] = useState({}); // invoice_id → {status, note, at}
   const [openId, setOpenId] = useState(null);
+  const [toast, setToast] = useState(null); // {msg, undoId}
+  const toastT = React.useRef(null);
 
   const bounds = useMemo(() => {
     const t = new Date();
@@ -7160,48 +7190,98 @@ function PickupAdmin({ deliveries, onOpen }) {
   }, [range]);
 
   // sirf Picked Up entries, us duration mein jab pickup hui
-  const picked = useMemo(() => {
+  const inRange = useMemo(() => {
     const [s, e] = bounds;
     return deliveries
       .filter((x) => x.stage === 'delivered')
-      .filter((x) => { const d = paPickDate(x); return d && d >= s && d <= e; })
-      .filter((x) => store === 'ALL' || x.branch === store)
-      .sort((a, b) => String(paPickDate(b)).localeCompare(String(paPickDate(a))));
-  }, [deliveries, bounds, store]);
+      .filter((x) => { const d = paPickDate(x); return d && d >= s && d <= e; });
+  }, [deliveries, bounds]);
+  const picked = useMemo(
+    () => inRange.filter((x) => store === 'ALL' || x.branch === store),
+    [inRange, store],
+  );
 
   const statusOf = (x) => (checks[x.invoice_id] && checks[x.invoice_id].status) || 'todo';
   const counts = {
     todo: picked.filter((x) => statusOf(x) === 'todo').length,
     verified: picked.filter((x) => statusOf(x) === 'verified').length,
     issue: picked.filter((x) => statusOf(x) === 'issue').length,
-    nophoto: picked.filter((x) => PA_PHOTOS(x).length === 0).length,
+    flagged: picked.filter((x) => statusOf(x) === 'todo' && paFlags(x).length).length,
   };
-  const term = q.trim().toLowerCase();
-  const rows = picked.filter((x) => {
-    if (tab !== 'all' && statusOf(x) !== tab) return false;
-    if (!term) return true;
-    return `${x.customer} ${x.id} ${x.phone} ${x.person || ''} ${x.equipment}`.toLowerCase().includes(term);
-  });
-  const open = deliveries.find((x) => x.invoice_id === openId) || null;
+  // store chips — har store pe kitni check baaki
+  const storeTodo = DASH_STORES.map((st) => ({
+    st,
+    n: inRange.filter((x) => x.branch === st && statusOf(x) === 'todo').length,
+  })).filter((s) => s.n > 0);
 
-  const mark = (x, status, note) => {
-    setChecks((c) => ({ ...c, [x.invoice_id]: { status, note: note || '', at: Date.now() } }));
-    setOpenId(null);
+  const term = q.trim().toLowerCase();
+  const rows = picked
+    .filter((x) => {
+      if (tab !== 'all' && statusOf(x) !== tab) return false;
+      if (!term) return true;
+      return `${x.customer} ${x.id} ${x.phone} ${x.person || ''} ${x.equipment}`.toLowerCase().includes(term);
+    })
+    .sort((a, b) => {
+      if (sort === 'flag') {
+        const d = paFlags(b).length - paFlags(a).length;
+        if (d) return d;
+      }
+      return String(paPickDate(b)).localeCompare(String(paPickDate(a)));
+    });
+  const idx = rows.findIndex((x) => x.invoice_id === openId);
+  const open = idx >= 0 ? rows[idx] : deliveries.find((x) => x.invoice_id === openId) || null;
+  const total = picked.length;
+  const doneN = counts.verified + counts.issue;
+
+  const ping = (msg, undoId) => {
+    clearTimeout(toastT.current);
+    setToast({ msg, undoId });
+    toastT.current = setTimeout(() => setToast(null), 4000);
   };
-  const unmark = (x) => {
-    setChecks((c) => { const n = { ...c }; delete n[x.invoice_id]; return n; });
+  const mark = (x, status, note, goNext) => {
+    // agli entry pehle hi nikal lo — mark hote hi ye list se hat jaayegi
+    const next = goNext ? rows.filter((r) => r.invoice_id !== x.invoice_id)[Math.max(0, idx)] : null;
+    setChecks((c) => ({ ...c, [x.invoice_id]: { status, note: note || '', at: Date.now() } }));
+    setOpenId(next ? next.invoice_id : null);
+    ping(`${x.customer} · ${status === 'verified' ? 'Verified ✓' : 'Issue mark hua'}`, x.invoice_id);
+  };
+  const unmark = (id) => {
+    setChecks((c) => { const n = { ...c }; delete n[id]; return n; });
+    setToast(null);
+  };
+  const go = (d) => {
+    if (idx < 0) return;
+    const n = rows[idx + d];
+    if (n) setOpenId(n.invoice_id);
   };
 
   const cards = [
-    { id: 'todo', label: 'Check karna baaki', n: counts.todo, icon: ClipboardCheck, color: T.amber, soft: T.amberSoft },
+    { id: 'todo', label: 'Check karna baaki', n: counts.todo, sub: counts.flagged ? `${counts.flagged} mein warning` : '', icon: ClipboardCheck, color: T.amber, soft: T.amberSoft },
     { id: 'verified', label: 'Verified', n: counts.verified, icon: CheckCircle2, color: T.green, soft: T.mint },
     { id: 'issue', label: 'Issue mila', n: counts.issue, icon: AlertTriangle, color: T.red, soft: T.redSoft },
-    { id: null, label: 'Photo nahi lagi', n: counts.nophoto, icon: Camera, color: T.violet, soft: T.violetSoft },
   ];
-  const stChip = (s) =>
-    s === 'verified' ? { label: 'Verified', color: T.green, soft: T.mint }
-      : s === 'issue' ? { label: 'Issue', color: T.red, soft: T.redSoft }
-        : { label: 'Check baaki', color: T.amber, soft: T.amberSoft };
+
+  const Thumb = ({ x, size }) => {
+    const ph = PA_PHOTOS(x);
+    return ph.length ? (
+      <span className="pa-thumb" style={{ width: size, height: size }}>
+        <img src={ph[0]} alt="" loading="lazy" />
+        {ph.length > 1 && <span className="pa-thumb-n">+{ph.length - 1}</span>}
+      </span>
+    ) : (
+      <span className="pa-thumb pa-thumb-none" style={{ width: size, height: size }} title="Photo nahi lagi">
+        <Camera size={16} />
+      </span>
+    );
+  };
+  const FlagChip = ({ x }) => {
+    const n = paFlags(x).length;
+    return n ? (
+      <span className="pa-flag" title={paFlags(x).join(' · ')}><AlertTriangle size={11} /> {n} warning</span>
+    ) : (
+      <span className="pa-clean"><Check size={11} /> Clean</span>
+    );
+  };
 
   return (
     <div>
@@ -7209,8 +7289,13 @@ function PickupAdmin({ deliveries, onOpen }) {
         <div>
           <div className="dash-sub">All stores · Supervisor check</div>
           <h2 style={{ margin: '2px 0 0' }}>Pickup Admin</h2>
+          <div className="pa-sub">
+            {section === 'check'
+              ? <>Store manager ne jo pickups <b>Picked Up</b> mark ki, unhe yahan confirm karo.</>
+              : <>Nayi pickup aur damage claim — Kanu Mam yahan approve / reject karti hain.</>}
+          </div>
         </div>
-        <div className="dash-filters">
+        <div className="dash-filters" style={section === 'check' ? undefined : { display: 'none' }}>
           <select className="dash-inp" value={range} onChange={(e) => setRange(e.target.value)}>
             <option value="today">Aaj</option>
             <option value="yesterday">Kal</option>
@@ -7225,22 +7310,62 @@ function PickupAdmin({ deliveries, onOpen }) {
         </div>
       </div>
 
+      <div className="pa-sections">
+        <button className={section === 'check' ? 'pa-sec on' : 'pa-sec'} onClick={() => setSection('check')}>
+          <ClipboardCheck size={16} />
+          <span><b>Pickup Check</b><em>Picked Up sach mein hui?</em></span>
+          <i>{counts.todo}</i>
+        </button>
+        <button className={section === 'approval' ? 'pa-sec on' : 'pa-sec'} onClick={() => setSection('approval')}>
+          <ShieldCheck size={16} />
+          <span><b>Approvals</b><em>Nayi pickup + damage claim</em></span>
+        </button>
+      </div>
+
+      {/* dono section mounted rehte hain — switch karne pe kiya hua kaam nahi khota */}
+      <div style={section === 'approval' ? undefined : { display: 'none' }}>
+        <ReviewPage embedded />
+      </div>
+      <div style={section === 'check' ? undefined : { display: 'none' }}>
       <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
         <b>Build mode</b> — Verified / Issue abhi sirf is screen pe hai, kahin save nahi hota
         (refresh pe hat jayega). Pickups ka data sirf padha ja raha hai, badla nahi.
       </div>
 
-      <div className="pa-cards">
-        {cards.map((c) => (
-          <button key={c.label} className={c.id && tab === c.id ? 'dash-card on' : 'dash-card'}
-            style={{ ...(c.id && tab === c.id ? { borderColor: c.color } : {}), ...(c.id ? {} : { cursor: 'default' }) }}
-            onClick={() => c.id && setTab(c.id)}>
-            <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
-            <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>{c.n}</div>
-            <div className="dash-card-l">{c.label}</div>
-          </button>
-        ))}
+      <div className="pa-top">
+        <div className="pa-cards">
+          {cards.map((c) => (
+            <button key={c.label} className={tab === c.id ? 'dash-card on' : 'dash-card'}
+              style={tab === c.id ? { borderColor: c.color } : {}} onClick={() => setTab(c.id)}>
+              <div className="dash-card-ico" style={{ background: c.soft, color: c.color }}><c.icon size={16} /></div>
+              <div className="dash-card-n" style={{ color: c.n ? c.color : T.ink }}>{c.n}</div>
+              <div className="dash-card-l">{c.label}</div>
+              {c.sub && <div className="pa-card-sub">{c.sub}</div>}
+            </button>
+          ))}
+        </div>
+        <div className="pa-progress dash-card" style={{ cursor: 'default' }}>
+          <div className="dash-card-l" style={{ marginTop: 0 }}>Progress</div>
+          <div className="dash-card-n" style={{ fontSize: 22, marginTop: 6 }}>
+            {doneN}<span style={{ color: T.inkSoft, fontSize: 15 }}> / {total}</span>
+          </div>
+          <div className="pa-bar"><div style={{ width: total ? `${(doneN / total) * 100}%` : 0 }} /></div>
+          <div className="dash-card-l">{total ? Math.round((doneN / total) * 100) : 0}% check ho gaya</div>
+        </div>
       </div>
+
+      {storeTodo.length > 0 && (
+        <div className="pa-stores">
+          <button className={store === 'ALL' ? 'pa-st on' : 'pa-st'} onClick={() => setStore('ALL')}>
+            All <b>{inRange.filter((x) => statusOf(x) === 'todo').length}</b>
+          </button>
+          {storeTodo.map((s) => (
+            <button key={s.st} className={store === s.st ? 'pa-st on' : 'pa-st'} onClick={() => setStore(store === s.st ? 'ALL' : s.st)}>
+              {branchLabel(s.st)} <b>{s.n}</b>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="pa-toolbar">
         <div className="layout-toggle">
@@ -7254,20 +7379,24 @@ function PickupAdmin({ deliveries, onOpen }) {
           <Search size={15} color={T.inkSoft} />
           <input placeholder="Customer, invoice, phone, pickup boy…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <select className="dash-inp" value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="flag">Warning wali pehle</option>
+          <option value="new">Nayi pehle</option>
+        </select>
       </div>
 
       {rows.length === 0 ? (
         <div className="pa-empty">
-          <CheckCircle2 size={26} color={T.green} />
-          <div>{tab === 'todo' ? 'Is duration ki saari pickups check ho gayi.' : 'Koi entry nahi.'}</div>
+          <CheckCircle2 size={28} color={T.green} />
+          <div>{tab === 'todo' ? 'Sab check ho gaya — is duration mein kuch baaki nahi.' : 'Koi entry nahi.'}</div>
         </div>
       ) : isMobile ? (
         <div className="pa-mlist">
           {rows.map((x) => {
-            const st = stChip(statusOf(x));
-            const ph = PA_PHOTOS(x).length;
+            const st = paStChip(statusOf(x));
             return (
               <button key={x.invoice_id} className="pa-mrow" onClick={() => setOpenId(x.invoice_id)}>
+                <Thumb x={x} size={52} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="pa-mtop">
                     <span className="pa-cust ellip">{x.customer}</span>
@@ -7277,12 +7406,9 @@ function PickupAdmin({ deliveries, onOpen }) {
                   <div className="pa-mbot">
                     <span>{branchLabel(x.branch)}</span>
                     <span>{niceDate(paPickDate(x)) || '—'}</span>
-                    <span style={{ color: ph ? T.inkSoft : T.violet, fontWeight: ph ? 500 : 800 }}>
-                      <Camera size={11} /> {ph || 'No photo'}
-                    </span>
+                    <FlagChip x={x} />
                   </div>
                 </div>
-                <ChevronRight size={16} color={T.inkSoft} />
               </button>
             );
           })}
@@ -7290,38 +7416,52 @@ function PickupAdmin({ deliveries, onOpen }) {
       ) : (
         <div className="dash-block" style={{ padding: 0 }}>
           <div className="dash-table-wrap">
-            <table className="dash-table">
+            <table className="dash-table pa-table">
               <thead>
                 <tr>
-                  <th>Customer</th>
+                  <th>Pickup</th>
                   <th>Store</th>
-                  <th>Item</th>
                   <th>Pickup boy</th>
-                  <th>Pickup date</th>
-                  <th>Photo</th>
+                  <th>Date</th>
                   <th style={{ textAlign: 'right' }}>Charges</th>
-                  <th>Status</th>
-                  <th />
+                  <th>Check</th>
+                  <th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((x) => {
-                  const st = stChip(statusOf(x));
-                  const ph = PA_PHOTOS(x).length;
+                  const st = statusOf(x);
+                  const chip = paStChip(st);
+                  const pp = paPerson(x.person);
                   return (
                     <tr key={x.invoice_id} className="dash-row" onClick={() => setOpenId(x.invoice_id)}>
                       <td>
-                        <div className="pa-cust">{x.customer}</div>
-                        <div className="pa-inv">#{x.id}</div>
+                        <div className="pa-cell">
+                          <Thumb x={x} size={46} />
+                          <div style={{ minWidth: 0 }}>
+                            <div className="pa-cust ellip" style={{ maxWidth: 260 }}>{x.customer}</div>
+                            <div className="pa-inv ellip" style={{ maxWidth: 260 }}>{x.equipment}</div>
+                            <div className="pa-inv">#{x.id}</div>
+                          </div>
+                        </div>
                       </td>
                       <td>{branchLabel(x.branch)}</td>
-                      <td className="ellip" style={{ maxWidth: 200 }}>{x.equipment}</td>
-                      <td className="ellip" style={{ maxWidth: 160 }}>{x.person || '—'}</td>
+                      <td>
+                        <div className="ellip" style={{ maxWidth: 150, fontWeight: 600 }}>{pp.name}</div>
+                        {pp.phone && <div className="pa-inv">{pp.phone}</div>}
+                      </td>
                       <td>{niceDate(paPickDate(x)) || '—'}</td>
-                      <td style={{ color: ph ? T.ink : T.violet, fontWeight: 700 }}>{ph ? `${ph} photo` : 'Nahi'}</td>
                       <td style={{ textAlign: 'right' }}>{x.charges != null ? `₹${x.charges.toLocaleString('en-IN')}` : '—'}</td>
-                      <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
-                      <td style={{ width: 30 }}><ChevronRight size={16} color={T.inkSoft} /></td>
+                      <td><FlagChip x={x} /></td>
+                      <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                        {st === 'todo' ? (
+                          <button className="pa-quick" onClick={() => mark(x, 'verified')} title="Seedha verify karo">
+                            <Check size={14} /> Verify
+                          </button>
+                        ) : (
+                          <span className="dash-chip" style={{ background: chip.soft, color: chip.color }}>{chip.label}</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -7332,97 +7472,125 @@ function PickupAdmin({ deliveries, onOpen }) {
       )}
 
       {open && (
-        <PaDrawer x={open} check={checks[open.invoice_id]} onClose={() => setOpenId(null)}
-          onVerify={() => mark(open, 'verified')}
-          onIssue={(note) => mark(open, 'issue', note)}
-          onUndo={() => unmark(open)}
+        <PaDrawer x={open} check={checks[open.invoice_id]} pos={idx >= 0 ? `${idx + 1} / ${rows.length}` : ''}
+          hasPrev={idx > 0} hasNext={idx >= 0 && idx < rows.length - 1}
+          onPrev={() => go(-1)} onNext={() => go(1)}
+          onClose={() => setOpenId(null)}
+          onVerify={() => mark(open, 'verified', '', true)}
+          onIssue={(note) => mark(open, 'issue', note, true)}
+          onUndo={() => unmark(open.invoice_id)}
           onFull={() => { setOpenId(null); onOpen(open); }} />
+      )}
+      </div>
+      {toast && (
+        <div className="toast">
+          <CheckCircle2 size={17} color={T.greenBright} /> {toast.msg}
+          <button className="pa-undo" onClick={() => unmark(toast.undoId)}>Undo</button>
+        </div>
       )}
       <PaStyle />
     </div>
   );
 }
 
-function PaDrawer({ x, check, onClose, onVerify, onIssue, onUndo, onFull }) {
+function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, onVerify, onIssue, onUndo, onFull }) {
   const [issueOpen, setIssueOpen] = useState(false);
   const [note, setNote] = useState('');
+  const [big, setBig] = useState(0);
   const r = x._raw || {};
   const photos = PA_PHOTOS(x);
-  const Icon = equipIcon(x.equipment);
+  const flags = paFlags(x);
+  const pp = paPerson(x.person);
+  // nayi entry khule to form reset
+  useEffect(() => { setIssueOpen(false); setNote(''); setBig(0); }, [x.invoice_id]);
+  // keyboard: V verify, I issue, ← → agli/pichhli, Esc band
+  useEffect(() => {
+    const k = (e) => {
+      if (/input|textarea|select/i.test((e.target && e.target.tagName) || '')) return;
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowRight' && hasNext) onNext();
+      else if (e.key === 'ArrowLeft' && hasPrev) onPrev();
+      else if (!check && (e.key === 'v' || e.key === 'V')) onVerify();
+      else if (!check && (e.key === 'i' || e.key === 'I')) { e.preventDefault(); setIssueOpen(true); }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
   const slot = r.confirmed_date && r.confirmed_date !== 'null'
     ? `${niceDate(r.confirmed_date)}${r.confirmed_time && r.confirmed_time !== 'null' ? ', ' + niceTime(r.confirmed_time) : ''}`
     : '—';
   const money = (v) => (v != null && v !== '' && v !== 'null' ? `₹${Number(v).toLocaleString('en-IN')}` : '—');
-  // jo cheezein shak paida karein — supervisor ki nazar pehle yahan
-  const flags = [];
-  if (!photos.length) flags.push('Pickup photo nahi lagi');
-  if (!r.item_inspected) flags.push('Item inspected tick nahi hua');
-  if (r.actual_pickup_date && r.confirmed_date && String(r.actual_pickup_date).slice(0, 10) < String(r.confirmed_date).slice(0, 10))
-    flags.push('Pickup date, tay hui date se pehle ki hai');
-  if (x.pending != null && x.pending > 0 && !(Number(r.pending_collected) > 0))
-    flags.push(`₹${x.pending.toLocaleString('en-IN')} pending tha, collect nahi dikha`);
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-head">
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
-            <div className="eq-ico" style={{ width: 42, height: 42, background: T.mint }}><Icon size={21} color={T.green} /></div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>{x.customer}</div>
-              <div className="ellip" style={{ fontSize: 12.5, color: T.inkSoft }}>#{x.id} · {branchLabel(x.branch)}</div>
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose}><X size={18} color={T.ink} /></button>
+      <div className="drawer pa-drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="pa-nav">
+          <button className="icon-btn" disabled={!hasPrev} style={!hasPrev ? { opacity: 0.35 } : null} onClick={onPrev} title="Pichhli (←)"><ArrowLeft size={16} color={T.ink} /></button>
+          <span className="pa-pos">{pos}</span>
+          <button className="icon-btn" disabled={!hasNext} style={!hasNext ? { opacity: 0.35 } : null} onClick={onNext} title="Agli (→)"><ArrowRight size={16} color={T.ink} /></button>
+          <span style={{ flex: 1 }} />
+          <button className="icon-btn" onClick={onClose} title="Band (Esc)"><X size={18} color={T.ink} /></button>
         </div>
 
+        <div style={{ fontWeight: 800, fontSize: 19, letterSpacing: -0.3 }}>{x.customer}</div>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 2 }}>#{x.id} · {branchLabel(x.branch)} · {x.equipment}</div>
+
         {check && (
-          <div className="flag-note" style={check.status === 'verified'
-            ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
+          <div className="flag-note" style={{ marginTop: 12, ...(check.status === 'verified'
+            ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }) }}>
             <b>{check.status === 'verified' ? 'Verified' : 'Issue mark kiya'}</b> · {fmtFullDateTime(check.at)}
             {check.note && <div style={{ marginTop: 2 }}>Note: {check.note}</div>}
           </div>
         )}
 
-        {flags.length > 0 && (
+        {/* photo sabse upar aur badi — asli saboot yahi hai */}
+        <div className="pa-hero">
+          {photos.length ? (
+            <a href={photos[big]} target="_blank" rel="noreferrer"><img src={photos[big]} alt="pickup" /></a>
+          ) : (
+            <div className="pa-hero-none"><Camera size={26} /><div>Store ne koi photo nahi lagayi</div></div>
+          )}
+        </div>
+        {photos.length > 1 && (
+          <div className="pa-strip">
+            {photos.map((u, i) => (
+              <button key={i} className={i === big ? 'pa-strip-i on' : 'pa-strip-i'} onClick={() => setBig(i)}><img src={u} alt="" /></button>
+            ))}
+          </div>
+        )}
+
+        {flags.length > 0 ? (
           <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginTop: 12 }}>
             <b>Dhyan do</b>
             {flags.map((f) => <div key={f} style={{ marginTop: 2 }}>• {f}</div>)}
           </div>
-        )}
-
-        <div className="sec-title" style={{ marginTop: 18 }}><Camera size={14} /> Pickup photo</div>
-        {photos.length ? (
-          <div className="photo-grid">
-            {photos.map((u, i) => (
-              <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="pickup" /></a>
-            ))}
-          </div>
         ) : (
-          <div className="block-next-note" style={{ marginTop: 0 }}>Store ne koi photo nahi lagayi.</div>
+          <div className="flag-note" style={{ background: T.mint, color: T.green, marginTop: 12 }}>
+            <b>Sab theek dikh raha hai</b> — photo hai, item inspected hai, paisa clear.
+          </div>
         )}
 
-        <div className="sec-title"><Truck size={14} /> Pickup kaise hui</div>
-        <div className="kv-grid">
-          <KV label="Pickup boy" value={x.person || '—'} />
-          <KV label="Vehicle" value={x.vehicle || '—'} />
-          <KV label="Slot tay hua" value={slot} />
-          <KV label="Actual pickup" value={niceDate(r.actual_pickup_date) || '—'} />
-          <KV label="Item inspected" value={r.item_inspected ? 'Haan' : 'Nahi'} />
-          <KV label="Picked up tick" value={r.pickup_done ? 'Haan' : 'Nahi'} />
-          <KV label="Pickup charges" value={money(r.pickup_charges_collected)} />
-          <KV label="Pending collected" value={money(r.pending_collected)} />
-          <KV label="Remarks" value={show(r.stage4_remarks)} full />
+        <div className="pa-facts">
+          <div><span>Pickup boy</span><b>{pp.name}</b>{pp.phone && <em>{pp.phone}</em>}</div>
+          <div><span>Vehicle</span><b>{x.vehicle || '—'}</b></div>
+          <div><span>Slot tay hua</span><b>{slot}</b></div>
+          <div><span>Actual pickup</span><b>{niceDate(r.actual_pickup_date) || '—'}</b></div>
+          <div><span>Inspected</span><b style={{ color: r.item_inspected ? T.green : T.red }}>{r.item_inspected ? 'Haan' : 'Nahi'}</b></div>
+          <div><span>Charges liye</span><b>{money(r.pickup_charges_collected)}</b></div>
+          <div><span>Pending tha</span><b style={{ color: x.pending > 0 ? T.red : T.ink }}>{x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'}</b></div>
+          <div><span>Pending collect</span><b>{money(r.pending_collected)}</b></div>
         </div>
+        {r.stage4_remarks && r.stage4_remarks !== 'null' && (
+          <div className="pa-remark">“{r.stage4_remarks}”</div>
+        )}
 
         <div className="sec-title"><User size={14} /> Customer</div>
         <div className="kv-grid">
           <KV label="Phone" value={x.phone} />
           <KV label="Store manager" value={x.manager} />
           <KV label="Address" value={x.area} full />
-          <KV label="Items" value={x.equipment} full />
-          <KV label="Pending amount" value={x.pending != null ? `₹${x.pending.toLocaleString('en-IN')}` : '—'} />
           <KV label="Security" value={x.securityAmount != null ? `₹${x.securityAmount.toLocaleString('en-IN')}${x.securityType ? ' · ' + x.securityType : ''}` : '—'} />
+          <KV label="Invoice total" value={x.amount != null ? `₹${x.amount.toLocaleString('en-IN')}` : '—'} />
         </div>
         <button className="edit-btn" onClick={onFull}><History size={15} /> Poori entry + timeline kholo</button>
 
@@ -7442,10 +7610,13 @@ function PaDrawer({ x, check, onClose, onVerify, onIssue, onUndo, onFull }) {
               </div>
             </>
           ) : (
-            <div className="pa-btnrow">
-              <button className="btn-primary" onClick={onVerify}><Check size={15} /> Pickup sahi hai · Verified</button>
-              <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
-            </div>
+            <>
+              <div className="pa-btnrow">
+                <button className="btn-primary" onClick={onVerify}><Check size={15} /> Sahi hai · Verify &amp; agla</button>
+                <button className="btn-danger" onClick={() => setIssueOpen(true)}><AlertTriangle size={15} /> Issue hai</button>
+              </div>
+              <div className="pa-keys">Shortcut: <kbd>V</kbd> verify · <kbd>I</kbd> issue · <kbd>←</kbd><kbd>→</kbd> agli/pichhli</div>
+            </>
           )}
         </div>
       </div>
@@ -7456,24 +7627,80 @@ function PaDrawer({ x, check, onClose, onVerify, onIssue, onUndo, onFull }) {
 function PaStyle() {
   return (
     <style>{`
-      .pa-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
+      .pa-sub { font-size: 12.5px; color: ${T.inkSoft}; margin-top: 4px; }
+      .pa-sub b { color: ${T.green}; }
+      .pa-sections { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+      .pa-sec { display: flex; align-items: center; gap: 11px; flex: 1 1 240px; max-width: 360px; text-align: left; background: #fff; border: 1.5px solid ${T.line}; border-radius: 14px; padding: 12px 14px; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .pa-sec span { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+      .pa-sec b { font-size: 14px; font-weight: 800; color: ${T.ink}; }
+      .pa-sec em { font-style: normal; font-size: 11.5px; margin-top: 1px; }
+      .pa-sec i { font-style: normal; font-size: 12px; font-weight: 800; background: ${T.amberSoft}; color: ${T.amber}; border-radius: 8px; padding: 2px 8px; }
+      .pa-sec.on { border-color: ${T.forest}; background: ${T.forest}; color: rgba(255,255,255,.75); }
+      .pa-sec.on b { color: #fff; }
+      .pa-sec.on i { background: rgba(255,255,255,.18); color: #fff; }
+      .pa-top { display: grid; grid-template-columns: 3fr 1fr; gap: 12px; margin-bottom: 14px; }
+      .pa-cards { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+      .pa-card-sub { font-size: 11px; font-weight: 700; color: ${T.amber}; margin-top: 3px; }
+      .pa-progress { display: flex; flex-direction: column; justify-content: center; }
+      .pa-bar { height: 7px; border-radius: 6px; background: ${T.line}; overflow: hidden; margin: 8px 0 6px; }
+      .pa-bar > div { height: 100%; background: ${T.green}; border-radius: 6px; transition: width .3s; }
+      .pa-stores { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+      .pa-st { border: 1px solid ${T.line}; background: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .pa-st b { color: ${T.amber}; margin-left: 4px; }
+      .pa-st:hover { border-color: ${T.green}; }
+      .pa-st.on { background: ${T.forest}; color: #fff; border-color: ${T.forest}; }
+      .pa-st.on b { color: #fff; }
       .pa-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
       .pa-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 6px; background: rgba(0,0,0,.08); font-size: 11px; }
       .lt-btn.active .pa-count { background: rgba(255,255,255,.2); }
       .pa-search { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid ${T.line}; border-radius: 11px; padding: 9px 13px; flex: 1; min-width: 200px; }
       .pa-search input { border: none; outline: none; background: transparent; font-family: inherit; font-size: 13.5px; color: ${T.ink}; width: 100%; }
+      .pa-table td { vertical-align: middle; padding-top: 10px; padding-bottom: 10px; }
+      .pa-cell { display: flex; align-items: center; gap: 12px; }
       .pa-cust { font-weight: 800; font-size: 13.5px; color: ${T.ink}; }
       .pa-inv { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 2px; }
-      .pa-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; border: 1px dashed ${T.line}; border-radius: 16px; padding: 40px 16px; font-size: 13.5px; font-weight: 700; color: ${T.inkSoft}; }
+      .pa-thumb { position: relative; flex-shrink: 0; border-radius: 10px; overflow: hidden; background: ${T.cream}; border: 1px solid ${T.line}; display: inline-flex; align-items: center; justify-content: center; }
+      .pa-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .pa-thumb-n { position: absolute; right: 3px; bottom: 3px; background: rgba(20,32,26,.8); color: #fff; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 6px; }
+      .pa-thumb-none { background: ${T.violetSoft}; color: ${T.violet}; border-style: dashed; border-color: #CFC6E6; }
+      .pa-flag { display: inline-flex; align-items: center; gap: 4px; background: ${T.amberSoft}; color: ${T.amber}; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+      .pa-clean { display: inline-flex; align-items: center; gap: 4px; background: ${T.mint}; color: ${T.green}; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; }
+      .pa-quick { display: inline-flex; align-items: center; gap: 5px; border: 1px solid ${T.green}; background: #fff; color: ${T.green}; border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 800; font-family: inherit; cursor: pointer; }
+      .pa-quick:hover { background: ${T.green}; color: #fff; }
+      .pa-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; border: 1px dashed ${T.line}; border-radius: 16px; padding: 44px 16px; font-size: 13.5px; font-weight: 700; color: ${T.inkSoft}; }
       .pa-mlist { display: flex; flex-direction: column; gap: 8px; }
-      .pa-mrow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 13px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
-      .pa-mtop { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-      .pa-mbot { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: ${T.inkSoft}; }
-      .pa-actions { position: sticky; bottom: -22px; margin: 22px -22px -22px; padding: 14px 22px 18px; background: ${T.cream}; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 10px; }
+      .pa-mrow { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 10px 12px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
+      .pa-mtop { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      .pa-mbot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: ${T.inkSoft}; }
+      .pa-drawer { width: 520px; }
+      .pa-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+      .pa-pos { font-size: 12.5px; font-weight: 800; color: ${T.inkSoft}; min-width: 56px; text-align: center; }
+      .pa-hero { margin-top: 14px; border-radius: 14px; overflow: hidden; border: 1px solid ${T.line}; background: #fff; }
+      .pa-hero img { width: 100%; max-height: 340px; object-fit: contain; display: block; background: #111; }
+      .pa-hero-none { height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: ${T.violet}; background: ${T.violetSoft}; font-size: 13px; font-weight: 700; }
+      .pa-strip { display: flex; gap: 7px; margin-top: 8px; overflow-x: auto; }
+      .pa-strip-i { width: 58px; height: 58px; flex-shrink: 0; border-radius: 9px; overflow: hidden; border: 2px solid transparent; padding: 0; cursor: pointer; background: none; }
+      .pa-strip-i.on { border-color: ${T.green}; }
+      .pa-strip-i img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .pa-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: ${T.line}; border: 1px solid ${T.line}; border-radius: 14px; overflow: hidden; margin-top: 14px; }
+      .pa-facts > div { background: #fff; padding: 10px 13px; display: flex; flex-direction: column; min-width: 0; }
+      .pa-facts span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: ${T.inkSoft}; }
+      .pa-facts b { font-size: 13.5px; font-weight: 800; color: ${T.ink}; margin-top: 2px; overflow-wrap: anywhere; }
+      .pa-facts em { font-style: normal; font-size: 11.5px; color: ${T.inkSoft}; }
+      .pa-remark { margin-top: 10px; font-size: 13px; font-weight: 600; color: ${T.ink}; background: #fff; border-left: 3px solid ${T.green}; border-radius: 8px; padding: 9px 12px; }
+      .pa-actions { position: sticky; bottom: -22px; margin: 22px -22px -22px; padding: 14px 22px 16px; background: ${T.cream}; border-top: 1px solid ${T.line}; display: flex; flex-direction: column; gap: 8px; }
       .pa-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
       .pa-btnrow > button { flex: 1 1 auto; }
-      @media (max-width: 900px) { .pa-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-      @media (max-width: 760px) { .pa-search { flex: 1 1 100%; } .pa-actions { bottom: -18px; margin: 22px -16px -18px; padding: 12px 16px 16px; } }
+      .pa-keys { font-size: 11px; color: ${T.inkSoft}; text-align: center; }
+      .pa-keys kbd { font-family: inherit; font-size: 10.5px; font-weight: 800; background: #fff; border: 1px solid ${T.line}; border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; margin: 0 1px; }
+      .pa-undo { margin-left: 8px; background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 4px 10px; font-weight: 800; font-family: inherit; cursor: pointer; }
+      @media (max-width: 1100px) { .pa-top { grid-template-columns: 1fr; } }
+      @media (max-width: 760px) {
+        .pa-cards { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+        .pa-search { flex: 1 1 100%; }
+        .pa-keys { display: none; }
+        .pa-actions { bottom: -18px; margin: 22px -16px -18px; padding: 12px 16px 14px; }
+      }
     `}</style>
   );
 }
