@@ -5820,6 +5820,8 @@ function AttSheetTab() {
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [askRefill, setAskRefill] = useState(false);
+  const [askGrid, setAskGrid] = useState(false);
+  const [gridMsg, setGridMsg] = useState("");
   const [hidden, setHidden] = useState<any[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const [extra, setExtra] = useState(0);   // + se kitne aage ke mahine khule hain
@@ -5859,6 +5861,56 @@ function AttSheetTab() {
     setBusy(false);
   };
   useEffect(() => { load(); }, [month]);
+
+  // Monthly Grid (muster_roll_json) ke marks se Days columns bharo.
+  // Total = mahine ke din (joining se pehle / leaving ke baad ke khaali din nahi)
+  // Week Off = W + F (holiday bhi off gina) · Leave = A, UL, har leave = 1,
+  // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini.
+  // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
+  const refillFromGrid = async () => {
+    setBusy(true); setErr(""); setGridMsg("");
+    const from = `${month}-01`;
+    const { data, error } = await supabase.rpc("muster_roll_json", { p_month: from });
+    if (error) { setErr(error.message); setBusy(false); return; }
+    const byCode: Record<string, Record<string, string>> = {};
+    (data || []).forEach((g: any) => { byCode[g.emp_code] = g.marks || {}; });
+    const today = istToday();
+    const leaveOf = (m: string) => {
+      const x = m.endsWith("?") ? m.slice(0, -1) : m;
+      if (["P", "L", "PSL", "SHORT", "W", "F", ""].includes(x)) return 0;
+      if (x === "H" || x === "HALF") return 0.5;
+      return 1;                       // A, UL, EL, CL, COMP ... sab
+    };
+    let done = 0, miss = 0;
+    const next = rows.map((r) => {
+      const marks = byCode[r.emp_code];
+      if (!marks) { miss++; return r; }
+      let total = 0, off = 0, lv = 0;
+      Object.entries(marks).forEach(([d, m0]) => {
+        const m = String(m0 || "");
+        if (!m && d <= today) return;        // joining se pehle / leaving ke baad
+        total++;
+        if (m === "W" || m === "F") off++;
+        else lv += leaveOf(m);
+      });
+      let nr: any = { ...r, total_days: total, week_off: off, leave_days: +lv.toFixed(2) };
+      nr = sheetRecalc(nr, "total_days");
+      nr = sheetRecalc(nr, "leave_days");
+      done++;
+      return nr;
+    });
+    const res = await Promise.all(next.filter((r) => byCode[r.emp_code]).map((r) =>
+      supabase.from("attendance_sheet").update({
+        total_days: r.total_days, week_off: r.week_off, leave_days: r.leave_days,
+        worked: r.worked, effect: r.effect, total_credit: r.total_credit,
+      }).eq("month", from).eq("employee_id", r.employee_id)));
+    const bad = res.find((x) => x.error);
+    if (bad?.error) setErr(bad.error.message);
+    setRows(next);
+    setGridMsg(`${done} rows refilled from the Monthly Grid.` +
+      (miss ? ` ${miss} not found in the grid — left as they were.` : ""));
+    setBusy(false);
+  };
 
   const queueSave = (r: any) => {
     const id = r.employee_id;
@@ -5979,6 +6031,9 @@ function AttSheetTab() {
         <button className="att-btn sm line" onClick={() => setAskRefill(true)}>
           Refill from attendance
         </button>
+        <button className="att-btn sm line" onClick={() => { setAskRefill(false); setAskGrid(true); }}>
+          Refill from Monthly Grid
+        </button>
         <button className="att-btn sm line" onClick={exportCsv} disabled={!shown.length}>CSV</button>
         <button className="att-btn sm line" onClick={() => setShowHidden(!showHidden)}>
           Removed ({hidden.length})
@@ -6019,8 +6074,26 @@ function AttSheetTab() {
         </div>
       )}
 
+      {askGrid && (
+        <div className="att-note err">
+          <span>
+            This fills Total Day, Week Off, Leave, Effect, Worked and Total Credit for every
+            row of {monthLabel} from the Monthly Grid marks (W and F count as week off;
+            A, UL and leaves as 1; half day as 0.5), overwriting your edits in those columns.
+            L.M Credit, C.M Credit, Deductions and Remarks stay.
+          </span>
+          <div className="att-flex" style={{ marginTop: 10 }}>
+            <button className="att-btn sm" onClick={() => { setAskGrid(false); refillFromGrid(); }}>
+              Yes, refill from grid
+            </button>
+            <button className="att-btn sm grey" onClick={() => setAskGrid(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       <Search placeholder="Search name, code or department" value={q} onChange={setQ} />
       <Note>{err}</Note>
+      <Note kind="ok">{gridMsg}</Note>
 
       {busy ? <p className="att-muted">Loading…</p> : !shown.length ? (
         <p className="att-muted">No one to show for this month.</p>
