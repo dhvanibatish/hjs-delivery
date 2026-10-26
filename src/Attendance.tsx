@@ -5864,7 +5864,9 @@ function AttSheetTab() {
 
   // Monthly Grid (muster_roll_json) ke marks se Days columns bharo.
   // Total = mahine ke din (joining se pehle / leaving ke baad ke khaali din nahi)
-  // Week Off = W + F (holiday bhi off gina) · Leave = A, UL, har leave = 1,
+  // Week Off = mahine mein us bande ke week-off din (employees.week_off_days,
+  // khaali ho to Sunday) — us din kaam kiya ho tab bhi gina; holiday (F) week off
+  // mein nahi, wo Worked mein paid gina jaata hai · Leave = A, UL, har leave = 1,
   // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini.
   // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
   const refillFromGrid = async () => {
@@ -5874,6 +5876,12 @@ function AttSheetTab() {
     if (error) { setErr(error.message); setBusy(false); return; }
     const byCode: Record<string, Record<string, string>> = {};
     (data || []).forEach((g: any) => { byCode[g.emp_code] = g.marks || {}; });
+    const { data: em } = await supabase.from("employees").select("emp_code, week_off_days");
+    const woBy: Record<string, number[]> = {};
+    (em || []).forEach((e: any) => {
+      woBy[e.emp_code] = Array.isArray(e.week_off_days) && e.week_off_days.length
+        ? e.week_off_days.map(Number) : [0];
+    });
     const today = istToday();
     const leaveOf = (m: string) => {
       const x = m.endsWith("?") ? m.slice(0, -1) : m;
@@ -5885,12 +5893,13 @@ function AttSheetTab() {
     const next = rows.map((r) => {
       const marks = byCode[r.emp_code];
       if (!marks) { miss++; return r; }
+      const wo = woBy[r.emp_code] || [0];
       let total = 0, off = 0, lv = 0;
       Object.entries(marks).forEach(([d, m0]) => {
         const m = String(m0 || "");
         if (!m && d <= today) return;        // joining se pehle / leaving ke baad
         total++;
-        if (m === "W" || m === "F") off++;
+        if (wo.includes(new Date(d + "T00:00:00").getDay())) off++;
         else lv += leaveOf(m);
       });
       let nr: any = { ...r, total_days: total, week_off: off, leave_days: +lv.toFixed(2) };
@@ -6078,7 +6087,7 @@ function AttSheetTab() {
         <div className="att-note err">
           <span>
             This fills Total Day, Week Off, Leave, Effect, Worked and Total Credit for every
-            row of {monthLabel} from the Monthly Grid marks (W and F count as week off;
+            row of {monthLabel} from the Monthly Grid marks (week off = the person's week-off days in the month;
             A, UL and leaves as 1; half day as 0.5), overwriting your edits in those columns.
             L.M Credit, C.M Credit, Deductions and Remarks stay.
           </span>
