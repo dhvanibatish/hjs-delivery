@@ -7388,8 +7388,8 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
   const mine = lv.employee_id === who?.id;
   const isAdmin = who?.role === "admin";
   const isApprover = who && ["manager", "admin"].includes(who.role);
-  // apni pending, ya manager/admin kisi ki bhi
-  const canCancel = (mine && lv.status === "Pending") || isApprover;
+  // Pending: khud ki ya manager/admin. Approved/Rejected: sirf admin.
+  const canCancel = isAdmin || (lv.status === "Pending" && (mine || isApprover));
   const one = lv.from_date === lv.to_date;
 
   const act = async (hard: boolean) => {
@@ -7448,6 +7448,9 @@ function LeaveSheet({ lv, who, onClose, onChanged }: any) {
         </dl>
 
         <Note>{msg.err}</Note>
+        {!isAdmin && lv.status === "Approved" && (
+          <p className="att-muted">Approved leave sirf admin badal sakta hai.</p>
+        )}
 
         {!confirm && lv.status !== "Cancelled" && canCancel && (
           <button className="att-btn line" onClick={() => setConfirm("cancel")}>
