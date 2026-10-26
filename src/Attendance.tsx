@@ -5786,7 +5786,6 @@ const SHEET_NUM: [string, string][] = [
   ["worked", "Worked"],
   ["lm_credit", "L.M Credit"],
   ["cm_credit", "C.M Credit"],
-  ["hol_credit", "Comp Off (this month only)"],
   ["total_credit", "Total Credit"],
   ["ded_this", "Deduction This Month"],
 ];
@@ -5794,16 +5793,16 @@ const SHEET_NUM: [string, string][] = [
 const SHEET_SHORT: Record<string, string> = {
   total_days: "Total", week_off: "Week Off", holiday: "Holiday", leave_days: "Leave",
   effect: "Effect", worked: "Worked", lm_credit: "L.M", cm_credit: "C.M",
-  hol_credit: "Comp Off", total_credit: "Total",
+  total_credit: "Total",
   ded_this: "This Month",
 };
 const SHEET_GROUP = (c: string) =>
-  ["lm_credit", "cm_credit", "hol_credit", "total_credit"].includes(c) ? "cr"
+  ["lm_credit", "cm_credit", "total_credit"].includes(c) ? "cr"
     : c.startsWith("ded_") || c.startsWith("plan:") ? "ded" : "days";
 
 // Koi number badla to us pe tike columns dobara nikal do.
 // Worked = Total − Week Off − Holiday − Leave · Effect = −Leave
-// Total Credit = L.M + C.M + Comp Off − Leave (Comp Off sirf isi mahine ka, aage nahi jaata)
+// Total Credit = L.M + C.M − Leave (holiday ke 2 credit C.M mein hi, agle mahine nahi jaate)
 // Derived columns bhi haath se badle ja sakte hain — tab kuch recalc nahi hota.
 const sheetRecalc = (r: any, k: string) => {
   const n = (x: any) => Number(x) || 0;
@@ -5811,9 +5810,8 @@ const sheetRecalc = (r: any, k: string) => {
   if (["total_days", "week_off", "holiday", "leave_days"].includes(k))
     x.worked = +(n(x.total_days) - n(x.week_off) - n(x.holiday) - n(x.leave_days)).toFixed(2);
   if (k === "leave_days") x.effect = +(-n(x.leave_days)).toFixed(2);
-  if (["leave_days", "lm_credit", "cm_credit", "hol_credit"].includes(k))
-    x.total_credit = +(n(x.lm_credit) + n(x.cm_credit) + n(x.hol_credit)
-      - n(x.leave_days)).toFixed(2);
+  if (["leave_days", "lm_credit", "cm_credit"].includes(k))
+    x.total_credit = +(n(x.lm_credit) + n(x.cm_credit) - n(x.leave_days)).toFixed(2);
   return x;
 };
 
@@ -5871,7 +5869,8 @@ function AttSheetTab() {
   // Week Off = mahine mein us bande ke week-off din (employees.week_off_days,
   // khaali ho to Sunday) — us din kaam kiya ho tab bhi gina; holiday (F) week off
   // mein nahi · Holiday = holiday pe check-in nahi kiya to 1, kiya to 0 aur
-  // Comp Off = 2 (sirf isi mahine) · Leave = A, UL, har leave = 1,
+  // C.M mein +2 (hol_credit mein yaad rakha, taaki dobara refill pe double na ho
+  // aur agle mahine carry na ho) · Leave = A, UL, har leave = 1,
   // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini.
   // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
   const refillFromGrid = async () => {
@@ -5923,8 +5922,10 @@ function AttSheetTab() {
         if (wo.includes(new Date(d + "T00:00:00").getDay())) off++;
         else lv += leaveOf(m);
       });
+      // C.M se pichla holiday credit hatao, naya jodo
+      const cm = +((Number(r.cm_credit) || 0) - (Number(r.hol_credit) || 0) + comp).toFixed(2);
       let nr: any = { ...r, total_days: total, week_off: off, holiday: hol,
-        hol_credit: comp, leave_days: +lv.toFixed(2) };
+        cm_credit: cm, hol_credit: comp, leave_days: +lv.toFixed(2) };
       nr = sheetRecalc(nr, "total_days");
       nr = sheetRecalc(nr, "leave_days");
       done++;
@@ -5933,7 +5934,8 @@ function AttSheetTab() {
     const res = await Promise.all(next.filter((r) => byCode[r.emp_code]).map((r) =>
       supabase.from("attendance_sheet").update({
         total_days: r.total_days, week_off: r.week_off, holiday: r.holiday,
-        hol_credit: r.hol_credit, leave_days: r.leave_days, worked: r.worked, effect: r.effect, total_credit: r.total_credit,
+        cm_credit: r.cm_credit, hol_credit: r.hol_credit,
+        leave_days: r.leave_days, worked: r.worked, effect: r.effect, total_credit: r.total_credit,
       }).eq("month", from).eq("employee_id", r.employee_id)));
     const bad = res.find((x) => x.error);
     if (bad?.error) setErr(bad.error.message);
@@ -6090,11 +6092,11 @@ function AttSheetTab() {
       {askGrid && (
         <div className="att-note err">
           <span>
-            This fills Total Day, Week Off, Holiday, Leave, Effect, Worked, Comp Off and Total Credit for every
+            This fills Total Day, Week Off, Holiday, Leave, Effect, Worked and Total Credit for every
             row of {monthLabel} from the Monthly Grid marks (week off = the person's week-off days in the month;
-            holiday = 1 if they didn't check in, else 0 and 2 Comp Off for this month only;
+            holiday = 1 if they didn't check in, else 0 and +2 in C.M for this month only;
             A, UL and leaves as 1; half day as 0.5), overwriting your edits in those columns.
-            L.M Credit, C.M Credit, Deductions and Remarks stay.
+            L.M Credit, the rest of C.M Credit, Deductions and Remarks stay.
           </span>
           <div className="att-flex" style={{ marginTop: 10 }}>
             <button className="att-btn sm" onClick={() => { setAskGrid(false); refillFromGrid(); }}>
