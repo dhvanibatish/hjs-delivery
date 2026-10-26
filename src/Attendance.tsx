@@ -5819,7 +5819,6 @@ function AttSheetTab() {
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState<Record<string, boolean>>({});
-  const [askRefill, setAskRefill] = useState(false);
   const [askGrid, setAskGrid] = useState(false);
   const [gridMsg, setGridMsg] = useState("");
   const [hidden, setHidden] = useState<any[]>([]);
@@ -6037,10 +6036,7 @@ function AttSheetTab() {
         </div>
         <input type="month" value={month} className="att-repmonth"
           onChange={(e) => e.target.value && setMonth(e.target.value)} />
-        <button className="att-btn sm line" onClick={() => setAskRefill(true)}>
-          Refill from attendance
-        </button>
-        <button className="att-btn sm line" onClick={() => { setAskRefill(false); setAskGrid(true); }}>
+        <button className="att-btn sm line" onClick={() => setAskGrid(true)}>
           Refill from Monthly Grid
         </button>
         <button className="att-btn sm line" onClick={exportCsv} disabled={!shown.length}>CSV</button>
@@ -6067,21 +6063,6 @@ function AttSheetTab() {
         </div>
       )}
 
-      {askRefill && (
-        <div className="att-note err">
-          <span>
-            This recalculates Total Day, Week Off, Leave, Effect, Worked, L.M Credit and
-            Total Credit for every row of {monthLabel} from attendance and leaves, and
-            overwrites your edits in those columns. C.M Credit, Signature and Remarks stay.
-          </span>
-          <div className="att-flex" style={{ marginTop: 10 }}>
-            <button className="att-btn sm" onClick={() => { setAskRefill(false); load(true); }}>
-              Yes, refill
-            </button>
-            <button className="att-btn sm grey" onClick={() => setAskRefill(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
 
       {askGrid && (
         <div className="att-note err">
