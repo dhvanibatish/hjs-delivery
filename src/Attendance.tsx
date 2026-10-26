@@ -5902,8 +5902,12 @@ function AttSheetTab() {
       if (x === "H" || x === "HALF") return 0.5;
       return 1;                       // A, UL, EL, CL, COMP ... sab
     };
+    // sheet ka taaza data server se lo (page pe purana C.M / hol_credit ho sakta hai)
+    const fresh = await supabase.rpc("att_sheet_get", { p_month: from, p_refresh: false });
+    if (fresh.error) { setErr(fresh.error.message); setBusy(false); return; }
+    const base: any[] = Array.isArray(fresh.data) ? fresh.data : rows;
     let done = 0, miss = 0;
-    const next = rows.map((r) => {
+    const next = base.map((r: any) => {
       const marks = byCode[r.emp_code];
       if (!marks) { miss++; return r; }
       const wo = woBy[r.emp_code] || [0];
@@ -5931,7 +5935,7 @@ function AttSheetTab() {
       done++;
       return nr;
     });
-    const res = await Promise.all(next.filter((r) => byCode[r.emp_code]).map((r) =>
+    const res = await Promise.all(next.filter((r: any) => byCode[r.emp_code]).map((r: any) =>
       supabase.from("attendance_sheet").update({
         total_days: r.total_days, week_off: r.week_off, holiday: r.holiday,
         cm_credit: r.cm_credit, hol_credit: r.hol_credit,
