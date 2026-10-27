@@ -9395,16 +9395,18 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
           {items.length === 0 && <p className="att-empty">No content added yet.</p>}
           {(() => {
             // module_name ke hisaab se group; jinka module nahi hai wo seedhe list mein
+            // naam match karte waqt case / extra space ka fark ignore karo
+            const key = (s: any) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
             const groups: any[] = [];
             items.forEach((x: any) => {
-              const g = groups.find((y) => y.name === (x.module_name || ""));
+              const g = groups.find((y) => key(y.name) === key(x.module_name));
               if (g) g.list.push(x);
               else groups.push({ name: x.module_name || "", list: [x] });
             });
             // assessment bhi apne module ke andar baithe
             asmts.forEach((a: any) => {
-              if (!a.module_name) return;
-              const g = groups.find((y) => y.name === a.module_name);
+              if (!key(a.module_name)) return;
+              const g = groups.find((y) => key(y.name) === key(a.module_name));
               if (g) g.asmt = [...(g.asmt || []), a];
               else groups.push({ name: a.module_name, list: [], asmt: [a] });
             });
@@ -9450,7 +9452,13 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
 
                 {(g.asmt || []).map((a: any) => {
                   const cleared = tries.some((t: any) => t.assessment_id === a.id && t.passed);
-                  const lock = !noLock && firstOpen !== -1;
+                  // module ke saare chapters done hote hi uska assessment khul jaaye.
+                  // jis module mein koi chapter nahi (sirf assessment), wo poora course
+                  // khatam hone par khulega.
+                  const modDone = g.list.length
+                    ? g.list.every((x: any) => done.has(x.id))
+                    : firstOpen === -1;
+                  const lock = !noLock && !modDone;
                   return (
                     <div className={`att-row ${lock ? "lock" : ""}`} key={a.id}>
                       <span className={`att-num ${cleared ? "ok" : ""}`}>
@@ -9474,12 +9482,12 @@ function LmsCoursePage({ me, course, items, done, doneAt, onClose, onChange }: a
           })()}
         </div>
 
-        {asmts.filter((a: any) => !a.module_name).length > 0 && (
+        {asmts.filter((a: any) => !String(a.module_name || "").trim()).length > 0 && (
           <div className="att-list">
             <div className="att-hd"><b>Assessments</b>
-              <span className="att-muted">{asmts.filter((a: any) => !a.module_name).length}</span>
+              <span className="att-muted">{asmts.filter((a: any) => !String(a.module_name || "").trim()).length}</span>
             </div>
-            {asmts.filter((a: any) => !a.module_name).map((a: any) => (
+            {asmts.filter((a: any) => !String(a.module_name || "").trim()).map((a: any) => (
               <div className="att-row" key={a.id}>
                 <div className="grow">
                   <p><b>{a.title}</b></p>
