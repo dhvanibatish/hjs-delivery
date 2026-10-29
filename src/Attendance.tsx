@@ -438,6 +438,12 @@ const CSS = `
   width: 26px; height: 26px; border-radius: 7px; font-weight: 700; font-size: 13px; }
 .hjsatt .att-mx th, .hjsatt .att-mx td { font-size: 14px; padding: 11px 10px; }
 .hjsatt .att-mx th { font-size: 11.5px; }
+/* Monthly Grid: scroll karne pe dates wali row upar chipki rahe */
+.hjsatt .att-mxwrap { max-height: calc(100vh - 230px); overflow: auto; }
+.hjsatt .att-mxwrap thead th { position: sticky; top: 0; z-index: 2;
+  box-shadow: 0 1px 0 #e5e7eb; }
+.hjsatt .att-mxwrap thead th.name { z-index: 3; }
+.hjsatt .att-mxwrap tbody td.name { z-index: 1; }
 .hjsatt .att-mx .att-mark { width: 30px; font-size: 15px; font-weight: 800; }
 .hjsatt .att-mxleg b { font-weight: 800; }
 
@@ -2527,7 +2533,7 @@ function MatrixTab({ me }: any) {
       {busy && <p className="att-muted">Loading…</p>}
 
       {!busy && (
-        <div className="att-scroll" style={{ marginTop: 8 }}>
+        <div className="att-scroll att-mxwrap" style={{ marginTop: 8 }}>
           <table className="att-table att-mx">
             <thead>
               <tr>
