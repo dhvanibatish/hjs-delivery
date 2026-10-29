@@ -6305,12 +6305,18 @@ function ReportsTab({ isAdmin = false }: any) {
 
   return (
     <>
-      {!isAdmin && (
+      {/* manager ko muster roll mein apni team dikhti hai (server sirf wahi bhejta hai) */}
+      {!isAdmin && !(kind === "muster" && data.length > 1) && (
         <div className="att-note">
           <span>This is your own record. Team-wide reports are with HR and the founders.</span>
         </div>
       )}
-      {isAdmin && (
+      {!isAdmin && kind === "muster" && data.length > 1 && (
+        <div className="att-note">
+          <span>Your team's muster roll — only you (and HR) can see this.</span>
+        </div>
+      )}
+      {(isAdmin || (kind === "muster" && data.length > 1)) && (
         <Search placeholder="Search name, code or department"
           value={q} onChange={setQ} />
       )}
@@ -11273,7 +11279,7 @@ const MODULES: Module[] = [
         { k: "me", label: "My attendance" },
         { k: "pay", label: "My pay" },
       ]},
-      { k: "att", label: "Company-wide", views: [
+      { k: "att", label: "Company / Team", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
       ]},
