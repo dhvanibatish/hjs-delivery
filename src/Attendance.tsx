@@ -313,6 +313,11 @@ const CSS = `
   border-bottom: 1px solid #f2f4f7; background: #fff; }
 .hjsatt .att-regsheet .gs { border-left: 1px solid #e4e7ec; }
 .hjsatt .att-regsheet tbody tr:hover td { background: #f9fafb; }
+/* Attendance sheet: location-wise group header */
+.hjsatt .att-regsheet tr.att-locrow td, .hjsatt .att-regsheet tbody tr.att-locrow:hover td {
+  background: #eef4ff; border-top: 1px solid #d0dcf5; border-bottom: 1px solid #d0dcf5; padding: 8px 0; }
+.hjsatt .att-regsheet tr.att-locrow span { position: sticky; left: 0; padding-left: 12px;
+  font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #1849a9; }
 .hjsatt .att-regsheet td.hl, .hjsatt .att-regsheet th.hl { background: #fffbe6; }
 .hjsatt .att-regsheet tbody tr:hover td.hl { background: #fff6cc; }
 .hjsatt .att-regsheet td.name { min-width: 190px; max-width: 230px; padding: 6px 10px; z-index: 1; }
@@ -5834,6 +5839,21 @@ function AttSheetTab() {
   const [showHidden, setShowHidden] = useState(false);
   const [extra, setExtra] = useState(0);   // + se kitne aage ke mahine khule hain
   const timers = useRef<Record<string, any>>({});
+  // employee_id -> location (branch) naam; sheet ki values nahi chhedta, sirf grouping ke liye
+  const [locOf, setLocOf] = useState<Record<string, string>>({});
+  useEffect(() => {
+    Promise.all([
+      supabase.from("employees").select("id, branch_id"),
+      supabase.from("branches").select("id, name"),
+    ]).then(([{ data: em }, { data: br }]) => {
+      const bn: Record<string, string> = {};
+      (br || []).forEach((b: any) => { bn[b.id] = b.name; });
+      const m: Record<string, string> = {};
+      (em || []).forEach((e: any) => { m[e.id] = bn[e.branch_id] || ""; });
+      setLocOf(m);
+    });
+  }, []);
+  const locName = (r: any) => locOf[r.employee_id] || "No location";
 
   // "2026-10" + 2 -> "2026-12-01"
   const planKey = (off: number) => {
@@ -5992,11 +6012,21 @@ function AttSheetTab() {
     queueSave(nr);
   };
 
-  // naam ke hisaab se A-Z
+  // location-wise, phir har location ke andar naam A-Z ("No location" sabse neeche)
   const shown = rows.filter((r) =>
-    !q || `${r.full_name} ${r.emp_code} ${r.team || ""}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((x, y) => String(x.full_name || "").trim()
-      .localeCompare(String(y.full_name || "").trim(), "en", { sensitivity: "base" }));
+    !q || `${r.full_name} ${r.emp_code} ${r.team || ""} ${locName(r)}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((x, y) => {
+      const lx = locName(x), ly = locName(y);
+      if (lx !== ly) {
+        if (lx === "No location") return 1;
+        if (ly === "No location") return -1;
+        return lx.localeCompare(ly, "en", { sensitivity: "base" });
+      }
+      return String(x.full_name || "").trim()
+        .localeCompare(String(y.full_name || "").trim(), "en", { sensitivity: "base" });
+    });
+  const locCount: Record<string, number> = {};
+  shown.forEach((r) => { locCount[locName(r)] = (locCount[locName(r)] || 0) + 1; });
 
   // Aage ke mahine: jitne + se khole, ya jitne aage tak kisi row ke plan mein value hai
   const planMax = rows.reduce((mx, r) => {
@@ -6051,7 +6081,7 @@ function AttSheetTab() {
     c === "ded_this" ? shortMon(0) : c.startsWith("plan:") ? shortMon(Number(c.slice(5))) : SHEET_SHORT[c];
 
   const exportCsv = () => downloadCsv(shown.map((r, i) => {
-    const o: any = { "Sr. No.": i + 1, "Emp Code": r.emp_code, Name: r.full_name };
+    const o: any = { "Sr. No.": i + 1, Location: locName(r), "Emp Code": r.emp_code, Name: r.full_name };
     cols.forEach(([c, l]) => {
       o[c === "ded_this" || c.startsWith("plan:") ? `Deduction ${colLabel(c)}` : l] = cellVal(r, c);
     });
@@ -6117,7 +6147,7 @@ function AttSheetTab() {
         </div>
       )}
 
-      <Search placeholder="Search name, code or department" value={q} onChange={setQ} />
+      <Search placeholder="Search name, code, department or location" value={q} onChange={setQ} />
       <Note>{err}</Note>
       <Note kind="ok">{gridMsg}</Note>
 
@@ -6165,11 +6195,24 @@ function AttSheetTab() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r, i) => (
-                  <tr key={r.employee_id}>
+                {shown.map((r, i) => {
+                  const loc = locName(r);
+                  const first = i === 0 || locName(shown[i - 1]) !== loc;
+                  let sr = 1;
+                  for (let k = i - 1; k >= 0 && locName(shown[k]) === loc; k--) sr++;
+                  return (
+                  <React.Fragment key={r.employee_id}>
+                  {first && (
+                    <tr className="att-locrow">
+                      <td colSpan={cols.length + 3}>
+                        <span>{loc} · {locCount[loc]}</span>
+                      </td>
+                    </tr>
+                  )}
+                  <tr>
                     <td className="name">
                       <div className="nm">
-                        <span className="sr">{i + 1}</span>
+                        <span className="sr">{sr}</span>
                         <div style={{ minWidth: 0 }}>
                           <b>{r.full_name}</b>
                           <span className="att-muted code">
@@ -6201,7 +6244,9 @@ function AttSheetTab() {
                         onClick={() => setExcluded(r, true)}>✕</button>
                     </td>
                   </tr>
-                ))}
+                  </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
