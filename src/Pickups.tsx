@@ -423,6 +423,7 @@ const STAGE_COLS = {
     pickup_charges_collected: null,
     pickup_done: false,
     stage4_remarks: null,
+    item_damaged: null,
   },
 };
 function clearAhead(toStage) {
@@ -845,6 +846,7 @@ function stageFields(toStage, f) {
       Charges: `₹${f.charges || 0}`,
       'Pending collected': `₹${f.pendingCollected || 0}`,
       Done: f.done ? 'Yes' : 'No',
+      ...(f.damaged ? { Damaged: f.damaged } : {}),
       ...rmk,
     };
   return {};
@@ -1727,6 +1729,8 @@ export default function App({
           : Number(f.pendingCollected);
       patch.pickup_done = !!f.done;
       patch.stage4_remarks = f.remarks || null;
+      // Damaged — optional (Yes / No), sirf staff app; kisi tracker mein nahi
+      patch.item_damaged = f.damaged || null;
     }
     return patch;
   };
@@ -5477,6 +5481,7 @@ function Drawer({
       rows: [
         ['Inspected', r.item_inspected ? 'Yes' : 'No'],
         ['Picked up', r.pickup_done ? 'Yes' : 'No'],
+        ['Damaged', r.item_damaged && r.item_damaged !== 'null' ? r.item_damaged : '—'],
         ['Actual date', niceDate(r.actual_pickup_date) || '—'],
         [
           'Charges',
@@ -6151,6 +6156,7 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
     person: delivery.person || '',
     vehicle: delivery.vehicle || 'Bike',
     eta: mode === 'edit' && r.app_eta && r.app_eta !== 'null' ? toLocalInput(r.app_eta) : nowDT,
+    damaged: mode === 'edit' && r.item_damaged && r.item_damaged !== 'null' ? r.item_damaged : '',
     inspected: !!r.item_inspected,
     photoPicked: r.pickup_image && r.pickup_image !== 'null' ? r.pickup_image : '',
     pickDate: mode === 'edit' && r.actual_pickup_date && r.actual_pickup_date !== 'null' ? r.actual_pickup_date : nowDate,
@@ -6298,6 +6304,14 @@ function StageModal({ delivery, toStage, mode, onClose, onSave, embedded }) {
         {toStage === 'delivered' && (
           <>
             <Check1 checked={f.inspected} onChange={() => set('inspected', !f.inspected)} label="Item inspected" />
+            {/* optional — abhi mandatory nahi; tracker mein nahi dikhta */}
+            <Field label="Damaged">
+              <select className="inp" value={f.damaged} onChange={(e) => set('damaged', e.target.value)}>
+                <option value="">Select…</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </Field>
             <Field label="Actual pickup date *">
               <input className="inp" type="date" value={f.pickDate} onClick={openPicker} onChange={(e) => set('pickDate', e.target.value)} />
             </Field>
