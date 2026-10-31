@@ -5763,6 +5763,9 @@ function Drawer({
             label="Invoice total"
             value={d.amount != null ? `₹${d.amount.toLocaleString('en-IN')}` : '—'}
           />
+          {pendingInvoicesOf(r).length > 0 && (
+            <KV label="Pending invoices (same item)" value={<PendingInvList r={r} />} full />
+          )}
           <KV
             label="Security li thi"
             value={
@@ -6065,6 +6068,62 @@ function Drawer({
         </div>
 
       </div>
+    </div>
+  );
+}
+
+/* Pending invoices (v4.0 sync) — same item ke saare pending invoices.
+   Column jsonb hai; RPC kabhi string bhi de sakta hai, dono handle. */
+function pendingInvoicesOf(r) {
+  let v = r && r.pending_invoices;
+  if (!v || v === 'null') return [];
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v);
+    } catch (e) {
+      return [];
+    }
+  }
+  return Array.isArray(v) ? v.filter((p) => p && p.invoice_number) : [];
+}
+function PendingInvList({ r }) {
+  const list = pendingInvoicesOf(r);
+  if (list.length === 0) return '—';
+  const total = list.reduce((s, p) => s + (Number(p.balance) || 0), 0);
+  const rs = (n) => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
+      {list.map((p, i) => (
+        <div
+          key={p.invoice_id || p.invoice_number || i}
+          style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13 }}
+        >
+          <span style={{ minWidth: 0 }}>
+            <b>{p.invoice_number}</b>
+            {p.date && (
+              <span style={{ color: T.inkSoft, marginLeft: 6, fontWeight: 500 }}>
+                {niceDate(String(p.date).slice(0, 10)) || p.date}
+              </span>
+            )}
+          </span>
+          <span style={{ fontWeight: 700, color: T.red, whiteSpace: 'nowrap' }}>{rs(p.balance)}</span>
+        </div>
+      ))}
+      {list.length > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            borderTop: `1px solid ${T.line}`,
+            paddingTop: 4,
+            fontSize: 13,
+            fontWeight: 800,
+          }}
+        >
+          <span>Total ({list.length} invoices)</span>
+          <span style={{ color: T.red }}>{rs(total)}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -7106,6 +7165,9 @@ function RvDrawer({ x, pos, hasPrev, hasNext, onPrev, onNext, onClose, onApprove
           <KV label="Items" value={items.join(', ')} full />
           <KV label="Invoice total" value={rvMoney(r.total_amount)} />
           <KV label="Pending amount" value={rvMoney(r.pending_amount)} />
+          {pendingInvoicesOf(r).length > 0 && (
+            <KV label="Pending invoices (same item)" value={<PendingInvList r={r} />} full />
+          )}
           {kind === 'damage' && <KV label="Security mode" value={show(r.security_type)} />}
           <KV label="Pickup date (bola)" value={niceDate(r.mentioned_pickup_date) || '—'} />
           <KV label="Store" value={branchLabel(br)} />
@@ -8412,6 +8474,9 @@ function PkOrderCard({ row }) {
     ['Pending amount', money(row.pending_amount) || '—'],
     ['Invoice total', money(row.total_amount) || '—'],
   ];
+  if (pendingInvoicesOf(row).length > 0) {
+    rows.push(['Pending invoices (same item)', <PendingInvList key="pinv" r={row} />]);
+  }
 
 
   return (
