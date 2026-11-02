@@ -3985,8 +3985,9 @@ export default function Physio() {
               <span className={`pill ${isHome(s) ? "home" : ""}`}>{placeLabel(s.place)}</span>
               <span className={`pill ${s.status}`}>{s.status === "scheduled" ? "missed / pending" : s.status}</span>
               {s.status === "scheduled" && <button className="btn sm ghost" onClick={() => markSession(s, "completed")}>Mark done</button>}
-              {/* Session edit (doctor/date/time/jagah) + delete — admin aur physio admin dono */}
-              {(isAdmin || isManager) && <button className="btn sm ghost" onClick={() => setDlg(<EditSessionDlg s={s} />)}>Edit</button>}
+              {/* Session edit (doctor/date/time/jagah) — admin, physio admin aur doctor teeno.
+                  Delete sirf admin aur physio admin. */}
+              {(isAdmin || isManager || who?.role === "doctor") && <button className="btn sm ghost" onClick={() => setDlg(<EditSessionDlg s={s} />)}>Edit</button>}
               {(isAdmin || isManager) && <button className="btn sm ghost danger" onClick={() => setDlg(<DeleteSessionDlg s={s} />)}>Delete</button>}
               {!!(s.therapies || []).length && (
                 <span className="thl">{(s.therapies || []).join(" · ")}{s.therapy_note ? ` — ${s.therapy_note}` : ""}</span>
