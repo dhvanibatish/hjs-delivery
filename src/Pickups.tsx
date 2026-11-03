@@ -6871,7 +6871,7 @@ function ReviewPage({ embedded = false, only = null, liveDamage = null } = {}) {
         {demo && liveDamage && (
           <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
             <b>Build mode</b> — list asli pickups se aa rahi hai (store ne <b>Damaged = Yes</b> kiya).
-            Store app abhi damage amount nahi bhejta, isliye amount yahan "Amount likho" se daalo.
+            Store sirf damage batata hai — amount mam yahan "Amount likho" se daalti hain, phir Approve.
             Approve / Reject abhi kahin save nahi hota.
           </div>
         )}
@@ -6967,7 +6967,7 @@ function ReviewPage({ embedded = false, only = null, liveDamage = null } = {}) {
                         <td className="ellip" style={{ maxWidth: 220 }}>{equipmentText(r)}</td>
                         {tab !== 'pickup' && <td className="rv-r">{rvMoney(r.security_amount)}</td>}
                         <td className="rv-r" style={{ fontWeight: 800, color: kind === 'damage' ? T.red : rvNum(r.pending_amount) > 0 ? T.red : T.ink }}>
-                          {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? (r.damage_amount == null ? 'Amount nahi' : rvMoney(r.damage_amount)) : rvMoney(r.pending_amount)}
+                          {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? (r.damage_amount == null ? 'Amount likhna hai' : rvMoney(r.damage_amount)) : rvMoney(r.pending_amount)}
                         </td>
                         <td style={{ color: T.inkSoft }}>{d ? fmtDateTime(new Date(d.at).toISOString()) : r.created_at ? `${agoText(r.created_at)} pehle` : '—'}</td>
                         <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
@@ -7156,7 +7156,7 @@ function RvDrawer({ x, pos, hasPrev, hasNext, onPrev, onNext, onClose, onApprove
           <>
             <div className="sec-title"><AlertTriangle size={14} /> Store ka damage claim</div>
             <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-              <b>{r.damage_amount == null ? 'Store ne amount nahi likha — "Amount likho" se daalo' : rvMoney(r.damage_amount)}</b>
+              <b>{r.damage_amount == null ? 'Amount mam likhengi — "Amount likho" dabao' : rvMoney(r.damage_amount)}</b>
               {r.damage_note && <div style={{ marginTop: 3, fontWeight: 600 }}>{r.damage_note}</div>}
               {r.inspected_by && <div style={{ marginTop: 3, opacity: 0.85 }}>Inspect kiya: {r.inspected_by}</div>}
             </div>
