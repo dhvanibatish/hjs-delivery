@@ -6732,7 +6732,8 @@ function rvBalance(r, damage) {
 }
 
 /* only='damage' → Pickup Admin ke "Damage request" button se: sirf Damage + History */
-function ReviewPage({ embedded = false, only = null } = {}) {
+/* liveDamage = Pickup Admin se aayi asli pickups jahan store ne Damaged = Yes kiya */
+function ReviewPage({ embedded = false, only = null, liveDamage = null } = {}) {
   const isMobile = useIsMobile();
   const [pin, setPin] = useState('');
   // embedded = Pickup Admin ke andar (head pehle se logged in) — PIN nahi
@@ -6744,7 +6745,7 @@ function ReviewPage({ embedded = false, only = null } = {}) {
   const [q, setQ] = useState('');
   const [store, setStore] = useState('ALL');
   const [pick, setPick] = useState(embedded && only !== 'damage' ? RV_DEMO_PICKUPS : []);
-  const [dmg, setDmg] = useState(embedded ? RV_DEMO_DAMAGE : []);
+  const [dmg, setDmg] = useState(liveDamage || (embedded ? RV_DEMO_DAMAGE : []));
   const [done, setDone] = useState([]); // decided (undo ke liye)
   const [openId, setOpenId] = useState(null); // drawer
   const [toast, setToast] = useState(null); // {msg, d}
@@ -6867,7 +6868,14 @@ function ReviewPage({ embedded = false, only = null } = {}) {
       <RvStyle />
       {!embedded && <RvTop onLogout={() => { setOk(false); setPin(''); setDone([]); setOpenId(null); }} />}
       <div className="rv-body">
-        {demo && (
+        {demo && liveDamage && (
+          <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
+            <b>Build mode</b> — list asli pickups se aa rahi hai (store ne <b>Damaged = Yes</b> kiya).
+            Store app abhi damage amount nahi bhejta, isliye amount yahan "Amount likho" se daalo.
+            Approve / Reject abhi kahin save nahi hota.
+          </div>
+        )}
+        {demo && !liveDamage && (
           <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
             <b>Demo mode</b> — approval RPC abhi Supabase pe nahi hai. Ye sample data hai,
             approve/reject sirf screen pe hota hai, kahin save nahi hota.
@@ -6959,7 +6967,7 @@ function ReviewPage({ embedded = false, only = null } = {}) {
                         <td className="ellip" style={{ maxWidth: 220 }}>{equipmentText(r)}</td>
                         {tab !== 'pickup' && <td className="rv-r">{rvMoney(r.security_amount)}</td>}
                         <td className="rv-r" style={{ fontWeight: 800, color: kind === 'damage' ? T.red : rvNum(r.pending_amount) > 0 ? T.red : T.ink }}>
-                          {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? rvMoney(r.damage_amount) : rvMoney(r.pending_amount)}
+                          {d && d.amount != null ? rvMoney(d.amount) : kind === 'damage' ? (r.damage_amount == null ? 'Amount nahi' : rvMoney(r.damage_amount)) : rvMoney(r.pending_amount)}
                         </td>
                         <td style={{ color: T.inkSoft }}>{d ? fmtDateTime(new Date(d.at).toISOString()) : r.created_at ? `${agoText(r.created_at)} pehle` : '—'}</td>
                         <td><span className="dash-chip" style={{ background: st.soft, color: st.color }}>{st.label}</span></td>
@@ -6968,7 +6976,9 @@ function ReviewPage({ embedded = false, only = null } = {}) {
                             <button className="rv-quick ghost" onClick={() => undo(d)}><RotateCcw size={13} /> Undo</button>
                           ) : (
                             <>
-                              <button className="rv-quick" onClick={() => decide(kind, r, 'approved', kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
+                              <button className="rv-quick" onClick={() => (kind === 'damage' && r.damage_amount == null
+                                ? setOpenId(x.key) /* amount nahi hai — pehle drawer mein likho */
+                                : decide(kind, r, 'approved', kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {}))}>
                                 <Check size={14} /> Approve
                               </button>
                               <button className="rv-quick no" title="Reject (kaaran chahiye)" onClick={() => setOpenId(x.key)}><X size={14} /></button>
@@ -7146,14 +7156,14 @@ function RvDrawer({ x, pos, hasPrev, hasNext, onPrev, onNext, onClose, onApprove
           <>
             <div className="sec-title"><AlertTriangle size={14} /> Store ka damage claim</div>
             <div className="flag-note" style={{ background: T.redSoft, color: T.red }}>
-              <b>{rvMoney(r.damage_amount)}</b>
+              <b>{r.damage_amount == null ? 'Store ne amount nahi likha — "Amount likho" se daalo' : rvMoney(r.damage_amount)}</b>
               {r.damage_note && <div style={{ marginTop: 3, fontWeight: 600 }}>{r.damage_note}</div>}
               {r.inspected_by && <div style={{ marginTop: 3, opacity: 0.85 }}>Inspect kiya: {r.inspected_by}</div>}
             </div>
             <div className="photo-grid" style={{ marginTop: 10 }}>
               {photos.length ? photos.map((u, i) => (
                 <a key={i} className="photo-preview" href={u} target="_blank" rel="noreferrer"><img src={u} alt="damage" /></a>
-              )) : <div className="block-next-note" style={{ marginTop: 0, gridColumn: "1 / -1" }}>Photos abhi nahi lagi (demo).</div>}
+              )) : <div className="block-next-note" style={{ marginTop: 0, gridColumn: "1 / -1" }}>Photos nahi lagi.</div>}
             </div>
           </>
         )}
@@ -7214,11 +7224,13 @@ function RvDrawer({ x, pos, hasPrev, hasNext, onPrev, onNext, onClose, onApprove
           ) : (
             <>
               <div className="rv-btnrow">
-                <button className="btn-primary" onClick={() => onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {})}>
+                <button className="btn-primary" onClick={() => (kind === 'damage' && r.damage_amount == null
+                  ? setMode('edit')
+                  : onApprove(kind === 'damage' ? { amount: rvNum(r.damage_amount) } : {}))}>
                   <Check size={15} /> Approve{hasNext ? ' & agla' : ''}
                 </button>
                 {kind === 'damage' && (
-                  <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> Amount badlo</button>
+                  <button className="btn-ghost" onClick={() => setMode('edit')}><Pencil size={14} /> {r.damage_amount == null ? 'Amount likho' : 'Amount badlo'}</button>
                 )}
                 <button className="btn-danger" onClick={() => setMode('reject')}><X size={15} /> Reject</button>
               </div>
@@ -7381,6 +7393,27 @@ function PickupAdmin({ deliveries, onOpen }) {
   );
 
   const statusOf = (x) => (checks[x.invoice_id] && checks[x.invoice_id].status) || 'todo';
+  // Damage request — asli pickups jahan store ne "Damaged = Yes" chuna (PA_START se)
+  const damageRows = useMemo(() => deliveries
+    .filter((x) => String((x._raw && x._raw.item_damaged) || '').toLowerCase() === 'yes')
+    .filter((x) => { const d = paPickDate(x); return !d || d >= PA_START; })
+    .map((x) => {
+      const r = x._raw || {};
+      const v = (k) => (r[k] != null && r[k] !== 'null' && r[k] !== '' ? r[k] : null);
+      return {
+        ...r,
+        id: x.invoice_id,
+        invoice_number: v('invoice_number') || x.id,
+        customer_name: x.customer,
+        phone: x.phone,
+        pickup_charges: v('pickup_charges_collected'),
+        damage_amount: v('damage_amount'), // store app abhi nahi bhejta → null
+        damage_note: v('stage4_remarks'),
+        photos: v('pickup_image') || '',
+        inspected_by: x.person || null,
+        created_at: v('actual_pickup_date') || v('updated_at') || v('created_at'),
+      };
+    }), [deliveries]);
   const counts = {
     todo: picked.filter((x) => statusOf(x) === 'todo').length,
     verified: picked.filter((x) => statusOf(x) === 'verified').length,
@@ -7492,11 +7525,12 @@ function PickupAdmin({ deliveries, onOpen }) {
         <button className={section === 'damage' ? 'pa-sec on' : 'pa-sec'} onClick={() => { setSection('damage'); setOpenId(null); }}>
           <AlertTriangle size={20} />
           <span><b>Damage request</b><em>Store ke damage claim — approve / edit / reject</em></span>
+          <i>{damageRows.length}</i>
         </button>
       </div>
 
       {section === 'damage' ? (
-        <ReviewPage embedded only="damage" />
+        <ReviewPage key={damageRows.map((r) => r.id).join(',')} embedded only="damage" liveDamage={damageRows} />
       ) : (
       <>
       <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
