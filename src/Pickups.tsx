@@ -7341,16 +7341,23 @@ function paFlags(x) {
     f.push(`₹${x.pending.toLocaleString('en-IN')} pending tha, collect nahi dikha`);
   return f;
 }
+/* Do step: 1) Verified (pickup sach mein hui)  2) Store mein aaya (item store
+   pahunch gaya). 'verified' = pickup theek, store tick abhi baaki.
+   'instore' = verified + store mein aa gaya. */
 const paStChip = (s) =>
-  s === 'verified' ? { label: 'Verified', color: T.green, soft: T.mint }
-    : s === 'issue' ? { label: 'Issue', color: T.red, soft: T.redSoft }
-      : { label: 'Check baaki', color: T.amber, soft: T.amberSoft };
+  s === 'instore' ? { label: 'Store mein aa gaya', color: T.green, soft: T.mint }
+    : s === 'verified' ? { label: 'Verified · store baaki', color: T.blue, soft: T.blueSoft }
+      : s === 'issue' ? { label: 'Issue', color: T.red, soft: T.redSoft }
+        : { label: 'Check baaki', color: T.amber, soft: T.amberSoft };
 
 function PickupAdmin({ deliveries, onOpen }) {
   const isMobile = useIsMobile();
   const [range, setRange] = useState('all'); // today | all (PA_START se)
   const [store, setStore] = useState('ALL');
-  const [tab, setTab] = useState('todo'); // todo | verified | issue | all
+  // do alag view (upar ke 2 button): 'pickup' = pickup sach mein hui?  'store' = item store mein aaya?
+  const [section, setSection] = useState('pickup');
+  const [tab, setTab] = useState('todo'); // pickup: todo | verified | issue | all · store: stodo | sdone | sall
+  const switchSection = (s) => { setSection(s); setTab(s === 'store' ? 'stodo' : 'todo'); setOpenId(null); };
   const [sort, setSort] = useState('flag'); // flag (shak wali pehle) | new
   const [q, setQ] = useState('');
   const [checks, setChecks] = useState({}); // invoice_id → {status, note, at}
@@ -7377,10 +7384,18 @@ function PickupAdmin({ deliveries, onOpen }) {
     [inRange, store],
   );
 
-  const statusOf = (x) => (checks[x.invoice_id] && checks[x.invoice_id].status) || 'todo';
+  const statusOf = (x) => {
+    const c = checks[x.invoice_id];
+    if (!c) return 'todo';
+    if (c.status === 'verified' && c.storeAt) return 'instore';
+    return c.status;
+  };
+  const baseOf = (x) => (checks[x.invoice_id] && checks[x.invoice_id].status) || 'todo';
   const counts = {
     todo: picked.filter((x) => statusOf(x) === 'todo').length,
-    verified: picked.filter((x) => statusOf(x) === 'verified').length,
+    verified: picked.filter((x) => statusOf(x) === 'verified').length, // verified, store tick baaki
+    instore: picked.filter((x) => statusOf(x) === 'instore').length,
+    allVerified: picked.filter((x) => baseOf(x) === 'verified').length,
     issue: picked.filter((x) => statusOf(x) === 'issue').length,
     flagged: picked.filter((x) => statusOf(x) === 'todo' && paFlags(x).length).length,
   };
@@ -7393,7 +7408,12 @@ function PickupAdmin({ deliveries, onOpen }) {
   const term = q.trim().toLowerCase();
   const rows = picked
     .filter((x) => {
-      if (tab !== 'all' && statusOf(x) !== tab) return false;
+      if (section === 'store') {
+        // Store view mein sirf verified pickups
+        if (baseOf(x) !== 'verified') return false;
+        if (tab === 'stodo' && statusOf(x) !== 'verified') return false;
+        if (tab === 'sdone' && statusOf(x) !== 'instore') return false;
+      } else if (tab !== 'all' && baseOf(x) !== tab) return false;
       if (!term) return true;
       return `${x.customer} ${x.id} ${x.phone} ${x.person || ''} ${x.equipment}`.toLowerCase().includes(term);
     })
@@ -7407,7 +7427,7 @@ function PickupAdmin({ deliveries, onOpen }) {
   const idx = rows.findIndex((x) => x.invoice_id === openId);
   const open = idx >= 0 ? rows[idx] : deliveries.find((x) => x.invoice_id === openId) || null;
   const total = picked.length;
-  const doneN = counts.verified + counts.issue;
+  const doneN = counts.verified + counts.instore + counts.issue;
 
   const ping = (msg, undoId) => {
     clearTimeout(toastT.current);
@@ -7423,6 +7443,22 @@ function PickupAdmin({ deliveries, onOpen }) {
   };
   const unmark = (id) => {
     setChecks((c) => { const n = { ...c }; delete n[id]; return n; });
+    setToast(null);
+  };
+  // Step 2 — verified pickup ka item store mein pahuncha: tick
+  const markStore = (x) => {
+    setChecks((c) => (c[x.invoice_id] ? { ...c, [x.invoice_id]: { ...c[x.invoice_id], storeAt: Date.now() } } : c));
+    clearTimeout(toastT.current);
+    setToast({ msg: `${x.customer} · Store mein aa gaya ✓`, storeUndoId: x.invoice_id });
+    toastT.current = setTimeout(() => setToast(null), 4000);
+  };
+  // store tick hatao — wapas "Verified · store baaki"
+  const unmarkStore = (id) => {
+    setChecks((c) => {
+      if (!c[id]) return c;
+      const { storeAt, ...rest } = c[id];
+      return { ...c, [id]: rest };
+    });
     setToast(null);
   };
   const go = (d) => {
@@ -7480,12 +7516,29 @@ function PickupAdmin({ deliveries, onOpen }) {
       </div>
 
       <div className="flag-note" style={{ background: T.amberSoft, color: T.amber, marginBottom: 16 }}>
-        <b>Build mode</b> — Verified / Issue abhi save nahi hota, refresh pe hat jayega.
+        <b>Build mode</b> — Verified / Store tick / Issue abhi save nahi hota, refresh pe hat jayega.
+      </div>
+
+      {/* 2 alag button — har ek apna view kholta hai */}
+      <div className="pa-sections">
+        <button className={section === 'pickup' ? 'pa-sec on' : 'pa-sec'} onClick={() => switchSection('pickup')}>
+          <ClipboardCheck size={20} />
+          <span><b>Pickup check</b><em>Pickup sach mein hui? Verify / Issue</em></span>
+          <i>{counts.todo}</i>
+        </button>
+        <button className={section === 'store' ? 'pa-sec on' : 'pa-sec'} onClick={() => switchSection('store')}>
+          <Package size={20} />
+          <span><b>Store mein aaya?</b><em>Verified pickups — item store pahuncha, tick karo</em></span>
+          <i>{counts.verified}</i>
+        </button>
       </div>
 
       <div className="pa-toolbar">
         <div className="layout-toggle">
-          {[['todo', 'Check baaki', counts.todo], ['verified', 'Verified', counts.verified], ['issue', 'Issue', counts.issue], ['all', 'Sab', picked.length]].map(([id, label, n]) => (
+          {(section === 'store'
+            ? [['stodo', 'Tick baaki', counts.verified], ['sdone', 'Store mein aa gaya', counts.instore], ['sall', 'Sab verified', counts.allVerified]]
+            : [['todo', 'Check baaki', counts.todo], ['verified', 'Verified', counts.allVerified], ['issue', 'Issue', counts.issue], ['all', 'Sab', picked.length]]
+          ).map(([id, label, n]) => (
             <button key={id} className={tab === id ? 'lt-btn active' : 'lt-btn'} onClick={() => setTab(id)}>
               {label} <span className="pa-count">{n}</span>
             </button>
@@ -7500,7 +7553,8 @@ function PickupAdmin({ deliveries, onOpen }) {
       {rows.length === 0 ? (
         <div className="pa-empty">
           <CheckCircle2 size={28} color={T.green} />
-          <div>{tab === 'todo' ? 'Sab check ho gaya — is duration mein kuch baaki nahi.' : 'Koi entry nahi.'}</div>
+          <div>{tab === 'todo' ? 'Sab check ho gaya — is duration mein kuch baaki nahi.'
+            : tab === 'stodo' ? 'Saare verified pickups store mein aa gaye.' : 'Koi entry nahi.'}</div>
         </div>
       ) : isMobile ? (
         <div className="pa-mlist">
@@ -7520,6 +7574,12 @@ function PickupAdmin({ deliveries, onOpen }) {
                     <span>{niceDate(paPickDate(x)) || '—'}</span>
                     <FlagChip x={x} />
                   </div>
+                  {section === 'store' && statusOf(x) === 'verified' && (
+                    <span role="button" className="pa-quick pa-store" style={{ marginTop: 6 }}
+                      onClick={(e) => { e.stopPropagation(); markStore(x); }}>
+                      <Package size={14} /> Store mein aaya <Check size={14} />
+                    </span>
+                  )}
                 </div>
               </button>
             );
@@ -7569,6 +7629,12 @@ function PickupAdmin({ deliveries, onOpen }) {
                         {/* seedha verify nahi — pehle entry khol ke photo/details dekhni hain */}
                         {st === 'todo' ? (
                           <span className="pa-quick">Kholo <ChevronRight size={14} /></span>
+                        ) : section === 'store' && st === 'verified' ? (
+                          /* verified hai — list se hi tick kar do, kholne ki zarurat nahi */
+                          <button className="pa-quick pa-store" title="Item store mein aa gaya"
+                            onClick={(e) => { e.stopPropagation(); markStore(x); }}>
+                            <Package size={14} /> Store mein aaya <Check size={14} />
+                          </button>
                         ) : (
                           <span className="dash-chip" style={{ background: chip.soft, color: chip.color }}>{chip.label}</span>
                         )}
@@ -7583,19 +7649,22 @@ function PickupAdmin({ deliveries, onOpen }) {
       )}
 
       {open && (
-        <PaDrawer x={open} check={checks[open.invoice_id]} pos={idx >= 0 ? `${idx + 1} / ${rows.length}` : ''}
+        <PaDrawer x={open} mode={section} check={checks[open.invoice_id]} pos={idx >= 0 ? `${idx + 1} / ${rows.length}` : ''}
           hasPrev={idx > 0} hasNext={idx >= 0 && idx < rows.length - 1}
           onPrev={() => go(-1)} onNext={() => go(1)}
           onClose={() => setOpenId(null)}
           onVerify={() => mark(open, 'verified', '', true)}
           onIssue={(note) => mark(open, 'issue', note, true)}
           onUndo={() => unmark(open.invoice_id)}
+          onStore={() => markStore(open)}
+          onStoreUndo={() => unmarkStore(open.invoice_id)}
           onFull={() => { setOpenId(null); onOpen(open); }} />
       )}
       {toast && (
         <div className="toast">
           <CheckCircle2 size={17} color={T.greenBright} /> {toast.msg}
           {toast.undoId && <button className="pa-undo" onClick={() => unmark(toast.undoId)}>Undo</button>}
+          {toast.storeUndoId && <button className="pa-undo" onClick={() => unmarkStore(toast.storeUndoId)}>Undo</button>}
         </div>
       )}
       <RvStyle />
@@ -7604,7 +7673,7 @@ function PickupAdmin({ deliveries, onOpen }) {
   );
 }
 
-function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, onVerify, onIssue, onUndo, onFull }) {
+function PaDrawer({ x, mode, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, onVerify, onIssue, onUndo, onStore, onStoreUndo, onFull }) {
   const [issueOpen, setIssueOpen] = useState(false);
   const [note, setNote] = useState('');
   const [big, setBig] = useState(0);
@@ -7648,7 +7717,16 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
           <div className="pa-psub ellip">#{x.id} · {branchLabel(x.branch)}</div>
           {/* buttons header mein — Zoho frame mein neeche ka hissa screen se bahar chala jaata hai */}
           <div className="pa-pact">
-            {check ? (
+            {mode === 'store' && check && check.status === 'verified' && !check.storeAt ? (
+              /* Store view — pickup verified hai, ab tick: item store mein aaya */
+              <button className="btn-primary" style={{ width: '100%' }} onClick={onStore}>
+                <Package size={15} /> Store mein aa gaya · Tick
+              </button>
+            ) : mode === 'store' && check && check.storeAt ? (
+              <button className="btn-ghost" style={{ width: '100%' }} onClick={onStoreUndo}>
+                <RotateCcw size={15} /> Undo — store tick hatao
+              </button>
+            ) : check ? (
               <button className="btn-ghost" style={{ width: '100%' }} onClick={onUndo}>
                 <RotateCcw size={15} /> Undo — wapas "check baaki"
               </button>
@@ -7682,6 +7760,13 @@ function PaDrawer({ x, check, pos, hasPrev, hasNext, onPrev, onNext, onClose, on
               ? { background: T.mint, color: T.green } : { background: T.redSoft, color: T.red }}>
               <b>{check.status === 'verified' ? 'Verified' : 'Issue mark kiya'}</b> · {fmtFullDateTime(check.at)}
               {check.note && <div style={{ marginTop: 2 }}>Note: {check.note}</div>}
+              {check.status === 'verified' && (
+                <div style={{ marginTop: 2 }}>
+                  {check.storeAt
+                    ? <><b>Store mein aa gaya</b> · {fmtFullDateTime(check.storeAt)}</>
+                    : <span style={{ color: T.amber }}>Store mein aaya ya nahi — abhi tick baaki</span>}
+                </div>
+              )}
             </div>
           )}
 
@@ -7779,6 +7864,8 @@ function PaStyle() {
       .pa-clean { display: inline-flex; align-items: center; gap: 4px; background: ${T.mint}; color: ${T.green}; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; }
       .pa-quick { display: inline-flex; align-items: center; gap: 5px; border: 1px solid ${T.green}; background: #fff; color: ${T.green}; border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 800; font-family: inherit; cursor: pointer; }
       .pa-quick:hover { background: ${T.green}; color: #fff; }
+      .pa-store { border-color: ${T.blue}; color: ${T.blue}; }
+      .pa-store:hover { background: ${T.blue}; color: #fff; }
       .pa-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; border: 1px dashed ${T.line}; border-radius: 16px; padding: 44px 16px; font-size: 13.5px; font-weight: 700; color: ${T.inkSoft}; }
       .pa-mlist { display: flex; flex-direction: column; gap: 8px; }
       .pa-mrow { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 10px 12px; font-family: inherit; color: ${T.ink}; cursor: pointer; }
