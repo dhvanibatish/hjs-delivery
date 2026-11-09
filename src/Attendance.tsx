@@ -1246,6 +1246,15 @@ const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
 
 const mapUrl = (lat: any, lng: any) => `https://www.google.com/maps?q=${lat},${lng}`;
 
+// 999 m tak meters, usse upar km (e.g. 1500 -> "1.5 km", 44810 -> "44.8 km", 239381 -> "239 km")
+const fmtDist = (m: any) => {
+  const n = Number(m);
+  if (!isFinite(n)) return `${m} m`;
+  if (n <= 999) return `${Math.round(n)} m`;
+  const km = n / 1000;
+  return `${km >= 100 ? Math.round(km) : km.toFixed(1).replace(/\.0$/, "")} km`;
+};
+
 const Pin = ({ lat, lng, dist, ok, label }: any) => {
   if (lat == null || lng == null)
     return <span className="att-pin none">no location</span>;
@@ -1253,7 +1262,7 @@ const Pin = ({ lat, lng, dist, ok, label }: any) => {
     <a className={`att-pin ${ok === false ? "far" : "ok"}`} href={mapUrl(lat, lng)}
       target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
       title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}>
-      ◉ {label || (dist == null ? "map" : `${dist} m`)}
+      ◉ {label || (dist == null ? "map" : fmtDist(dist))}
     </a>
   );
 };
@@ -1856,7 +1865,7 @@ function HomeScreen({ me }: any) {
               <p style={{ marginTop: 6 }}>
                 <Pin lat={open.in_lat} lng={open.in_lng} ok={open.in_geo_ok}
                   label={open.in_distance_m != null
-                    ? `${open.in_distance_m} m from branch`
+                    ? `${fmtDist(open.in_distance_m)} from branch`
                     : "location saved · open map"} />
               </p>
             )}
