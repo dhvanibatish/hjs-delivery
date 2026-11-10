@@ -11459,10 +11459,14 @@ export default function Attendance() {
   useEffect(() => {
     if (!me || !["manager", "admin"].includes(me.role)) return;
     (async () => {
-      const [l, r, dir] = await Promise.all([
+      const [l, r, dir, ex] = await Promise.all([
         supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
         supabase.rpc("directory", {}),
+        // Needs setup ki "Leaving details pending" list jaisa hi filter
+        supabase.from("employees").select("id", { count: "exact", head: true })
+          .eq("active", false).is("date_of_leaving", null)
+          .not("emp_code", "like", "REG-%").not("emp_code", "like", "TMP-%"),
       ]);
 
       const mineOut = (x: any) => me.role === "admin" || x.employee_id !== me.id;
@@ -11471,7 +11475,7 @@ export default function Attendance() {
         String(x.emp_code).startsWith("REG-")
         || !x.team_id || !x.designation
         || (!x.reports_to && !x.co_manager_id && x.designation !== "Co-Founder")
-        || !x.email).length;
+        || !x.email).length + (ex.count || 0);
 
       setCounts({ pending: approvals, setup });   // history ka koi badge nahi
       setPending(approvals);                      // rail pe kaam wale hi
