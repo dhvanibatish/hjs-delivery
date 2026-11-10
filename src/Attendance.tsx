@@ -5103,9 +5103,14 @@ function TodayTab({ me }: any) {
   const notIn = rows.filter((r) => r.state === "Yet to check in").length;
   // geofence ke bahar se punch — HR ko roz ye dekhne hote hain
   const offSite = rows.filter((r) => r.punch && r.punch.in_geo_ok === false).length;
+  // der se check-in par jinki Short Leave / Half Day lagi (Full Day kiya to nahi gina)
+  const lateCut = (r: any) => !!r.log?.auto_cut
+    && (r.log.late_override || r.log.auto_cut) !== "Present";
+  const lateN = rows.filter(lateCut).length;
   const shown = rows
     .filter((r) => filter !== "offsite" || (r.punch && r.punch.in_geo_ok === false))
-    .filter((r) => !filter || filter === "offsite" || r.state === filter)
+    .filter((r) => filter !== "late" || lateCut(r))
+    .filter((r) => !filter || filter === "offsite" || filter === "late" || r.state === filter)
     .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
       .toLowerCase().includes(q.toLowerCase()));
 
@@ -5131,7 +5136,8 @@ function TodayTab({ me }: any) {
       {busy && <p className="att-muted">Loading…</p>}
       <Note>{actErr}</Note>
 
-      <div className="att-grid4 att-grid6">
+      <div className="att-grid4 att-grid6"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
         <div className={`att-stat clk ${!filter ? "on" : ""}`}
           onClick={() => setFilter("")}>
           <b style={{ color: "#1849a9" }}>{rows.length}</b><span>Total staff</span></div>
@@ -5148,12 +5154,15 @@ function TodayTab({ me }: any) {
         <div className={`att-stat clk ${filter === "offsite" ? "on" : ""}`}
           onClick={() => setFilter(filter === "offsite" ? "" : "offsite")}>
           <b style={{ color: "#9333ea" }}>{offSite}</b><span>Off-site</span></div>
+        <div className={`att-stat clk ${filter === "late" ? "on" : ""}`}
+          onClick={() => setFilter(filter === "late" ? "" : "late")}>
+          <b style={{ color: "#c2410c" }}>{lateN}</b><span>Late / early · SL / HD</span></div>
       </div>
       <div className="att-flex">
         <Search placeholder="Search name, code, team" value={q}
           onChange={setQ} style={{ flex: 1 }} />
         {filter && <button className="att-btn sm line" onClick={() => setFilter("")}>
-          Clear {filter === "offsite" ? "off-site" : filter}</button>}
+          Clear {filter === "offsite" ? "off-site" : filter === "late" ? "late" : filter}</button>}
       </div>
 
       {teamNames.map((tn) => {
@@ -5161,7 +5170,8 @@ function TodayTab({ me }: any) {
         const gi = g.filter((x) => x.state === "In").length;
         const gn = g.filter((x) => x.state === "Yet to check in").length;
         return (
-          <Section key={tn} title={tn} count={g.length} open={!!q || teamNames.length <= 3}
+          <Section key={`${tn}-${filter}-${q ? 1 : 0}`} title={tn} count={g.length}
+            open={!!q || !!filter || teamNames.length <= 3}
             chips={<>
               <span style={{ background: "#ecfdf3", color: "#067647" }}>{gi} in</span>
               {gn > 0 && <span style={{ background: "#fef3f2", color: "#b42318" }}>{gn} not in</span>}
@@ -5186,15 +5196,18 @@ function TodayTab({ me }: any) {
                     </p>
                   )}
                 </div>
-                {r.log?.late_mark && (() => {
-                  const cur = r.log.late_override || r.log.late_mark;
+                {r.log?.auto_cut && (() => {
+                  const cur = r.log.late_override || r.log.auto_cut;
+                  // kis wajah se: late aaya, jaldi gaya, ya dono
+                  const why = [r.log.late_mark && "late check-in", r.log.early_mark && "early check-out"]
+                    .filter(Boolean).join(" + ");
                   const lbl = (m: string) => (m === "Present" ? "Full Day" : m);
                   return (
                     // apni line par, poori chaudai — mobile par naam nahi dabta
                     <div style={{ flexBasis: "100%", display: "flex", alignItems: "center",
                                   gap: 8, flexWrap: "wrap", paddingLeft: 46, marginTop: 2 }}>
                       {!canWaive(r) ? (
-                        <span className={pillClass(cur)}>{lbl(cur)} · late</span>
+                        <span className={pillClass(cur)}>{lbl(cur)} · {why}</span>
                       ) : (
                         <div style={{ display: "inline-flex", border: "1px solid #d0d5dd",
                                       borderRadius: 8, overflow: "hidden" }}>
@@ -5214,7 +5227,7 @@ function TodayTab({ me }: any) {
                       <span className="att-muted" style={{ fontSize: 11 }}>
                         {r.log.late_override
                           ? `Changed${r.log.late_waived_by ? ` by ${r.log.late_waived_by}` : ""}`
-                          : "Auto: late check-in"}
+                          : `Auto: ${why}`}
                       </span>
                     </div>
                   );
