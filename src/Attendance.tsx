@@ -5123,15 +5123,6 @@ function TodayTab({ me }: any) {
           <button onClick={() => setDate(addDays(date, 1))} disabled={date >= istToday()}>Next ›</button>
         </div>
         <div className="att-flex" style={{ marginLeft: "auto" }}>
-          {live && (
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: "#067647" }}>● Live</span>
-          )}
-          {updatedAt && (
-            <span className="att-muted" style={{ fontSize: 11.5 }}>
-              Updated {updatedAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: TZ })}
-            </span>
-          )}
-          <button className="att-btn sm line" onClick={() => setTick((t) => t + 1)}>↻ Refresh</button>
           <input type="date" max={istToday()} value={date}
             onChange={(e) => setDate(e.target.value)} />
         </div>
