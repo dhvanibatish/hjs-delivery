@@ -6352,6 +6352,208 @@ function AttSheetTab() {
   );
 }
 
+/* ================= CR-10: Late Comers ================= */
+// Grace ke baad check-in. Chuni hui date ki list + mahine mein ab tak
+// kitni baar late (month-to-date). Admin sab, manager direct team.
+function LateComersTab({ me }: any) {
+  const [date, setDate] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true); setErr("");
+      const { data, error } = await supabase.rpc("late_comers",
+        { p_from: monthStart(date), p_to: date });
+      if (error) setErr(error.message);
+      setRows(data || []); setBusy(false);
+    })();
+  }, [date]);
+
+  const match = (r: any) => !q ||
+    `${r.emp_code} ${r.full_name} ${r.team} ${r.manager || ""}`.toLowerCase().includes(q.toLowerCase());
+  // mahine mein ab tak (chuni date tak) har bande ke late
+  const mtd = useMemo(() => {
+    const by: Record<string, any> = {};
+    rows.forEach((r) => {
+      const x = by[r.employee_id] || (by[r.employee_id] = { ...r, n: 0, mins: 0 });
+      x.n++; x.mins += r.late_minutes || 0;
+    });
+    return by;
+  }, [rows]);
+  const today = rows.filter((r) => r.work_date === date && match(r))
+    .sort((a, b) => String(a.punch_in_at).localeCompare(String(b.punch_in_at)));
+  const summary = Object.values(mtd).filter(match)
+    .sort((a: any, b: any) => b.n - a.n || b.mins - a.mins);
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+        <input type="date" value={date} max={istToday()} style={{ width: "auto" }}
+          onChange={(e) => setDate(e.target.value || istToday())} />
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <Search placeholder="Search name, code, department or manager" value={q} onChange={setQ} />
+        </div>
+        <button className="att-btn sm" disabled={!rows.length}
+          onClick={() => downloadCsv(rows.map((r) => ({
+            Date: r.work_date, Code: r.emp_code, Name: r.full_name, Department: r.team,
+            Manager: r.manager || "", Shift: fmtHM(r.shift_start), "Grace (min)": r.grace_minutes,
+            "Check-in": fmtTime(r.punch_in_at), "Minutes late": r.late_minutes, Status: r.status,
+          })), `HJS_late_${monthStart(date).slice(0, 7)}_to_${date}.csv`)}>CSV</button>
+      </div>
+      <Note>{err}</Note>
+      {busy ? <p className="att-muted">Loading…</p> : (
+        <>
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Late on {fmtDate(date)}</b><span className="att-muted">{today.length}</span>
+            </div>
+            {!today.length && <p className="att-empty">Is din koi late nahi aaya.</p>}
+            {today.map((r) => (
+              <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
+                <Avatar name={r.full_name} />
+                <div className="grow" style={{ minWidth: 170 }}>
+                  <p><PName id={r.employee_id} code={r.emp_code}>
+                    <b>{r.emp_code}</b> · {r.full_name}</PName></p>
+                  <p className="att-muted">{r.team}{r.manager ? ` · ${r.manager}` : ""}</p>
+                </div>
+                <span className="att-muted" style={{ width: 120 }}>
+                  In {fmtTime(r.punch_in_at)}
+                  <span style={{ display: "block", fontSize: 11.5 }}>Shift {fmtHM(r.shift_start)}</span>
+                </span>
+                <span className="att-pill p-Late">{r.late_minutes}m late</span>
+                <span className={pillClass(r.status)}>{r.status}</span>
+                <span className="att-muted" style={{ width: 92, textAlign: "right" }}>
+                  {mtd[r.employee_id]?.n || 1}× this month
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Month to date · {fmtDate(monthStart(date))} – {fmtDate(date)}</b>
+              <span className="att-muted">{summary.length} people</span>
+            </div>
+            {!summary.length && <p className="att-empty">Is mahine abhi tak koi late nahi.</p>}
+            {summary.map((r: any) => (
+              <div className="att-row" key={r.employee_id}>
+                <span className="grow">
+                  <PName id={r.employee_id} code={r.emp_code}><b>{r.full_name}</b></PName>
+                  <span className="att-muted"> · {r.team}</span>
+                </span>
+                <span className="att-muted">{hhmm(r.mins)} total</span>
+                <b style={{ width: 70, textAlign: "right", color: r.n >= 3 ? "#b42318" : "#b54708" }}>
+                  {r.n} late
+                </b>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ================= CR-10: Login Hours ================= */
+// Din-wise login ghante. Required (default 8h) se kam wale din laal.
+// Auto check-out (system ne shift end par band kiya) ke ghante alag dikhte
+// hain aur required mein nahi gine jaate.
+function LoginHoursTab({ me }: any) {
+  const [from, setFrom] = useState(monthStart(istToday()));
+  const [to, setTo] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [onlyShort, setOnlyShort] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true); setErr("");
+      const { data, error } = await supabase.rpc("login_hours", { p_from: from, p_to: to });
+      if (error) setErr(error.message);
+      setRows(data || []); setBusy(false);
+    })();
+  }, [from, to]);
+
+  // aaj ka din abhi chal raha ho to "kam" mat bolo
+  const isShort = (r: any) => !(r.open_now && r.work_date === istToday())
+    && (r.own_min || 0) < (r.required_min || 480);
+  const shown = rows.filter((r) => (!onlyShort || isShort(r)) && (!q ||
+    `${r.emp_code} ${r.full_name} ${r.team} ${r.manager || ""}`.toLowerCase().includes(q.toLowerCase())));
+  const shortCount = rows.filter(isShort).length;
+  const autoCount = rows.filter((r) => r.auto_min > 0).length;
+
+  return (
+    <div className="att-wrap att-stack">
+      <div className="att-flex" style={{ flexWrap: "wrap" }}>
+        <input type="date" value={from} max={to} style={{ width: "auto" }}
+          onChange={(e) => setFrom(e.target.value || from)} />
+        <span className="att-muted">to</span>
+        <input type="date" value={to} min={from} max={istToday()} style={{ width: "auto" }}
+          onChange={(e) => setTo(e.target.value || to)} />
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <Search placeholder="Search name, code, department or manager" value={q} onChange={setQ} />
+        </div>
+        <button className="att-btn sm" disabled={!rows.length}
+          onClick={() => downloadCsv(rows.map((r) => ({
+            Date: r.work_date, Code: r.emp_code, Name: r.full_name, Department: r.team,
+            Manager: r.manager || "", "First in": fmtTime(r.first_in), "Last out": fmtTime(r.last_out),
+            Sessions: r.sessions, "Own hours": hhmm(r.own_min), "Auto check-out hours": hhmm(r.auto_min),
+            Required: hhmm(r.required_min), "Below required": isShort(r) ? "Yes" : "No", Status: r.status || "",
+          })), `HJS_login_hours_${from}_to_${to}.csv`)}>CSV</button>
+      </div>
+
+      <div className="att-seg">
+        <button className={onlyShort ? "on" : ""} onClick={() => setOnlyShort(true)}>
+          Below required ({shortCount})</button>
+        <button className={!onlyShort ? "on" : ""} onClick={() => setOnlyShort(false)}>
+          All days ({rows.length})</button>
+        <span className="att-muted" style={{ alignSelf: "center", marginLeft: 6 }}>
+          {autoCount} din auto check-out hua
+        </span>
+      </div>
+      <Note>{err}</Note>
+
+      {busy ? <p className="att-muted">Loading…</p> : (
+        <div className="att-list">
+          {!shown.length && <p className="att-empty">
+            {onlyShort ? "Sabke ghante poore hain." : "Is range mein koi check-in nahi."}</p>}
+          {shown.map((r) => {
+            const short = isShort(r);
+            return (
+              <div className="att-row" key={`${r.work_date}-${r.employee_id}`} style={{ flexWrap: "wrap" }}>
+                <span style={{ width: 58, fontWeight: 650 }}>{fmtDate(r.work_date)}</span>
+                <div className="grow" style={{ minWidth: 170 }}>
+                  <p><PName id={r.employee_id} code={r.emp_code}>
+                    <b>{r.emp_code}</b> · {r.full_name}</PName></p>
+                  <p className="att-muted">
+                    {r.team}{r.manager ? ` · ${r.manager}` : ""}
+                    {" · "}{fmtTime(r.first_in)} – {r.open_now ? "still in" : fmtTime(r.last_out)}
+                    {r.sessions > 1 ? ` · ${r.sessions} sessions` : ""}
+                  </p>
+                </div>
+                {r.auto_min > 0 && (
+                  <span className="att-pill p-Absent" title="System ne shift end par check-out kiya">
+                    Auto check-out {hhmm(r.auto_min)}
+                  </span>
+                )}
+                <span style={{ width: 120, textAlign: "right" }}>
+                  <b style={{ color: short ? "#b42318" : "#067647" }}>{hhmm(r.own_min)}</b>
+                  <span className="att-muted"> / {hhmm(r.required_min)}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsTab({ isAdmin = false }: any) {
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("muster");
@@ -7236,7 +7438,8 @@ function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone 
 /* ================= admin: roz ki attendance report ================= */
 // Founders aur Nishita mam is report mein nahi dikhte
 const HIDE_IN_ABSENT = /saket\s+agarwal|jatinder\s+verma|nishita/i;
-function DailyReportTab() {
+function DailyReportTab({ me }: any) {
+  const isAdm = me?.role === "admin";
   const [date, setDate] = useState(istToday());
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
@@ -7251,7 +7454,7 @@ function DailyReportTab() {
     setBusy(true); setErr("");
     const [em, lg, lv, hl, tm] = await Promise.all([
       supabase.from("employees")
-        .select("id, emp_code, full_name, designation, week_off_days, branch_id, team_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving")
+        .select("id, emp_code, full_name, designation, week_off_days, branch_id, team_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving, reports_to, co_manager_id")
         .eq("active", true),
       supabase.from("attendance_logs").select("*").eq("work_date", date),
       supabase.from("leaves").select("*").in("status", ["Approved", "Pending"])
@@ -7262,6 +7465,8 @@ function DailyReportTab() {
     if (em.error) setErr(em.error.message);
     const teamName: Record<string, string> = {};
     (tm.data || []).forEach((t: any) => { teamName[t.id] = t.name; });
+    const nameOf: Record<string, string> = {};
+    (em.data || []).forEach((e: any) => { nameOf[e.id] = e.full_name; });
     const dow = new Date(date + "T00:00:00").getDay();
     const out = (em.data || [])
       .filter((e: any) => (e.approval_status || "Approved") === "Approved")
@@ -7269,6 +7474,8 @@ function DailyReportTab() {
         && !["VGN-E001", "VGN-E002", "VGN-E010"].includes(e.emp_code))
       .filter((e: any) => !e.date_of_joining || String(e.date_of_joining) <= date)
       .filter((e: any) => !e.date_of_leaving || String(e.date_of_leaving) >= date)
+      // CR-9: manager ko sirf uski direct team
+      .filter((e: any) => isAdm || e.reports_to === me?.id || e.co_manager_id === me?.id)
       .map((e: any) => {
         const log = (lg.data || []).find((x: any) => x.employee_id === e.id);
         const lvs = (lv.data || []).filter((x: any) => x.employee_id === e.id);
@@ -7281,7 +7488,8 @@ function DailyReportTab() {
           : hol || off ? "off"
           : pend ? "pending"
           : "absent";
-        return { ...e, team: teamName[e.team_id] || "No department", log, appr, pend, hol, off, kind };
+        return { ...e, team: teamName[e.team_id] || "No department",
+                 manager: nameOf[e.reports_to] || "", log, appr, pend, hol, off, kind };
       });
     setRows(out); setBusy(false);
   };
@@ -7339,7 +7547,7 @@ function DailyReportTab() {
             onClick={() => setDate(addDays(date, 1))}>›</button>
           <button className="att-btn sm line" disabled={!shown.length}
             onClick={() => downloadCsv(shown.map((r) => ({
-              Code: r.emp_code, Name: r.full_name, Department: r.team,
+              Code: r.emp_code, Name: r.full_name, Department: r.team, Manager: r.manager,
               Status: TAG[r.kind][0],
               In: r.log?.punch_in_at ? fmtTime(r.log.punch_in_at) : "",
               Out: r.log?.punch_out_at ? fmtTime(r.log.punch_out_at) : "",
@@ -7381,6 +7589,7 @@ function DailyReportTab() {
                 <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
                 <p className="att-muted">
                   {r.designation || "—"}
+                  {r.manager ? ` · Manager: ${r.manager}` : ""}
                   {r.log?.punch_in_at ? ` · ${fmtTime(r.log.punch_in_at)}${
                     r.log.punch_out_at ? ` – ${fmtTime(r.log.punch_out_at)}` : " – still in"}` : ""}
                   {r.appr ? ` · ${r.appr.leave_type}` : ""}
@@ -7389,7 +7598,7 @@ function DailyReportTab() {
                 </p>
               </div>
               <span className={`att-pill ${TAG[r.kind][1]}`}>{TAG[r.kind][0]}</span>
-              <div className="att-flex">
+              {isAdm && <div className="att-flex">
                 {(r.kind === "absent" || r.kind === "pending") && (
                   <>
                     <button className="att-btn sm green" disabled={quick === r.id}
@@ -7404,7 +7613,7 @@ function DailyReportTab() {
                   onClick={() => setEdit({ r, initial: r.kind === "present" ? "Present" : "Leave" })}>
                   Change
                 </button>
-              </div>
+              </div>}
             </div>
           ))}
         </div>
@@ -11416,6 +11625,8 @@ const MODULES: Module[] = [
       { k: "att", label: "Company / Team", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
+        { k: "late", label: "Late Comers" },
+        { k: "hours", label: "Login Hours" },
       ]},
 
     ],
@@ -11612,10 +11823,11 @@ export default function Attendance() {
       ...m,
       scopes: m.scopes
         .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead)
-          && (sc.k !== "absent" || me.role === "admin"))
+          && (sc.k !== "absent" || ["admin", "manager"].includes(me.role)))
         .map((sc) => ({ ...sc, views: sc.views.filter((v) =>
           (!v.adminOnly || topAdmin) && (!v.headOnly || isHead)
-          && (v.k !== "daily" || me.role === "admin")) }))
+          && (v.k !== "daily" || ["admin", "manager"].includes(me.role))
+          && (!["late", "hours"].includes(v.k) || ["admin", "manager"].includes(me.role))) }))
         .filter((sc) => sc.views.length > 0),
     }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
@@ -11667,7 +11879,8 @@ export default function Attendance() {
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
-      case "att/absent/daily":      return me.role === "admin" ? <DailyReportTab /> : <HomeScreen me={me} />;
+      case "att/absent/daily":
+        return ["admin", "manager"].includes(me.role) ? <DailyReportTab me={me} /> : <HomeScreen me={me} />;
       case "att/team/dash":        return <div className="att-wrap att-stack"><DashTab /></div>;
       case "att/sheet/month":       return <AttSheetTab />;
       // ---- Leave ----
@@ -11696,6 +11909,8 @@ export default function Attendance() {
       case "reports/mine/pay":      return <MyPayTab me={me} />;
       case "reports/att/muster":
         return <div className="att-wrap att-stack"><ReportsTab isAdmin={topAdmin} /></div>;
+      case "reports/att/late":     return <LateComersTab me={me} />;
+      case "reports/att/hours":    return <LoginHoursTab me={me} />;
       case "reports/att/payroll":
         return <div className="att-wrap att-stack"><PayrollTab isAdmin={topAdmin} /></div>;
       default:                      return <HomeScreen me={me} />;
