@@ -5023,9 +5023,39 @@ function TodayTab({ me }: any) {
   const [acting, setActing] = useState("");
   const [actErr, setActErr] = useState("");
 
+  // LIVE: koi check-in / check-out / late change hote hi list badal jaati hai
+  // (Supabase Realtime). Saath mein 2 min ka backup refresh + tab pe lautte hi.
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    let t: any = null;
+    const bump = () => {               // ek saath 10 change aaye to ek hi reload
+      if (t) return;
+      t = setTimeout(() => { t = null; setTick((x) => x + 1); }, 800);
+    };
+    const ch = supabase.channel(`team-space-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_sessions" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_logs" }, bump)
+      .subscribe((st: string) => setLive(st === "SUBSCRIBED"));
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+  }, []);
+  useEffect(() => {
+    const iv = window.setInterval(() => {
+      if (document.visibilityState === "visible") setTick((t) => t + 1);
+    }, 120000);
+    const onVis = () => { if (document.visibilityState === "visible") setTick((t) => t + 1); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      window.clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, []);
+
   useEffect(() => {
     (async () => {
-      setBusy(true);
+      if (!updatedAt) setBusy(true);
       const [{ data }, sess] = await Promise.all([
         supabase.rpc("whos_in", { p_date: date }),
         supabase.from("attendance_sessions")
@@ -5050,6 +5080,7 @@ function TodayTab({ me }: any) {
       setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code],
         emp: empByCode[r.emp_code], log: logByCode[r.emp_code] })));
       setBusy(false);
+      setUpdatedAt(new Date());
     })();
   }, [date, tick]);
 
@@ -5092,6 +5123,15 @@ function TodayTab({ me }: any) {
           <button onClick={() => setDate(addDays(date, 1))} disabled={date >= istToday()}>Next ›</button>
         </div>
         <div className="att-flex" style={{ marginLeft: "auto" }}>
+          {live && (
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: "#067647" }}>● Live</span>
+          )}
+          {updatedAt && (
+            <span className="att-muted" style={{ fontSize: 11.5 }}>
+              Updated {updatedAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: TZ })}
+            </span>
+          )}
+          <button className="att-btn sm line" onClick={() => setTick((t) => t + 1)}>↻ Refresh</button>
           <input type="date" max={istToday()} value={date}
             onChange={(e) => setDate(e.target.value)} />
         </div>
