@@ -5136,13 +5136,13 @@ function TodayTab({ me }: any) {
               {gn > 0 && <span style={{ background: "#fef3f2", color: "#b42318" }}>{gn} not in</span>}
             </>}>
             {g.map((r) => (
-              <div className="att-row" key={r.emp_code}>
+              <div className="att-row" key={r.emp_code} style={{ flexWrap: "wrap" }}>
                 <Avatar name={r.full_name} />
-                <div className="grow">
+                <div className="grow" style={{ minWidth: 0 }}>
                   <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
                   <p className="att-muted">{r.designation || "—"}</p>
                 </div>
-                <div style={{ textAlign: "right" }}>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
                   <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[r.state] }}>{r.state}</p>
                   <p className="att-muted" style={{ fontSize: 11.5 }}>
                     {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
@@ -5154,33 +5154,40 @@ function TodayTab({ me }: any) {
                         dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
                     </p>
                   )}
-                  {r.log?.late_mark && (() => {
-                    const cur = r.log.late_override || r.log.late_mark;
-                    const lbl = (m: string) => (m === "Present" ? "Full Day" : m);
-                    return (
-                      <div style={{ marginTop: 4, textAlign: "right" }}>
-                        {!canWaive(r) ? (
-                          <span className={pillClass(cur)}>{lbl(cur)} · late</span>
-                        ) : (
-                          <div className="att-flex" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            {["Short Leave", "Half Day", "Present"].map((m) => (
-                              <button key={m} disabled={acting === r.emp_code}
-                                className={`att-btn sm ${cur === m ? "" : "line"}`}
-                                onClick={() => cur !== m && setMark(r, m)}>
-                                {lbl(m)}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        <p className="att-muted" style={{ fontSize: 11, marginTop: 2 }}>
-                          {r.log.late_override
-                            ? `Changed${r.log.late_waived_by ? ` by ${r.log.late_waived_by}` : ""}`
-                            : `Auto: late check-in`}
-                        </p>
-                      </div>
-                    );
-                  })()}
                 </div>
+                {r.log?.late_mark && (() => {
+                  const cur = r.log.late_override || r.log.late_mark;
+                  const lbl = (m: string) => (m === "Present" ? "Full Day" : m);
+                  return (
+                    // apni line par, poori chaudai — mobile par naam nahi dabta
+                    <div style={{ flexBasis: "100%", display: "flex", alignItems: "center",
+                                  gap: 8, flexWrap: "wrap", paddingLeft: 46, marginTop: 2 }}>
+                      {!canWaive(r) ? (
+                        <span className={pillClass(cur)}>{lbl(cur)} · late</span>
+                      ) : (
+                        <div style={{ display: "inline-flex", border: "1px solid #d0d5dd",
+                                      borderRadius: 8, overflow: "hidden" }}>
+                          {["Short Leave", "Half Day", "Present"].map((m, i) => (
+                            <button key={m} disabled={acting === r.emp_code}
+                              onClick={() => cur !== m && setMark(r, m)}
+                              style={{ padding: "5px 10px", fontSize: 12, fontWeight: 650,
+                                       whiteSpace: "nowrap",
+                                       borderLeft: i ? "1px solid #d0d5dd" : "none",
+                                       background: cur === m ? "#2563eb" : "#fff",
+                                       color: cur === m ? "#fff" : "#344054" }}>
+                              {lbl(m)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <span className="att-muted" style={{ fontSize: 11 }}>
+                        {r.log.late_override
+                          ? `Changed${r.log.late_waived_by ? ` by ${r.log.late_waived_by}` : ""}`
+                          : "Auto: late check-in"}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </Section>
