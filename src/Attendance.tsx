@@ -5035,7 +5035,7 @@ function TodayTab({ me }: any) {
       const [emps, lg] = await Promise.all([
         supabase.from("employees").select("id, emp_code, reports_to, co_manager_id"),
         supabase.from("attendance_logs")
-          .select("employee_id, status, late_mark, late_waived, late_waived_by").eq("work_date", date),
+          .select("employee_id, status, late_mark, late_override, late_waived_by").eq("work_date", date),
       ]);
       const codeById: Record<string, string> = {};
       const empByCode: Record<string, any> = {};
@@ -5056,10 +5056,11 @@ function TodayTab({ me }: any) {
   // der se check-in ka cut — manager (direct team) / admin hata sakta hai
   const canWaive = (r: any) => !!r.emp && (me?.role === "admin"
     || r.emp.reports_to === me?.id || r.emp.co_manager_id === me?.id);
-  const waive = async (r: any, on: boolean) => {
+  // manager chune: Short Leave / Half Day / Full Day
+  const setMark = async (r: any, mark: string) => {
     setActErr(""); setActing(r.emp_code);
-    const { error } = await supabase.rpc("set_late_waive",
-      { p_emp: r.emp.id, p_date: date, p_waive: on });
+    const { error } = await supabase.rpc("set_late_override",
+      { p_emp: r.emp.id, p_date: date, p_mark: mark });
     setActing("");
     if (error) setActErr(`${r.full_name}: ${error.message}`);
     else setTick((t) => t + 1);
@@ -5153,24 +5154,32 @@ function TodayTab({ me }: any) {
                         dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
                     </p>
                   )}
-                  {r.log?.late_mark && (
-                    <p style={{ marginTop: 4, display: "flex", gap: 6, justifyContent: "flex-end",
-                                alignItems: "center", flexWrap: "wrap" }}>
-                      {r.log.late_waived ? (
-                        <span className="att-muted" style={{ fontSize: 11.5 }}>
-                          Late {r.log.late_mark} hataya{r.log.late_waived_by ? ` · ${r.log.late_waived_by}` : ""}
-                        </span>
-                      ) : (
-                        <span className={pillClass(r.log.late_mark)}>{r.log.late_mark} · late</span>
-                      )}
-                      {canWaive(r) && (
-                        <button className="att-btn sm line" disabled={acting === r.emp_code}
-                          onClick={() => waive(r, !r.log.late_waived)}>
-                          {acting === r.emp_code ? "…" : r.log.late_waived ? "Undo" : "Remove"}
-                        </button>
-                      )}
-                    </p>
-                  )}
+                  {r.log?.late_mark && (() => {
+                    const cur = r.log.late_override || r.log.late_mark;
+                    const lbl = (m: string) => (m === "Present" ? "Full Day" : m);
+                    return (
+                      <div style={{ marginTop: 4, textAlign: "right" }}>
+                        {!canWaive(r) ? (
+                          <span className={pillClass(cur)}>{lbl(cur)} · late</span>
+                        ) : (
+                          <div className="att-flex" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                            {["Short Leave", "Half Day", "Present"].map((m) => (
+                              <button key={m} disabled={acting === r.emp_code}
+                                className={`att-btn sm ${cur === m ? "" : "line"}`}
+                                onClick={() => cur !== m && setMark(r, m)}>
+                                {lbl(m)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <p className="att-muted" style={{ fontSize: 11, marginTop: 2 }}>
+                          {r.log.late_override
+                            ? `Changed${r.log.late_waived_by ? ` by ${r.log.late_waived_by}` : ""}`
+                            : `Auto: late check-in`}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
