@@ -1733,6 +1733,14 @@ function HomeScreen({ me }: any) {
   const [err, setErr] = useState(""); const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
   const [regOpen, setRegOpen] = useState(false);
+  // CR-2: manager/admin ne meri leave lagayi — jab tak OK na dabaun dikhe
+  const [byMgr, setByMgr] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("leaves").select("id, leave_type, from_date, to_date, days, applied_by_name")
+      .eq("employee_id", me.id).not("applied_by", "is", null).eq("applied_seen", false)
+      .eq("status", "Approved").order("from_date")
+      .then(({ data }) => setByMgr(data || []));
+  }, [me.id]);
   const [range, setRange] = useState({ from: monthStart(istToday()), to: istToday() });
   const [drill, setDrill] = useState<any>(null);
   const [mgr, setMgr] = useState<any[]>([]);
@@ -1966,6 +1974,23 @@ function HomeScreen({ me }: any) {
 
         {/* ---- right ---- */}
         <div className="att-col">
+          {byMgr.length > 0 && (
+            <div className="att-note ok" style={{ alignItems: "center" }}>
+              <span style={{ flex: 1 }}>
+                {byMgr.map((l: any) => (
+                  <span key={l.id} style={{ display: "block" }}>
+                    {l.applied_by_name} ne aapki {l.leave_type} leave lagayi:{" "}
+                    {fmtDate(l.from_date)}{l.to_date !== l.from_date ? ` – ${fmtDate(l.to_date)}` : ""}
+                    {" "}({l.days}d)
+                  </span>
+                ))}
+              </span>
+              <button className="att-btn sm line" onClick={async () => {
+                await supabase.rpc("ack_applied_leaves");
+                setByMgr([]);
+              }}>OK</button>
+            </div>
+          )}
           <div className="att-greet">
             <h3>{greetWord()}, {String(me.full_name).split(" ")[0]}</h3>
             <p>
@@ -4038,6 +4063,9 @@ function LeavesScreen({ me, tab }: any) {
                 {r.reason && (
                   <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>
                 )}
+                {r.applied_by_name && (
+                  <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
+                )}
               </div>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
@@ -4299,7 +4327,21 @@ const isCorporate = (emp: any) => !!emp?.branches?.corporate_policy;
 
 function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const today = istToday();
-  const corp = isCorporate(me);
+  // CR-2: manager apni direct team ke liye, admin kisi ke bhi liye leave laga sakta hai
+  const canFor = me.role === "admin" || me.role === "manager";
+  const [team, setTeam] = useState<any[]>([]);
+  const [forId, setForId] = useState<string>(me.id);
+  useEffect(() => {
+    if (!canFor) return;
+    let q = supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)")
+      .eq("active", true).neq("id", me.id).order("full_name");
+    if (me.role !== "admin") q = q.or(`reports_to.eq.${me.id},co_manager_id.eq.${me.id}`);
+    q.then(({ data }) => setTeam(data || []));
+  }, [me.id]);
+  const forOther = forId !== me.id;
+  // jiske liye leave lag rahi hai — eligibility usi ki dekhi jaati hai
+  const who = forOther ? (team.find((t) => t.id === forId) || me) : me;
+  const corp = isCorporate(who);
   // Is mahine kya-kya milta hai: birthday/anniversary month, comp off (holiday pe kaam), flex (2+ saal)
   const [elig, setElig] = useState<any>(null);
   useEffect(() => {
@@ -4310,10 +4352,10 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       const yFrom = `${today.slice(0, 4)}-01-01`;
       const [lv, ss, hl] = await Promise.all([
         supabase.from("leaves").select("leave_type, from_date, days, status")
-          .eq("employee_id", me.id).in("status", ["Approved", "Pending"])
+          .eq("employee_id", who.id).in("status", ["Approved", "Pending"])
           .in("leave_type", ["BDAY", "ANNIV", "COMP", "FLEX"]).gte("from_date", yFrom),
         supabase.from("attendance_sessions").select("work_date")
-          .eq("employee_id", me.id).gte("work_date", yFrom).lte("work_date", mTo),
+          .eq("employee_id", who.id).gte("work_date", yFrom).lte("work_date", mTo),
         supabase.from("holidays").select("hol_date").eq("comp_off", true)
           .gte("hol_date", yFrom).lte("hol_date", mTo),
       ]);
@@ -4330,18 +4372,18 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       const compUsed = L.filter((x: any) => x.leave_type === "COMP" && x.from_date.startsWith(ym))
         .reduce((a: number, x: any) => a + Number(x.days || 0), 0);
       const md = (v: any) => (v ? String(v).slice(5, 7) : "");
-      const doj = me.date_of_joining ? String(me.date_of_joining).slice(0, 10) : "";
+      const doj = who.date_of_joining ? String(who.date_of_joining).slice(0, 10) : "";
       setElig({
-        BDAY: md(me.date_of_birth) === today.slice(5, 7)
+        BDAY: md(who.date_of_birth) === today.slice(5, 7)
           && !L.some((x: any) => x.leave_type === "BDAY"),
-        ANNIV: md(me.marriage_anniversary) === today.slice(5, 7)
+        ANNIV: md(who.marriage_anniversary) === today.slice(5, 7)
           && !L.some((x: any) => x.leave_type === "ANNIV"),
         COMP: Math.max(0, thisMonthHol * 2 - compUsed),
         FLEX: !!doj && doj <= addDays(today, -730)
           && !L.some((x: any) => x.leave_type === "FLEX" && x.from_date.startsWith(ym)),
       });
     })();
-  }, [corp, me.id]);
+  }, [corp, who.id]);
 
   const types = useMemo(() => (allTypes || []).filter((t: any) => {
     // LV (Leave unpaid) band — uski jagah Casual Leave hai
@@ -4379,7 +4421,8 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const maxDate = addDays(today, rule.futureDays);
 
   // form badla to nayi request bhej sakte hain
-  useEffect(() => { setSent(false); }, [form.leave_type, form.from_date, form.to_date, form.reason]);
+  useEffect(() => { setSent(false); },
+    [form.leave_type, form.from_date, form.to_date, form.reason, forId]);
 
   // type badalte hi dates ko rule ke andar le aao
   const setType = (code: string) => {
@@ -4423,7 +4466,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
     }
     // birthday / anniversary sirf usi mahine mein
     if (form.leave_type === "BDAY" || form.leave_type === "ANNIV") {
-      const ref = form.leave_type === "BDAY" ? me.date_of_birth : me.marriage_anniversary;
+      const ref = form.leave_type === "BDAY" ? who.date_of_birth : who.marriage_anniversary;
       const lbl = form.leave_type === "BDAY" ? "Birthday" : "Anniversary";
       if (!ref) return `${lbl} date record mein nahi hai. HR se add karwao.`;
       if (String(ref).slice(5, 7) !== form.from_date.slice(5, 7)) {
@@ -4433,11 +4476,26 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       }
     }
     return "";
-  }, [form, rule, days, minDate, maxDate, elig]);
+  }, [form, rule, days, minDate, maxDate, elig, who]);
 
   const submit = async () => {
     if (problem || sent) { setMsg({ err: problem, ok: "" }); return; }
     setBusy(true); setMsg({ err: "", ok: "" });
+    if (forOther) {
+      // seedha Approved, balance se katti, "Applied by" ke saath
+      const { error } = await supabase.rpc("apply_leave_for", {
+        p_emp: who.id, p_type: form.leave_type,
+        p_from: form.from_date, p_to: form.to_date, p_days: days,
+        p_reason: form.reason.trim(),
+        p_from_time: needsTime ? form.from_time : null,
+        p_to_time:   needsTime ? form.to_time   : null,
+      });
+      if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
+      else { setMsg({ err: "", ok: `Leave lag gayi aur approve ho gayi — ${who.full_name} ko dikh jayegi.` });
+             setSent(true); }
+      setBusy(false);
+      return;
+    }
     const { error } = await supabase.from("leaves").insert({
       employee_id: me.id, leave_type: form.leave_type,
       from_date: form.from_date, to_date: form.to_date,
@@ -4454,6 +4512,22 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   return (
     <Sheet title="Apply Leave" onClose={onClose}>
       <div className="att-card att-stack">
+        {canFor && team.length > 0 && (
+          <div>
+            <label>Leave for</label>
+            <select value={forId} onChange={(e) => setForId(e.target.value)}>
+              <option value={me.id}>Myself</option>
+              {team.map((t) => (
+                <option key={t.id} value={t.id}>{t.emp_code} · {t.full_name}</option>
+              ))}
+            </select>
+            {forOther && (
+              <p className="att-muted" style={{ marginTop: 6 }}>
+                Ye leave seedha approve hogi aur {who.full_name} ke balance se kategi.
+              </p>
+            )}
+          </div>
+        )}
         <div>
           <label>Leave type</label>
           <select value={form.leave_type} onChange={(e) => setType(e.target.value)}>
@@ -4516,7 +4590,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
             {rule.fixedDays ? " (counted)" : ""}
           </span>
           <button className="att-btn sm" onClick={submit} disabled={busy || sent || !!problem}>
-            {busy ? "Sending…" : sent ? "\u2713 Sent" : "Apply"}
+            {busy ? "Sending…" : sent ? "\u2713 Sent" : forOther ? "Apply & approve" : "Apply"}
           </button>
         </div>
         {problem && !msg.err && <p className="att-muted">{problem}</p>}
@@ -4768,6 +4842,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                   </p>
                 )}
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
+                {r.applied_by_name && (
+                  <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
+                )}
               </div>
               <Actions r={r} kind="leave" />
             </div>
@@ -4796,6 +4873,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                   {fmtDate(r.work_date)} · {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
                 </p>
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
+                {r.applied_by_name && (
+                  <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
+                )}
               </div>
               <Actions r={r} kind="reg" />
             </div>
