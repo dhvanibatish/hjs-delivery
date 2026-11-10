@@ -5125,6 +5125,8 @@ function StaffTab({ me }: any) {
   );
 }
 
+const STATUS_OPTS = ["Active", "Probation", "Notice period", "Exited"];
+
 function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
@@ -5184,10 +5186,11 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         date_of_leaving: f.date_of_leaving || null,
         marriage_anniversary: f.marriage_anniversary || null,
         employment_type: f.employment_type || null,
-        employee_status: f.employee_status || null,
+        employee_status: f.employee_status || (f.active === false ? "Exited" : "Active"),
         source_of_hire: f.source_of_hire || null,
         nickname: f.nickname || null,
-        field_staff: f.field_staff, active: f.active,
+        field_staff: f.field_staff,
+        active: (f.employee_status || (f.active === false ? "Exited" : "Active")) !== "Exited",
         show_verify_panel: f.show_verify_panel !== false,
         week_off_days: f.week_off_days,
         monthly_gross: f.monthly_gross === "" || f.monthly_gross == null ? null : Number(f.monthly_gross),
@@ -5364,20 +5367,17 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
           </div>
           <div>
             <label>Employee status</label>
-            <select value={f.employee_status || ""}
+            <select value={f.employee_status || (f.active === false ? "Exited" : "Active")}
               onChange={(e) => {
-                // Exited = inactive; Exited se hatao to wapas active
-                const v = e.target.value || null;
-                setF({ ...f, employee_status: v,
-                  active: v === "Exited" ? false : (f.employee_status === "Exited" ? true : f.active) });
+                // Status hi master hai: Exited = inactive, baaki sab = active
+                const v = e.target.value;
+                setF({ ...f, employee_status: v, active: v !== "Exited" });
               }}>
-              <option value="">— not set —</option>
-              <option>Active</option>
-              <option>Probation</option>
-              <option>Notice period</option>
-              <option>On leave</option>
-              <option>Details pending</option>
-              <option>Exited</option>
+              {STATUS_OPTS.map((o) => <option key={o}>{o}</option>)}
+              {/* purana status (Probation, Details pending...) ho to dikhta rahe, data na jaye */}
+              {f.employee_status && !STATUS_OPTS.includes(f.employee_status) && (
+                <option>{f.employee_status}</option>
+              )}
             </select>
           </div>
         </div>
@@ -5473,16 +5473,6 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             onChange={(e) => setF({ ...f, show_verify_panel: e.target.checked })} />
           Show the daily "who turned up" panel on their home screen
         </label>
-        {!isNew && (
-          <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
-            <input type="checkbox" checked={f.active}
-              onChange={(e) => setF({ ...f, active: e.target.checked,
-                employee_status: e.target.checked
-                  ? (f.employee_status === "Exited" ? "Active" : f.employee_status)
-                  : "Exited" })} />
-            Active
-          </label>
-        )}
         <Note>{msg.err}</Note>
         <Note kind="ok">{msg.ok}</Note>
         <button className="att-btn" onClick={save} disabled={busy || !f.emp_code || !f.full_name}>
