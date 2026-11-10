@@ -4426,6 +4426,14 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const minDate = addDays(today, -rule.pastDays);
   const maxDate = addDays(today, rule.futureDays);
 
+  // Week off: har hafte 1, mahine ke end tak carry, max 2 ek baar mein
+  const [woAv, setWoAv] = useState<number | null>(null);
+  useEffect(() => {
+    if (form.leave_type !== "WO") { setWoAv(null); return; }
+    supabase.rpc("wo_available", { p_emp: who.id, p_upto: form.to_date })
+      .then(({ data, error }) => setWoAv(error ? null : Number(data)));
+  }, [form.leave_type, form.to_date, who.id]);
+
   // form badla to nayi request bhej sakte hain
   useEffect(() => { setSent(false); },
     [form.leave_type, form.from_date, form.to_date, form.reason, forId]);
@@ -4462,6 +4470,13 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       return "This leave type is for a single day only.";
     if (!form.reason.trim()) return "Please write why you need this leave.";
     if (days > 60) return "One request can't be longer than 60 days.";
+    if (form.leave_type === "WO") {
+      if (form.from_date.slice(0, 7) !== form.to_date.slice(0, 7))
+        return "Week off ek hi mahine ke andar lo.";
+      if (days > 2) return "Week off ek baar mein max 2 din. Lambi chhutti ke liye CL/EL lo.";
+      if (woAv !== null && me.role !== "admin" && days > woAv)
+        return `Week off bache: ${Math.max(0, woAv)}. Aage ke hafte ka pehle nahi le sakte.`;
+    }
     // comp off: isi mahine mein, aur jitne bache hain usse zyada nahi
     if (form.leave_type === "COMP") {
       const ym = today.slice(0, 7);
@@ -4482,7 +4497,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       }
     }
     return "";
-  }, [form, rule, days, minDate, maxDate, elig, who]);
+  }, [form, rule, days, minDate, maxDate, elig, who, woAv]);
 
   const submit = async () => {
     if (problem || sent) { setMsg({ err: problem, ok: "" }); return; }
@@ -4544,6 +4559,14 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
           </select>
           {rule.note && (
             <p className="att-muted" style={{ marginTop: 6 }}>{rule.note}</p>
+          )}
+          {form.leave_type === "WO" && (
+            <p className="att-muted" style={{ marginTop: 6 }}>
+              Har hafte 1 week off milta hai, mahine ke end tak bacha reh sakta hai.
+              Ek baar mein max 2 din.
+              {woAv !== null && <b style={{ color: woAv > 0 ? "#067647" : "#b42318" }}>
+                {" "}Abhi bache: {Math.max(0, woAv)}</b>}
+            </p>
           )}
         </div>
 
