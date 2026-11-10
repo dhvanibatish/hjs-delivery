@@ -5107,6 +5107,9 @@ function StaffTab({ me }: any) {
             {!r.email && <span className="att-pill p-Absent">no email</span>}
             {!r.auth_user_id && <span className="att-pill p-Late">code pending</span>}
             {!r.active && <span className="att-pill p-Off">Inactive</span>}
+            {!r.active && !r.date_of_leaving && (
+              <span className="att-pill p-Late">Leaving date pending</span>
+            )}
             {r.field_staff && <span className="att-pill p-Leave">Field</span>}
           </div>
         ))}
@@ -5362,13 +5365,19 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
           <div>
             <label>Employee status</label>
             <select value={f.employee_status || ""}
-              onChange={(e) => setF({ ...f, employee_status: e.target.value || null })}>
+              onChange={(e) => {
+                // Exited = inactive; Exited se hatao to wapas active
+                const v = e.target.value || null;
+                setF({ ...f, employee_status: v,
+                  active: v === "Exited" ? false : (f.employee_status === "Exited" ? true : f.active) });
+              }}>
               <option value="">— not set —</option>
               <option>Active</option>
               <option>Probation</option>
               <option>Notice period</option>
               <option>On leave</option>
               <option>Details pending</option>
+              <option>Exited</option>
             </select>
           </div>
         </div>
@@ -5411,6 +5420,11 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
             <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
               Sirf resign / exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
             </p>
+            {!isNew && !f.active && !f.date_of_leaving && (
+              <p style={{ fontSize: 12, marginTop: 4, color: "#b54708", fontWeight: 600 }}>
+                Inactive hai par last working day khaali hai — bhar do.
+              </p>
+            )}
           </div>
           <div>
             <label>Marriage anniversary</label>
@@ -5462,7 +5476,10 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
         {!isNew && (
           <label className="att-flex" style={{ fontWeight: 400, marginBottom: 0, color: "#374151" }}>
             <input type="checkbox" checked={f.active}
-              onChange={(e) => setF({ ...f, active: e.target.checked })} />
+              onChange={(e) => setF({ ...f, active: e.target.checked,
+                employee_status: e.target.checked
+                  ? (f.employee_status === "Exited" ? "Active" : f.employee_status)
+                  : "Exited" })} />
             Active
           </label>
         )}
