@@ -4066,6 +4066,12 @@ function LeavesScreen({ me, tab }: any) {
                 {r.applied_by_name && (
                   <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
                 )}
+                {r.orig_leave_type && (
+                  <p style={{ fontSize: 12, color: "#b54708" }}>
+                    Type changed: {r.orig_leave_type} → {r.leave_type}
+                    {r.type_changed_by_name ? ` by ${r.type_changed_by_name}` : ""}
+                  </p>
+                )}
               </div>
               <span className={pillClass(r.status)}>{r.status}</span>
               {r.status === "Pending" && (
@@ -4647,6 +4653,68 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   };
   useEffect(() => { load(); }, [mode]);
 
+  // approve karne wala leave ka type badal sake (jaise WO -> CL)
+  const [ltypes, setLtypes] = useState<any[]>([]);
+  const [typeFor, setTypeFor] = useState<string | null>(null);
+  const [typeOpts, setTypeOpts] = useState<any[] | null>(null);
+  // Employee ke hisaab se kaunse type mil sakte hain — Apply Leave wala hi rule,
+  // bas leave ke mahine ke hisaab se (aaj ke nahi) aur ye leave khud nahi gini
+  const openType = async (r: any) => {
+    setTypeFor(r.id); setTypeOpts(null);
+    const { data: e } = await supabase.from("employees")
+      .select("*, branches(name, corporate_policy)").eq("id", r.employee_id).single();
+    const corp = isCorporate(e);
+    const elig: any = {};
+    if (corp && e) {
+      const ym = String(r.from_date).slice(0, 7);
+      const yr = ym.slice(0, 4);
+      const yFrom = `${yr}-01-01`, mTo = lastDayOf(`${ym}-01`);
+      const [lv, ss, hl] = await Promise.all([
+        supabase.from("leaves").select("id, leave_type, from_date, days, status")
+          .eq("employee_id", e.id).in("status", ["Approved", "Pending"]).neq("id", r.id)
+          .in("leave_type", ["BDAY", "ANNIV", "COMP", "FLEX"]).gte("from_date", yFrom),
+        supabase.from("attendance_sessions").select("work_date")
+          .eq("employee_id", e.id).gte("work_date", yFrom).lte("work_date", mTo),
+        supabase.from("holidays").select("hol_date").eq("comp_off", true)
+          .gte("hol_date", yFrom).lte("hol_date", mTo),
+      ]);
+      const L = lv.data || [];
+      const worked = new Set((ss.data || []).map((x: any) => x.work_date));
+      const compDays = new Set<string>((hl.data || []).map((x: any) => String(x.hol_date)));
+      ["01-26", "08-15", "10-02"].forEach((md) => {
+        const d = `${yr}-${md}`; if (d <= mTo) compDays.add(d);
+      });
+      const workedHol = Array.from(compDays).filter((d) => worked.has(d)).sort().slice(0, 3);
+      const monHol = workedHol.filter((d) => d.startsWith(ym)).length;
+      const compUsed = L.filter((x: any) => x.leave_type === "COMP" && x.from_date.startsWith(ym))
+        .reduce((a: number, x: any) => a + Number(x.days || 0), 0);
+      const md = (v: any) => (v ? String(v).slice(5, 7) : "");
+      const doj = e.date_of_joining ? String(e.date_of_joining).slice(0, 10) : "";
+      elig.BDAY = md(e.date_of_birth) === ym.slice(5, 7) && !L.some((x: any) => x.leave_type === "BDAY");
+      elig.ANNIV = md(e.marriage_anniversary) === ym.slice(5, 7)
+        && !L.some((x: any) => x.leave_type === "ANNIV");
+      elig.COMP = monHol * 2 - compUsed >= Number(r.days || 0);
+      elig.FLEX = !!doj && doj <= addDays(r.from_date, -730)
+        && !L.some((x: any) => x.leave_type === "FLEX" && x.from_date.startsWith(ym));
+    }
+    setTypeOpts(ltypes.filter((t) => t.code !== r.leave_type
+      // half day / short leave sirf ek din ki leave par
+      && (r.from_date === r.to_date || !["HALF", "SHORT"].includes(t.code))
+      && (!CORP_ONLY_TYPES.includes(t.code) || (corp && !!elig[t.code]))));
+  };
+  useEffect(() => {
+    supabase.from("leave_types").select("code, name").order("name")
+      .then(({ data }) => setLtypes((data || []).filter((t: any) => t.code !== "LV")));
+  }, []);
+  const changeType = async (r: any, code: string) => {
+    if (!code || code === r.leave_type) { setTypeFor(null); return; }
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("change_leave_type", { p_id: r.id, p_type: code });
+    if (error) setErr(`${r.emp?.full_name || ""}: ${error.message}`);
+    setTypeFor(null);
+    await load(); setBusy(false);
+  };
+
   const decideLeave = async (id: string, st: string) => {
     setBusy(true); setErr("");
     const { error } = await supabase.from("leaves").update({
@@ -4728,6 +4796,15 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             onClick={(e) => { e.stopPropagation(); kill(r, kind); }}>Delete</button>
         )}
       </div>
+    ) : kind === "leave" && typeFor === r.id ? (
+      <div className="att-flex" onClick={(e) => e.stopPropagation()}>
+        <select autoFocus defaultValue="" disabled={busy || !typeOpts} style={{ width: "auto", minHeight: 34 }}
+          onChange={(e) => changeType(r, e.target.value)}>
+          <option value="">{typeOpts ? `Change ${r.leave_type} to…` : "Loading…"}</option>
+          {(typeOpts || []).map((t) => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
+        </select>
+        <button className="att-btn sm line" onClick={() => setTypeFor(null)}>Cancel</button>
+      </div>
     ) : (
       <>
         <button className="att-btn sm green" disabled={busy}
@@ -4735,6 +4812,12 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved"); }}>
           Approve
         </button>
+        {kind === "leave" && (
+          <button className="att-btn sm line" disabled={busy}
+            onClick={(e) => { e.stopPropagation(); openType(r); }}>
+            Change type
+          </button>
+        )}
         <button className="att-btn sm grey" disabled={busy}
           onClick={(e) => { e.stopPropagation();
             kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected"); }}>
@@ -4845,6 +4928,12 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                 {r.applied_by_name && (
                   <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
                 )}
+                {r.orig_leave_type && (
+                  <p style={{ fontSize: 12, color: "#b54708" }}>
+                    Type changed: {r.orig_leave_type} → {r.leave_type}
+                    {r.type_changed_by_name ? ` by ${r.type_changed_by_name}` : ""}
+                  </p>
+                )}
               </div>
               <Actions r={r} kind="leave" />
             </div>
@@ -4875,6 +4964,12 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
                 {r.applied_by_name && (
                   <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
+                )}
+                {r.orig_leave_type && (
+                  <p style={{ fontSize: 12, color: "#b54708" }}>
+                    Type changed: {r.orig_leave_type} → {r.leave_type}
+                    {r.type_changed_by_name ? ` by ${r.type_changed_by_name}` : ""}
+                  </p>
                 )}
               </div>
               <Actions r={r} kind="reg" />
@@ -11625,9 +11720,10 @@ const MODULES: Module[] = [
       { k: "att", label: "Company / Team", views: [
         { k: "muster", label: "Muster Roll" },
         { k: "payroll", label: "Payroll" },
-        { k: "late", label: "Late Comers" },
-        { k: "hours", label: "Login Hours" },
       ]},
+      // CR-10: apne alag tab — sirf admin aur manager ko
+      { k: "late", label: "Late Comers", views: [{ k: "list", label: "Late Comers" }]},
+      { k: "hours", label: "Login Hours", views: [{ k: "list", label: "Login Hours" }]},
 
     ],
   },
@@ -11823,11 +11919,11 @@ export default function Attendance() {
       ...m,
       scopes: m.scopes
         .filter((sc) => (!sc.adminOnly || topAdmin) && (!sc.headOnly || isHead)
-          && (sc.k !== "absent" || ["admin", "manager"].includes(me.role)))
+          && (sc.k !== "absent" || ["admin", "manager"].includes(me.role))
+          && (!["late", "hours"].includes(sc.k) || ["admin", "manager"].includes(me.role)))
         .map((sc) => ({ ...sc, views: sc.views.filter((v) =>
           (!v.adminOnly || topAdmin) && (!v.headOnly || isHead)
-          && (v.k !== "daily" || ["admin", "manager"].includes(me.role))
-          && (!["late", "hours"].includes(v.k) || ["admin", "manager"].includes(me.role))) }))
+          && (v.k !== "daily" || ["admin", "manager"].includes(me.role))) }))
         .filter((sc) => sc.views.length > 0),
     }));
   const curMod = mods.find((m) => m.k === mod) || mods[0];
@@ -11909,8 +12005,8 @@ export default function Attendance() {
       case "reports/mine/pay":      return <MyPayTab me={me} />;
       case "reports/att/muster":
         return <div className="att-wrap att-stack"><ReportsTab isAdmin={topAdmin} /></div>;
-      case "reports/att/late":     return <LateComersTab me={me} />;
-      case "reports/att/hours":    return <LoginHoursTab me={me} />;
+      case "reports/late/list":    return <LateComersTab me={me} />;
+      case "reports/hours/list":   return <LoginHoursTab me={me} />;
       case "reports/att/payroll":
         return <div className="att-wrap att-stack"><PayrollTab isAdmin={topAdmin} /></div>;
       default:                      return <HomeScreen me={me} />;
