@@ -5064,8 +5064,8 @@ function TodayTab({ me }: any) {
       ]);
       const [emps, lg] = await Promise.all([
         supabase.from("employees").select("id, emp_code, reports_to, co_manager_id"),
-        supabase.from("attendance_logs")
-          .select("employee_id, status, late_mark, late_override, late_waived_by").eq("work_date", date),
+        // late cut + "kya main badal sakta hoon" server batata hai (can_approve)
+        supabase.rpc("team_late_marks", { p_date: date }),
       ]);
       const codeById: Record<string, string> = {};
       const empByCode: Record<string, any> = {};
@@ -5085,8 +5085,8 @@ function TodayTab({ me }: any) {
   }, [date, tick]);
 
   // der se check-in ka cut — manager (direct team) / admin hata sakta hai
-  const canWaive = (r: any) => !!r.emp && (me?.role === "admin"
-    || r.emp.reports_to === me?.id || r.emp.co_manager_id === me?.id);
+  // reporting manager (department manager / reports_to) ya admin — server se aata hai
+  const canWaive = (r: any) => !!r.emp && !!r.log?.can_edit;
   // manager chune: Short Leave / Half Day / Full Day
   const setMark = async (r: any, mark: string) => {
     setActErr(""); setActing(r.emp_code);
