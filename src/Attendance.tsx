@@ -7728,11 +7728,20 @@ function OnLeaveTab() {
 function NeedsSetupTab({ me }: any) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<any[]>([]);
+  const [left, setLeft] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [open, setOpen] = useState<any>(null);
   const canEdit = me?.role === "admin";
 
   const load = async () => {
+    // Exited / inactive par last working day khaali (REG-/TMP- duplicates chhod ke)
+    const ex = await supabase.from("employees")
+      .select("id, emp_code, full_name, designation, employee_status, date_of_joining, teams(name)")
+      .eq("active", false).is("date_of_leaving", null)
+      .not("emp_code", "like", "REG-%").not("emp_code", "like", "TMP-%")
+      .order("full_name");
+    setLeft((ex.data || []).map((r: any) => ({ ...r, team: r.teams?.name || "—" })));
+
     const { data } = await supabase.rpc("directory", {});
     setRows((data || []).filter((r: any) =>
       String(r.emp_code).startsWith("REG-")
@@ -7793,8 +7802,37 @@ function NeedsSetupTab({ me }: any) {
         ))}
       </div>
 
+      <div className="att-list">
+        <div className="att-hd">
+          <b>Leaving details pending</b><span className="att-muted">{left.length}</span>
+        </div>
+        {!left.length && <p className="att-empty">Har exited bande ki last working day bhari hai.</p>}
+        {left.filter((r) => !q ||
+          `${r.full_name} ${r.emp_code} ${r.teams?.name || ""} ${r.designation || ""}`
+            .toLowerCase().includes(q.toLowerCase()))
+          .map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <Avatar name={r.full_name} />
+            <div className="grow" style={{ minWidth: 170 }}>
+              <p><b>{r.full_name}</b> <span className="att-muted">{r.emp_code}</span></p>
+              <p className="att-muted">
+                {r.teams?.name || "no department"}
+                {r.designation ? ` · ${r.designation}` : ""}
+                {` · ${r.employee_status || "Inactive"}`}
+              </p>
+              <p style={{ fontSize: 12, color: "#b54708", marginTop: 2 }}>
+                Missing: last working day
+              </p>
+            </div>
+            {canEdit && (
+              <button className="att-btn sm" onClick={() => setOpen(r)}>Fix it</button>
+            )}
+          </div>
+        ))}
+      </div>
+
       {open && <PersonSheet p={open} canEdit={canEdit}
-        onClose={() => setOpen(null)} onDeleted={load} />}
+        onClose={() => { setOpen(null); load(); }} onDeleted={load} />}
     </>
   );
 }
