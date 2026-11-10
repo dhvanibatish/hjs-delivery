@@ -14,6 +14,33 @@ const KEY_ = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(URL_, KEY_, {
   auth: { persistSession: true, autoRefreshToken: true, storageKey: "hjs-attendance" },
 });
+
+// LIVE: kisi bhi screen pe — DB mein in tables mein change hote hi cb chalta hai
+// (Supabase Realtime) + isi tab mein employee save hote hi turant.
+// Bahut saare change ek saath aaye to ek hi baar chalta hai.
+function useLive(tables: string[], cb: () => void) {
+  const ref = useRef(cb);
+  ref.current = cb;
+  useEffect(() => {
+    let t: any = null;
+    const bump = () => {
+      if (t) return;
+      t = setTimeout(() => { t = null; ref.current(); }, 700);
+    };
+    let ch: any = supabase.channel(`live-${tables.join("-")}-${Math.random().toString(36).slice(2)}`);
+    tables.forEach((tb) => {
+      ch = ch.on("postgres_changes", { event: "*", schema: "public", table: tb }, bump);
+    });
+    ch.subscribe();
+    const onLocal = () => bump();
+    if (tables.includes("employees")) window.addEventListener("hjs:employee-updated", onLocal);
+    return () => {
+      if (t) clearTimeout(t);
+      supabase.removeChannel(ch);
+      window.removeEventListener("hjs:employee-updated", onLocal);
+    };
+  }, [tables.join(",")]);
+}
 const IST = "en-IN";
 const TZ = "Asia/Kolkata";
 
@@ -3174,6 +3201,7 @@ function DirectoryTab({ me }: any) {
     setRows(data || []); setBusy(false); setSel(new Set());
   };
   useEffect(() => { load(); }, []);
+  useLive(["employees", "teams"], load);
 
   const toggle = (id: string) => {
     const n = new Set(sel);
@@ -5036,8 +5064,14 @@ function TodayTab({ me }: any) {
     const ch = supabase.channel(`team-space-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "attendance_sessions" }, bump)
       .on("postgres_changes", { event: "*", schema: "public", table: "attendance_logs" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "employees" }, bump)
+      .on("postgres_changes", { event: "*", schema: "public", table: "leaves" }, bump)
       .subscribe((st: string) => setLive(st === "SUBSCRIBED"));
-    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+    window.addEventListener("hjs:employee-updated", bump);
+    return () => {
+      if (t) clearTimeout(t); supabase.removeChannel(ch);
+      window.removeEventListener("hjs:employee-updated", bump);
+    };
   }, []);
   useEffect(() => {
     const iv = window.setInterval(() => {
@@ -5379,6 +5413,7 @@ function StaffTab({ me }: any) {
     setTeams(t.data || []); setDesigs(d.data || []); setBusy(false);
   };
   useEffect(() => { load(); }, []);
+  useLive(["employees", "teams"], load);
 
   if (busy) return <p className="att-muted">Loading…</p>;
   const shown = rows.filter((r) =>
@@ -5986,6 +6021,8 @@ function OrgTab() {
   const [emps, setEmps] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(true);
+  const [tick, setTick] = useState(0);
+  useLive(["employees", "teams"], () => setTick((x) => x + 1));
 
   useEffect(() => {
     (async () => {
@@ -5995,7 +6032,7 @@ function OrgTab() {
       ]);
       setTeams(t.data || []); setEmps(e.data || []); setBusy(false);
     })();
-  }, []);
+  }, [tick]);
 
   if (busy) return <p className="att-muted">Loading…</p>;
 
@@ -7517,7 +7554,7 @@ const ALIASES: Record<string, string> = {
   // scope ke naam (jinme ek hi view hai)
   "Pending": "approve leave request regularisation waiting action inbox",
   "Approved": "approved rejected history past decided requests today",
-  "Needs setup": "incomplete missing department manager email code",
+  "Employees missing details": "needs setup incomplete missing department manager email code leaving date",
   "Holidays": "holiday list festival calendar public",
   "My Profile": "account settings my details code shift password",
 };
@@ -8288,6 +8325,7 @@ function NeedsSetupTab({ me }: any) {
     setBusy(false);
   };
   useEffect(() => { load(); }, []);
+  useLive(["employees", "teams"], load);
 
   const gaps = (r: any) => {
     const g: string[] = [];
@@ -11851,7 +11889,7 @@ const MODULES: Module[] = [
     scopes: [
       { k: "pending", label: "Pending", views: [{ k: "all", label: "Awaiting action" }]},
       { k: "approved", label: "Approved", views: [{ k: "all", label: "Approved requests" }]},
-      { k: "setup", label: "Needs setup", views: [{ k: "all", label: "Half-filled records" }]},
+      { k: "setup", label: "Employees missing details", views: [{ k: "all", label: "Half-filled records" }]},
     ],
   },
   {
@@ -11895,6 +11933,9 @@ const MODULES: Module[] = [
 
 export default function Attendance() {
   const [session, setSession] = useState<any>(undefined);
+  // badge (Pending / Employees missing details) live
+  const [countTick, setCountTick] = useState(0);
+  useLive(["employees", "leaves", "regularizations"], () => setCountTick((x) => x + 1));
   const [me, setMe] = useState<any>(null);
   // Nav ab URL ke hash mein rehta hai: #home/myspace/verify
   // Isse refresh pe wahi tab khulta hai aur link share kiya ja sakta hai.
@@ -12027,7 +12068,7 @@ export default function Attendance() {
       setCounts({ pending: approvals, setup });   // history ka koi badge nahi
       setPending(approvals);                      // rail pe kaam wale hi
     })();
-  }, [me, mod]);
+  }, [me, mod, countTick]);
 
   const shell = (children: any) => (
     <div className="hjsatt" lang="en-GB"><style>{CSS}</style>{children}</div>
