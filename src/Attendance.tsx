@@ -363,6 +363,7 @@ const CSS = `
 .hjsatt .m-W { color: #98a2b3; } .hjsatt .m-F { color: #a16207; }
 .hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
 .hjsatt .m-PSL { color: #0891b2; }
+.hjsatt .m-S { color: #c2410c; }
 .hjsatt .m-PEND { color: #b54708; opacity: .75; }
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
 .hjsatt .m-X { color: #2563eb; }
@@ -1055,6 +1056,7 @@ const greetWord = () => {
 const pillClass = (s: string) => {
   const map: Record<string, string> = {
     Present: "p-Present", Late: "p-Late", "Half Day": "p-HalfDay", Absent: "p-Absent",
+    "Short Leave": "p-Late",
     Leave: "p-Leave", Holiday: "p-Off", "Week Off": "p-Off",
     Approved: "p-Approved", Pending: "p-Pending", Rejected: "p-Rejected", Cancelled: "p-Off",
   };
@@ -1062,19 +1064,22 @@ const pillClass = (s: string) => {
 };
 const markClass = (m: string) =>
   m && m.endsWith("?") ? "att-mark m-PEND"
-  : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL"].includes(m) ? m : "X"}`;
+  : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL", "S"].includes(m) ? m : "X"}`;
 // muster roll par dikhne wala text — PSL = present, par us din short leave bhi li
-const markText = (m: string) => (m === "PSL" ? "P (SL)" : m);
+// S = der se check-in (11:30–12:45) -> system ki Short Leave (0.25 cut)
+const markText = (m: string) => (m === "PSL" ? "P (SL)" : m === "S" ? "SL" : m);
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
 };
 
 const letterOf = (st: string) => ({
   Present: "P", Late: "L", "Half Day": "H", Absent: "A", "Week Off": "W", Holiday: "F",
+  "Short Leave": "S",
 } as Record<string, string>)[st] || (st ? st[0] : "-");
 const MK_TINT: Record<string, [string, string]> = {
   P: ["#ecfdf3", "#067647"], L: ["#fffaeb", "#b54708"], H: ["#fff6ed", "#c4320a"],
   A: ["#fef3f2", "#b42318"], W: ["#f2f4f7", "#475467"], F: ["#f2f4f7", "#475467"],
+  S: ["#fff4ed", "#c2410c"],
 };
 const monthStart = (iso: string) => iso.slice(0, 8) + "01";
 const shiftMonth = (iso: string, n: number) => {
@@ -1834,7 +1839,8 @@ function HomeScreen({ me }: any) {
         isToday: key === istToday(),
         status,
         mark: log ? (lv && lv.leave_type === "SHORT" ? "PSL"
-                : ({ Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P"))
+                : ({ Present: "P", Late: "L", "Half Day": "H", "Short Leave": "S",
+                     Absent: "A" }[log.status as string] || "P"))
               : off ? "W" : lvm ? lvm : key > istToday() ? "" : "A",
         mins: log?.worked_minutes,
         log, lv,
@@ -1844,7 +1850,7 @@ function HomeScreen({ me }: any) {
 
   const dayColor: Record<string, string> = {
     Present: "#16a34a", Late: "#d97706", "Half Day": "#ea580c",
-    Absent: "#dc2626", Off: "#98a2b3",
+    "Short Leave": "#c2410c", Absent: "#dc2626", Off: "#98a2b3",
   };
   const peerCodes = new Set(peers.map((p: any) => p.emp_code));
   const myTeam = board.filter((p) => peerCodes.has(p.emp_code) || p.emp_code === me.emp_code);
@@ -2561,6 +2567,7 @@ function MatrixTab({ me }: any) {
         <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
         <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave ·{" "}
         <b className="m-PSL">P (SL)</b> present, short leave liya ·{" "}
+        <b className="m-S">SL</b> 11:30–12:45 check-in (short leave) ·{" "}
         <b className="m-PEND">EL?</b> leave lagi hai, approval pending
       </p>
 
@@ -2683,7 +2690,8 @@ function CalendarTab({ me }: any) {
     const hol = hols.find((x: any) => x.hol_date === key);
     const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
     if (log) return { label: log.status, mins: log.worked_minutes,
-      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#9333ea" }[log.status as string] || "#475467" };
+      color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#9333ea",
+               "Short Leave": "#c2410c", Absent: "#dc2626" }[log.status as string] || "#475467" };
     if (hol) return { label: hol.name, color: "#a16207" };
     if (off) return { label: "Week off", color: "#98a2b3" };
     if (lv) {
@@ -5005,12 +5013,15 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
 }
 
 /* ========================= team ========================= */
-function TodayTab() {
+function TodayTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [date, setDate] = useState(istToday());
   const [filter, setFilter] = useState("");
   const [q, setQ] = useState("");
+  const [tick, setTick] = useState(0);
+  const [acting, setActing] = useState("");
+  const [actErr, setActErr] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -5021,18 +5032,38 @@ function TodayTab() {
           .select("employee_id, in_at, in_lat, in_lng, in_distance_m, in_geo_ok")
           .eq("work_date", date).order("in_at"),
       ]);
-      const emps = await supabase.from("employees").select("id, emp_code");
+      const [emps, lg] = await Promise.all([
+        supabase.from("employees").select("id, emp_code, reports_to, co_manager_id"),
+        supabase.from("attendance_logs")
+          .select("employee_id, status, late_mark, late_waived, late_waived_by").eq("work_date", date),
+      ]);
       const codeById: Record<string, string> = {};
-      (emps.data || []).forEach((e: any) => { codeById[e.id] = e.emp_code; });
+      const empByCode: Record<string, any> = {};
+      (emps.data || []).forEach((e: any) => { codeById[e.id] = e.emp_code; empByCode[e.emp_code] = e; });
+      const logByCode: Record<string, any> = {};
+      (lg.data || []).forEach((x: any) => { logByCode[codeById[x.employee_id]] = x; });
       const firstByCode: Record<string, any> = {};
       (sess.data || []).forEach((x: any) => {
         const c = codeById[x.employee_id];
         if (c && !firstByCode[c]) firstByCode[c] = x;
       });
-      setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code] })));
+      setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code],
+        emp: empByCode[r.emp_code], log: logByCode[r.emp_code] })));
       setBusy(false);
     })();
-  }, [date]);
+  }, [date, tick]);
+
+  // der se check-in ka cut — manager (direct team) / admin hata sakta hai
+  const canWaive = (r: any) => !!r.emp && (me?.role === "admin"
+    || r.emp.reports_to === me?.id || r.emp.co_manager_id === me?.id);
+  const waive = async (r: any, on: boolean) => {
+    setActErr(""); setActing(r.emp_code);
+    const { error } = await supabase.rpc("set_late_waive",
+      { p_emp: r.emp.id, p_date: date, p_waive: on });
+    setActing("");
+    if (error) setActErr(`${r.full_name}: ${error.message}`);
+    else setTick((t) => t + 1);
+  };
 
   const inNow = rows.filter((r) => r.state === "In").length;
   const done = rows.filter((r) => r.state === "Out").length;
@@ -5066,6 +5097,7 @@ function TodayTab() {
       </div>
 
       {busy && <p className="att-muted">Loading…</p>}
+      <Note>{actErr}</Note>
 
       <div className="att-grid4 att-grid6">
         <div className={`att-stat clk ${!filter ? "on" : ""}`}
@@ -5119,6 +5151,24 @@ function TodayTab() {
                     <p style={{ marginTop: 3 }}>
                       <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
                         dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
+                    </p>
+                  )}
+                  {r.log?.late_mark && (
+                    <p style={{ marginTop: 4, display: "flex", gap: 6, justifyContent: "flex-end",
+                                alignItems: "center", flexWrap: "wrap" }}>
+                      {r.log.late_waived ? (
+                        <span className="att-muted" style={{ fontSize: 11.5 }}>
+                          Late {r.log.late_mark} hataya{r.log.late_waived_by ? ` · ${r.log.late_waived_by}` : ""}
+                        </span>
+                      ) : (
+                        <span className={pillClass(r.log.late_mark)}>{r.log.late_mark} · late</span>
+                      )}
+                      {canWaive(r) && (
+                        <button className="att-btn sm line" disabled={acting === r.emp_code}
+                          onClick={() => waive(r, !r.log.late_waived)}>
+                          {acting === r.emp_code ? "…" : r.log.late_waived ? "Undo" : "Remove"}
+                        </button>
+                      )}
                     </p>
                   )}
                 </div>
@@ -5325,7 +5375,7 @@ function StaffTab({ me }: any) {
 
 const STATUS_OPTS = ["Active", "Probation", "Notice period", "Exited"];
 
-function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
+function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnSave }: any) {
   const isNew = !row;
   const [f, setF] = useState<any>(row || {
     emp_code: "", full_name: "", first_name: "", last_name: "",
@@ -5410,6 +5460,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose }: any) {
           : "Saved." });
         // payroll wagairah taaza ho jaye
         window.dispatchEvent(new CustomEvent("hjs:employee-updated"));
+        // Needs setup se khula tha -> save ke baad wapas list par
+        if (closeOnSave) setTimeout(onClose, 700);
       }
     } catch (e: any) { setMsg({ err: e.message, ok: "" }); }
     setBusy(false);
@@ -6140,6 +6192,7 @@ function AttSheetTab() {
       const x = m.endsWith("?") ? m.slice(0, -1) : m;
       if (["P", "L", "PSL", "SHORT", "W", "F", ""].includes(x)) return 0;
       if (x === "H" || x === "HALF") return 0.5;
+      if (x === "S") return 0.25;     // der se check-in wali short leave
       return 1;                       // A, UL, EL, CL, COMP ... sab
     };
     // sheet ka taaza data server se lo (page pe purana C.M / hol_credit ho sakta hai)
@@ -6152,7 +6205,7 @@ function AttSheetTab() {
       if (!marks) { miss++; return r; }
       const wo = woBy[r.emp_code] || [0];
       const hols = holsFor(r.emp_code);
-      const came = (m: string) => ["P", "L", "H", "PSL"].includes(m);
+      const came = (m: string) => ["P", "L", "H", "PSL", "S"].includes(m);
       let total = 0, off = 0, hol = 0, comp = 0, lv = 0;
       Object.entries(marks).forEach(([d, m0]) => {
         const m = String(m0 || "");
@@ -7128,7 +7181,8 @@ function MyReportTab({ me }: any) {
       const hol = hols.find((x: any) => x.hol_date === d);
       const off = (me.week_off_days || []).includes(new Date(d + "T00:00:00").getDay());
       let mark = "", label = "";
-      if (log) { mark = { Present: "P", Late: "L", "Half Day": "H" }[log.status as string] || "P";
+      if (log) { mark = { Present: "P", Late: "L", "Half Day": "H", "Short Leave": "S",
+                          Absent: "A" }[log.status as string] || "P";
                  label = log.status;
                  if (lv && lv.leave_type === "SHORT") {
                    mark = "PSL"; label = `${log.status} · Short leave`;
@@ -8138,6 +8192,22 @@ function NeedsSetupTab({ me }: any) {
   const [left, setLeft] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [open, setOpen] = useState<any>(null);
+  // Fix it -> seedha edit form (profile view nahi)
+  const [fix, setFix] = useState<any>(null);
+  const [fixBusy, setFixBusy] = useState("");
+  const openFix = async (r: any) => {
+    setFixBusy(r.id);
+    const [emp, b, t, d, ppl] = await Promise.all([
+      supabase.from("employees").select("*").eq("id", r.id).single(),
+      supabase.from("branches").select("*").order("name"),
+      supabase.from("teams").select("*").order("name"),
+      supabase.from("designations").select("*").eq("active", true).order("sort_order").order("name"),
+      supabase.from("employees").select("id, emp_code, full_name").order("full_name"),
+    ]);
+    setFixBusy("");
+    if (emp.data) setFix({ row: emp.data, branches: b.data || [], teams: t.data || [],
+                           desigs: d.data || [], people: ppl.data || [] });
+  };
   const canEdit = me?.role === "admin";
 
   const load = async () => {
@@ -8203,7 +8273,8 @@ function NeedsSetupTab({ me }: any) {
               </p>
             </div>
             {canEdit && (
-              <button className="att-btn sm" onClick={() => setOpen(r)}>Fix it</button>
+              <button className="att-btn sm" disabled={fixBusy === r.id}
+                onClick={() => openFix(r)}>{fixBusy === r.id ? "Opening…" : "Fix it"}</button>
             )}
           </div>
         ))}
@@ -8232,12 +8303,18 @@ function NeedsSetupTab({ me }: any) {
               </p>
             </div>
             {canEdit && (
-              <button className="att-btn sm" onClick={() => setOpen(r)}>Fix it</button>
+              <button className="att-btn sm" disabled={fixBusy === r.id}
+                onClick={() => openFix(r)}>{fixBusy === r.id ? "Opening…" : "Fix it"}</button>
             )}
           </div>
         ))}
       </div>
 
+      {fix && (
+        <EmployeeSheet row={fix.row} branches={fix.branches} teams={fix.teams}
+          desigs={fix.desigs} people={fix.people} closeOnSave
+          onClose={() => { setFix(null); load(); }} />
+      )}
       {open && <PersonSheet p={open} canEdit={canEdit}
         onClose={() => { setOpen(null); load(); }} onDeleted={load} />}
     </>
@@ -11982,7 +12059,7 @@ export default function Attendance() {
       // ---- Home ----
       case "home/myspace/overview": return <HomeScreen me={me} />;
       case "home/myspace/verify":   return <VerifyPanel onCount={setToCheck} />;
-      case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "home/team/space":       return <div className="att-wrap att-stack"><TodayTab me={me} /></div>;
       case "home/team/dept":        return <div className="att-wrap att-stack"><DeptTab /></div>;
       case "home/team/peers":       return <div className="att-wrap att-stack"><PeersTab /></div>;
       case "home/org/list":         return <div className="att-wrap att-stack"><DirectoryTab me={me} /></div>;
@@ -11996,7 +12073,7 @@ export default function Attendance() {
       case "att/mydata/summary":    return <AttSummary me={me} />;
       case "att/mydata/calendar":   return <CalendarTab me={me} />;
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
-      case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab /></div>;
+      case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab me={me} /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/absent/daily":
         return ["admin", "manager"].includes(me.role) ? <DailyReportTab me={me} /> : <HomeScreen me={me} />;
