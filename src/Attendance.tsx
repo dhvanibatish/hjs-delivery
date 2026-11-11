@@ -2549,9 +2549,9 @@ function MatrixTab({ me }: any) {
     const n = (x: string) => v.filter((y) => y === x).length;
     return {
       p: n("P") + n("L"), present: n("P"), late: n("L"), half: n("H"),
-      a: n("A"), w: n("W"), f: n("F"),
-      l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x)).length,
-      byLeave: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", ""].includes(x))
+      a: n("A"), w: n("W"), f: n("F"), ul: n("UL"),
+      l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", "UL", ""].includes(x)).length,
+      byLeave: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", "UL", ""].includes(x))
         .reduce((o: Record<string, number>, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {}),
     };
   };
@@ -2561,7 +2561,7 @@ function MatrixTab({ me }: any) {
       const o: any = { Code: r.code, Name: r.name };
       dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
       const t = tally(r.marks);
-      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l;
+      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l; o["Unpaid"] = t.ul;
       return o;
     }), `HJS_matrix_${month}.csv`);
 
@@ -2620,6 +2620,7 @@ function MatrixTab({ me }: any) {
                 <th style={{ textAlign: "center" }}>P</th>
                 <th style={{ textAlign: "center" }}>A</th>
                 <th style={{ textAlign: "center" }}>Lv</th>
+                <th style={{ textAlign: "center" }}>UL</th>
               </tr>
             </thead>
             <tbody>
@@ -2632,6 +2633,7 @@ function MatrixTab({ me }: any) {
                   ["Absent", t.a, "#fef3f2", "#b42318"],
                   ["Week off", t.w, "#f2f4f7", "#475467"],
                   ["Holiday", t.f, "#f2f4f7", "#475467"],
+                  ["Unpaid", t.ul, "#fdf2fa", "#c11574"],
                   ...Object.entries(t.byLeave).map(
                     ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
                 ];
@@ -2653,9 +2655,10 @@ function MatrixTab({ me }: any) {
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#c11574" }}>{t.ul}</td>
                     </tr>
                     <tr className="tot" key={r.code + "-t"}>
-                      <td className="name" colSpan={dates.length + 4}>
+                      <td className="name" colSpan={dates.length + 5}>
                         <div className="att-totchips">
                           {chips.filter(([, v]) => v > 0).map(([k, v, bg, fg]) => (
                             <span key={k} style={{ background: bg, color: fg }}>{k} {v}</span>
@@ -2670,7 +2673,7 @@ function MatrixTab({ me }: any) {
                 );
               })}
               {!shown.length && (
-                <tr><td className="name" colSpan={dates.length + 4}>No data for this month.</td></tr>
+                <tr><td className="name" colSpan={dates.length + 5}>No data for this month.</td></tr>
               )}
             </tbody>
           </table>
