@@ -4381,6 +4381,10 @@ const LEAVE_RULES: Record<string, {
            note: "Single day only, counts as a quarter day. Reason is required." },
   HALF:  { single: true, fixedDays: 0.5, reasonReq: true, pastDays: 7, futureDays: 30,
            note: "Single day only, counts as half a day. Reason is required." },
+  // WFH: koi bhi employee / manager apne liye, manager apni team ke liye.
+  // Kisi balance se nahi katta; us din check-in ghar se (off-site flag nahi).
+  WFH:   { reasonReq: true, pastDays: 7, futureDays: 30,
+           note: "Work from home \u2014 kisi leave balance se nahi katta. Us din check-in phone se ghar se karna hai." },
   // ---- corporate policy (Head Office + Noida Showroom) ----
   COMP:  { reasonReq: true, pastDays: 7, futureDays: 31,
            note: "Holiday pe kaam ke badle. Usi mahine mein lena hai, warna lapse." },
@@ -4578,7 +4582,9 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
         p_to_time:   needsTime ? form.to_time   : null,
       });
       if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
-      else { setMsg({ err: "", ok: `Leave lag gayi aur approve ho gayi — ${who.full_name} ko dikh jayegi.` });
+      else { setMsg({ err: "", ok: form.leave_type === "WFH"
+                   ? `WFH lag gaya aur approve ho gaya — ${who.full_name} ko dikh jayega.`
+                   : `Leave lag gayi aur approve ho gayi — ${who.full_name} ko dikh jayegi.` });
              setSent(true); }
       setBusy(false);
       return;
@@ -4592,7 +4598,9 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
       reason: form.reason.trim(), status: "Pending",
     });
     if (error) setMsg({ err: error.message.replace(/^.*?:\s*/, ""), ok: "" });
-    else { setMsg({ err: "", ok: "Leave request sent for approval." }); setSent(true); }
+    else { setMsg({ err: "", ok: form.leave_type === "WFH"
+             ? "WFH request manager ko approval ke liye chali gayi." : "Leave request sent for approval." });
+           setSent(true); }
     setBusy(false);
   };
 
@@ -4610,7 +4618,9 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
             </select>
             {forOther && (
               <p className="att-muted" style={{ marginTop: 6 }}>
-                Ye leave seedha approve hogi aur {who.full_name} ke balance se kategi.
+                {form.leave_type === "WFH"
+                  ? `Ye WFH seedha approve hoga, ${who.full_name} ke kisi balance se nahi katega.`
+                  : `Ye leave seedha approve hogi aur ${who.full_name} ke balance se kategi.`}
               </p>
             )}
           </div>
@@ -4689,7 +4699,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
           </button>
         </div>
         {problem && !msg.err && <p className="att-muted">{problem}</p>}
-        {corp && !rule.fixedDays && days > 5 && (
+        {corp && !rule.fixedDays && days > 5 && form.leave_type !== "WFH" && (
           <div className="att-note err">
             <span>
               Yeh long leave hai (5 din se zyada). Saal mein sirf ek baar mil sakti hai,
@@ -5137,6 +5147,11 @@ function TodayTab({ me }: any) {
         // late cut + "kya main badal sakta hoon" server batata hai (can_approve)
         supabase.rpc("team_late_marks", { p_date: date }),
       ]);
+      // aaj approved WFH wale — inka ghar se check-in off-site nahi gina
+      const wfh = await supabase.from("leaves").select("employee_id")
+        .eq("leave_type", "WFH").eq("status", "Approved")
+        .lte("from_date", date).gte("to_date", date);
+      const wfhIds = new Set((wfh.data || []).map((x: any) => x.employee_id));
       const codeById: Record<string, string> = {};
       const empByCode: Record<string, any> = {};
       (emps.data || []).forEach((e: any) => { codeById[e.id] = e.emp_code; empByCode[e.emp_code] = e; });
@@ -5148,7 +5163,8 @@ function TodayTab({ me }: any) {
         if (c && !firstByCode[c]) firstByCode[c] = x;
       });
       setRows((data || []).map((r: any) => ({ ...r, punch: firstByCode[r.emp_code],
-        emp: empByCode[r.emp_code], log: logByCode[r.emp_code] })));
+        emp: empByCode[r.emp_code], log: logByCode[r.emp_code],
+        wfh: !!empByCode[r.emp_code] && wfhIds.has(empByCode[r.emp_code].id) })));
       setBusy(false);
       setUpdatedAt(new Date());
     })();
@@ -5172,13 +5188,13 @@ function TodayTab({ me }: any) {
   const onLeave = rows.filter((r) => r.state === "Leave").length;
   const notIn = rows.filter((r) => r.state === "Yet to check in").length;
   // geofence ke bahar se punch — HR ko roz ye dekhne hote hain
-  const offSite = rows.filter((r) => r.punch && r.punch.in_geo_ok === false).length;
+  const offSite = rows.filter((r) => r.punch && r.punch.in_geo_ok === false && !r.wfh).length;
   // der se check-in par jinki Short Leave / Half Day lagi (Full Day kiya to nahi gina)
   const lateCut = (r: any) => !!r.log?.auto_cut
     && (r.log.late_override || r.log.auto_cut) !== "Present";
   const lateN = rows.filter(lateCut).length;
   const shown = rows
-    .filter((r) => filter !== "offsite" || (r.punch && r.punch.in_geo_ok === false))
+    .filter((r) => filter !== "offsite" || (r.punch && r.punch.in_geo_ok === false && !r.wfh))
     .filter((r) => filter !== "late" || lateCut(r))
     .filter((r) => !filter || filter === "offsite" || filter === "late" || r.state === filter)
     .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
@@ -5259,10 +5275,15 @@ function TodayTab({ me }: any) {
                     {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
                     {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
                   </p>
+                  {r.wfh && (
+                    <p style={{ marginTop: 3 }}>
+                      <span className="att-pill" style={{ background: "#eff8ff", color: "#175cd3" }}>WFH</span>
+                    </p>
+                  )}
                   {r.punch && (
                     <p style={{ marginTop: 3 }}>
                       <Pin lat={r.punch.in_lat} lng={r.punch.in_lng}
-                        dist={r.punch.in_distance_m} ok={r.punch.in_geo_ok} />
+                        dist={r.punch.in_distance_m} ok={r.wfh ? true : r.punch.in_geo_ok} />
                     </p>
                   )}
                 </div>
@@ -6335,7 +6356,7 @@ function AttSheetTab() {
     const today = istToday();
     const leaveOf = (m: string) => {
       const x = m.endsWith("?") ? m.slice(0, -1) : m;
-      if (["P", "L", "PSL", "SHORT", "W", "F", ""].includes(x)) return 0;
+      if (["P", "L", "PSL", "SHORT", "W", "F", "WFH", ""].includes(x)) return 0;
       if (x === "H" || x === "HALF") return 0.5;
       if (x === "S") return 0.25;     // der se check-in wali short leave
       return 1;                       // A, UL, EL, CL, COMP ... sab
