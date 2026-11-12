@@ -314,6 +314,7 @@ const CSS = `
 
 .hjsatt .att-seg { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .hjsatt .att-seg::-webkit-scrollbar { display: none; }
+.hjsatt .att-seg.att-seg-wrap { flex-wrap: wrap; overflow: visible; }
 .hjsatt .att-seg button { padding: 8px 14px; border-radius: 7px; font-size: 13px;
   color: #475467; white-space: nowrap; background: #fff; border: 1px solid #e5e7eb; }
 .hjsatt .att-seg button.on { background: #eff4ff; color: #2563eb;
@@ -653,7 +654,10 @@ const CSS = `
   border-radius: 6px; white-space: nowrap; }
 
 /* ---------- calendar ---------- */
-.hjsatt .att-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+/* minmax(0,1fr): lamba label ("Unpaid leave") column ko chauda na kare — mobile pe Sunday kat raha tha */
+.hjsatt .att-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.hjsatt .att-calday { min-width: 0; overflow: hidden; }
+.hjsatt .att-calday .st { overflow-wrap: anywhere; line-height: 1.2; }
 .hjsatt .att-caldow { font-size: 11px; font-weight: 700; color: #6b7280; text-align: center;
   padding-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
 .hjsatt .att-calday { min-height: 82px; border: 1px solid #e5e7eb; border-radius: 9px;
@@ -664,9 +668,12 @@ const CSS = `
 .hjsatt .att-calday .st { font-size: 11px; font-weight: 700; margin-top: 6px; }
 .hjsatt .att-calday .hr { font-size: 10.5px; color: #6b7280; }
 @media (max-width: 720px) {
-  .hjsatt .att-calday { min-height: 62px; padding: 5px; }
-  .hjsatt .att-calday .st { font-size: 9.5px; }
+  .hjsatt .att-cal { gap: 4px; }
+  .hjsatt .att-calday { min-height: 58px; padding: 4px 3px; border-radius: 7px; }
+  .hjsatt .att-calday .n { font-size: 12px; }
+  .hjsatt .att-calday .st { font-size: 9px; margin-top: 4px; letter-spacing: -.01em; }
   .hjsatt .att-calday .hr { display: none; }
+  .hjsatt .att-caldow { font-size: 10px; letter-spacing: 0; }
 }
 
 /* ---------- people cards ---------- */
@@ -2529,10 +2536,14 @@ function MatrixTab({ me }: any) {
   };
 
   const isAdmin = me.role === "admin";
+  // manager apni direct team ka din badal sakta hai (short leave / half day / leave),
+  // apna khud ka nahi. Grid mein server pehle se sirf uski team bhejta hai.
+  const canEdit = (code: string) => isAdmin
+    || (me.role === "manager" && code !== me.emp_code);
 
   const openDay = async (code: string, d: string, mark: string) => {
-    // admin khaali din (aage ki date) pe bhi leave laga sakta hai
-    if (!mark && !isAdmin) return;
+    // admin / manager khaali din (aage ki date) pe bhi leave laga sakta hai
+    if (!mark && !canEdit(code)) return;
     const emp = empByCode[code];
     if (!emp) return;
     setPickEmp(emp);
@@ -2599,7 +2610,8 @@ function MatrixTab({ me }: any) {
       </p>
 
       {pick && pickEmp && (
-        <DaySheet d={pick} me={pickEmp} admin={isAdmin} onChanged={load}
+        <DaySheet d={pick} me={pickEmp} admin={canEdit(pickEmp.emp_code)}
+          mgr={!isAdmin} onChanged={load}
           onClose={() => { setPick(null); setPickEmp(null); }} />
       )}
 
@@ -2645,8 +2657,8 @@ function MatrixTab({ me }: any) {
                       </td>
                       {dates.map((d) => (
                         <td key={d} style={{ textAlign: "center",
-                          cursor: r.marks[d] || isAdmin ? "pointer" : "default" }}
-                          title={isAdmin ? "Open / change this day"
+                          cursor: r.marks[d] || canEdit(r.code) ? "pointer" : "default" }}
+                          title={canEdit(r.code) ? "Open / change this day"
                             : r.marks[d] ? "Open this day" : undefined}
                           onClick={() => openDay(r.code, d, r.marks[d])}>
                           <span className={markClass(r.marks[d])}>{markText(r.marks[d]) || "·"}</span>
@@ -7596,15 +7608,23 @@ const LEDGER_KIND: Record<string, { label: string; bg: string; fg: string }> = {
   lapse:      { label: "Lapsed",   bg: "#f2f4f7", fg: "#667085" },
 };
 
-/* ================= admin: kisi bhi din ko badlo ================= */
-// Present / Half day / Leave / Absent — sab admin_set_day RPC se.
-// Purani leave us din se hat jaati hai (lambi leave ho to beech se tootti hai).
-function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone }: any) {
+/* ================= admin / manager: kisi bhi din ko badlo ================= */
+// Admin: Present / Short leave / Half day / Leave / Absent.
+// Manager (sirf apni direct team): Short leave / Half day / Leave — ye sab
+// apply_leave_for se jaate hain (seedha Approved), jo server pe manager ke liye allowed hai.
+// Present / Absent admin_set_day se — wo sirf admin ke liye hai.
+function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onClose, onDone }: any) {
   const s0 = String(emp?.shift_start || "10:00").slice(0, 5);
   const s1 = String(emp?.shift_end || "19:00").slice(0, 5);
-  const [st, setSt] = useState<string>(initial);
+  const opts: [string, string][] = mgr
+    ? [["Short Leave", "Short leave"], ["Half Day", "Half day"], ["Leave", "Leave"]]
+    : [["Present", "Present"], ["Short Leave", "Short leave"], ["Half Day", "Half day"],
+       ["Leave", "Leave"], ["Absent", "Absent"]];
+  const first = opts.some(([k]) => k === initial) ? initial : opts[0][0];
+  const [st, setSt] = useState<string>(first);
   const [tin, setTin] = useState(s0);
-  const [tout, setTout] = useState(s1);
+  const [tout, setTout] = useState(first === "Short Leave" ? addMins(s0, 120)
+    : first === "Half Day" ? addMins(s0, 240) : s1);
   const [lt, setLt] = useState("EL");
   const [types, setTypes] = useState<any[]>([]);
   const [note, setNote] = useState("");
@@ -7613,63 +7633,91 @@ function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone 
 
   useEffect(() => {
     supabase.from("leave_types").select("code, name").order("code")
-      .then(({ data }) => setTypes((data || []).filter((t: any) => t.code !== "SHORT")));
+      .then(({ data }) => {
+        const t = (data || []).filter((x: any) => !["SHORT", "HALF"].includes(x.code));
+        setTypes(t);
+        if (t.length && !t.some((x: any) => x.code === "EL")) setLt(t[0].code);
+      });
   }, []);
 
-  // half day chuna to out time apne aap 4 ghante baad
+  // short leave = 2 ghante, half day = 4 ghante — shift start se
   const pick = (k: string) => {
-    setSt(k);
+    setSt(k); setErr("");
+    if (k === "Short Leave") { setTin(s0); setTout(addMins(s0, 120)); }
     if (k === "Half Day") { setTin(s0); setTout(addMins(s0, 240)); }
     if (k === "Present") { setTin(s0); setTout(s1); }
   };
 
+  // manager ka half day bhi leave (HALF) ban ke jaata hai
+  const viaLeave = st === "Short Leave" || st === "Leave" || (mgr && st === "Half Day");
+  const timed = st === "Short Leave" || st === "Half Day" || st === "Present";
+  const needReason = viaLeave;
+
   const save = async () => {
-    if ((st === "Present" || st === "Half Day") && tout <= tin)
-      return setErr("Out time, in time ke baad hona chahiye.");
+    if (timed && tout <= tin) return setErr("To time must be after the from time.");
+    if (needReason && !note.trim()) return setErr("Please write a reason.");
     setBusy(true); setErr("");
-    const { error } = await supabase.rpc("admin_set_day", {
-      p_emp: emp.id, p_date: date, p_status: st,
-      p_leave_type: st === "Leave" ? lt : null,
-      p_note: note.trim() || null,
-      p_in: st === "Present" || st === "Half Day" ? tin : null,
-      p_out: st === "Present" || st === "Half Day" ? tout : null,
-    });
+    let error: any = null;
+    if (viaLeave) {
+      const code = st === "Short Leave" ? "SHORT" : st === "Half Day" ? "HALF" : lt;
+      ({ error } = await supabase.rpc("apply_leave_for", {
+        p_emp: emp.id, p_type: code, p_from: date, p_to: date,
+        p_days: code === "SHORT" ? 0.25 : code === "HALF" ? 0.5 : 1,
+        p_reason: note.trim(),
+        p_from_time: code === "SHORT" || code === "HALF" ? tin : null,
+        p_to_time:   code === "SHORT" || code === "HALF" ? tout : null,
+      }));
+    } else {
+      ({ error } = await supabase.rpc("admin_set_day", {
+        p_emp: emp.id, p_date: date, p_status: st, p_leave_type: null,
+        p_note: note.trim() || null,
+        p_in: st === "Present" || st === "Half Day" ? tin : null,
+        p_out: st === "Present" || st === "Half Day" ? tout : null,
+      }));
+    }
     setBusy(false);
-    if (error) return setErr(error.message);
+    if (error) return setErr(error.message.replace(/^.*?:\s*/, "") || error.message);
     onDone && onDone();
   };
 
   const pretty = new Date(date + "T00:00:00").toLocaleDateString("en-GB",
     { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  const label = opts.find(([k]) => k === st)?.[1] || st;
 
   return (
     <Sheet title={`Change day · ${emp?.full_name || ""}`} onClose={onClose}>
       <div className="att-card att-stack">
         <p className="att-muted">
-          {pretty}{current ? <> · abhi: <b>{current}</b></> : null}
+          {pretty}{current ? <> · now: <b>{current}</b></> : null}
         </p>
 
         <div>
           <label>Mark this day as</label>
-          <div className="att-seg">
-            {[["Present", "Present"], ["Half Day", "Half day"],
-              ["Leave", "Leave"], ["Absent", "Absent"]].map(([k, l]) => (
+          <div className="att-seg att-seg-wrap">
+            {opts.map(([k, l]) => (
               <button key={k} className={st === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>
             ))}
           </div>
         </div>
 
-        {(st === "Present" || st === "Half Day") && (
+        {timed && (
           <div className="att-row2">
             <div>
-              <label>Check-in</label>
+              <label>{st === "Present" ? "Check-in" : "From"}</label>
               <input type="time" lang="en-US" value={tin} onChange={(e) => setTin(e.target.value)} />
             </div>
             <div>
-              <label>Check-out</label>
+              <label>{st === "Present" ? "Check-out" : "To"}</label>
               <input type="time" lang="en-US" value={tout} onChange={(e) => setTout(e.target.value)} />
             </div>
           </div>
+        )}
+
+        {st === "Short Leave" && (
+          <p className="att-muted">Approved short leave — counts as a quarter day (0.25). Shows as P (SL) if they checked in.</p>
+        )}
+        {st === "Half Day" && mgr && (
+          <p className="att-muted">Approved half-day leave — counts as 0.5 day.</p>
         )}
 
         {st === "Leave" && (
@@ -7681,26 +7729,26 @@ function DaySetSheet({ emp, date, current, initial = "Present", onClose, onDone 
               ))}
             </select>
             <p className="att-muted" style={{ marginTop: 6 }}>
-              Seedha Approved lagegi. Balance kam hua to baaki din UL ban jaayenge.
+              Goes in as Approved. If the balance runs short, the extra days become UL.
             </p>
           </div>
         )}
 
         {st === "Absent" && (
           <div className="att-note err">
-            <span>Us din ki check-in aur leave dono hat jaayengi — din A dikhega.</span>
+            <span>That day's check-in and leave will both be removed — the day will show A.</span>
           </div>
         )}
 
         <div>
-          <label>Note <span className="att-muted">(optional)</span></label>
-          <input value={note} placeholder="Jaise: phone kharab tha, office aaya tha"
+          <label>{needReason ? "Reason" : <>Note <span className="att-muted">(optional)</span></>}</label>
+          <input value={note} placeholder="e.g. went to the bank, left early for a doctor visit"
             onChange={(e) => setNote(e.target.value)} />
         </div>
 
         <Note>{err}</Note>
         <button className="att-btn" disabled={busy} onClick={save}>
-          {busy ? "Saving…" : `Save as ${st === "Half Day" ? "Half day" : st}`}
+          {busy ? "Saving…" : `Save as ${label}`}
         </button>
       </div>
     </Sheet>
@@ -7902,7 +7950,7 @@ function DailyReportTab({ me }: any) {
 }
 
 /* ================= ek din ki poori detail ================= */
-function DaySheet({ d, me, onClose, admin = false, onChanged }: any) {
+function DaySheet({ d, me, onClose, admin = false, mgr = false, onChanged }: any) {
   const [sess, setSess] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [edit, setEdit] = useState(false);
@@ -7916,7 +7964,8 @@ function DaySheet({ d, me, onClose, admin = false, onChanged }: any) {
   // admin ne din badla -> wapas list pe aur list taaza
   if (edit) {
     return (
-      <DaySetSheet emp={me} date={d.d} current={d.label}
+      <DaySetSheet emp={me} date={d.d} current={d.label} mgr={mgr}
+        initial={mgr ? "Short Leave" : "Present"}
         onClose={() => setEdit(false)}
         onDone={() => { setEdit(false); onChanged && onChanged(); onClose(); }} />
     );
@@ -7938,7 +7987,8 @@ function DaySheet({ d, me, onClose, admin = false, onChanged }: any) {
         {admin && (
           <button className="att-btn sm" style={{ alignSelf: "flex-start" }}
             onClick={() => setEdit(true)}>
-            Change this day (Present / Leave / Absent)
+            {mgr ? "Change this day (Short leave / Half day / Leave)"
+              : "Change this day (Present / Short leave / Half day / Leave / Absent)"}
           </button>
         )}
 
