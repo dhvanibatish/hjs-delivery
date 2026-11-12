@@ -5065,6 +5065,11 @@ function TodayTab({ me }: any) {
   const [tick, setTick] = useState(0);
   const [acting, setActing] = useState("");
   const [actErr, setActErr] = useState("");
+  // kisi ka din badalna (short leave / half day / leave) — manager: direct team, admin: sab
+  const [chg, setChg] = useState<any>(null);
+  const isAdm = me?.role === "admin";
+  const canChange = (r: any) => !!r.emp && r.emp.id !== me?.id && (isAdm
+    || (me?.role === "manager" && (r.emp.reports_to === me?.id || r.emp.co_manager_id === me?.id)));
 
   // LIVE: koi check-in / check-out / late change hote hi list badal jaati hai
   // (Supabase Realtime). Saath mein 2 min ka backup refresh + tab pe lautte hi.
@@ -5112,7 +5117,8 @@ function TodayTab({ me }: any) {
           .eq("work_date", date).order("in_at"),
       ]);
       const [emps, lg] = await Promise.all([
-        supabase.from("employees").select("id, emp_code, reports_to, co_manager_id"),
+        supabase.from("employees")
+          .select("id, emp_code, full_name, reports_to, co_manager_id, shift_start, shift_end"),
         // late cut + "kya main badal sakta hoon" server batata hai (can_approve)
         supabase.rpc("team_late_marks", { p_date: date }),
       ]);
@@ -5245,6 +5251,10 @@ function TodayTab({ me }: any) {
                     </p>
                   )}
                 </div>
+                {canChange(r) && (
+                  <button className="att-btn sm line" style={{ flexShrink: 0 }}
+                    onClick={() => setChg(r)}>Change</button>
+                )}
                 {r.log?.auto_cut && (() => {
                   const cur = r.log.late_override || r.log.auto_cut;
                   // kis wajah se: late aaya, jaldi gaya, ya dono
@@ -5288,6 +5298,12 @@ function TodayTab({ me }: any) {
       })}
       {!shown.length && !busy && (
         <div className="att-list"><p className="att-empty">Nobody in this list.</p></div>
+      )}
+      {chg && (
+        <DaySetSheet emp={chg.emp} date={date} current={chg.state} mgr={!isAdm}
+          initial={isAdm ? (chg.state === "Yet to check in" ? "Leave" : "Present") : "Short Leave"}
+          onClose={() => setChg(null)}
+          onDone={() => { setChg(null); setTick((x) => x + 1); }} />
       )}
     </>
   );
