@@ -5185,7 +5185,8 @@ function TodayTab({ me }: any) {
 
   const inNow = rows.filter((r) => r.state === "In").length;
   const done = rows.filter((r) => r.state === "Out").length;
-  const onLeave = rows.filter((r) => r.state === "Leave").length;
+  const onLeave = rows.filter((r) => r.state === "Leave" && !r.wfh).length;
+  const wfhN = rows.filter((r) => r.wfh).length;
   const notIn = rows.filter((r) => r.state === "Yet to check in").length;
   // geofence ke bahar se punch — HR ko roz ye dekhne hote hain
   const offSite = rows.filter((r) => r.punch && r.punch.in_geo_ok === false && !r.wfh).length;
@@ -5196,7 +5197,9 @@ function TodayTab({ me }: any) {
   const shown = rows
     .filter((r) => filter !== "offsite" || (r.punch && r.punch.in_geo_ok === false && !r.wfh))
     .filter((r) => filter !== "late" || lateCut(r))
-    .filter((r) => !filter || filter === "offsite" || filter === "late" || r.state === filter)
+    .filter((r) => filter !== "wfh" || r.wfh)
+    .filter((r) => filter !== "Leave" || !r.wfh)
+    .filter((r) => !filter || ["offsite", "late", "wfh"].includes(filter) || r.state === filter)
     .filter((r) => !q || `${r.full_name} ${r.emp_code} ${r.designation || ""} ${r.team || ""}`
       .toLowerCase().includes(q.toLowerCase()));
 
@@ -5243,6 +5246,9 @@ function TodayTab({ me }: any) {
         <div className={`att-stat clk ${filter === "late" ? "on" : ""}`}
           onClick={() => setFilter(filter === "late" ? "" : "late")}>
           <b style={{ color: "#c2410c" }}>{lateN}</b><span>Late / early · SL / HD</span></div>
+        <div className={`att-stat clk ${filter === "wfh" ? "on" : ""}`}
+          onClick={() => setFilter(filter === "wfh" ? "" : "wfh")}>
+          <b style={{ color: "#175cd3" }}>{wfhN}</b><span>WFH</span></div>
       </div>
       <div className="att-flex">
         <Search placeholder="Search name, code, team" value={q}
@@ -5270,7 +5276,8 @@ function TodayTab({ me }: any) {
                   <p className="att-muted">{r.designation || "—"}</p>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <p style={{ fontWeight: 700, fontSize: 13, color: stateColor[r.state] }}>{r.state}</p>
+                  <p style={{ fontWeight: 700, fontSize: 13, color: r.wfh && r.state === "Leave" ? "#175cd3" : stateColor[r.state] }}>
+                    {r.wfh && r.state === "Leave" ? "WFH" : r.state}</p>
                   <p className="att-muted" style={{ fontSize: 11.5 }}>
                     {r.first_in ? `${fmtTime(r.first_in)}${r.state === "Out" ? ` – ${fmtTime(r.last_out)}` : ""}` : ""}
                     {r.minutes ? ` · ${hhmm(r.minutes)}` : ""}
@@ -7675,9 +7682,9 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
   const s0 = String(emp?.shift_start || "10:00").slice(0, 5);
   const s1 = String(emp?.shift_end || "19:00").slice(0, 5);
   const opts: [string, string][] = mgr
-    ? [["Short Leave", "Short leave"], ["Half Day", "Half day"], ["Leave", "Leave"]]
+    ? [["Short Leave", "Short leave"], ["Half Day", "Half day"], ["WFH", "WFH"], ["Leave", "Leave"]]
     : [["Present", "Present"], ["Short Leave", "Short leave"], ["Half Day", "Half day"],
-       ["Leave", "Leave"], ["Absent", "Absent"]];
+       ["WFH", "WFH"], ["Leave", "Leave"], ["Absent", "Absent"]];
   const first = opts.some(([k]) => k === initial) ? initial : opts[0][0];
   const [st, setSt] = useState<string>(first);
   const [tin, setTin] = useState(s0);
@@ -7692,7 +7699,7 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
   useEffect(() => {
     supabase.from("leave_types").select("code, name").order("code")
       .then(({ data }) => {
-        const t = (data || []).filter((x: any) => !["SHORT", "HALF"].includes(x.code));
+        const t = (data || []).filter((x: any) => !["SHORT", "HALF", "WFH"].includes(x.code));
         setTypes(t);
         if (t.length && !t.some((x: any) => x.code === "EL")) setLt(t[0].code);
       });
@@ -7707,7 +7714,7 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
   };
 
   // manager ka half day bhi leave (HALF) ban ke jaata hai
-  const viaLeave = st === "Short Leave" || st === "Leave" || (mgr && st === "Half Day");
+  const viaLeave = st === "Short Leave" || st === "Leave" || st === "WFH" || (mgr && st === "Half Day");
   const timed = st === "Short Leave" || st === "Half Day" || st === "Present";
   const needReason = viaLeave;
 
@@ -7717,7 +7724,7 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
     setBusy(true); setErr("");
     let error: any = null;
     if (viaLeave) {
-      const code = st === "Short Leave" ? "SHORT" : st === "Half Day" ? "HALF" : lt;
+      const code = st === "Short Leave" ? "SHORT" : st === "Half Day" ? "HALF" : st === "WFH" ? "WFH" : lt;
       ({ error } = await supabase.rpc("apply_leave_for", {
         p_emp: emp.id, p_type: code, p_from: date, p_to: date,
         p_days: code === "SHORT" ? 0.25 : code === "HALF" ? 0.5 : 1,
@@ -7773,6 +7780,10 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
 
         {st === "Short Leave" && (
           <p className="att-muted">Approved short leave — counts as a quarter day (0.25). Shows as P (SL) if they checked in.</p>
+        )}
+        {st === "WFH" && (
+          <p className="att-muted">Work from home — seedha Approved, kisi balance se nahi katta.
+            Check-in kiya ho to bhi off-site nahi ginega.</p>
         )}
         {st === "Half Day" && mgr && (
           <p className="att-muted">Approved half-day leave — counts as 0.5 day.</p>
