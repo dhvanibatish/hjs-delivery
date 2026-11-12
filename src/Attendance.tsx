@@ -4518,7 +4518,7 @@ const LEAVE_RULES: Record<string, {
   // WFH: koi bhi employee / manager apne liye, manager apni team ke liye.
   // Kisi balance se nahi katta; us din check-in ghar se (off-site flag nahi).
   WFH:   { reasonReq: true, pastDays: 7, futureDays: 30,
-           note: "Work from home \u2014 kisi leave balance se nahi katta. Us din check-in phone se ghar se karna hai." },
+           note: "Work from home \u2014 kisi leave balance se nahi katta. Us din check-in / check-out kahin se bhi, phone ya laptop se. Approval ka wait nahi." },
   // ---- corporate policy (Head Office + Noida Showroom) ----
   COMP:  { reasonReq: true, pastDays: 7, futureDays: 31,
            note: "Holiday pe kaam ke badle. Usi mahine mein lena hai, warna lapse." },
