@@ -2558,13 +2558,24 @@ function MatrixTab({ me }: any) {
   const tally = (m: Record<string, string>) => {
     const v = Object.values(m);
     const n = (x: string) => v.filter((y) => y === x).length;
-    return {
-      p: n("P") + n("L"), present: n("P"), late: n("L"), half: n("H"),
+    // P/L/S/PSL = aaya (short leave se pay nahi katti), H = aadha din
+    const NOT_LEAVE = ["P", "L", "S", "PSL", "H", "A", "W", "F", "UL", ""];
+    const isPend = (x: string) => !!x && x.endsWith("?");
+    const paidLv = v.filter((x) => x && !NOT_LEAVE.includes(x) && !isPend(x));
+    const t = {
+      p: n("P") + n("L") + n("S") + n("PSL"), present: n("P"), late: n("L"),
+      sl: n("S") + n("PSL"), half: n("H"),
       a: n("A"), w: n("W"), f: n("F"), ul: n("UL"),
-      l: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", "UL", ""].includes(x)).length,
-      byLeave: v.filter((x) => x && !["P", "L", "H", "A", "W", "F", "UL", ""].includes(x))
+      pend: v.filter(isPend).length,
+      l: paidLv.length,
+      byLeave: paidLv
         .reduce((o: Record<string, number>, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {}),
+      pay: 0,
     };
+    // Pay = aaya + half×0.5 + paid leave + week off + holiday
+    // (A, UL aur approval-pending leave pay mein nahi)
+    t.pay = t.p + t.half * 0.5 + t.l + t.w + t.f;
+    return t;
   };
 
   const exportCsv = () => downloadCsv(
@@ -2572,7 +2583,7 @@ function MatrixTab({ me }: any) {
       const o: any = { Code: r.code, Name: r.name };
       dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
       const t = tally(r.marks);
-      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l; o["Unpaid"] = t.ul;
+      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l; o["Unpaid"] = t.ul; o["Pay days"] = t.pay;
       return o;
     }), `HJS_matrix_${month}.csv`);
 
@@ -2633,6 +2644,7 @@ function MatrixTab({ me }: any) {
                 <th style={{ textAlign: "center" }}>A</th>
                 <th style={{ textAlign: "center" }}>Lv</th>
                 <th style={{ textAlign: "center" }}>UL</th>
+                <th style={{ textAlign: "center" }}>Pay</th>
               </tr>
             </thead>
             <tbody>
@@ -2641,11 +2653,13 @@ function MatrixTab({ me }: any) {
                 const chips: [string, number, string, string][] = [
                   ["Present", t.present, "#ecfdf3", "#067647"],
                   ["Late", t.late, "#fffaeb", "#b54708"],
+                  ["Short leave", t.sl, "#fffaeb", "#b54708"],
                   ["Half day", t.half, "#fff6ed", "#c4320a"],
                   ["Absent", t.a, "#fef3f2", "#b42318"],
                   ["Week off", t.w, "#f2f4f7", "#475467"],
                   ["Holiday", t.f, "#f2f4f7", "#475467"],
                   ["Unpaid", t.ul, "#fdf2fa", "#c11574"],
+                  ["Pending approval", t.pend, "#fffaeb", "#b54708"],
                   ...Object.entries(t.byLeave).map(
                     ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
                 ];
@@ -2668,9 +2682,10 @@ function MatrixTab({ me }: any) {
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#c11574" }}>{t.ul}</td>
+                      <td style={{ textAlign: "center", fontWeight: 800, color: "#101828" }}>{t.pay}</td>
                     </tr>
                     <tr className="tot" key={r.code + "-t"}>
-                      <td className="name" colSpan={dates.length + 5}>
+                      <td className="name" colSpan={dates.length + 6}>
                         <div className="att-totchips">
                           {chips.filter(([, v]) => v > 0).map(([k, v, bg, fg]) => (
                             <span key={k} style={{ background: bg, color: fg }}>{k} {v}</span>
@@ -2685,7 +2700,7 @@ function MatrixTab({ me }: any) {
                 );
               })}
               {!shown.length && (
-                <tr><td className="name" colSpan={dates.length + 5}>No data for this month.</td></tr>
+                <tr><td className="name" colSpan={dates.length + 6}>No data for this month.</td></tr>
               )}
             </tbody>
           </table>
@@ -6292,6 +6307,8 @@ function AttSheetTab() {
   // C.M mein +2 (hol_credit mein yaad rakha, taaki dobara refill pe double na ho
   // aur agle mahine carry na ho) · Leave = A, UL, har leave = 1,
   // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini.
+  // Short leave: mahine ki pehli 2 (SHORT + P (SL) + der/jaldi wali S milake)
+  // free; 3rd se S = 0.25 (SHORT apply hi 2 ke baad block hai).
   // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
   const refillFromGrid = async () => {
     setBusy(true); setErr(""); setGridMsg("");
@@ -6334,8 +6351,8 @@ function AttSheetTab() {
       const wo = woBy[r.emp_code] || [0];
       const hols = holsFor(r.emp_code);
       const came = (m: string) => ["P", "L", "H", "PSL", "S"].includes(m);
-      let total = 0, off = 0, hol = 0, comp = 0, lv = 0;
-      Object.entries(marks).forEach(([d, m0]) => {
+      let total = 0, off = 0, hol = 0, comp = 0, lv = 0, slUsed = 0;
+      Object.entries(marks).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).forEach(([d, m0]) => {
         const m = String(m0 || "");
         if (!m && d <= today) return;        // joining se pehle / leaving ke baad
         total++;
@@ -6345,6 +6362,10 @@ function AttSheetTab() {
           return;
         }
         if (wo.includes(new Date(d + "T00:00:00").getDay())) off++;
+        else if (["S", "PSL", "SHORT"].includes(m.replace("?", ""))) {
+          slUsed++;
+          if (m === "S" && slUsed > 2) lv += 0.25;   // 2 free ke baad hi cut
+        }
         else lv += leaveOf(m);
       });
       // C.M se pichla holiday credit hatao, naya jodo
