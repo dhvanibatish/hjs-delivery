@@ -1772,6 +1772,8 @@ function HomeScreen({ me }: any) {
   const [err, setErr] = useState(""); const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
   const [regOpen, setRegOpen] = useState(false);
+  const [missedDay, refreshMissed] = useMissedCheckout(me);
+  const [fixDay, setFixDay] = useState<string | null>(null);
   // CR-2: manager/admin ne meri leave lagayi — jab tak OK na dabaun dikhe
   const [byMgr, setByMgr] = useState<any[]>([]);
   useEffect(() => {
@@ -1824,15 +1826,10 @@ function HomeScreen({ me }: any) {
     [sessions]);
 
   const punch = async (dir: "in" | "out") => {
+    if (dir === "in" && missedDay) { setFixDay(missedDay); return; }
     setErr(""); setOk(""); setBusy(true);
     try {
-      // Check-in par location zaroori hai, check-out par nahi.
-      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
-      if (dir === "in") {
-        const pos = await getPosition();
-        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
-                 p_accuracy: Math.round(pos.coords.accuracy) };
-      }
+      const args = await punchArgs(me, dir);
       const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
       if (error) throw new Error(error.message);
       setOk(dir === "in" ? "Checked in." : "Checked out. You can check in again anytime.");
@@ -1928,6 +1925,7 @@ function HomeScreen({ me }: any) {
                 ? "Check-in works only on your phone. Check-out can be done from anywhere."
                 : "Location is recorded with every punch"}
             </p>
+            {!open && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
 
             {sessions.length > 0 && (
               <div style={{ marginTop: 12 }}>
@@ -2109,7 +2107,10 @@ function HomeScreen({ me }: any) {
         </div>
       </div>
 
-      {regOpen && <RegularizeSheet me={me} onClose={() => setRegOpen(false)} />}
+      {regOpen && <RegularizeSheet me={me} onClose={() => { setRegOpen(false); refreshMissed(); }} />}
+      {fixDay && <RegularizeSheet me={me} forDate={fixDay}
+        onClose={() => { setFixDay(null); refreshMissed(); }} />}
+      <LslPopup me={me} todayLog={today} />
       {drill && <DayListSheet title={drill.t} rows={drill.r} onClose={() => setDrill(null)} />}
 
       {pickDay && (
@@ -2126,16 +2127,113 @@ function HomeScreen({ me }: any) {
   );
 }
 
+/* ================= check-out mandatory + LSL ================= */
+// Check-in par hamesha location. Check-out par sirf corporate (Head Office +
+// Noida Showroom) se — unka check-out bhi 500 m ke andar hi hona chahiye.
+const punchArgs = async (me: any, dir: "in" | "out") => {
+  if (dir === "out" && !isCorporate(me)) return { p_lat: null, p_lng: null, p_accuracy: null };
+  const pos = await getPosition();
+  return { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+           p_accuracy: Math.round(pos.coords.accuracy) };
+};
+
+// Pichle din ka check-out nahi hua (raat ko system ne band kiya) aur
+// regularization apply nahi kiya -> wo date. Warna null.
+function useMissedCheckout(me: any) {
+  const [day, setDay] = useState<string | null>(null);
+  const refresh = async () => {
+    const { data } = await supabase.rpc("missed_checkout_day");
+    setDay(data || null);
+  };
+  useEffect(() => { refresh(); }, [me.id]);
+  return [day, refresh] as const;
+}
+
+function MissedCheckoutNote({ day, onFix }: any) {
+  if (!day) return null;
+  return (
+    <div className="att-note err" style={{ marginTop: 10 }}>
+      <span>
+        You didn't check out on {fmtDate(day)}. Apply regularization for that day first,
+        then you can check in.
+      </span>
+      <button className="att-btn sm" style={{ marginTop: 9 }} onClick={onFix}>
+        Apply regularization
+      </button>
+    </div>
+  );
+}
+
+// Late Short Leave: 10:30 ke baad check-in (aur 9 ghante poore nahi).
+// Har 3 LSL = payroll mein half day. Aaj LSL lagi to ek baar pop-up.
+const LSL_MARK = "Late SL";
+function LslPopup({ me, todayLog }: any) {
+  const [n, setN] = useState<number | null>(null);
+  const [show, setShow] = useState(false);
+  const key = `hjs-lsl-${me.id}-${istToday()}`;
+  useEffect(() => {
+    if (todayLog?.late_mark !== LSL_MARK || todayLog?.late_override === "Present") return;
+    let seen = false;
+    try { seen = localStorage.getItem(key) === "1"; } catch { /* storage band */ }
+    if (seen) return;
+    supabase.from("attendance_logs").select("work_date, late_override")
+      .eq("employee_id", me.id).eq("late_mark", LSL_MARK)
+      .gte("work_date", monthStart(istToday())).lte("work_date", istToday())
+      .then(({ data }) => {
+        setN((data || []).filter((x: any) => x.late_override !== "Present").length);
+        setShow(true);
+      });
+  }, [todayLog?.late_mark, todayLog?.late_override, me.id]);
+  if (!show || n == null) return null;
+  const close = () => {
+    try { localStorage.setItem(key, "1"); } catch { /* storage band */ }
+    setShow(false);
+  };
+  const left = 3 - (n % 3);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(16,24,40,.45)", zIndex: 60,
+                  display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+      <div className="att-card" style={{ maxWidth: 360, width: "100%", textAlign: "center" }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: "#c2410c" }}>Late Short Leave</p>
+        <p style={{ fontSize: 40, fontWeight: 800, margin: "8px 0 2px" }}>{n}</p>
+        <p className="att-muted">this month</p>
+        <p style={{ marginTop: 12, fontSize: 13.5, color: "#344054" }}>
+          You checked in after 10:30. Complete 9 hours today (lunch included) and this
+          Late Short Leave is removed.
+        </p>
+        <p style={{ marginTop: 8, fontSize: 13.5, color: "#344054" }}>
+          Every 3 Late Short Leaves = 1 half day cut from salary.{" "}
+          {n % 3 === 0 ? <b>A half day has been cut for this set.</b>
+            : <b>{left} more and a half day is cut.</b>}
+        </p>
+        <button className="att-btn" style={{ marginTop: 14 }} onClick={close}>OK</button>
+      </div>
+    </div>
+  );
+}
+
 /* ================= regularization ================= */
-function RegularizeSheet({ me, onClose }: any) {
+// forDate: jis din ka check-out chhoota (check-in block hai) — wahi date fix,
+// aur us din ka asli pehla check-in time pehle se bhara
+function RegularizeSheet({ me, onClose, forDate }: any) {
   const [form, setForm] = useState({
-    work_date: istToday(),
+    work_date: forDate || istToday(),
     req_punch_in: String(me?.shift_start || "10:00").slice(0, 5),
-    req_punch_out: nowHM(),
+    req_punch_out: forDate ? String(me?.shift_end || "19:00").slice(0, 5) : nowHM(),
     reason: "",
   });
   const [msg, setMsg] = useState({ err: "", ok: "" });
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!forDate) return;
+    supabase.from("attendance_sessions").select("in_at").eq("employee_id", me.id)
+      .eq("work_date", forDate).order("in_at").limit(1)
+      .then(({ data }) => {
+        const t = data?.[0]?.in_at;
+        if (t) setForm((f) => ({ ...f, req_punch_in: new Date(t).toLocaleTimeString("en-GB",
+          { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ }) }));
+      });
+  }, [forDate, me.id]);
 
   const submit = async () => {
     setBusy(true); setMsg({ err: "", ok: "" });
@@ -2146,17 +2244,25 @@ function RegularizeSheet({ me, onClose }: any) {
       reason: form.reason, status: "Pending",
     });
     if (error) setMsg({ err: "Couldn't send: " + error.message, ok: "" });
-    else setMsg({ err: "", ok: "Sent to your manager." });
+    else setMsg({ err: "", ok: forDate
+      ? "Sent to your manager. You can check in now."
+      : "Sent to your manager." });
     setBusy(false);
   };
 
   return (
-    <Sheet title="Missed a punch?" onClose={onClose}>
+    <Sheet title={forDate ? "Check-out missed" : "Missed a punch?"} onClose={onClose}>
       <div className="att-card att-stack">
+        {forDate && (
+          <Note>
+            You didn't check out on {fmtDate(forDate)}. Send a regularization for that day
+            to check in today. Your manager will confirm the times.
+          </Note>
+        )}
         <div>
           <label>Date</label>
           <input type="date" max={istToday()} min={addDays(istToday(), -15)}
-            value={form.work_date}
+            value={form.work_date} disabled={!!forDate}
             onChange={(e) => setForm({ ...form, work_date: e.target.value })} />
           <p className="att-muted" style={{ marginTop: 6 }}>
             Only the last 15 days can be regularized.
@@ -2266,15 +2372,13 @@ function AttSummary({ me }: any) {
               .reduce((a, x) => a + (x.minutes || 0), 0),
     [sess]);
 
+  const [missedDay, refreshMissed] = useMissedCheckout(me);
+  const [fixDay, setFixDay] = useState<string | null>(null);
   const punch = async (dir: "in" | "out") => {
+    if (dir === "in" && missedDay) { setFixDay(missedDay); return; }
     setErr(""); setBusy(true);
     try {
-      let args: any = { p_lat: null, p_lng: null, p_accuracy: null };
-      if (dir === "in") {
-        const pos = await getPosition();
-        args = { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
-                 p_accuracy: Math.round(pos.coords.accuracy) };
-      }
+      const args = await punchArgs(me, dir);
       const { error } = await supabase.rpc(dir === "in" ? "punch_in" : "punch_out", args);
       if (error) throw new Error(error.message);
       await load();
@@ -2390,6 +2494,9 @@ function AttSummary({ me }: any) {
           </span>
         )}
       </div>
+      {!openSess && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
+      {fixDay && <RegularizeSheet me={me} forDate={fixDay}
+        onClose={() => { setFixDay(null); refreshMissed(); }} />}
 
       <Note>{err}</Note>
 
@@ -4843,9 +4950,21 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     await load(); setBusy(false);
   };
 
+  // manager approve se pehle time badal sakta hai — jo yahan save hoga wahi lagega
+  const [regT, setRegT] = useState<Record<string, { in: string; out: string }>>({});
+  const tOf = (r: any) => regT[r.id] || {
+    in: String(r.req_punch_in || "").slice(0, 5), out: String(r.req_punch_out || "").slice(0, 5) };
   const decideReg = async (id: string, st: string) => {
+    const r = regs.find((x) => x.id === id);
+    const t = r ? tOf(r) : { in: "", out: "" };
+    if (st === "Approved" && t.in && t.out && t.out <= t.in) {
+      setErr("Check-out time must be after check-in time."); return;
+    }
     setBusy(true); setErr("");
-    const { error } = await supabase.rpc("decide_regularization", { p_id: id, p_status: st });
+    const { error } = await supabase.rpc("decide_regularization", {
+      p_id: id, p_status: st, p_note: null,
+      p_in: st === "Approved" && t.in ? t.in : null,
+      p_out: st === "Approved" && t.out ? t.out : null });
     if (error) setErr(error.message);
     await load(); setBusy(false);
   };
@@ -5060,6 +5179,26 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                 <p className="att-muted">
                   {fmtDate(r.work_date)} · {fmtHM(r.req_punch_in)} – {fmtHM(r.req_punch_out)}
                 </p>
+                {r.status === "Pending" && (
+                  <div className="att-flex" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}
+                    onClick={(e) => e.stopPropagation()}>
+                    <label className="att-muted" style={{ fontSize: 12 }}>
+                      In
+                      <input type="time" lang="en-US" value={tOf(r).in} disabled={busy}
+                        style={{ width: 118, minHeight: 34, marginLeft: 5 }}
+                        onChange={(e) => setRegT({ ...regT, [r.id]: { ...tOf(r), in: e.target.value } })} />
+                    </label>
+                    <label className="att-muted" style={{ fontSize: 12 }}>
+                      Out
+                      <input type="time" lang="en-US" value={tOf(r).out} disabled={busy}
+                        style={{ width: 118, minHeight: 34, marginLeft: 5 }}
+                        onChange={(e) => setRegT({ ...regT, [r.id]: { ...tOf(r), out: e.target.value } })} />
+                    </label>
+                    {regT[r.id] && (
+                      <span style={{ fontSize: 11.5, color: "#b54708" }}>Edited — approve to save</span>
+                    )}
+                  </div>
+                )}
                 <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
                 {r.applied_by_name && (
                   <p style={{ fontSize: 12, color: "#2563eb" }}>Applied by: {r.applied_by_name}</p>
@@ -5303,17 +5442,21 @@ function TodayTab({ me }: any) {
                   // kis wajah se: late aaya, jaldi gaya, ya dono
                   const why = [r.log.late_mark && "late check-in", r.log.early_mark && "early check-out"]
                     .filter(Boolean).join(" + ");
-                  const lbl = (m: string) => (m === "Present" ? "Full Day" : m);
+                  const lbl = (m: string) => (m === "Present" ? "Full Day"
+                    : m === LSL_MARK ? "Late Short Leave" : m);
+                  // LSL ka manager ke paas sirf rakho / hatao (Full Day)
+                  const opts = r.log.auto_cut === LSL_MARK
+                    ? [LSL_MARK, "Present"] : ["Short Leave", "Half Day", "Present"];
                   return (
                     // apni line par, poori chaudai — mobile par naam nahi dabta
                     <div style={{ flexBasis: "100%", display: "flex", alignItems: "center",
                                   gap: 8, flexWrap: "wrap", paddingLeft: 46, marginTop: 2 }}>
                       {!canWaive(r) ? (
-                        <span className={pillClass(cur)}>{lbl(cur)} · {why}</span>
+                        <span className={pillClass(cur === LSL_MARK ? "Short Leave" : cur)}>{lbl(cur)} · {why}</span>
                       ) : (
                         <div style={{ display: "inline-flex", border: "1px solid #d0d5dd",
                                       borderRadius: 8, overflow: "hidden" }}>
-                          {["Short Leave", "Half Day", "Present"].map((m, i) => (
+                          {opts.map((m, i) => (
                             <button key={m} disabled={acting === r.emp_code}
                               onClick={() => cur !== m && setMark(r, m)}
                               style={{ padding: "5px 10px", fontSize: 12, fontWeight: 650,
@@ -7161,6 +7304,12 @@ function PayrollTab({ isAdmin = false }: any) {
                         {" · "}{r.extra_days} worked on an off day
                       </span>
                     )}
+                    {Number(r.lsl) > 0 && (
+                      <span style={{ color: "#c2410c" }}>
+                        {" · "}{r.lsl} late short leave
+                        {Number(r.lsl_cut) > 0 ? ` (−${r.lsl_cut} day)` : ""}
+                      </span>
+                    )}
                   </p>
                   <p className="att-muted" style={{ marginTop: 2 }}>
                     Payable <b>{r.payable_days}</b> of {r.month_days} days
@@ -7303,6 +7452,10 @@ function MyPayTab({ me }: any) {
             {Number(row.extra_days) > 0 && (
               <div className="att-stat"><b style={{ color: "#067647" }}>{row.extra_days}</b>
                 <span>Worked off days</span></div>
+            )}
+            {Number(row.lsl) > 0 && (
+              <div className="att-stat"><b style={{ color: "#c2410c" }}>{row.lsl}</b>
+                <span>Late short leave{Number(row.lsl_cut) > 0 ? ` (−${row.lsl_cut} day)` : ""}</span></div>
             )}
             <div className="att-stat"><b style={{ color: "#1849a9" }}>{row.payable_days}</b>
               <span>Payable days</span></div>
