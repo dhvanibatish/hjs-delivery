@@ -1774,6 +1774,8 @@ function HomeScreen({ me }: any) {
   const [regOpen, setRegOpen] = useState(false);
   const [missedDay, refreshMissed] = useMissedCheckout(me);
   const [fixDay, setFixDay] = useState<string | null>(null);
+  const wfhToday = useWfhToday(me);
+  const phoneOk = isMobile() || wfhToday;
   // CR-2: manager/admin ne meri leave lagayi — jab tak OK na dabaun dikhe
   const [byMgr, setByMgr] = useState<any[]>([]);
   useEffect(() => {
@@ -1917,11 +1919,11 @@ function HomeScreen({ me }: any) {
 
             <button className={`att-btn big ${open ? "gout" : "gin"}`} style={{ marginTop: 12 }}
               onClick={() => punch(open ? "out" : "in")}
-              disabled={busy || (!open && !isMobile())}>
+              disabled={busy || (!open && !phoneOk)}>
               {busy ? (open ? "Checking out…" : "Getting location…") : open ? "Check-out" : "Check-in"}
             </button>
             <p className="att-muted" style={{ marginTop: 9, fontSize: 12 }}>
-              {!open && !isMobile()
+              {!open && !phoneOk
                 ? "Check-in works only on your phone. Check-out can be done from anywhere."
                 : "Location is recorded with every punch"}
             </p>
@@ -2128,13 +2130,24 @@ function HomeScreen({ me }: any) {
 }
 
 /* ================= check-out mandatory + LSL ================= */
-// Check-in par hamesha location. Check-out par sirf corporate (Head Office +
-// Noida Showroom) se — unka check-out bhi 500 m ke andar hi hona chahiye.
+// Check-in par hamesha location. Check-out par sirf Mohali Head Office +
+// Noida Showroom (branches.strict_geofence) se — unka check-out bhi 500 m ke andar.
+// WFH apply kiya ho (pending ya approved) to location na mile tab bhi punch ho jaye.
 const punchArgs = async (me: any, dir: "in" | "out") => {
-  if (dir === "out" && !isCorporate(me)) return { p_lat: null, p_lng: null, p_accuracy: null };
-  const pos = await getPosition();
-  return { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
-           p_accuracy: Math.round(pos.coords.accuracy) };
+  const none = { p_lat: null, p_lng: null, p_accuracy: null };
+  // check-out location sirf 500 m wali branches (Mohali HO + Noida Showroom) se
+  if (dir === "out" && !me?.branches?.strict_geofence) return none;
+  try {
+    const pos = await getPosition();
+    return { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude,
+             p_accuracy: Math.round(pos.coords.accuracy) };
+  } catch (e) {
+    const { data } = await supabase.from("leaves").select("id").eq("employee_id", me.id)
+      .eq("leave_type", "WFH").in("status", ["Pending", "Approved"])
+      .lte("from_date", istToday()).gte("to_date", istToday()).limit(1);
+    if (data && data.length) return none;
+    throw e;
+  }
 };
 
 // Pichle din ka check-out nahi hua (raat ko system ne band kiya) aur
@@ -2147,6 +2160,18 @@ function useMissedCheckout(me: any) {
   };
   useEffect(() => { refresh(); }, [me.id]);
   return [day, refresh] as const;
+}
+
+// Aaj WFH apply hai (pending ya approved)? To laptop se bhi check-in chalega.
+function useWfhToday(me: any) {
+  const [wfh, setWfh] = useState(false);
+  useEffect(() => {
+    supabase.from("leaves").select("id").eq("employee_id", me.id)
+      .eq("leave_type", "WFH").in("status", ["Pending", "Approved"])
+      .lte("from_date", istToday()).gte("to_date", istToday()).limit(1)
+      .then(({ data }) => setWfh(!!(data && data.length)));
+  }, [me.id]);
+  return wfh;
 }
 
 function MissedCheckoutNote({ day, onFix }: any) {
@@ -2374,6 +2399,8 @@ function AttSummary({ me }: any) {
 
   const [missedDay, refreshMissed] = useMissedCheckout(me);
   const [fixDay, setFixDay] = useState<string | null>(null);
+  const wfhToday = useWfhToday(me);
+  const phoneOk = isMobile() || wfhToday;
   const punch = async (dir: "in" | "out") => {
     if (dir === "in" && missedDay) { setFixDay(missedDay); return; }
     setErr(""); setBusy(true);
@@ -2482,13 +2509,13 @@ function AttSummary({ me }: any) {
           </span>
         </div>
         <button className={`att-checkbtn ${openSess ? "out" : ""}`}
-          disabled={busy || (!openSess && !isMobile())}
-          title={!openSess && !isMobile() ? "Check-in works only on a phone" : ""}
+          disabled={busy || (!openSess && !phoneOk)}
+          title={!openSess && !phoneOk ? "Check-in works only on a phone" : ""}
           onClick={() => punch(openSess ? "out" : "in")}>
           <span>{busy ? (openSess ? "Checking out…" : "Getting location…") : openSess ? "Check-out" : "Check-in"}</span>
           <b><LiveClock startedAt={openSess?.in_at} baseMinutes={todayClosed} boxes={false} /> Hrs</b>
         </button>
-        {!openSess && !isMobile() && (
+        {!openSess && !phoneOk && (
           <span className="att-muted" style={{ width: "100%" }}>
             Check-in works only on your phone. Check-out can be done from anywhere.
           </span>
@@ -4516,7 +4543,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   const [forId, setForId] = useState<string>(me.id);
   useEffect(() => {
     if (!canFor) return;
-    let q = supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)")
+    let q = supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)")
       .eq("active", true).neq("id", me.id).order("full_name");
     if (me.role !== "admin") q = q.or(`reports_to.eq.${me.id},co_manager_id.eq.${me.id}`);
     q.then(({ data }) => setTeam(data || []));
@@ -4868,7 +4895,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const openType = async (r: any) => {
     setTypeFor(r.id); setTypeOpts(null);
     const { data: e } = await supabase.from("employees")
-      .select("*, branches(name, corporate_policy)").eq("id", r.employee_id).single();
+      .select("*, branches(name, corporate_policy, strict_geofence)").eq("id", r.employee_id).single();
     const corp = isCorporate(e);
     const elig: any = {};
     if (corp && e) {
@@ -5286,9 +5313,9 @@ function TodayTab({ me }: any) {
         // late cut + "kya main badal sakta hoon" server batata hai (can_approve)
         supabase.rpc("team_late_marks", { p_date: date }),
       ]);
-      // aaj approved WFH wale — inka ghar se check-in off-site nahi gina
+      // aaj WFH wale (apply kiya — pending ya approved) — ghar se check-in off-site nahi gina
       const wfh = await supabase.from("leaves").select("employee_id")
-        .eq("leave_type", "WFH").eq("status", "Approved")
+        .eq("leave_type", "WFH").in("status", ["Approved", "Pending"])
         .lte("from_date", date).gte("to_date", date);
       const wfhIds = new Set((wfh.data || []).map((x: any) => x.employee_id));
       const codeById: Record<string, string> = {};
@@ -5620,7 +5647,7 @@ function StaffTab({ me }: any) {
 
   const load = async () => {
     const [e, b, t, d] = await Promise.all([
-      supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)").order("full_name"),
+      supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)").order("full_name"),
       supabase.from("branches").select("*").order("name"),
       supabase.from("teams").select("*").order("name"),
       supabase.from("designations").select("*").eq("active", true)
@@ -12299,7 +12326,7 @@ export default function Attendance() {
 
   useEffect(() => {
     if (!session) { setMe(null); return; }
-    supabase.from("employees").select("*, branches(name, corporate_policy), teams(name)")
+    supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)")
       .eq("auth_user_id", session.user.id).maybeSingle()
       .then(({ data, error }) => {
         if (error) console.error("employee lookup failed:", error);
