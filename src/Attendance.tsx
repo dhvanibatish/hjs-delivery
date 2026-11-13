@@ -4023,13 +4023,25 @@ function PeersTab() {
 // sirf usi time mein check-in / check-out kahin se bhi. Approval nahi.
 // Roster sirf Inside Sales ko — team ke naam ya designation mein "Inside Sales"
 // + jinhe alag se roster diya gaya (employees.roster_allowed), jaise Kanupriya mam
-// Roster: Inside Sales + Renewals team + jinhe alag se diya (roster_allowed)
+// Roster: Inside Sales + jinhe alag se diya (roster_allowed, jaise Kanupriya mam)
 const isSalesEmp = (emp: any) => !!emp?.roster_allowed ||
-  /inside\s*sales|renewal/i.test(emp?.teams?.name || "") ||
-  /inside\s*sales|renewal/i.test(emp?.designation || "");
+  /inside\s*sales/i.test(emp?.teams?.name || "") ||
+  /inside\s*sales/i.test(emp?.designation || "");
+
+// Roster milega ya nahi — server (is_sales) se, kyunki teams ka naam employee ko
+// RLS ki wajah se kabhi khaali milta hai. Jab tak jawab na aaye, local andaza.
+function useIsSales(me: any) {
+  const [v, setV] = useState<boolean>(isSalesEmp(me));
+  useEffect(() => {
+    if (!me?.id) return;
+    supabase.rpc("is_sales", { p_emp: me.id })
+      .then(({ data, error }) => { if (!error && data != null) setV(!!data); });
+  }, [me?.id]);
+  return v;
+}
 
 function OutsideWorkTab({ me }: any) {
-  const sales = isSalesEmp(me);
+  const sales = useIsSales(me);
   const [types, setTypes] = useState<any[]>([]);
   const [wfh, setWfh] = useState<any[]>([]);
   const [rost, setRost] = useState<any[]>([]);
@@ -12650,6 +12662,15 @@ export default function Attendance() {
       });
   }, [session]);
 
+  // Roster (WFH & Roster ka naam) — server ka is_sales; teams ka naam RLS se chhup sakta hai
+  const [salesFromServer, setSalesFromServer] = useState(false);
+  useEffect(() => {
+    if (!me?.id) return;
+    setSalesFromServer(isSalesEmp(me));
+    supabase.rpc("is_sales", { p_emp: me.id })
+      .then(({ data, error }) => { if (!error && data != null) setSalesFromServer(!!data); });
+  }, [me?.id]);
+
   useEffect(() => {
     if (!me) return;
     supabase.rpc("should_verify").then(async ({ data }) => {
@@ -12733,7 +12754,7 @@ export default function Attendance() {
   const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
   const isHead = me.special_post === "Attendance Head";
   // Roster sirf Sales team ka — baaki sabko is module ka naam bas "WFH" dikhe
-  const salesMe = isSalesEmp(me);
+  const salesMe = salesFromServer;
   const mods = MODULES.filter((m) => !m.approverOnly || approver)
     .map((m) => m.k !== "outside" || salesMe ? m : {
       ...m, label: "WFH",
