@@ -7125,8 +7125,93 @@ function AttSheetTab() {
 /* ================= CR-10: Late Comers ================= */
 // Grace ke baad check-in. Chuni hui date ki list + mahine mein ab tak
 // kitni baar late (month-to-date). Admin sab, manager direct team.
+// Ek employee ki poori late history — admin / manager ke liye
+function LateHistorySheet({ emp, onClose }: any) {
+  const [from, setFrom] = useState(addDays(istToday(), -90));
+  const [to, setTo] = useState(istToday());
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    setBusy(true);
+    supabase.from("attendance_logs")
+      .select("work_date, punch_in_at, punch_out_at, worked_minutes, late_minutes, late_mark, late_override, late_waived_by, status")
+      .eq("employee_id", emp.id).gte("work_date", from).lte("work_date", to)
+      .order("work_date", { ascending: false })
+      .then(({ data }) => {
+        // late = 10:30 ke baad check-in, ya koi late mark laga
+        const late = (data || []).filter((r: any) => {
+          if (r.late_mark) return true;
+          if (!r.punch_in_at) return false;
+          const hm = new Date(r.punch_in_at).toLocaleTimeString("en-GB",
+            { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
+          return hm > "10:30";
+        });
+        setRows(late); setBusy(false);
+      });
+  }, [emp.id, from, to]);
+
+  const kept = rows.filter((r) => r.late_mark === LSL_MARK && r.late_override !== "Present").length;
+  const removed = rows.filter((r) => !r.late_mark).length;
+  const waived = rows.filter((r) => r.late_override === "Present").length;
+  const what = (r: any) => {
+    if (r.late_override === "Present") return { t: `Full Day${r.late_waived_by ? ` by ${r.late_waived_by}` : ""}`, c: "Present" };
+    if (r.late_mark === LSL_MARK) return { t: "Late Short Leave", c: "Short Leave" };
+    if (r.late_mark === "Half Day") return { t: "Half Day", c: "Half Day" };
+    if (r.late_mark) return { t: r.late_mark, c: "Late" };
+    return { t: "9 hrs done — removed", c: "Present" };
+  };
+
+  return (
+    <Sheet title={`Late history · ${emp.full_name}`} onClose={onClose}>
+      <div className="att-card att-stack">
+        <div className="att-row2">
+          <div><label>From</label>
+            <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value || from)} /></div>
+          <div><label>To</label>
+            <input type="date" value={to} max={istToday()} onChange={(e) => setTo(e.target.value || to)} /></div>
+        </div>
+        <div className="att-flex" style={{ flexWrap: "wrap", gap: 6 }}>
+          <span className="att-pill p-Late">{rows.length} late days</span>
+          <span className="att-pill p-Absent">{kept} Late Short Leave</span>
+          <span className="att-pill p-Present">{removed} removed (9 hrs)</span>
+          {waived > 0 && <span className="att-pill p-Leave">{waived} made Full Day</span>}
+        </div>
+        <button className="att-btn sm line" disabled={!rows.length} style={{ alignSelf: "flex-start" }}
+          onClick={() => downloadCsv(rows.map((r) => ({
+            Date: r.work_date, Code: emp.emp_code, Name: emp.full_name,
+            "Check-in": fmtTime(r.punch_in_at), "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
+            Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "", Result: what(r).t,
+          })), `HJS_late_${emp.emp_code}_${from}_to_${to}.csv`)}>CSV</button>
+      </div>
+      <div className="att-list">
+        {busy && <p className="att-muted" style={{ padding: 12 }}>Loading…</p>}
+        {!busy && !rows.length && <p className="att-empty">No late days in this period.</p>}
+        {rows.map((r) => {
+          const w = what(r);
+          return (
+            <div className="att-row" key={r.work_date} style={{ flexWrap: "wrap" }}>
+              <span style={{ width: 62, fontWeight: 700, flexShrink: 0 }}>{fmtDate(r.work_date)}</span>
+              <div className="grow" style={{ minWidth: 140 }}>
+                <p>In {fmtTime(r.punch_in_at)}{r.punch_out_at ? ` – out ${fmtTime(r.punch_out_at)}` : ""}</p>
+                <p className="att-muted">{r.worked_minutes ? `${hhmm(r.worked_minutes)} worked` : "—"}</p>
+              </div>
+              <span className={pillClass(w.c)}>{w.t}</span>
+            </div>
+          );
+        })}
+      </div>
+    </Sheet>
+  );
+}
+
 function LateComersTab({ me }: any) {
   const [date, setDate] = useState(istToday());
+  const [hist, setHist] = useState<any>(null);
+  const [staff, setStaff] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("employees").select("id, emp_code, full_name").eq("active", true)
+      .order("full_name").then(({ data }) => setStaff(data || []));
+  }, []);
   const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
@@ -7163,6 +7248,14 @@ function LateComersTab({ me }: any) {
       <div className="att-flex" style={{ flexWrap: "wrap" }}>
         <input type="date" value={date} max={istToday()} style={{ width: "auto" }}
           onChange={(e) => setDate(e.target.value || istToday())} />
+        <select value="" style={{ width: "auto", minWidth: 190 }}
+          onChange={(e) => {
+            const x = staff.find((s) => s.id === e.target.value);
+            if (x) setHist(x);
+          }}>
+          <option value="">Employee late history…</option>
+          {staff.map((s) => <option key={s.id} value={s.id}>{s.full_name} ({s.emp_code})</option>)}
+        </select>
         <div style={{ flex: 1, minWidth: 200 }}>
           <Search placeholder="Search name, code, department or manager" value={q} onChange={setQ} />
         </div>
@@ -7209,7 +7302,8 @@ function LateComersTab({ me }: any) {
             </div>
             {!summary.length && <p className="att-empty">Is mahine abhi tak koi late nahi.</p>}
             {summary.map((r: any) => (
-              <div className="att-row" key={r.employee_id}>
+              <div className="att-row clk" key={r.employee_id} title="Open late history"
+                onClick={() => setHist({ id: r.employee_id, emp_code: r.emp_code, full_name: r.full_name })}>
                 <span className="grow">
                   <PName id={r.employee_id} code={r.emp_code}><b>{r.full_name}</b></PName>
                   <span className="att-muted"> · {r.team}</span>
@@ -7223,6 +7317,7 @@ function LateComersTab({ me }: any) {
           </div>
         </>
       )}
+      {hist && <LateHistorySheet emp={hist} onClose={() => setHist(null)} />}
     </div>
   );
 }
