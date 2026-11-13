@@ -2147,6 +2147,9 @@ const punchArgs = async (me: any, dir: "in" | "out") => {
       .eq("leave_type", "WFH").in("status", ["Pending", "Approved"])
       .lte("from_date", istToday()).gte("to_date", istToday()).limit(1);
     if (data && data.length) return none;
+    // Roster (sales bahar kaam) ke time mein bhi location zaroori nahi
+    const { data: rost } = await supabase.rpc("has_roster_now", { p_emp: me.id });
+    if (rost) return none;
     throw e;
   }
 };
@@ -3939,6 +3942,168 @@ function PeersTab() {
   );
 }
 
+/* ================= Outside Work: WFH + Roster ================= */
+// Dono leave nahi hain — sirf location bypass. Pay check-in / check-out se hi.
+// WFH: sabke liye, poora din. Roster: sirf Sales team, ek din ka from–to time,
+// sirf usi time mein check-in / check-out kahin se bhi. Approval nahi.
+const isSalesEmp = (emp: any) => /sales/i.test(emp?.teams?.name || "");
+
+function OutsideWorkTab({ me }: any) {
+  const sales = isSalesEmp(me);
+  const [types, setTypes] = useState<any[]>([]);
+  const [wfh, setWfh] = useState<any[]>([]);
+  const [rost, setRost] = useState<any[]>([]);
+  const [openWfh, setOpenWfh] = useState(false);
+  const [openRost, setOpenRost] = useState(false);
+  const [busy, setBusy] = useState("");
+
+  const load = async () => {
+    const [t, w, r] = await Promise.all([
+      supabase.from("leave_types").select("*").eq("code", "WFH"),
+      supabase.from("leaves").select("*").eq("employee_id", me.id).eq("leave_type", "WFH")
+        .order("from_date", { ascending: false }).limit(40),
+      supabase.from("rosters").select("*").eq("employee_id", me.id)
+        .order("work_date", { ascending: false }).limit(40),
+    ]);
+    setTypes(t.data || []); setWfh(w.data || []); setRost(r.data || []);
+  };
+  useEffect(() => { load(); }, [me.id]);
+
+  const cancelRoster = async (r: any) => {
+    if (!window.confirm(`Cancel the roster for ${fmtDate(r.work_date)}?`)) return;
+    setBusy(r.id);
+    const { error } = await supabase.rpc("cancel_roster", { p_id: r.id });
+    if (error) window.alert(error.message);
+    setBusy(""); load();
+  };
+
+  return (
+    <>
+      <div className="att-note" style={{ marginBottom: 4 }}>
+        <span>
+          WFH and Roster are not leave. They only let you check in / check out from
+          outside the office. Your day and hours still come from your check-in and check-out.
+        </span>
+      </div>
+
+      {sales && (
+        <div className="att-list">
+          <div className="att-hd">
+            <b>Roster</b>
+            <button className="att-btn sm" onClick={() => setOpenRost(true)}>Apply roster</button>
+          </div>
+          <p className="att-muted" style={{ padding: "0 14px" }}>
+            Working outside for some hours? Pick the date and time — during that time you can
+            check in / check out from anywhere. Applies right away.
+          </p>
+          {!rost.length && <p className="att-empty">No roster yet.</p>}
+          {rost.map((r) => (
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <span style={{ width: 54, fontWeight: 700, flexShrink: 0 }}>{fmtDate(r.work_date)}</span>
+              <div className="grow" style={{ minWidth: 120 }}>
+                <p>{fmtHM(r.from_time)} – {fmtHM(r.to_time)}</p>
+                {r.reason && <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>}
+              </div>
+              <span className={pillClass(r.status === "Active" ? "Approved" : "Cancelled")}>
+                {r.status}
+              </span>
+              {r.status === "Active" && String(r.work_date) >= istToday() && (
+                <button className="att-muted" disabled={busy === r.id} onClick={() => cancelRoster(r)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="att-list">
+        <div className="att-hd">
+          <b>Work from home</b>
+          <button className="att-btn sm" onClick={() => setOpenWfh(true)} disabled={!types.length}>
+            Apply WFH
+          </button>
+        </div>
+        {!wfh.length && <p className="att-empty">No WFH yet.</p>}
+        {wfh.map((r) => (
+          <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+            <span style={{ width: 120, fontWeight: 700, flexShrink: 0 }}>
+              {fmtDate(r.from_date)}{r.to_date !== r.from_date ? ` – ${fmtDate(r.to_date)}` : ""}
+            </span>
+            <div className="grow" style={{ minWidth: 120 }}>
+              {r.reason && <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>}
+            </div>
+            <span className={pillClass(r.status)}>{r.status}</span>
+          </div>
+        ))}
+      </div>
+
+      {openWfh && <ApplyLeaveSheet me={me} types={types} only="WFH"
+        onClose={() => { setOpenWfh(false); load(); }} />}
+      {openRost && <RosterSheet onClose={() => { setOpenRost(false); load(); }} />}
+    </>
+  );
+}
+
+function RosterSheet({ onClose }: any) {
+  const today = istToday();
+  const [d, setD] = useState(today);
+  const [from, setFrom] = useState(nowHM());
+  const [to, setTo] = useState(addMins(nowHM(), 180));
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const save = async () => {
+    if (!d) return setErr("Pick a date.");
+    if (d < today) return setErr("You can't put a roster on a past date.");
+    if (to <= from) return setErr("To time must be after the from time.");
+    if (!reason.trim()) return setErr("Write where you'll be working.");
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("apply_roster",
+      { p_date: d, p_from: from, p_to: to, p_reason: reason.trim() });
+    setBusy(false);
+    if (error) return setErr(error.message.replace(/^.*?:\s*/, "") || error.message);
+    onClose();
+  };
+
+  return (
+    <Sheet title="Apply roster" onClose={onClose}>
+      <div className="att-card att-stack">
+        <div>
+          <label>Date</label>
+          <input type="date" value={d} min={today} max={addDays(today, 30)}
+            onChange={(e) => setD(e.target.value)} />
+        </div>
+        <div className="att-row2">
+          <div>
+            <label>From</label>
+            <input type="time" lang="en-US" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div>
+            <label>To</label>
+            <input type="time" lang="en-US" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        </div>
+        <div>
+          <label>Where / why</label>
+          <input value={reason} placeholder="e.g. customer visit, Sector 62 hospital"
+            onChange={(e) => setReason(e.target.value)} />
+        </div>
+        <p className="att-muted">
+          Only between these times can you check in / check out from anywhere. Before or
+          after, the normal office location rule applies. One roster per day — applying
+          again for the same day replaces it.
+        </p>
+        <Note>{err}</Note>
+        <button className="att-btn" disabled={busy} onClick={save}>
+          {busy ? "Saving…" : "Save roster"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 function MyRegsTab({ me }: any) {
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
@@ -4554,7 +4719,7 @@ const CORP_ONLY_TYPES = ["COMP", "FLEX", "BDAY", "ANNIV"];
 // Policy ab saari branches / stores pe — sirf branch ka flag dekhte hain
 const isCorporate = (emp: any) => !!emp?.branches?.corporate_policy;
 
-function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
+function ApplyLeaveSheet({ me, types: allTypes, onClose, only = "" }: any) {
   const today = istToday();
   // CR-2: manager apni direct team ke liye, admin kisi ke bhi liye leave laga sakta hai
   const canFor = me.role === "admin" || me.role === "manager";
@@ -4615,12 +4780,15 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   }, [corp, who.id]);
 
   const types = useMemo(() => (allTypes || []).filter((t: any) => {
+    // "Outside Work" section se sirf wahi type (WFH); Leave section mein WFH nahi
+    if (only) return t.code === only;
+    if (t.code === "WFH") return false;
     // LV (Leave unpaid) band — uski jagah Casual Leave hai
     if (t.code === "LV") return false;
     if (!CORP_ONLY_TYPES.includes(t.code)) return true;
     if (!corp || !elig) return false;
     return t.code === "COMP" ? elig.COMP > 0 : !!elig[t.code];
-  }), [allTypes, corp, elig]);
+  }), [allTypes, corp, elig, only]);
   const [form, setForm] = useState<any>({
     leave_type: types[0]?.code || "", from_date: today, to_date: today, reason: "",
     from_time: nowHM(), to_time: addMins(nowHM(), 60),
@@ -4758,7 +4926,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose }: any) {
   };
 
   return (
-    <Sheet title="Apply Leave" onClose={onClose}>
+    <Sheet title={only === "WFH" ? "Apply WFH" : "Apply Leave"} onClose={onClose}>
       <div className="att-card att-stack">
         {canFor && team.length > 0 && (
           <div>
@@ -12201,6 +12369,10 @@ const MODULES: Module[] = [
         { k: "calendar", label: "Calendar" },
         { k: "regs", label: "Regularisation (Missed a punch)" },
       ]},
+      // WFH + Roster — leave nahi, sirf location bypass
+      { k: "outside", label: "Outside Work", views: [
+        { k: "mine", label: "WFH & Roster" },
+      ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Who's In Today" },
         { k: "matrix", label: "Monthly Grid" },
@@ -12521,6 +12693,7 @@ export default function Attendance() {
       case "att/mydata/summary":    return <AttSummary me={me} />;
       case "att/mydata/calendar":   return <CalendarTab me={me} />;
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
+      case "att/outside/mine":      return <div className="att-wrap att-stack"><OutsideWorkTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab me={me} /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/absent/daily":
