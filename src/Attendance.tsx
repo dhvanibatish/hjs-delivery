@@ -3982,7 +3982,7 @@ function OutsideWorkTab({ me }: any) {
     <>
       <div className="att-note" style={{ marginBottom: 4 }}>
         <span>
-          WFH and Roster are not leave. They only let you check in / check out from
+          {sales ? "WFH and Roster are" : "WFH is"} not leave. {sales ? "They only let" : "It only lets"} you check in / check out from
           outside the office. Your day and hours still come from your check-in and check-out.
         </span>
       </div>
@@ -12638,7 +12638,14 @@ export default function Attendance() {
   // ki zaroorat nahi.
   const topAdmin = me.role === "admin" || me.designation === "Co-Founder";
   const isHead = me.special_post === "Attendance Head";
+  // Roster sirf Sales team ka — baaki sabko is module ka naam bas "WFH" dikhe
+  const salesMe = isSalesEmp(me);
   const mods = MODULES.filter((m) => !m.approverOnly || approver)
+    .map((m) => m.k !== "outside" || salesMe ? m : {
+      ...m, label: "WFH",
+      scopes: m.scopes.map((sc) => ({ ...sc,
+        views: sc.views.map((v) => ({ ...v, label: "Work from home" })) })),
+    })
     .map((m) => ({
       ...m,
       scopes: m.scopes
