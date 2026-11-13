@@ -854,6 +854,21 @@ const CSS = `
 .hjsatt .att-stat.clk:hover { border-color: #b2ccff; background: #fafbff; }
 @media (hover: none) { .hjsatt .att-dayrow:hover { background: #fff; } }
 
+/* Team Space — mobile */
+.hjsatt .att-tsstats { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+@media (max-width: 560px) {
+  .hjsatt .att-tsstats { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .hjsatt .att-tsstats .att-stat { padding: 8px 4px; }
+  .hjsatt .att-tsstats .att-stat b { font-size: 18px; }
+  .hjsatt .att-tsstats .att-stat span { font-size: 10.5px; line-height: 1.2; }
+  .hjsatt .att-tsrow { row-gap: 6px; }
+  .hjsatt .att-tsrow .grow { flex: 1 1 0; }
+  .hjsatt .att-tsrow .att-tschg { order: 2; padding: 5px 10px; }
+  .hjsatt .att-tsrow .att-tsright { order: 3; flex-basis: 100%; text-align: left !important;
+    padding-left: 46px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .hjsatt .att-tsrow .att-tsright p { margin: 0 !important; }
+  .hjsatt .att-tsrow > div[style*="flex-basis: 100%"] { order: 4; }
+}
 .hjsatt .att-stats { display: grid; gap: 9px;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
 .hjsatt .att-rephd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1930,6 +1945,7 @@ function HomeScreen({ me }: any) {
             </p>
             {!open && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
             <CheckoutLastWarning me={me} />
+            <LslTodayNote me={me} todayLog={today} />
 
             {sessions.length > 0 && (
               <div style={{ marginTop: 12 }}>
@@ -2180,6 +2196,53 @@ function useWfhToday(me: any) {
 }
 
 // 12 Nov ka check-out miss -> sirf aaj (13 Nov) ek last warning, block nahi
+// Aaj late aaya -> home par warning. 9 ghante (lunch ke saath) poore hote hi
+// server LSL hata deta hai, tab green "removed" dikhta hai.
+// todayLog na diya ho to khud laata hai (tick badle to dobara).
+function LslTodayNote({ me, todayLog, tick }: any) {
+  const [own, setOwn] = useState<any>(null);
+  useEffect(() => {
+    if (todayLog !== undefined) return;
+    supabase.from("attendance_logs").select("*").eq("employee_id", me.id)
+      .eq("work_date", istToday()).maybeSingle()
+      .then(({ data }) => setOwn(data || null));
+  }, [me.id, tick, todayLog === undefined]);
+  const log = todayLog !== undefined ? todayLog : own;
+  if (!log?.punch_in_at || String(log.work_date || istToday()) !== istToday()) return null;
+  if (log.late_override === "Present") return null;
+  const inAt = new Date(log.punch_in_at);
+  const inHM = inAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
+  const until = fmtTime(new Date(inAt.getTime() + 9 * 3600 * 1000).toISOString());
+  if (log.late_mark === LSL_MARK) {
+    return (
+      <div className="att-note" style={{ marginTop: 10, background: "#fff7ed",
+        border: "1px solid #fed7aa", color: "#9a3412" }}>
+        <span>
+          <b>Late check-in today ({fmtTime(log.punch_in_at)}) — Late Short Leave.</b>{" "}
+          Complete 9 hours (lunch included): check out after <b>{until}</b> and it is
+          removed automatically. Every 3 Late Short Leaves = 1 half day cut.
+        </span>
+      </div>
+    );
+  }
+  if (log.late_mark === "Half Day") {
+    return (
+      <div className="att-note err" style={{ marginTop: 10 }}>
+        <span><b>Checked in after 12:45 today ({fmtTime(log.punch_in_at)}) — Half Day.</b></span>
+      </div>
+    );
+  }
+  // late aaya tha par 9 ghante poore -> hat gayi
+  if (!log.late_mark && inHM > "10:30" && log.punch_out_at) {
+    return (
+      <div className="att-note ok" style={{ marginTop: 10 }}>
+        <span>Late check-in today, but 9 hours are done — Late Short Leave removed.</span>
+      </div>
+    );
+  }
+  return null;
+}
+
 function CheckoutLastWarning({ me }: any) {
   const [day, setDay] = useState<string | null>(null);
   useEffect(() => {
@@ -2545,6 +2608,7 @@ function AttSummary({ me }: any) {
       </div>
       {!openSess && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
       <CheckoutLastWarning me={me} />
+      <LslTodayNote me={me} tick={`${openSess?.id || ""}-${todayClosed}`} />
       {fixDay && <RegularizeSheet me={me} forDate={fixDay}
         onClose={() => { setFixDay(null); refreshMissed(); }} />}
 
@@ -5581,8 +5645,7 @@ function TodayTab({ me }: any) {
       {busy && <p className="att-muted">Loading…</p>}
       <Note>{actErr}</Note>
 
-      <div className="att-grid4 att-grid6"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
+      <div className="att-grid4 att-tsstats">
         <div className={`att-stat clk ${!filter ? "on" : ""}`}
           onClick={() => setFilter("")}>
           <b style={{ color: "#1849a9" }}>{rows.length}</b><span>Total staff</span></div>
@@ -5625,13 +5688,13 @@ function TodayTab({ me }: any) {
               {gn > 0 && <span style={{ background: "#fef3f2", color: "#b42318" }}>{gn} not in</span>}
             </>}>
             {g.map((r) => (
-              <div className="att-row" key={r.emp_code} style={{ flexWrap: "wrap" }}>
+              <div className="att-row att-tsrow" key={r.emp_code} style={{ flexWrap: "wrap" }}>
                 <Avatar name={r.full_name} />
                 <div className="grow" style={{ minWidth: 0 }}>
                   <p><PName id={r.id} code={r.emp_code}><b>{r.emp_code}</b> · {r.full_name}</PName></p>
                   <p className="att-muted">{r.designation || "—"}</p>
                 </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div className="att-tsright" style={{ textAlign: "right", flexShrink: 0 }}>
                   <p style={{ fontWeight: 700, fontSize: 13, color: r.wfh && r.state === "Leave" ? "#175cd3" : stateColor[r.state] }}>
                     {r.wfh && r.state === "Leave" ? "WFH" : r.state}</p>
                   <p className="att-muted" style={{ fontSize: 11.5 }}>
@@ -5651,7 +5714,7 @@ function TodayTab({ me }: any) {
                   )}
                 </div>
                 {canChange(r) && (
-                  <button className="att-btn sm line" style={{ flexShrink: 0 }}
+                  <button className="att-btn sm line att-tschg" style={{ flexShrink: 0 }}
                     onClick={() => setChg(r)}>Change</button>
                 )}
                 {r.log?.auto_cut && (() => {
