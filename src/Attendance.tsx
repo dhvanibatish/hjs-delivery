@@ -7293,32 +7293,6 @@ function LateComersTab({ me }: any) {
         <>
           <div className="att-list">
             <div className="att-hd">
-              <b>Late on {fmtDate(date)}</b><span className="att-muted">{today.length}</span>
-            </div>
-            {!today.length && <p className="att-empty">Is din koi late nahi aaya.</p>}
-            {today.map((r) => (
-              <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
-                <Avatar name={r.full_name} />
-                <div className="grow" style={{ minWidth: 170 }}>
-                  <p><PName id={r.employee_id} code={r.emp_code}>
-                    <b>{r.emp_code}</b> · {r.full_name}</PName></p>
-                  <p className="att-muted">{r.team}{r.manager ? ` · ${r.manager}` : ""}</p>
-                </div>
-                <span className="att-muted" style={{ width: 120 }}>
-                  In {fmtTime(r.punch_in_at)}
-                  <span style={{ display: "block", fontSize: 11.5 }}>Shift {fmtHM(r.shift_start)}</span>
-                </span>
-                <span className="att-pill p-Late">{r.late_minutes}m late</span>
-                <span className={pillClass(r.status)}>{r.status}</span>
-                <span className="att-muted" style={{ width: 92, textAlign: "right" }}>
-                  {mtd[r.employee_id]?.n || 1}× this month
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="att-list">
-            <div className="att-hd">
               <b>Late Short Leave not removed · {fmtDate(monthStart(date))} – {fmtDate(date)}</b>
               <span className="att-flex" style={{ gap: 8 }}>
                 <span className="att-muted">{lslBy.length} people</span>
@@ -7354,6 +7328,32 @@ function LateComersTab({ me }: any) {
                 </div>
               );
             })}
+          </div>
+
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Late on {fmtDate(date)}</b><span className="att-muted">{today.length}</span>
+            </div>
+            {!today.length && <p className="att-empty">Is din koi late nahi aaya.</p>}
+            {today.map((r) => (
+              <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
+                <Avatar name={r.full_name} />
+                <div className="grow" style={{ minWidth: 170 }}>
+                  <p><PName id={r.employee_id} code={r.emp_code}>
+                    <b>{r.emp_code}</b> · {r.full_name}</PName></p>
+                  <p className="att-muted">{r.team}{r.manager ? ` · ${r.manager}` : ""}</p>
+                </div>
+                <span className="att-muted" style={{ width: 120 }}>
+                  In {fmtTime(r.punch_in_at)}
+                  <span style={{ display: "block", fontSize: 11.5 }}>Shift {fmtHM(r.shift_start)}</span>
+                </span>
+                <span className="att-pill p-Late">{r.late_minutes}m late</span>
+                <span className={pillClass(r.status)}>{r.status}</span>
+                <span className="att-muted" style={{ width: 92, textAlign: "right" }}>
+                  {mtd[r.employee_id]?.n || 1}× this month
+                </span>
+              </div>
+            ))}
           </div>
 
           <div className="att-list">
