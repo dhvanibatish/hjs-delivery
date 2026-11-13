@@ -7125,260 +7125,120 @@ function AttSheetTab() {
 /* ================= CR-10: Late Comers ================= */
 // Grace ke baad check-in. Chuni hui date ki list + mahine mein ab tak
 // kitni baar late (month-to-date). Admin sab, manager direct team.
-// Ek employee ki poori late history — admin / manager ke liye
-function LateHistorySheet({ emp, onClose }: any) {
-  const [from, setFrom] = useState(addDays(istToday(), -90));
-  const [to, setTo] = useState(istToday());
-  const [rows, setRows] = useState<any[]>([]);
-  const [busy, setBusy] = useState(true);
-  useEffect(() => {
-    setBusy(true);
-    supabase.from("attendance_logs")
-      .select("work_date, punch_in_at, punch_out_at, worked_minutes, late_minutes, late_mark, late_override, late_waived_by, status")
-      .eq("employee_id", emp.id).gte("work_date", from).lte("work_date", to)
-      .order("work_date", { ascending: false })
-      .then(({ data }) => {
-        // late = 10:30 ke baad check-in, ya koi late mark laga
-        const late = (data || []).filter((r: any) => {
-          if (r.late_mark) return true;
-          if (!r.punch_in_at) return false;
-          const hm = new Date(r.punch_in_at).toLocaleTimeString("en-GB",
-            { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
-          return hm > "10:30";
-        });
-        setRows(late); setBusy(false);
-      });
-  }, [emp.id, from, to]);
-
-  const kept = rows.filter((r) => r.late_mark === LSL_MARK && r.late_override !== "Present").length;
-  const removed = rows.filter((r) => !r.late_mark).length;
-  const waived = rows.filter((r) => r.late_override === "Present").length;
-  const what = (r: any) => {
-    if (r.late_override === "Present") return { t: `Full Day${r.late_waived_by ? ` by ${r.late_waived_by}` : ""}`, c: "Present" };
-    if (r.late_mark === LSL_MARK) return { t: "Late Short Leave", c: "Short Leave" };
-    if (r.late_mark === "Half Day") return { t: "Half Day", c: "Half Day" };
-    if (r.late_mark) return { t: r.late_mark, c: "Late" };
-    return { t: "9 hrs done — removed", c: "Present" };
-  };
-
-  return (
-    <Sheet title={`Late history · ${emp.full_name}`} onClose={onClose}>
-      <div className="att-card att-stack">
-        <div className="att-row2">
-          <div><label>From</label>
-            <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value || from)} /></div>
-          <div><label>To</label>
-            <input type="date" value={to} max={istToday()} onChange={(e) => setTo(e.target.value || to)} /></div>
-        </div>
-        <div className="att-flex" style={{ flexWrap: "wrap", gap: 6 }}>
-          <span className="att-pill p-Late">{rows.length} late days</span>
-          <span className="att-pill p-Absent">{kept} Late Short Leave</span>
-          <span className="att-pill p-Present">{removed} removed (9 hrs)</span>
-          {waived > 0 && <span className="att-pill p-Leave">{waived} made Full Day</span>}
-        </div>
-        <button className="att-btn sm line" disabled={!rows.length} style={{ alignSelf: "flex-start" }}
-          onClick={() => downloadCsv(rows.map((r) => ({
-            Date: r.work_date, Code: emp.emp_code, Name: emp.full_name,
-            "Check-in": fmtTime(r.punch_in_at), "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
-            Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "", Result: what(r).t,
-          })), `HJS_late_${emp.emp_code}_${from}_to_${to}.csv`)}>CSV</button>
-      </div>
-      <div className="att-list">
-        {busy && <p className="att-muted" style={{ padding: 12 }}>Loading…</p>}
-        {!busy && !rows.length && <p className="att-empty">No late days in this period.</p>}
-        {rows.map((r) => {
-          const w = what(r);
-          return (
-            <div className="att-row" key={r.work_date} style={{ flexWrap: "wrap" }}>
-              <span style={{ width: 62, fontWeight: 700, flexShrink: 0 }}>{fmtDate(r.work_date)}</span>
-              <div className="grow" style={{ minWidth: 140 }}>
-                <p>In {fmtTime(r.punch_in_at)}{r.punch_out_at ? ` – out ${fmtTime(r.punch_out_at)}` : ""}</p>
-                <p className="att-muted">{r.worked_minutes ? `${hhmm(r.worked_minutes)} worked` : "—"}</p>
-              </div>
-              <span className={pillClass(w.c)}>{w.t}</span>
-            </div>
-          );
-        })}
-      </div>
-    </Sheet>
-  );
-}
-
 function LateComersTab({ me }: any) {
-  const [date, setDate] = useState(istToday());
-  const [hist, setHist] = useState<any>(null);
+  // Sirf Late Short Leave jo nahi hati (9 ghante poore nahi, Full Day bhi nahi ki gayi) —
+  // date-wise, taaki saaf dikhe kaun kis din.
+  const [from, setFrom] = useState(monthStart(istToday()));
+  const [to, setTo] = useState(istToday());
   const [staff, setStaff] = useState<any[]>([]);
-  // Late Short Leave jo 9 ghante se nahi hati (aur Full Day bhi nahi ki gayi)
   const [lsl, setLsl] = useState<any[]>([]);
-  useEffect(() => {
-    supabase.from("attendance_logs")
-      .select("employee_id, work_date, punch_in_at, punch_out_at, worked_minutes, late_override, employees(emp_code, full_name)")
-      .eq("late_mark", LSL_MARK).gte("work_date", monthStart(date)).lte("work_date", date)
-      .order("work_date")
-      .then(({ data }) => setLsl((data || []).filter((r: any) => r.late_override !== "Present")));
-  }, [date]);
-  useEffect(() => {
-    supabase.from("employees").select("id, emp_code, full_name").eq("active", true)
-      .order("full_name").then(({ data }) => setStaff(data || []));
-  }, []);
-  const [rows, setRows] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    (async () => {
-      setBusy(true); setErr("");
-      const { data, error } = await supabase.rpc("late_comers",
-        { p_from: monthStart(date), p_to: date });
-      if (error) setErr(error.message);
-      setRows(data || []); setBusy(false);
-    })();
-  }, [date]);
+    supabase.from("employees").select("id, emp_code, full_name, designation")
+      .order("full_name").then(({ data }) => setStaff(data || []));
+  }, []);
+  useEffect(() => {
+    setBusy(true); setErr("");
+    supabase.from("attendance_logs")
+      .select("employee_id, work_date, punch_in_at, punch_out_at, worked_minutes, late_override")
+      .eq("late_mark", LSL_MARK).gte("work_date", from).lte("work_date", to)
+      .order("work_date", { ascending: false }).order("punch_in_at")
+      .then(({ data, error }) => {
+        if (error) setErr(error.message);
+        setLsl((data || []).filter((r: any) => r.late_override !== "Present"));
+        setBusy(false);
+      });
+  }, [from, to]);
 
-  const match = (r: any) => !q ||
-    `${r.emp_code} ${r.full_name} ${r.team} ${r.manager || ""}`.toLowerCase().includes(q.toLowerCase());
-  // mahine mein ab tak (chuni date tak) har bande ke late
-  const mtd = useMemo(() => {
-    const by: Record<string, any> = {};
-    rows.forEach((r) => {
-      const x = by[r.employee_id] || (by[r.employee_id] = { ...r, n: 0, mins: 0 });
-      x.n++; x.mins += r.late_minutes || 0;
-    });
-    return by;
-  }, [rows]);
-  // bande-wise: kitni LSL lagi rahi aur kin dino
-  const lslBy = useMemo(() => {
-    const by: Record<string, any> = {};
-    lsl.forEach((r: any) => {
-      const x = by[r.employee_id] || (by[r.employee_id] = {
-        employee_id: r.employee_id, emp_code: r.employees?.emp_code || "",
-        full_name: r.employees?.full_name || "", team: "", days: [] as any[] });
-      x.days.push(r);
-    });
-    return Object.values(by)
-      .filter((x: any) => !q || `${x.emp_code} ${x.full_name}`.toLowerCase().includes(q.toLowerCase()))
-      .sort((a: any, b: any) => b.days.length - a.days.length);
-  }, [lsl, q]);
-  const today = rows.filter((r) => r.work_date === date && match(r))
-    .sort((a, b) => String(a.punch_in_at).localeCompare(String(b.punch_in_at)));
-  const summary = Object.values(mtd).filter(match)
-    .sort((a: any, b: any) => b.n - a.n || b.mins - a.mins);
+  const emp = (id: string) => staff.find((x: any) => x.id === id) || {};
+  const rows = lsl.filter((r: any) => {
+    if (!q) return true;
+    const e: any = emp(r.employee_id);
+    return `${e.emp_code || ""} ${e.full_name || ""}`.toLowerCase().includes(q.toLowerCase());
+  });
+  // date-wise groups
+  const dates = Array.from(new Set(rows.map((r: any) => r.work_date)));
+  // is range mein har bande ki kitni
+  const perEmp: Record<string, number> = {};
+  rows.forEach((r: any) => { perEmp[r.employee_id] = (perEmp[r.employee_id] || 0) + 1; });
+  const isToday = (d: string) => d === istToday();
 
   return (
     <div className="att-wrap att-stack">
       <div className="att-flex" style={{ flexWrap: "wrap" }}>
-        <input type="date" value={date} max={istToday()} style={{ width: "auto" }}
-          onChange={(e) => setDate(e.target.value || istToday())} />
-        <select value="" style={{ width: "auto", minWidth: 190 }}
-          onChange={(e) => {
-            const x = staff.find((s) => s.id === e.target.value);
-            if (x) setHist(x);
-          }}>
-          <option value="">Employee late history…</option>
-          {staff.map((s) => <option key={s.id} value={s.id}>{s.full_name} ({s.emp_code})</option>)}
-        </select>
+        <input type="date" value={from} max={to} style={{ width: "auto" }}
+          onChange={(e) => setFrom(e.target.value || from)} />
+        <span className="att-muted">to</span>
+        <input type="date" value={to} max={istToday()} style={{ width: "auto" }}
+          onChange={(e) => setTo(e.target.value || to)} />
         <div style={{ flex: 1, minWidth: 200 }}>
-          <Search placeholder="Search name, code, department or manager" value={q} onChange={setQ} />
+          <Search placeholder="Search name or code" value={q} onChange={setQ} />
         </div>
         <button className="att-btn sm" disabled={!rows.length}
-          onClick={() => downloadCsv(rows.map((r) => ({
-            Date: r.work_date, Code: r.emp_code, Name: r.full_name, Department: r.team,
-            Manager: r.manager || "", Shift: fmtHM(r.shift_start), "Grace (min)": r.grace_minutes,
-            "Check-in": fmtTime(r.punch_in_at), "Minutes late": r.late_minutes, Status: r.status,
-          })), `HJS_late_${monthStart(date).slice(0, 7)}_to_${date}.csv`)}>CSV</button>
+          onClick={() => downloadCsv(rows.map((r: any) => {
+            const e: any = emp(r.employee_id);
+            return {
+              Date: r.work_date, Code: e.emp_code || "", Name: e.full_name || "",
+              "Check-in": fmtTime(r.punch_in_at),
+              "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
+              Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "",
+            };
+          }), `HJS_late_short_leave_${from}_to_${to}.csv`)}>CSV</button>
       </div>
+      <p className="att-muted">
+        Checked in after 10:30 and did not complete 9 hours — Late Short Leave stayed.
+        Every 3 = half day cut. Made Full Day by a manager are not shown.
+      </p>
       <Note>{err}</Note>
       {busy ? <p className="att-muted">Loading…</p> : (
         <>
-          <div className="att-list">
-            <div className="att-hd">
-              <b>Late Short Leave not removed · {fmtDate(monthStart(date))} – {fmtDate(date)}</b>
-              <span className="att-flex" style={{ gap: 8 }}>
-                <span className="att-muted">{lslBy.length} people</span>
-                <button className="att-btn sm line" disabled={!lslBy.length}
-                  onClick={() => downloadCsv(lsl.map((r: any) => ({
-                    Date: r.work_date, Code: r.employees?.emp_code, Name: r.employees?.full_name,
-                    "Check-in": fmtTime(r.punch_in_at),
-                    "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
-                    Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "",
-                  })), `HJS_LSL_not_removed_${monthStart(date).slice(0, 7)}.csv`)}>CSV</button>
-              </span>
-            </div>
-            <p className="att-muted" style={{ padding: "0 14px" }}>
-              Came after 10:30 and did not complete 9 hours — the Late Short Leave stayed.
-              Every 3 = half day cut.
-            </p>
-            {!lslBy.length && <p className="att-empty">Nobody this month.</p>}
-            {lslBy.map((x: any) => {
-              const n = x.days.length;
-              return (
-                <div className="att-row clk" key={x.employee_id} style={{ flexWrap: "wrap" }}
-                  onClick={() => setHist({ id: x.employee_id, emp_code: x.emp_code, full_name: x.full_name })}>
-                  <div className="grow" style={{ minWidth: 160 }}>
-                    <p><b>{x.emp_code}</b> · {x.full_name}</p>
-                    <p className="att-muted" style={{ whiteSpace: "normal" }}>
-                      {x.days.map((d: any) => `${fmtDate(d.work_date)} (in ${fmtTime(d.punch_in_at)}${
-                        d.worked_minutes ? `, ${hhmm(d.worked_minutes)}` : ""})`).join(" · ")}
-                    </p>
-                  </div>
-                  <span className={pillClass(n >= 3 ? "Absent" : "Late")}>
-                    {n} LSL{n >= 3 ? ` · ${Math.floor(n / 3) * 0.5} day cut` : ""}
-                  </span>
+          {!dates.length && (
+            <div className="att-list"><p className="att-empty">No Late Short Leave in this period.</p></div>
+          )}
+          {dates.map((d) => {
+            const list = rows.filter((r: any) => r.work_date === d);
+            return (
+              <div className="att-list" key={d}>
+                <div className="att-hd">
+                  <b>{new Date(d + "T00:00:00").toLocaleDateString("en-GB",
+                    { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}</b>
+                  <span className="att-muted">{list.length} people</span>
                 </div>
-              );
-            })}
-          </div>
-
-          <div className="att-list">
-            <div className="att-hd">
-              <b>Late on {fmtDate(date)}</b><span className="att-muted">{today.length}</span>
-            </div>
-            {!today.length && <p className="att-empty">Is din koi late nahi aaya.</p>}
-            {today.map((r) => (
-              <div className="att-row" key={r.employee_id} style={{ flexWrap: "wrap" }}>
-                <Avatar name={r.full_name} />
-                <div className="grow" style={{ minWidth: 170 }}>
-                  <p><PName id={r.employee_id} code={r.emp_code}>
-                    <b>{r.emp_code}</b> · {r.full_name}</PName></p>
-                  <p className="att-muted">{r.team}{r.manager ? ` · ${r.manager}` : ""}</p>
-                </div>
-                <span className="att-muted" style={{ width: 120 }}>
-                  In {fmtTime(r.punch_in_at)}
-                  <span style={{ display: "block", fontSize: 11.5 }}>Shift {fmtHM(r.shift_start)}</span>
-                </span>
-                <span className="att-pill p-Late">{r.late_minutes}m late</span>
-                <span className={pillClass(r.status)}>{r.status}</span>
-                <span className="att-muted" style={{ width: 92, textAlign: "right" }}>
-                  {mtd[r.employee_id]?.n || 1}× this month
-                </span>
+                {list.map((r: any) => {
+                  const e: any = emp(r.employee_id);
+                  const n = perEmp[r.employee_id] || 1;
+                  return (
+                    <div className="att-row" key={`${d}-${r.employee_id}`} style={{ flexWrap: "wrap" }}>
+                      <Avatar name={e.full_name || "?"} />
+                      <div className="grow" style={{ minWidth: 150 }}>
+                        <p><b>{e.emp_code}</b> · {e.full_name}</p>
+                        <p className="att-muted">{e.designation || ""}</p>
+                      </div>
+                      <span className="att-muted" style={{ minWidth: 150 }}>
+                        In {fmtTime(r.punch_in_at)}
+                        {r.punch_out_at ? ` – Out ${fmtTime(r.punch_out_at)}` : ""}
+                        <span style={{ display: "block", fontSize: 11.5 }}>
+                          {r.worked_minutes ? `${hhmm(r.worked_minutes)} worked` : ""}
+                        </span>
+                      </span>
+                      <span className={pillClass("Short Leave")}>
+                        {isToday(d) && !r.punch_out_at ? "Late SL · still in" : "Late Short Leave"}
+                      </span>
+                      <span className="att-muted" style={{ width: 92, textAlign: "right",
+                        color: n >= 3 ? "#b42318" : undefined, fontWeight: n >= 3 ? 700 : undefined }}>
+                        {n}× in period
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-
-          <div className="att-list">
-            <div className="att-hd">
-              <b>Month to date · {fmtDate(monthStart(date))} – {fmtDate(date)}</b>
-              <span className="att-muted">{summary.length} people</span>
-            </div>
-            {!summary.length && <p className="att-empty">Is mahine abhi tak koi late nahi.</p>}
-            {summary.map((r: any) => (
-              <div className="att-row clk" key={r.employee_id} title="Open late history"
-                onClick={() => setHist({ id: r.employee_id, emp_code: r.emp_code, full_name: r.full_name })}>
-                <span className="grow">
-                  <PName id={r.employee_id} code={r.emp_code}><b>{r.full_name}</b></PName>
-                  <span className="att-muted"> · {r.team}</span>
-                </span>
-                <span className="att-muted">{hhmm(r.mins)} total</span>
-                <b style={{ width: 70, textAlign: "right", color: r.n >= 3 ? "#b42318" : "#b54708" }}>
-                  {r.n} late
-                </b>
-              </div>
-            ))}
-          </div>
+            );
+          })}
         </>
       )}
-      {hist && <LateHistorySheet emp={hist} onClose={() => setHist(null)} />}
     </div>
   );
 }
