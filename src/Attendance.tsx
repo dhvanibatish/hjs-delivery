@@ -758,9 +758,6 @@ const CSS = `
   white-space: nowrap; }
 .hjsatt .att-jumplist .it .ar { font-size: 12px; color: #d0d5dd; }
 .hjsatt .att-jumplist .it.on .ar { color: #667085; }
-.hjsatt .att-helpbody { padding: 2px 18px 12px 55px; }
-.hjsatt .att-helpbody p { font-size: 13.5px; color: #344054; line-height: 1.5;
-  white-space: normal; margin-bottom: 9px; }
 
 @media (max-width: 860px) {
   .hjsatt .att-topsearch { display: flex; }
@@ -1294,7 +1291,6 @@ const ICONS: Record<string, string> = {
   pencil: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
   book: "M4 4.5A1.5 1.5 0 0 1 5.5 3H19v18H5.5A1.5 1.5 0 0 1 4 19.5v-15ZM8 3v18",
   dots: "M5 12h.01M12 12h.01M19 12h.01",
-  info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 16v-4.5M12 8h.01",
 };
 const Icon = ({ n, c = "#9fb0cd", s = 19 }: any) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
@@ -4015,8 +4011,11 @@ function PeersTab() {
 // WFH: sabke liye, poora din. Roster: sirf Sales team, ek din ka from–to time,
 // sirf usi time mein check-in / check-out kahin se bhi. Approval nahi.
 // Roster sirf Inside Sales ko — team ke naam ya designation mein "Inside Sales"
-const isSalesEmp = (emp: any) =>
-  /inside\s*sales/i.test(emp?.teams?.name || "") || /inside\s*sales/i.test(emp?.designation || "");
+// + jinhe alag se roster diya gaya (employees.roster_allowed), jaise Kanupriya mam
+// Roster: Inside Sales + Renewals team + jinhe alag se diya (roster_allowed)
+const isSalesEmp = (emp: any) => !!emp?.roster_allowed ||
+  /inside\s*sales|renewal/i.test(emp?.teams?.name || "") ||
+  /inside\s*sales|renewal/i.test(emp?.designation || "");
 
 function OutsideWorkTab({ me }: any) {
   const sales = isSalesEmp(me);
@@ -7978,49 +7977,22 @@ function JumpTo({ mods, onGo, onClose }: any) {
     return out;
   }, [mods]);
 
-  // search ke shabd (Hinglish bharti hata ke). Sab bharti ho to poora likha hua lo.
-  const words = useMemo(() => {
-    const raw = q.trim().toLowerCase().replace(/[?.,!]/g, " ").split(/\s+/).filter(Boolean);
-    const w = raw.filter((x) => !STOP.has(x));
-    return w.length ? w : raw;
-  }, [q]);
-
   const hits = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return all;
+    const words = t.split(/\s+/);
     return all
       .map((x) => {
-        const n = scoreOf(x.hay, words);
-        if (!n) return null;
-        // saare shabd mile + naam se shuru = sabse upar
-        const rank = (n === words.length ? 0 : 10)
-          + (x.title.toLowerCase().startsWith(t) ? 0 : x.title.toLowerCase().includes(t) ? 1 : 2);
+        if (!words.every((w) => x.hay.includes(w))) return null;
+        // naam se shuru hota hai to upar
+        const rank = x.title.toLowerCase().startsWith(t) ? 0
+          : x.title.toLowerCase().includes(t) ? 1 : 2;
         return { ...x, rank };
       })
       .filter(Boolean)
       .sort((a: any, b: any) => a.rank - b.rank)
-      .slice(0, 25);
-  }, [q, all, words]);
-
-  // instructions — sirf wahi jinka tab is user ko dikhta hai
-  const can = useMemo(() => new Set(all.map((x) => `${x.mod}/${x.scope}/${x.view}`)), [all]);
-  const helps = useMemo(() => {
-    if (!q.trim()) return [];
-    return HELP
-      .filter((h) => !h.go || can.has(h.go.join("/")))
-      .map((h) => {
-        const hay = `${h.q} ${h.kw}`.toLowerCase();
-        const n = scoreOf(hay, words);
-        // sawaal mein hi shabd hai to aur upar
-        return { ...h, n: n * 2 + scoreOf(h.q.toLowerCase(), words) };
-      })
-      .filter((h) => h.n > 0)
-      .sort((a, b) => b.n - a.n)
-      .slice(0, 6);
-  }, [q, words, can]);
-  // pehla jawab khula, baaki click par
-  const [openHelp, setOpenHelp] = useState(0);
-  useEffect(() => { setOpenHelp(0); }, [q]);
+      .slice(0, 40);
+  }, [q, all]);
 
   useEffect(() => { boxRef.current?.focus(); }, []);
   useEffect(() => { setSel(0); }, [q]);
@@ -8029,10 +8001,6 @@ function JumpTo({ mods, onGo, onClose }: any) {
 
   const onKey = (e: any) => {
     if (e.key === "Escape") return onClose();
-    // pehla jawab dikh raha hai aur koi tab nahi mila -> Enter = us jawab ki jagah chalo
-    if (e.key === "Enter" && !hits.length && helps[0]?.go) {
-      e.preventDefault(); onGo(...(helps[0].go as [string, string, string])); onClose(); return;
-    }
     if (e.key === "ArrowDown") { e.preventDefault(); setSel((i) => Math.min(i + 1, hits.length - 1)); }
     if (e.key === "ArrowUp")   { e.preventDefault(); setSel((i) => Math.max(i - 1, 0)); }
     if (e.key === "Enter" && hits[sel]) { e.preventDefault(); pick(hits[sel]); }
@@ -8051,42 +8019,15 @@ function JumpTo({ mods, onGo, onClose }: any) {
             <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
           </svg>
           <input ref={boxRef} value={q} onKeyDown={onKey}
-            placeholder="Search a page or ask — e.g. apply leave, forgot checkout"
+            placeholder="Where do you want to go?"
             onChange={(e) => setQ(e.target.value)} />
           <button className="esc" onClick={onClose}>Close</button>
         </div>
 
         <div className="att-jumplist">
-          {!hits.length && !helps.length && (
-            <p className="att-empty">Nothing matches "{q}". Try a simple word — leave, checkout, salary, WFH.</p>
+          {!hits.length && (
+            <p className="att-empty">Nothing matches "{q}".</p>
           )}
-          {helps.length > 0 && (
-            <div>
-              <div className="gh">How to</div>
-              {helps.map((h, i) => (
-                <div key={h.q} className="att-help">
-                  <button className={`it ${openHelp === i ? "on" : ""}`}
-                    onClick={() => setOpenHelp(openHelp === i ? -1 : i)}>
-                    <span className="ic"><Icon n="info" c="#5b6b8c" /></span>
-                    <span className="tx">{h.q}</span>
-                    <span className="ar">{openHelp === i ? "▴" : "▾"}</span>
-                  </button>
-                  {openHelp === i && (
-                    <div className="att-helpbody">
-                      <p>{h.a}</p>
-                      {h.go && (
-                        <button className="att-btn sm"
-                          onClick={() => { onGo(...(h.go as [string, string, string])); onClose(); }}>
-                          Take me there →
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {hits.length > 0 && helps.length > 0 && <div className="gh">Pages</div>}
           {Object.keys(groups).map((path) => (
             <div key={path}>
               <div className="gh">{path}</div>
@@ -8149,172 +8090,6 @@ const ALIASES: Record<string, string> = {
   "My Profile": "account settings my details code shift password",
 };
 
-
-
-/* ================= search mein "kaise karein" — saari instructions =================
-   q   = sawaal (jo dikhega)
-   a   = jawab (seedhi bhasha)
-   go  = kis tab par le jana hai  [module, scope, view]  (null = sirf jawab)
-   kw  = search ke shabd — English + Hinglish, jaise log likhte hain
-   Agar "go" wala tab us user ko dikhta hi nahi (role), to ye entry bhi nahi dikhegi. */
-const HELP: { q: string; a: string; go: string[] | null; kw: string }[] = [
-  // ---- check-in / check-out ----
-  { q: "How do I check in / check out?", go: ["home", "myspace", "overview"],
-    a: "Home › Overview — tap Check-in when you reach, Check-out when you leave. You can check in again after checking out. Location is taken on check-in.",
-    kw: "check in checkin check out checkout punch attendance lagana mark present haazri hajri start day" },
-  { q: "Check-in button is not working on laptop", go: ["home", "myspace", "overview"],
-    a: "Check-in works only on your phone. Check-out can be done from anywhere. On a day you have applied WFH, laptop check-in also works.",
-    kw: "laptop computer desktop check in nahi ho raha disabled grey button mobile phone" },
-  { q: "Location error / location permission", go: ["home", "myspace", "overview"],
-    a: "Allow location for this site in your browser / phone settings and try again. Turn on GPS. If you applied WFH for today, check-in works even without location.",
-    kw: "location gps permission allow error nahi mil rahi denied" },
-  { q: "Check-in blocked — “you didn't check out”", go: ["att", "mydata", "regs"],
-    a: "Check-out is mandatory. If you missed it, the next day check-in is blocked until you apply a regularization for that day. Tap “Apply regularization” on the home screen (or Attendance › Regularisation), fill the time you left and send. Check-in opens right away — approval is not needed for that.",
-    kw: "check in block blocked nahi ho raha checkout bhool gaya bhul gaye forgot missed checkout kal yesterday pichhle din band ruka" },
-  { q: "Missed a punch? Apply regularization", go: ["att", "mydata", "regs"],
-    a: "Attendance › My Data › Regularisation › Missed a punch? Pick the date (last 15 days), your in/out time and a reason. Your manager approves it — and can correct the time before approving.",
-    kw: "regularisation regularization regularize missed punch forgot bhool gaya galat time wrong time correction request" },
-  { q: "Office 500 m rule (Mohali Head Office / Noida Showroom)", go: ["home", "myspace", "overview"],
-    a: "Staff of Mohali Head Office and Noida Showroom can check in and check out only within 500 m of the office. On a WFH day (applied, approved or not) you can do it from anywhere. Inside Sales can also add a Roster for outside hours.",
-    kw: "500 m meter geofence door far office se bahar outside distance block range" },
-
-  // ---- leave ----
-  { q: "How do I apply for leave?", go: ["leave", "mydata", "requests"],
-    a: "Leave Tracker › My Data › Leave Requests › Apply Leave. Pick the type, dates and reason, then Apply. It goes to your manager.",
-    kw: "apply leave chutti chhutti chhuti leave lena leave kaha hai kahan request off holiday lena" },
-  { q: "How much leave do I have? (balance)", go: ["leave", "mydata", "summary"],
-    a: "Leave Tracker › My Data › Leave Summary shows your available balance for each leave type.",
-    kw: "leave balance kitni bachi remaining available el cl earned casual credit quota" },
-  { q: "Cancel my leave", go: ["leave", "mydata", "requests"],
-    a: "Leave Tracker › Leave Requests — open the leave and cancel it. Once a leave is approved, only an admin can cancel or change it.",
-    kw: "cancel leave hatana delete withdraw leave wapas" },
-  { q: "Half day / short leave", go: ["leave", "mydata", "requests"],
-    a: "Apply Leave › choose Half Day or Short Leave. Everyone gets 2 short leaves a month that don't cut anything — system short leaves (late / early) count in these 2. A 3rd can't be applied.",
-    kw: "half day short leave aadha din 2 short leave month adha" },
-  { q: "Week off (WO) leave", go: ["leave", "mydata", "requests"],
-    a: "1 Week Off is credited every week. Unused ones carry to month end and then lapse. Max 2 days per request; balance can't go negative.",
-    kw: "week off wo weekoff weekly off sunday off chhutti" },
-  { q: "Long leave (more than 5 days)", go: ["leave", "mydata", "requests"],
-    a: "Leave of more than 5 continuous days is long leave — once a year, fully unpaid, manager approves. WFH is not counted as long leave.",
-    kw: "long leave 5 din lambi chhutti unpaid ek baar saal" },
-  { q: "Sandwich rule", go: ["leave", "mydata", "requests"],
-    a: "If a week off or holiday falls between two leave days, those off days are counted as leave too.",
-    kw: "sandwich week off beech mein holiday count" },
-  { q: "Comp off / birthday / anniversary leave", go: ["leave", "mydata", "requests"],
-    a: "Working on a national holiday gives 2 comp offs — use them the same month. Birthday and marriage-anniversary leave show in Apply Leave only in that month.",
-    kw: "comp off compensatory holiday kaam birthday anniversary janamdin leave" },
-  { q: "Holiday list", go: ["leave", "holidays", "list"],
-    a: "Leave Tracker › Holidays shows this year's holidays.",
-    kw: "holiday list chhutti festival diwali holi 26 jan 15 aug 2 oct" },
-
-  // ---- late / early / hours ----
-  { q: "What is Late Short Leave?", go: ["att", "mydata", "summary"],
-    a: "Check-in after 10:30 = Late Short Leave. Check-in at 12:45 or later = Half Day. If you complete 9 hours (first check-in to last check-out, lunch included) that day, the Late Short Leave is removed. Every 3 Late Short Leaves = half day cut from salary. Your manager can also mark it Full Day.",
-    kw: "late short leave lsl der late aana 10:30 10.30 late mark 9 hours ghante half day cut salary" },
-  { q: "Early check-out — what gets marked?", go: ["att", "mydata", "summary"],
-    a: "Last check-out before 12 noon = Absent, before 4:30 PM = Half Day, 4:30 – 6:30 PM = Short Leave, after 6:30 PM = nothing. If you check in again the same day, it's removed.",
-    kw: "early checkout jaldi jana half day absent short leave 4:30 6:30 jaldi nikalna" },
-  { q: "How are my hours / days counted?", go: ["att", "mydata", "summary"],
-    a: "Attendance › My Data › Attendance Summary shows your days and hours. Calendar shows each day's status.",
-    kw: "hours ghante worked days kitne din present absent my attendance summary" },
-  { q: "See my attendance day by day", go: ["att", "mydata", "calendar"],
-    a: "Attendance › My Data › Calendar. Tap a day to see its check-ins and status.",
-    kw: "calendar month day wise din status my attendance dekhna" },
-
-  // ---- WFH / roster ----
-  { q: "How do I apply WFH (work from home)?", go: ["outside", "mydata", "mine"],
-    a: "Open the WFH tab › Apply WFH. Pick the dates and reason. As soon as it's applied (even before approval) you can check in / out from anywhere, phone or laptop. Pay still comes from your check-in — WFH without check-in is absent.",
-    kw: "wfh work from home ghar se kaam home apply remote" },
-  { q: "Roster — working outside for a few hours (Inside Sales)", go: ["outside", "mydata", "mine"],
-    a: "WFH & Roster › add Roster: pick the date and from–to time. During that time you can check in / out from anywhere. No approval needed. Only for Inside Sales.",
-    kw: "roster bahar field outside visit sales client meeting time" },
-
-  // ---- pay / reports ----
-  { q: "My salary / payable days", go: ["reports", "mine", "pay"],
-    a: "Reports › My Reports › My pay shows your payable days and amount for the month.",
-    kw: "salary pay tankhwah payable amount kitni kategi cut deduction" },
-  { q: "My monthly attendance report", go: ["reports", "mine", "me"],
-    a: "Reports › My Reports › My attendance.",
-    kw: "report month monthly attendance report mera" },
-
-  // ---- profile / login ----
-  { q: "Change my profile photo", go: ["me", "me", "profile"],
-    a: "Profile — change your photo. You can change it 2 times; after that ask an admin.",
-    kw: "photo pic picture profile dp image change badalna" },
-  { q: "Forgot my 4-digit code", go: null,
-    a: "On the sign-in screen enter your email and tap “Forgot code” to get a new one by mail. Or ask an admin to reset your code.",
-    kw: "forgot code password pin bhool gaya login sign in reset 4 digit" },
-
-  // ---- people / company ----
-  { q: "Who is in today?", go: ["att", "team", "today"],
-    a: "Attendance › Team › Who's In Today shows who has checked in, who is out and who hasn't come yet.",
-    kw: "who is in aaj kaun aaya present today team live" },
-  { q: "Who is on leave today?", go: ["leave", "team", "onleave"],
-    a: "Leave Tracker › Team › On Leave Today.",
-    kw: "on leave today aaj chhutti par kaun absent" },
-  { q: "Org chart / who reports to whom", go: ["home", "org", "emptree"],
-    a: "Home › Organization › Employee Tree.",
-    kw: "org chart manager kaun reporting tree hierarchy boss" },
-  { q: "Birthdays and new joiners", go: ["home", "org", "people"],
-    a: "Home › Organization › Birthdays & New Hires.",
-    kw: "birthday janamdin new joiner naya joined anniversary" },
-  { q: "Trainings / courses", go: ["lms", "mydata", "courses"],
-    a: "Trainings › My Courses. Finish all chapters and pass the assessments to get your certificate.",
-    kw: "training course lms learning video quiz assessment certificate" },
-
-  // ---- managers ----
-  { q: "Approve leave / regularization (managers)", go: ["approvals", "pending", "all"],
-    a: "Approvals › Pending. For a regularization you can correct the In / Out time before tapping Approve — the time you save is what applies. For a leave you can change the leave type before approving.",
-    kw: "approve approval reject manager pending request team leave regularization time edit" },
-  { q: "Apply leave for my team member (managers)", go: ["leave", "mydata", "requests"],
-    a: "Apply Leave › in “Leave for” pick the team member instead of Myself.",
-    kw: "team member leave apply for someone manager kisi aur ki leave" },
-  { q: "Remove a Late Short Leave / mark Full Day (managers)", go: ["home", "team", "space"],
-    a: "Home › Team › Team Space — on the team member's late / early mark choose Full Day (or Short Leave / Half Day).",
-    kw: "late short leave hatana remove waive full day manager team space late mark" },
-  { q: "Fix someone's check-in / check-out time (managers)", go: ["att", "team", "matrix"],
-    a: "Attendance › Team › Monthly Grid — tap the person's day › Change day, set the in and out time and save. It's recorded who changed it.",
-    kw: "fix time change time galat time sahi karna punch edit manager monthly grid change day" },
-  { q: "Late comers report", go: ["reports", "late", "list"],
-    a: "Reports › Late Comers.",
-    kw: "late comers report der se aane wale late list" },
-  { q: "Login hours report", go: ["reports", "hours", "list"],
-    a: "Reports › Login Hours.",
-    kw: "login hours report kitne ghante worked hours team" },
-  { q: "Team leave list", go: ["leave", "team", "leaves"],
-    a: "Leave Tracker › Team › All Team Leaves.",
-    kw: "team leaves sabki leave list" },
-
-  // ---- admin ----
-  { q: "Add a new employee (admin)", go: ["home", "org", "staff"],
-    a: "Home › Organization › Manage Staff › add the employee with their email. They set their own 4-digit code on first sign-in.",
-    kw: "add employee new joiner naya banda staff create joining" },
-  { q: "Reset someone's code (admin)", go: ["home", "org", "list"],
-    a: "Home › Organization › Employee List — open the person › Reset their code.",
-    kw: "reset code password pin employee bhool gaya admin" },
-  { q: "Today's absent list (admin)", go: ["att", "absent", "daily"],
-    a: "Attendance › Daily Absent Report — mark an absent person as present or leave.",
-    kw: "absent report aaj kaun nahi aaya daily absent mark present" },
-  { q: "Attendance sheet (Attendance Heads)", go: ["att", "sheet", "month"],
-    a: "Attendance › Attendance Sheet › Monthly Sheet — every number is editable.",
-    kw: "attendance sheet monthly register hr sheet credit" },
-  { q: "Payroll for everyone", go: ["reports", "att", "payroll"],
-    a: "Reports › Company / Team › Payroll. Every 3 Late Short Leaves cut half a day here.",
-    kw: "payroll salary all staff sabki salary payable" },
-  { q: "Give / adjust leave balance (admin)", go: ["leave", "team", "balances"],
-    a: "Leave Tracker › Team › Balance & History.",
-    kw: "leave balance credit allot dena adjust el cl quota" },
-];
-
-// Hinglish ke bharti ke shabd — inse match nahi karna
-const STOP = new Set(("kaha kahan kaise kese kya kyu kyun h hai hain he ho hota hoti me mein main mai " +
-  "ka ki ke ko se par pe ye yeh wo woh mera meri mere apna apni karu karun karna karne kare karein krna kru " +
-  "kar how do i to my the a an is where what can of for in on and or ka liye lagana dekhna batao bata " +
-  "gaya gayi gaye hua hui nahi nhi raha rahi chahiye kiya kiye lagaye lagau hoga").split(" "));
-
-// sawaal ke shabd — kitne match hue
-const scoreOf = (hay: string, words: string[]) =>
-  words.reduce((n, w) => n + (hay.includes(w) ? 1 : 0), 0);
 
 /* ================= search box (cross ke saath) ================= */
 function Search({ value, onChange, placeholder = "Search", style }: any) {
