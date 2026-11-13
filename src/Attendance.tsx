@@ -7208,6 +7208,15 @@ function LateComersTab({ me }: any) {
   const [date, setDate] = useState(istToday());
   const [hist, setHist] = useState<any>(null);
   const [staff, setStaff] = useState<any[]>([]);
+  // Late Short Leave jo 9 ghante se nahi hati (aur Full Day bhi nahi ki gayi)
+  const [lsl, setLsl] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("attendance_logs")
+      .select("employee_id, work_date, punch_in_at, punch_out_at, worked_minutes, late_override, employees(emp_code, full_name)")
+      .eq("late_mark", LSL_MARK).gte("work_date", monthStart(date)).lte("work_date", date)
+      .order("work_date")
+      .then(({ data }) => setLsl((data || []).filter((r: any) => r.late_override !== "Present")));
+  }, [date]);
   useEffect(() => {
     supabase.from("employees").select("id, emp_code, full_name").eq("active", true)
       .order("full_name").then(({ data }) => setStaff(data || []));
@@ -7238,6 +7247,19 @@ function LateComersTab({ me }: any) {
     });
     return by;
   }, [rows]);
+  // bande-wise: kitni LSL lagi rahi aur kin dino
+  const lslBy = useMemo(() => {
+    const by: Record<string, any> = {};
+    lsl.forEach((r: any) => {
+      const x = by[r.employee_id] || (by[r.employee_id] = {
+        employee_id: r.employee_id, emp_code: r.employees?.emp_code || "",
+        full_name: r.employees?.full_name || "", team: "", days: [] as any[] });
+      x.days.push(r);
+    });
+    return Object.values(by)
+      .filter((x: any) => !q || `${x.emp_code} ${x.full_name}`.toLowerCase().includes(q.toLowerCase()))
+      .sort((a: any, b: any) => b.days.length - a.days.length);
+  }, [lsl, q]);
   const today = rows.filter((r) => r.work_date === date && match(r))
     .sort((a, b) => String(a.punch_in_at).localeCompare(String(b.punch_in_at)));
   const summary = Object.values(mtd).filter(match)
@@ -7293,6 +7315,45 @@ function LateComersTab({ me }: any) {
                 </span>
               </div>
             ))}
+          </div>
+
+          <div className="att-list">
+            <div className="att-hd">
+              <b>Late Short Leave not removed · {fmtDate(monthStart(date))} – {fmtDate(date)}</b>
+              <span className="att-flex" style={{ gap: 8 }}>
+                <span className="att-muted">{lslBy.length} people</span>
+                <button className="att-btn sm line" disabled={!lslBy.length}
+                  onClick={() => downloadCsv(lsl.map((r: any) => ({
+                    Date: r.work_date, Code: r.employees?.emp_code, Name: r.employees?.full_name,
+                    "Check-in": fmtTime(r.punch_in_at),
+                    "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
+                    Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "",
+                  })), `HJS_LSL_not_removed_${monthStart(date).slice(0, 7)}.csv`)}>CSV</button>
+              </span>
+            </div>
+            <p className="att-muted" style={{ padding: "0 14px" }}>
+              Came after 10:30 and did not complete 9 hours — the Late Short Leave stayed.
+              Every 3 = half day cut.
+            </p>
+            {!lslBy.length && <p className="att-empty">Nobody this month.</p>}
+            {lslBy.map((x: any) => {
+              const n = x.days.length;
+              return (
+                <div className="att-row clk" key={x.employee_id} style={{ flexWrap: "wrap" }}
+                  onClick={() => setHist({ id: x.employee_id, emp_code: x.emp_code, full_name: x.full_name })}>
+                  <div className="grow" style={{ minWidth: 160 }}>
+                    <p><b>{x.emp_code}</b> · {x.full_name}</p>
+                    <p className="att-muted" style={{ whiteSpace: "normal" }}>
+                      {x.days.map((d: any) => `${fmtDate(d.work_date)} (in ${fmtTime(d.punch_in_at)}${
+                        d.worked_minutes ? `, ${hhmm(d.worked_minutes)}` : ""})`).join(" · ")}
+                    </p>
+                  </div>
+                  <span className={pillClass(n >= 3 ? "Absent" : "Late")}>
+                    {n} LSL{n >= 3 ? ` · ${Math.floor(n / 3) * 0.5} day cut` : ""}
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
           <div className="att-list">
