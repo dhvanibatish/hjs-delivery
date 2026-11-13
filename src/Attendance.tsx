@@ -180,6 +180,17 @@ const CSS = `
   .hjsatt .att-subbar { position: sticky; top: 84px; z-index: 12; }
   .hjsatt .att-card, .hjsatt .att-list { box-shadow: none; }
   .hjsatt .att-tcard { width: 240px; }
+
+  /* phone: kuch bhi screen se bahar na nikle (side-scroll band) */
+  .hjsatt { overflow-x: clip; }
+  .hjsatt .att-main, .hjsatt .att-wrap { max-width: 100vw; overflow-x: clip; }
+  .hjsatt .att-card, .hjsatt .att-list, .hjsatt .att-note { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  .hjsatt input, .hjsatt select, .hjsatt textarea { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  /* iOS date box apne aap chauda ho jaata hai — dono date ek line mein, aadhe-aadhe */
+  .hjsatt input[type="date"], .hjsatt input[type="time"] { -webkit-appearance: none; appearance: none; }
+  .hjsatt .att-range .att-flex { width: 100%; margin-left: 0 !important; flex-wrap: nowrap; }
+  .hjsatt .att-range .att-flex input { flex: 1 1 0; width: 0; min-width: 0; }
+  .hjsatt .att-flex { min-width: 0; }
 }
 
 /* phone pe hover effects band — scroll pe repaint kam */
