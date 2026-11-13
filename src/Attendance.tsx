@@ -1928,6 +1928,7 @@ function HomeScreen({ me }: any) {
                 : "Location is recorded with every punch"}
             </p>
             {!open && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
+            <CheckoutLastWarning me={me} />
 
             {sessions.length > 0 && (
               <div style={{ marginTop: 12 }}>
@@ -2172,6 +2173,23 @@ function useWfhToday(me: any) {
       .then(({ data }) => setWfh(!!(data && data.length)));
   }, [me.id]);
   return wfh;
+}
+
+// 12 Nov ka check-out miss -> sirf aaj (13 Nov) ek last warning, block nahi
+function CheckoutLastWarning({ me }: any) {
+  const [day, setDay] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.rpc("missed_checkout_warning").then(({ data }) => setDay(data || null));
+  }, [me.id]);
+  if (!day) return null;
+  return (
+    <div className="att-note err" style={{ marginTop: 10 }}>
+      <span>
+        <b>Last warning:</b> you didn't check out on {fmtDate(day)}. From now on, if you
+        miss a check-out, you can't check in the next day until you apply regularization.
+      </span>
+    </div>
+  );
 }
 
 function MissedCheckoutNote({ day, onFix }: any) {
@@ -2522,6 +2540,7 @@ function AttSummary({ me }: any) {
         )}
       </div>
       {!openSess && <MissedCheckoutNote day={missedDay} onFix={() => setFixDay(missedDay)} />}
+      <CheckoutLastWarning me={me} />
       {fixDay && <RegularizeSheet me={me} forDate={fixDay}
         onClose={() => { setFixDay(null); refreshMissed(); }} />}
 
