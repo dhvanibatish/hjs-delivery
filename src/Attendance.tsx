@@ -7881,9 +7881,10 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
   const s0 = String(emp?.shift_start || "10:00").slice(0, 5);
   const s1 = String(emp?.shift_end || "19:00").slice(0, 5);
   const opts: [string, string][] = mgr
-    ? [["Short Leave", "Short leave"], ["Half Day", "Half day"], ["WFH", "WFH"], ["Leave", "Leave"]]
-    : [["Present", "Present"], ["Short Leave", "Short leave"], ["Half Day", "Half day"],
-       ["WFH", "WFH"], ["Leave", "Leave"], ["Absent", "Absent"]];
+    ? [["Times", "Fix check-in/out"], ["Short Leave", "Short leave"], ["Half Day", "Half day"],
+       ["WFH", "WFH"], ["Leave", "Leave"]]
+    : [["Present", "Present"], ["Times", "Fix check-in/out"], ["Short Leave", "Short leave"],
+       ["Half Day", "Half day"], ["WFH", "WFH"], ["Leave", "Leave"], ["Absent", "Absent"]];
   const first = opts.some(([k]) => k === initial) ? initial : opts[0][0];
   const [st, setSt] = useState<string>(first);
   const [tin, setTin] = useState(s0);
@@ -7894,6 +7895,22 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  // us din ke asli punches — "Fix check-in/out" mein pehle se bhar do
+  const [punch, setPunch] = useState<[string, string] | null>(null);
+  const hhmm = (t: any) => t ? new Date(t).toLocaleTimeString("en-GB",
+    { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "";
+  useEffect(() => {
+    supabase.from("attendance_sessions").select("in_at, out_at")
+      .eq("employee_id", emp.id).eq("work_date", date).order("in_at")
+      .then(({ data }) => {
+        if (!data || !data.length) return;
+        const p: [string, string] = [hhmm(data[0].in_at) || s0,
+          hhmm(data[data.length - 1].out_at) || s1];
+        setPunch(p);
+        if (first === "Times") { setTin(p[0]); setTout(p[1]); }
+      });
+  }, [emp?.id, date]);
 
   useEffect(() => {
     supabase.from("leave_types").select("code, name").order("code")
@@ -7910,11 +7927,12 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
     if (k === "Short Leave") { setTin(s0); setTout(addMins(s0, 120)); }
     if (k === "Half Day") { setTin(s0); setTout(addMins(s0, 240)); }
     if (k === "Present") { setTin(s0); setTout(s1); }
+    if (k === "Times") { setTin(punch ? punch[0] : s0); setTout(punch ? punch[1] : s1); }
   };
 
   // manager ka half day bhi leave (HALF) ban ke jaata hai
   const viaLeave = st === "Short Leave" || st === "Leave" || st === "WFH" || (mgr && st === "Half Day");
-  const timed = st === "Short Leave" || st === "Half Day" || st === "Present";
+  const timed = st === "Short Leave" || st === "Half Day" || st === "Present" || st === "Times";
   const needReason = viaLeave;
 
   const save = async () => {
@@ -7922,7 +7940,11 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
     if (needReason && !note.trim()) return setErr("Please write a reason.");
     setBusy(true); setErr("");
     let error: any = null;
-    if (viaLeave) {
+    if (st === "Times") {
+      ({ error } = await supabase.rpc("set_punch_times", {
+        p_emp: emp.id, p_date: date, p_in: tin, p_out: tout, p_note: note.trim() || null,
+      }));
+    } else if (viaLeave) {
       const code = st === "Short Leave" ? "SHORT" : st === "Half Day" ? "HALF" : st === "WFH" ? "WFH" : lt;
       ({ error } = await supabase.rpc("apply_leave_for", {
         p_emp: emp.id, p_type: code, p_from: date, p_to: date,
@@ -7967,16 +7989,20 @@ function DaySetSheet({ emp, date, current, initial = "Present", mgr = false, onC
         {timed && (
           <div className="att-row2">
             <div>
-              <label>{st === "Present" ? "Check-in" : "From"}</label>
+              <label>{st === "Present" || st === "Times" ? "Check-in" : "From"}</label>
               <input type="time" lang="en-US" value={tin} onChange={(e) => setTin(e.target.value)} />
             </div>
             <div>
-              <label>{st === "Present" ? "Check-out" : "To"}</label>
+              <label>{st === "Present" || st === "Times" ? "Check-out" : "To"}</label>
               <input type="time" lang="en-US" value={tout} onChange={(e) => setTout(e.target.value)} />
             </div>
           </div>
         )}
 
+        {st === "Times" && (
+          <p className="att-muted">That day's check-in and check-out are set to these times.
+            Late / early rules apply to the new times, and it's saved with your name.</p>
+        )}
         {st === "Short Leave" && (
           <p className="att-muted">Approved short leave — counts as a quarter day (0.25). Shows as P (SL) if they checked in.</p>
         )}
