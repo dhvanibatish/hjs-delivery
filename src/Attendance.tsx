@@ -1269,6 +1269,7 @@ const ICONS: Record<string, string> = {
   home: "M3 10.5 12 3l9 7.5M5 9.8V20h14V9.8",
   clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   cal: "M8 3v3M16 3v3M3.5 9h17M4.5 5.5h15v15h-15z",
+  pin: "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21ZM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
   check: "m4.5 12.5 5 5 10-11",
   users: "M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20M9 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 20v-1.5a4 4 0 0 0-3-3.8M16.5 3.7a4 4 0 0 1 0 6.9",
   user: "M20 21v-2a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
@@ -12369,10 +12370,6 @@ const MODULES: Module[] = [
         { k: "calendar", label: "Calendar" },
         { k: "regs", label: "Regularisation (Missed a punch)" },
       ]},
-      // WFH + Roster — leave nahi, sirf location bypass
-      { k: "outside", label: "Outside Work", views: [
-        { k: "mine", label: "WFH & Roster" },
-      ]},
       { k: "team", label: "Team", views: [
         { k: "today", label: "Who's In Today" },
         { k: "matrix", label: "Monthly Grid" },
@@ -12401,6 +12398,13 @@ const MODULES: Module[] = [
         { k: "balances", label: "Balance & History" },
       ]},
       { k: "holidays", label: "Holidays", views: [{ k: "list", label: "Holiday List" }]},
+    ],
+  },
+  // WFH + Roster — leave nahi, sirf location bypass. Rail mein apna alag icon.
+  {
+    k: "outside", label: "WFH & Roster", icon: "pin",
+    scopes: [
+      { k: "mydata", label: "My Data", views: [{ k: "mine", label: "WFH & Roster" }]},
     ],
   },
   {
@@ -12693,7 +12697,7 @@ export default function Attendance() {
       case "att/mydata/summary":    return <AttSummary me={me} />;
       case "att/mydata/calendar":   return <CalendarTab me={me} />;
       case "att/mydata/regs":       return <div className="att-wrap att-stack"><MyRegsTab me={me} /></div>;
-      case "att/outside/mine":      return <div className="att-wrap att-stack"><OutsideWorkTab me={me} /></div>;
+      case "outside/mydata/mine":      return <div className="att-wrap att-stack"><OutsideWorkTab me={me} /></div>;
       case "att/team/today":        return <div className="att-wrap att-stack"><TodayTab me={me} /></div>;
       case "att/team/matrix":       return <div className="att-wrap att-stack"><MatrixTab me={me} /></div>;
       case "att/absent/daily":
