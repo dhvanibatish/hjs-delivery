@@ -2218,9 +2218,8 @@ function LslTodayNote({ me, todayLog, tick }: any) {
       <div className="att-note" style={{ marginTop: 10, background: "#fff7ed",
         border: "1px solid #fed7aa", color: "#9a3412" }}>
         <span>
-          <b>Late check-in today ({fmtTime(log.punch_in_at)}) — Late Short Leave.</b>{" "}
-          Complete 9 hours (lunch included): check out after <b>{until}</b> and it is
-          removed automatically. Every 3 Late Short Leaves = 1 half day cut.
+          <b>You logged in late today at {fmtTime(log.punch_in_at)}.</b> Stay till{" "}
+          <b>{until}</b> (9 hours) to remove the Late Short Leave.
         </span>
       </div>
     );
@@ -2228,7 +2227,7 @@ function LslTodayNote({ me, todayLog, tick }: any) {
   if (log.late_mark === "Half Day") {
     return (
       <div className="att-note err" style={{ marginTop: 10 }}>
-        <span><b>Checked in after 12:45 today ({fmtTime(log.punch_in_at)}) — Half Day.</b></span>
+        <span><b>You logged in late today at {fmtTime(log.punch_in_at)}</b> (after 12:45) — Half Day.</span>
       </div>
     );
   }
@@ -2236,7 +2235,7 @@ function LslTodayNote({ me, todayLog, tick }: any) {
   if (!log.late_mark && inHM > "10:30" && log.punch_out_at) {
     return (
       <div className="att-note ok" style={{ marginTop: 10 }}>
-        <span>Late check-in today, but 9 hours are done — Late Short Leave removed.</span>
+        <span>You logged in late today, but 9 hours are done — Late Short Leave removed.</span>
       </div>
     );
   }
