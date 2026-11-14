@@ -215,9 +215,10 @@ const CSS = `
 .hjsatt .att-flex { display: flex; align-items: center; gap: 9px; }
 .hjsatt .att-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .hjsatt .att-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.hjsatt .att-cols { display: grid; gap: 13px; align-items: start; }
-@media (min-width: 1000px) { .hjsatt .att-cols { grid-template-columns: 340px 1fr; } }
-.hjsatt .att-col { display: flex; flex-direction: column; gap: 13px; }
+/* minmax(0,1fr): column content (dates, chips, session rows) ko screen se chauda na hone do */
+.hjsatt .att-cols { display: grid; gap: 13px; align-items: start; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1000px) { .hjsatt .att-cols { grid-template-columns: 340px minmax(0, 1fr); } }
+.hjsatt .att-col { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
 
 .hjsatt .att-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; min-height: 42px; padding: 11px; border-radius: 8px;
