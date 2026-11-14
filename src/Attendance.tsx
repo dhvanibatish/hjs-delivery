@@ -1802,7 +1802,8 @@ function HomeScreen({ me }: any) {
   const [missedDay, refreshMissed] = useMissedCheckout(me);
   const [fixDay, setFixDay] = useState<string | null>(null);
   const wfhToday = useWfhToday(me);
-  const phoneOk = isMobile() || wfhToday;
+  const rosterNow = useRosterNow(me);
+  const phoneOk = isMobile() || wfhToday || rosterNow;
   // CR-2: manager/admin ne meri leave lagayi — jab tak OK na dabaun dikhe
   const [byMgr, setByMgr] = useState<any[]>([]);
   useEffect(() => {
@@ -2206,6 +2207,21 @@ function useWfhToday(me: any) {
   return wfh;
 }
 
+// Abhi roster chal raha hai (20 min pehle se; check-out 20 min baad tak)? To laptop se bhi
+// check-in / check-out. Har minute dobara dekho — roster ka time aate-jaate.
+function useRosterNow(me: any) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!me?.id) return;
+    const chk = () => supabase.rpc("has_roster_now", { p_emp: me.id })
+      .then(({ data, error }) => { if (!error) setOn(!!data); });
+    chk();
+    const t = setInterval(chk, 60000);
+    return () => clearInterval(t);
+  }, [me?.id]);
+  return on;
+}
+
 // 12 Nov ka check-out miss -> sirf aaj (13 Nov) ek last warning, block nahi
 // Aaj late aaya -> home par warning. 9 ghante (lunch ke saath) poore hote hi
 // server LSL hata deta hai, tab green "removed" dikhta hai.
@@ -2495,7 +2511,8 @@ function AttSummary({ me }: any) {
   const [missedDay, refreshMissed] = useMissedCheckout(me);
   const [fixDay, setFixDay] = useState<string | null>(null);
   const wfhToday = useWfhToday(me);
-  const phoneOk = isMobile() || wfhToday;
+  const rosterNow = useRosterNow(me);
+  const phoneOk = isMobile() || wfhToday || rosterNow;
   const punch = async (dir: "in" | "out") => {
     if (dir === "in" && missedDay) { setFixDay(missedDay); return; }
     setErr(""); setBusy(true);
@@ -4145,6 +4162,11 @@ function RosterSheet({ onClose }: any) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Sales ka aam roster: subah 7–10, shaam 7–10
+  const SLOTS = [
+    { label: "Morning 7–10 AM", from: "07:00", to: "10:00" },
+    { label: "Evening 7–10 PM", from: "19:00", to: "22:00" },
+  ];
 
   const save = async () => {
     if (!d) return setErr("Pick a date.");
@@ -4167,6 +4189,15 @@ function RosterSheet({ onClose }: any) {
           <input type="date" value={d} min={today} max={addDays(today, 30)}
             onChange={(e) => setD(e.target.value)} />
         </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {SLOTS.map((x) => (
+            <button key={x.label} type="button"
+              className={from === x.from && to === x.to ? "att-btn sm" : "att-btn sm line"}
+              onClick={() => { setFrom(x.from); setTo(x.to); }}>
+              {x.label}
+            </button>
+          ))}
+        </div>
         <div className="att-row2">
           <div>
             <label>From</label>
@@ -4183,9 +4214,10 @@ function RosterSheet({ onClose }: any) {
             onChange={(e) => setReason(e.target.value)} />
         </div>
         <p className="att-muted">
-          Only between these times can you check in / check out from anywhere. Before or
-          after, the normal office location rule applies. One roster per day — applying
-          again for the same day replaces it.
+          Between these times you can check in / check out from anywhere. Check-in opens
+          20 min before the start; check-out works up to 20 min after the end. You can add a morning and an evening roster on the
+          same day — check out after the morning one and check in again later. Outside
+          roster time the normal office location rule applies.
         </p>
         <Note>{err}</Note>
         <button className="att-btn" disabled={busy} onClick={save}>
