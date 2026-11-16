@@ -4038,7 +4038,8 @@ function PeersTab() {
 /* ================= Outside Work: WFH + Roster ================= */
 // Dono leave nahi hain — sirf location bypass. Pay check-in / check-out se hi.
 // WFH: sabke liye, poora din. Roster: sirf Sales team, ek din ka from–to time,
-// sirf usi time mein check-in / check-out kahin se bhi. Approval nahi.
+// sirf usi time mein check-in / check-out kahin se bhi. Manager ke paas
+// approval ko jata hai (16 Nov), par Pending pe bhi bypass chalu — Reject pe band.
 // Roster sirf Inside Sales ko — team ke naam ya designation mein "Inside Sales"
 // + jinhe alag se roster diya gaya (employees.roster_allowed), jaise Kanupriya mam
 // Roster: Inside Sales + jinhe alag se diya (roster_allowed, jaise Kanupriya mam)
@@ -4104,7 +4105,8 @@ function OutsideWorkTab({ me }: any) {
           </div>
           <p className="att-muted" style={{ padding: "0 14px" }}>
             Working outside for some hours? Pick the date and time — during that time you can
-            check in / check out from anywhere. Applies right away.
+            check in / check out from anywhere. It goes to your manager for approval, but works
+            right away while pending (stops if rejected).
           </p>
           {!rost.length && <p className="att-empty">No roster yet.</p>}
           {rost.map((r) => (
@@ -4114,10 +4116,10 @@ function OutsideWorkTab({ me }: any) {
                 <p>{fmtHM(r.from_time)} – {fmtHM(r.to_time)}</p>
                 {r.reason && <p className="att-muted" style={{ whiteSpace: "normal" }}>{r.reason}</p>}
               </div>
-              <span className={pillClass(r.status === "Active" ? "Approved" : "Cancelled")}>
-                {r.status}
+              <span className={pillClass(r.status === "Active" ? "Approved" : r.status)}>
+                {r.status === "Active" ? "Approved" : r.status}
               </span>
-              {r.status === "Active" && String(r.work_date) >= istToday() && (
+              {["Active", "Pending", "Approved"].includes(r.status) && String(r.work_date) >= istToday() && (
                 <button className="att-muted" disabled={busy === r.id} onClick={() => cancelRoster(r)}>
                   Cancel
                 </button>
@@ -4215,6 +4217,8 @@ function RosterSheet({ onClose }: any) {
             onChange={(e) => setReason(e.target.value)} />
         </div>
         <p className="att-muted">
+          This goes to your manager for approval. It works right away while pending; if your
+          manager rejects it, the normal office location rule applies again.
           Between these times you can check in / check out from anywhere. Check-in opens
           20 min before the start; check-out works up to 20 min after the end. You can add a morning and an evening roster on the
           same day — check out after the morning one and check in again later. Outside
@@ -4222,7 +4226,7 @@ function RosterSheet({ onClose }: any) {
         </p>
         <Note>{err}</Note>
         <button className="att-btn" disabled={busy} onClick={save}>
-          {busy ? "Saving…" : "Save roster"}
+          {busy ? "Sending…" : "Send roster"}
         </button>
       </div>
     </Sheet>
@@ -5164,6 +5168,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const [pickLeave, setPickLeave] = useState<any>(null);
   const [leaves, setLeaves] = useState<any[]>([]);
   const [regs, setRegs] = useState<any[]>([]);
+  const [rosts, setRosts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   // "approved" tab = jo requests decide ho chuki hain; default aaj ki
@@ -5185,6 +5190,12 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
         : supabase.from("regularizations").select("*").eq("status", "Pending").order("work_date"),
       supabase.from("employees").select("id, emp_code, full_name, designation"),
     ]);
+    // Roster (16 Nov) — manager ke paas approval ko; RLS manager -> apni team
+    const ro = history
+      ? await supabase.from("rosters").select("*").in("status", ["Approved", "Rejected"])
+          .not("approved_at", "is", null).order("approved_at", { ascending: false }).limit(1000)
+      : await supabase.from("rosters").select("*").eq("status", "Pending")
+          .order("work_date").order("from_time");
     if (l.error) setErr(l.error.message);
     const byId: Record<string, any> = {};
     (emps.data || []).forEach((e: any) => { byId[e.id] = e; });
@@ -5193,8 +5204,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     const keep = (x: any) => me.role === "admin" || x.employee_id !== me.id;
     const L = (l.data || []).filter(keep).map(attach);
     const R = (r.data || []).filter(keep).map(attach);
-    setLeaves(L); setRegs(R);
-    if (!history) onCount(L.length + R.length);
+    const RO = (ro.data || []).filter(keep).map(attach);
+    setLeaves(L); setRegs(R); setRosts(RO);
+    if (!history) onCount(L.length + R.length + RO.length);
   };
   useEffect(() => { load(); }, [mode]);
 
@@ -5308,6 +5320,13 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     await load(); setBusy(false);
   };
 
+  const decideRoster = async (id: string, st: string) => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("decide_roster", { p_id: id, p_status: st });
+    if (error) setErr(error.message);
+    await load(); setBusy(false);
+  };
+
   const inRange = (d: string) => d >= range.from && d <= range.to;
   // approve/reject kis din hua (IST) — Approved tab is date se filter hota hai.
   // Pending tab pe koi date filter nahi, sab dikhta hai.
@@ -5323,7 +5342,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
     && hit(x, `${x.leave_type} ${x.status}`));
   const shownR = regs.filter((x) => stOk(x) && dateOk(x, x.work_date)
     && hit(x, x.status));
-  const total = shownL.length + shownR.length;
+  const shownRo = rosts.filter((x) => stOk(x) && dateOk(x, x.work_date)
+    && hit(x, `roster ${x.status}`));
+  const total = shownL.length + shownR.length + shownRo.length;
   const isToday = range.from === istToday() && range.to === istToday();
 
   const kill = async (r: any, kind: string) => {
@@ -5347,7 +5368,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
             {fmtDate(r.approved_at)}
           </p>
         )}
-        {me.role === "admin" && (
+        {me.role === "admin" && kind !== "roster" && (
           <button className="att-muted" style={{ fontSize: 11.5, marginTop: 2 }}
             disabled={busy}
             onClick={(e) => { e.stopPropagation(); kill(r, kind); }}>Delete</button>
@@ -5366,7 +5387,8 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
       <>
         <button className="att-btn sm green" disabled={busy}
           onClick={(e) => { e.stopPropagation();
-            kind === "leave" ? decideLeave(r.id, "Approved") : decideReg(r.id, "Approved"); }}>
+            kind === "leave" ? decideLeave(r.id, "Approved")
+              : kind === "roster" ? decideRoster(r.id, "Approved") : decideReg(r.id, "Approved"); }}>
           Approve
         </button>
         {kind === "leave" && (
@@ -5377,7 +5399,8 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
         )}
         <button className="att-btn sm grey" disabled={busy}
           onClick={(e) => { e.stopPropagation();
-            kind === "leave" ? decideLeave(r.id, "Rejected") : decideReg(r.id, "Rejected"); }}>
+            kind === "leave" ? decideLeave(r.id, "Rejected")
+              : kind === "roster" ? decideRoster(r.id, "Rejected") : decideReg(r.id, "Rejected"); }}>
           Reject
         </button>
       </>
@@ -5430,6 +5453,9 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
               ...shownR.map((r) => ({ Type: "Regularization", Employee: r.emp?.full_name,
                 Code: r.emp?.emp_code, Kind: "Missed punch", From: r.work_date, To: r.work_date,
                 Days: "", Reason: r.reason, Status: r.status })),
+              ...shownRo.map((r) => ({ Type: "Roster", Employee: r.emp?.full_name,
+                Code: r.emp?.emp_code, Kind: `Roster ${fmtHM(r.from_time)}–${fmtHM(r.to_time)}`,
+                From: r.work_date, To: r.work_date, Days: "", Reason: r.reason, Status: r.status })),
             ], `HJS_approvals_${range.from}_${range.to}.csv`)}>CSV</button>
         </div>
       )}
@@ -5550,6 +5576,37 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
                 )}
               </div>
               <Actions r={r} kind="reg" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {shownRo.length > 0 && (
+        <div className="att-list">
+          <div className="att-hd"><b>Roster requests</b><span className="att-muted">{shownRo.length}</span></div>
+          {!history && (
+            <p className="att-muted" style={{ padding: "0 14px", fontSize: 12.5 }}>
+              Roster already works while pending (check-in / check-out from anywhere in that time).
+              Reject to stop it.
+            </p>
+          )}
+          {shownRo.map((r) => (
+            <div className="att-row" key={r.id} style={{ flexWrap: "wrap" }}>
+              <Avatar name={r.emp?.full_name} />
+              <div className="grow" style={{ minWidth: 150 }}>
+                <p><PName id={r.employee_id} code={r.emp?.emp_code}>
+                    <b>{r.emp?.emp_code} · {r.emp?.full_name}</b></PName>
+                  {r.employee_id === me.id && (
+                    <span className="att-pill p-Late" style={{ marginLeft: 7 }}>your own</span>)}
+                </p>
+                <p className="att-muted">
+                  Roster · {fmtDate(r.work_date)} · {fmtHM(r.from_time)} – {fmtHM(r.to_time)}
+                </p>
+                {r.reason && (
+                  <p style={{ color: "#475467", fontSize: 13, whiteSpace: "normal" }}>{r.reason}</p>
+                )}
+              </div>
+              <Actions r={r} kind="roster" />
             </div>
           ))}
         </div>
@@ -12718,7 +12775,7 @@ export default function Attendance() {
   useEffect(() => {
     if (!me || !["manager", "admin"].includes(me.role)) return;
     (async () => {
-      const [l, r, dir, ex] = await Promise.all([
+      const [l, r, dir, ex, ro] = await Promise.all([
         supabase.from("leaves").select("id, employee_id").eq("status", "Pending"),
         supabase.from("regularizations").select("id, employee_id").eq("status", "Pending"),
         supabase.rpc("directory", {}),
@@ -12726,10 +12783,12 @@ export default function Attendance() {
         supabase.from("employees").select("id", { count: "exact", head: true })
           .eq("active", false).is("date_of_leaving", null)
           .not("emp_code", "like", "REG-%").not("emp_code", "like", "TMP-%"),
+        supabase.from("rosters").select("id, employee_id").eq("status", "Pending"),
       ]);
 
       const mineOut = (x: any) => me.role === "admin" || x.employee_id !== me.id;
-      const approvals = [...(l.data || []), ...(r.data || [])].filter(mineOut).length;
+      const approvals = [...(l.data || []), ...(r.data || []), ...(ro.data || [])]
+        .filter(mineOut).length;
       const setup = (dir.data || []).filter((x: any) =>
         String(x.emp_code).startsWith("REG-")
         || !x.team_id || !x.designation
