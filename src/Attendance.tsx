@@ -3200,7 +3200,8 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     ["Account", p.approval_status],
     ["Source of hire", p.source_of_hire],
     ["Date of joining", p.date_of_joining ? fmtDateY(p.date_of_joining) : null],
-    ["Last working day", p.date_of_leaving ? fmtDateY(p.date_of_leaving) : null],
+    ["Last working day", p.date_of_leaving && !["Active", "Probation"].includes(p.employee_status)
+      ? fmtDateY(p.date_of_leaving) : null],
     ["Date of birth", p.date_of_birth ? fmtDateY(p.date_of_birth) : null],
     ["Today", p.state],
   ];
@@ -6084,7 +6085,10 @@ const STATUS_OPTS = ["Active", "Probation", "Notice period", "Exited"];
 
 function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnSave }: any) {
   const isNew = !row;
-  const [f, setF] = useState<any>(row || {
+  // exit plan nahi (Active / Probation) -> form khulte hi last working day khaali
+  const [f, setF] = useState<any>(row
+    ? { ...row, date_of_leaving: ["Active", "Probation"].includes(row.employee_status) ? null : row.date_of_leaving }
+    : {
     emp_code: "", full_name: "", first_name: "", last_name: "",
     email: "", phone: "", designation: "", nickname: "",
     employment_type: "", employee_status: "Active", source_of_hire: "",
@@ -6138,7 +6142,10 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnS
         grace_minutes: Number(f.grace_minutes) || 0,
         date_of_birth: f.date_of_birth || null,
         date_of_joining: f.date_of_joining || null,
-        date_of_leaving: f.date_of_leaving || null,
+        // exit plan nahi (Active / Probation) -> last working day hamesha blank
+        date_of_leaving: ["Active", "Probation"].includes(
+          f.employee_status || (f.active === false ? "Exited" : "Active"))
+          ? null : (f.date_of_leaving || null),
         marriage_anniversary: f.marriage_anniversary || null,
         employment_type: f.employment_type || null,
         employee_status: f.employee_status || (f.active === false ? "Exited" : "Active"),
@@ -6327,8 +6334,10 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnS
             <select value={f.employee_status || (f.active === false ? "Exited" : "Active")}
               onChange={(e) => {
                 // Status hi master hai: Exited = inactive, baaki sab = active
+                // Active / Probation = exit plan nahi -> last working day khaali
                 const v = e.target.value;
-                setF({ ...f, employee_status: v, active: v !== "Exited" });
+                setF({ ...f, employee_status: v, active: v !== "Exited",
+                  date_of_leaving: ["Active", "Probation"].includes(v) ? null : f.date_of_leaving });
               }}>
               {STATUS_OPTS.map((o) => <option key={o}>{o}</option>)}
               {/* purana status (Probation, Details pending...) ho to dikhta rahe, data na jaye */}
@@ -6372,10 +6381,16 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnS
         <div className="att-row2">
           <div>
             <label>Last working day</label>
-            <input type="date" value={f.date_of_leaving || ""}
-              onChange={(e) => setF({ ...f, date_of_leaving: e.target.value || null })} />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="date" style={{ flex: 1 }} value={f.date_of_leaving || ""}
+                onChange={(e) => setF({ ...f, date_of_leaving: e.target.value || null })} />
+              {f.date_of_leaving && (
+                <button type="button" className="att-btn sm line"
+                  onClick={() => setF({ ...f, date_of_leaving: null })}>Clear</button>
+              )}
+            </div>
             <p className="att-muted" style={{ fontSize: 12, marginTop: 4 }}>
-              Sirf resign / exit ke case mein bharo. Iske baad ke din reports mein nahi aayenge.
+              Sirf resign / exit ke case mein bharo. Status Active / Probation karte hi ye khaali ho jayega. Iske baad ke din reports mein nahi aayenge.
             </p>
             {!isNew && !f.active && !f.date_of_leaving && (
               <p style={{ fontSize: 12, marginTop: 4, color: "#b54708", fontWeight: 600 }}>
@@ -8433,7 +8448,7 @@ function DailyReportTab({ me }: any) {
     setBusy(true); setErr("");
     const [em, lg, lv, hl, tm] = await Promise.all([
       supabase.from("employees")
-        .select("id, emp_code, full_name, designation, week_off_days, branch_id, team_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving, reports_to, co_manager_id")
+        .select("id, emp_code, full_name, designation, week_off_days, branch_id, team_id, shift_start, shift_end, approval_status, date_of_joining, date_of_leaving, employee_status, reports_to, co_manager_id")
         .eq("active", true),
       supabase.from("attendance_logs").select("*").eq("work_date", date),
       supabase.from("leaves").select("*").in("status", ["Approved", "Pending"])
@@ -8452,7 +8467,8 @@ function DailyReportTab({ me }: any) {
       .filter((e: any) => !HIDE_IN_ABSENT.test(e.full_name || "")
         && !["VGN-E001", "VGN-E002", "VGN-E010"].includes(e.emp_code))
       .filter((e: any) => !e.date_of_joining || String(e.date_of_joining) <= date)
-      .filter((e: any) => !e.date_of_leaving || String(e.date_of_leaving) >= date)
+      .filter((e: any) => !e.date_of_leaving || ["Active", "Probation"].includes(e.employee_status)
+        || String(e.date_of_leaving) >= date)
       // CR-9: manager ko sirf uski direct team
       .filter((e: any) => isAdm || e.reports_to === me?.id || e.co_manager_id === me?.id)
       .map((e: any) => {
