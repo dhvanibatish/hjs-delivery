@@ -4857,7 +4857,7 @@ function ApplyLeaveSheet({ me, types: allTypes, onClose, only = "" }: any) {
   const [forId, setForId] = useState<string>(me.id);
   useEffect(() => {
     if (!canFor) return;
-    let q = supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)")
+    let q = supabase.from("employees").select("*, branches:branches!employees_branch_id_fkey(name, corporate_policy, strict_geofence), teams(name)")
       .eq("active", true).neq("id", me.id).order("full_name");
     if (me.role !== "admin") q = q.or(`reports_to.eq.${me.id},co_manager_id.eq.${me.id}`);
     q.then(({ data }) => setTeam(data || []));
@@ -5220,7 +5220,7 @@ function InboxScreen({ me, onCount, mode = "pending" }: any) {
   const openType = async (r: any) => {
     setTypeFor(r.id); setTypeOpts(null);
     const { data: e } = await supabase.from("employees")
-      .select("*, branches(name, corporate_policy, strict_geofence)").eq("id", r.employee_id).single();
+      .select("*, branches:branches!employees_branch_id_fkey(name, corporate_policy, strict_geofence)").eq("id", r.employee_id).single();
     const corp = isCorporate(e);
     const elig: any = {};
     if (corp && e) {
@@ -6016,7 +6016,7 @@ function StaffTab({ me }: any) {
 
   const load = async () => {
     const [e, b, t, d] = await Promise.all([
-      supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)").order("full_name"),
+      supabase.from("employees").select("*, branches:branches!employees_branch_id_fkey(name, corporate_policy, strict_geofence), teams(name)").order("full_name"),
       supabase.from("branches").select("*").order("name"),
       supabase.from("teams").select("*").order("name"),
       supabase.from("designations").select("*").eq("active", true)
@@ -12759,7 +12759,7 @@ export default function Attendance() {
 
   useEffect(() => {
     if (!session) { setMe(null); return; }
-    supabase.from("employees").select("*, branches(name, corporate_policy, strict_geofence), teams(name)")
+    supabase.from("employees").select("*, branches:branches!employees_branch_id_fkey(name, corporate_policy, strict_geofence), teams(name)")
       .eq("auth_user_id", session.user.id).maybeSingle()
       .then(({ data, error }) => {
         if (error) console.error("employee lookup failed:", error);
