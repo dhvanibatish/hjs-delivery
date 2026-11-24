@@ -151,13 +151,197 @@ const techPhoneVal = (f) =>
     ? String(f.techPhoneOther || '').trim()
     : techPhoneOf(f.tech);
 
+/* ══════════════════════════════════════════════════════════════════════
+   PRODUCT CATALOG — Stage 1 ("Details") mein product ka type aur problem
+   yahin se aata hai. Form ab sirf naam/phone/product/problem bhejta hai.
+   Naya product / problem jodna ho to bas yahan ek line jodo.
+   ══════════════════════════════════════════════════════════════════════ */
+const CATALOG = [
+  {
+    key: 'bed',
+    label: 'Bed',
+    match: /bed/i,
+    types: {
+      'Electric Bed': [
+        'Not turning on',
+        'Physical damage',
+        'Remote not working',
+        'Wheel lock problem',
+        'Motor not working',
+        'Plug out / Power plug disconnected',
+        'Wire loose',
+        'Mattress issue',
+        'Welding issue',
+        'Side railing issue',
+      ],
+      'Manual Bed': [
+        'Loose parts / Nut bolt loose',
+        'Wheel lock problem',
+        'Wheel damaged',
+        'Crank handle not working',
+        'Physical damage',
+        'Mattress issue',
+        'Head side not lifting / Leg side not lifting',
+        'Side railing issue',
+      ],
+    },
+  },
+  {
+    key: 'wheelchair',
+    label: 'Wheelchair',
+    match: /wheel\s*chair/i,
+    types: {
+      'Manual Wheelchair': [
+        'Seat damaged',
+        'Brake issue',
+        'Physical damage',
+        'Nut bolt issue',
+      ],
+      'Motorized Wheelchair': [
+        'Physical damage',
+        'Seat damaged',
+        'Joystick not working',
+        'Battery drain issue',
+        'Not getting charged',
+        'Motor not working',
+        'Power issue',
+      ],
+      'Stair-Climbing': [
+        'Battery issue',
+        'Crawler belt',
+        'Slipping on stairs',
+        'Nut bolt loose',
+        'Brake issue',
+        'Seat belt',
+        'Physical damage',
+      ],
+    },
+  },
+  {
+    key: 'oc',
+    label: 'Oxygen Concentrator',
+    match: /concentrat|\boc\b|oc-/i,
+    types: {
+      'OC 5L': null,
+      'OC 10L': null,
+    },
+    problems: [
+      'Physical damage',
+      'Power issue',
+      'Low pressure issue',
+      'Filter issue',
+      'Low oxygen purity issue',
+      'Display issue',
+      'Humidifier bottle issue',
+    ],
+  },
+  {
+    key: 'pap',
+    label: 'BiPAP / CPAP',
+    match: /bipap|cpap/i,
+    types: { BiPAP: null, CPAP: null },
+    problems: [
+      'Mask not fitting properly',
+      'Humidifier issue',
+      'Pressure setting issue',
+      'Filter issue',
+      'Power issue',
+      'Tube damaged / loose',
+    ],
+  },
+  {
+    key: 'dvt',
+    label: 'DVT Pump',
+    match: /dvt/i,
+    problems: ['Power issue', 'Cuff leakage issue', 'Cuff damaged', 'Not turning on'],
+  },
+  {
+    key: 'monitor',
+    label: 'Monitor',
+    match: /monitor/i,
+    problems: [
+      'BP cuff leakage issue',
+      'Battery backup issue',
+      'NIBP fluctuation issue',
+      'Display issue',
+      'Power issue',
+    ],
+  },
+  {
+    key: 'cylinder',
+    label: 'Oxygen Cylinder',
+    match: /cylinder/i,
+    problems: ['Flow meter leaking', 'Refill required', 'Pressure issue', 'Knob damaged'],
+  },
+  {
+    key: 'suction',
+    label: 'Suction Machine',
+    match: /suction/i,
+    problems: ['Jar damaged', 'Pressure not holding', 'Power issue'],
+  },
+];
+const catalogOf = (product) =>
+  CATALOG.find((c) => c.match.test(String(product || ''))) || null;
+const typeNamesOf = (cat) => (cat && cat.types ? Object.keys(cat.types) : []);
+/* type chuna ho to us type ki list, warna product ki common list */
+function problemsFor(cat, type) {
+  if (!cat) return [];
+  if (cat.types && type && Array.isArray(cat.types[type])) return cat.types[type];
+  return cat.problems || [];
+}
+const realVal = (v) => (v && v !== 'null' ? String(v) : '');
+/* Form ke dropdown mein jo type / problem chuni gayi — Stage 1 mein pehle
+   se bhar dete hain. "Electric-Bed" = "Electric Bed", aakhri "." ignore. */
+const norm = (v) =>
+  String(v || '')
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/[.\s]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+function guessFromForm(raw, cat) {
+  const out = { ptype: '', problem: '' };
+  if (!cat || !raw) return out;
+  const vals = Object.keys(raw)
+    .filter(
+      (k) =>
+        k !== 'product' &&
+        !/remarks|app_log|status|name|mobile|email|city/i.test(k),
+    )
+    .map((k) => realVal(raw[k]))
+    .filter(Boolean);
+  const types = typeNamesOf(cat);
+  for (const v of vals) {
+    const t = types.find((x) => norm(x) === norm(v) || norm(v).includes(norm(x)));
+    if (t) {
+      out.ptype = t;
+      break;
+    }
+  }
+  const list = problemsFor(cat, out.ptype);
+  for (const v of vals) {
+    const pr = list.find((x) => norm(x) === norm(v));
+    if (pr) {
+      out.problem = pr;
+      break;
+    }
+  }
+  return out;
+}
+/* Stage 1 mein bhari problem — "Other" ho to likhi hui */
+const pickedProblem = (r) =>
+  realVal(r.problem_type) === 'Other'
+    ? realVal(r.problem_other)
+    : realVal(r.problem_type);
+
+/* Resolution — kya karke problem theek hui */
 const ACTIONS = [
-  'Technician ghar bheja',
-  'Part / spare order kiya',
+  'Ghar pe repair kiya (technician)',
+  'Part / spare badla',
   'Naya saman diya (replace)',
   'Store pe repair kiya',
-  'Company / warehouse bheja',
-  'Customer ko samjhaya',
+  'Company / warehouse se theek karwaya',
+  'Customer ko samjhaya — machine theek thi',
   'Other',
 ];
 
@@ -242,8 +426,8 @@ const STAGES = [
   },
   {
     id: 'talk',
-    label: 'Talked to Customer',
-    short: 'Contacted',
+    label: 'Details & Problem',
+    short: 'Details',
     status: 'Talked To Customer',
     color: T.blue,
     soft: T.blueSoft,
@@ -255,14 +439,6 @@ const STAGES = [
     status: 'Technician Assigned',
     color: T.violet,
     soft: T.violetSoft,
-  },
-  {
-    id: 'status',
-    label: 'Work in Progress',
-    short: 'In Progress',
-    status: 'In Progress',
-    color: T.amber,
-    soft: T.amberSoft,
   },
   {
     id: 'resolution',
@@ -277,15 +453,31 @@ const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
 
 // peeche le jaate waqt: target stage ke AAGE wali stages ke saare fields null
 const STAGE_COLS = {
-  talk: { talk_date: null, talk_time: null, stage1_remarks: null },
-  tech: { technician: null, technician_phone: null, tech_remarks: null },
+  talk: {
+    talk_date: null,
+    talk_time: null,
+    stage1_remarks: null,
+    product_type: null,
+    problem_type: null,
+    problem_other: null,
+  },
+  tech: {
+    technician: null,
+    technician_phone: null,
+    tech_remarks: null,
+    expected_date: null,
+  },
   status: {
     action_taken: null,
     action_other: null,
-    expected_date: null,
     stage2_remarks: null,
   },
-  resolution: { is_resolved: false, stage3_remarks: null },
+  resolution: {
+    is_resolved: false,
+    stage3_remarks: null,
+    action_taken: null,
+    action_other: null,
+  },
 };
 function clearAhead(toStage) {
   const t = stageIndex(toStage);
@@ -299,19 +491,19 @@ function clearAhead(toStage) {
 /* ── Language (EN / Hinglish) — dono clean & professional ── */
 const HINDI = {
   received: { label: 'Ticket Mila', short: 'Naya' },
-  talk: { label: 'Customer Se Baat Hui', short: 'Baat Hui' },
+  talk: { label: 'Details & Problem', short: 'Details' },
   tech: { label: 'Technician Bheja', short: 'Technician' },
   status: { label: 'Kaam Jaari Hai', short: 'Jaari' },
   resolution: { label: 'Samasya Hal Hui', short: 'Hal Hui' },
 };
 const HINDI_MOVE = {
-  talk: 'Customer se baat karein',
+  talk: 'Details bharein',
   tech: 'Technician assign karein',
   status: 'Kaam shuru karein',
   resolution: 'Hal hua mark karein',
 };
 const ENG_MOVE = {
-  talk: 'Talk to customer',
+  talk: 'Fill details',
   tech: 'Assign a technician',
   status: 'Start the work',
   resolution: 'Mark as resolved',
@@ -456,9 +648,32 @@ const TXT = {
     hi: 'Kab jayega, kya le kar jayega…',
   },
   techShort: { en: 'Technician', hi: 'Technician' },
+  productType: { en: 'Product type *', hi: 'Product type *' },
+  exactProblem: { en: 'Exact problem *', hi: 'Sahi problem *' },
+  problemOtherLbl: { en: 'Describe the problem *', hi: 'Problem likhein *' },
+  problemOtherPh: { en: 'What exactly is wrong…', hi: 'Kya kharab hai…' },
+  problemFree: { en: 'Problem *', hi: 'Problem *' },
+  problemRequired: {
+    en: 'Choose the product type and problem to continue.',
+    hi: 'Aage badhne ke liye product type aur problem chunein.',
+  },
+  formSaid: { en: 'Form mein likha', hi: 'Form mein likha' },
+  kvType: { en: 'Type', hi: 'Type' },
+  kvProblemShort: { en: 'Problem', hi: 'Problem' },
+  customerSaidOpt: {
+    en: 'What did the customer say? (optional)',
+    hi: 'Customer ne kya kaha? (optional)',
+  },
+  expectedRequired: {
+    en: 'Choose the expected resolution date.',
+    hi: 'Kab tak theek hoga — date chunein.',
+  },
   techPhoneShort: { en: 'Phone', hi: 'Phone' },
   techAssigned: { en: 'Technician', hi: 'Technician' },
-  workDone: { en: 'What work was done? *', hi: 'Kya kaam kiya? *' },
+  workDone: {
+    en: 'What resolution was done? *',
+    hi: 'Kya resolution kiya? *',
+  },
   workDoneOther: {
     en: 'Describe the work done *',
     hi: 'Jo kaam kiya wo likhein *',
@@ -479,7 +694,7 @@ const TXT = {
   kvDate: { en: 'Date', hi: 'Date' },
   kvTime: { en: 'Time', hi: 'Time' },
   whatSaidShort: { en: 'Customer said', hi: 'Customer ne kya kaha' },
-  workDoneShort: { en: 'Work done', hi: 'Kya kaam kiya' },
+  workDoneShort: { en: 'Resolution', hi: 'Resolution' },
   expectedShort: { en: 'Expected by', hi: 'Kab tak theek hoga' },
   remarksShort: { en: 'Remarks', hi: 'Remarks' },
   resolvedShort: { en: 'Resolved', hi: 'Hal hua' },
@@ -512,6 +727,15 @@ const TXT = {
     hi: 'Delete ho gaya — database mein "Deleted" mark hua',
   },
   tSaveFail: { en: 'Save failed', hi: 'Save nahi hua' },
+  tTransferred: { en: 'Transferred to', hi: 'Transfer hua' },
+  transferTitle: { en: 'Transfer to another store', hi: 'Dusre store ko bhejein' },
+  transferPh: { en: 'Choose store…', hi: 'Store chunein…' },
+  transferBtn: { en: 'Transfer', hi: 'Transfer' },
+  transferNote: {
+    en: 'Ticket moves to that store with all its stages. This store will no longer see it.',
+    hi: 'Ticket apni saari stages ke saath us store mein chala jayega. Is store mein nahi dikhega.',
+  },
+  kvProblem: { en: 'Customer problem', hi: 'Customer ki problem' },
   tDeleteFail: { en: 'Delete failed', hi: 'Delete nahi hua' },
   tMarked: { en: 'Marked as', hi: 'Mark hua' },
   tMoved: { en: 'Moved to', hi: 'Move hua' },
@@ -562,6 +786,12 @@ function L(key) {
   return HJS_LANG === 'hi' ? t.hi : t.en;
 }
 function eventLine(ev) {
+  if (ev && ev.stage === 'transfer') {
+    const f = ev.fields || {};
+    return HJS_LANG === 'hi'
+      ? `Store transfer — ${f.From || ''} se ${f.To || ''}`
+      : `Transferred ${f.From || ''} → ${f.To || ''}`;
+  }
   const label =
     HJS_LANG === 'hi' && HINDI[ev.stage] ? HINDI[ev.stage].label : ev.label;
   if (HJS_LANG !== 'hi') return `${ev.action} ${label}`;
@@ -583,7 +813,9 @@ function statusToStage(s) {
   if (t.includes('cancel')) return 'cancelled';
   if (t.includes('resolv') || t.includes('closed') || t.includes('suljh'))
     return 'resolution';
-  if (t.includes('progress') || t.includes('chalu')) return 'status';
+  // "Work in Progress" stage hata di — purane In Progress tickets
+  // Technician stage pe dikhenge, agla step seedha Resolution.
+  if (t.includes('progress') || t.includes('chalu')) return 'tech';
   if (t.includes('technician') || t.includes('assign')) return 'tech';
   if (t.includes('talk') || t.includes('baat')) return 'talk';
   return 'received';
@@ -659,20 +891,17 @@ const STAGE_HINT = {
     hi: 'Ticket register ho gaya',
   },
   talk: {
-    en: 'Call the customer and note the issue',
-    hi: 'Customer ko call karke dikkat note karein',
+    en: 'Call the customer — pick the product type and exact problem',
+    hi: 'Customer ko call karein — product type aur sahi problem chunein',
   },
   tech: {
-    en: 'Choose a technician — name and number get saved',
-    hi: 'Technician chunein — naam aur number save honge',
+    en: 'Assign a technician and the expected resolution date',
+    hi: 'Technician aur kab tak theek hoga — dono bharein',
   },
-  status: {
-    en: 'Enter the work done and expected resolution date',
-    hi: 'Kya kaam kiya aur kab tak theek hoga bharein',
-  },
+
   resolution: {
-    en: 'Tick once resolved — the ticket will close',
-    hi: 'Hal hone par tick karein — ticket band ho jayega',
+    en: 'Enter the resolution done and tick resolved — the ticket will close',
+    hi: 'Kya resolution kiya bharein aur tick karein — ticket band ho jayega',
   },
 };
 const stageHint = (id) => {
@@ -690,7 +919,8 @@ function clean(v) {
 }
 function equipIcon(text) {
   const t = String(text || '').toLowerCase();
-  if (t.includes('oxygen') || t.includes('concentrat')) return Wind;
+  if (t.includes('oxygen') || t.includes('concentrat') || /\boc\b/.test(t))
+    return Wind;
   if (t.includes('bed')) return BedDouble;
   if (t.includes('wheel')) return Accessibility;
   if (t.includes('cpap') || t.includes('bipap')) return Stethoscope;
@@ -764,21 +994,26 @@ function stageFields(toStage, f) {
   const rmk = f.remarks ? { Remarks: f.remarks } : {};
   if (toStage === 'received') return {};
   if (toStage === 'talk')
-    return { Date: f.date || '—', Time: f.time || '—', ...rmk };
+    return {
+      Date: f.date || '—',
+      Time: f.time || '—',
+      ...(f.ptype ? { Type: f.ptype } : {}),
+      Problem: (f.problem === 'Other' ? f.problemOther : f.problem) || '—',
+      ...rmk,
+    };
   if (toStage === 'tech')
     return {
       Technician: techNameOf(f) || '—',
       Phone: techPhoneVal(f) || '—',
-      ...rmk,
-    };
-  if (toStage === 'status')
-    return {
-      Action: (f.action === 'Other' ? f.actionOther : f.action) || '—',
       'Kab tak': f.expected ? niceDate(f.expected) || f.expected : '—',
       ...rmk,
     };
   if (toStage === 'resolution')
-    return { Resolved: f.resolved ? 'Yes' : 'No', ...rmk };
+    return {
+      Resolution: (f.action === 'Other' ? f.actionOther : f.action) || '—',
+      Resolved: f.resolved ? 'Yes' : 'No',
+      ...rmk,
+    };
   return {};
 }
 /* ── Kaun kar raha hai ─────────────────────────────────────────────────
@@ -955,8 +1190,63 @@ const CATS = [
   },
 ];
 
+/* ── Form ki city → app ka store ──────────────────────────────────────
+   Zoho form ki city list aur app ke STORE_ORDER ke naam alag the
+   (Gurgaon vs Gurugram, NCR, Chandigarh). Bina is map ke wo tickets kisi
+   store login mein nahi dikhte the — sirf "All stores" mein.
+   Naya form label aaye to yahan ek line jod do. */
+const CITY_ALIAS = {
+  gurgaon: 'Gurugram',
+  gurugram: 'Gurugram',
+  ncr: 'Noida', // ⚠ confirm: form ka "NCR" = Noida store?
+  noida: 'Noida',
+  chandigarh: 'Mohali', // ⚠ confirm: Chandigarh tickets Mohali store handle karta hai?
+  mohali: 'Mohali',
+  'mohali / chandigarh': 'Mohali',
+  'shastri nagar': 'Shastri Nagar',
+  'delhi - shastri nagar': 'Shastri Nagar',
+  janakpuri: 'Janakpuri',
+  'delhi - janakpuri': 'Janakpuri',
+  jaipur: 'Jaipur',
+  ludhiana: 'Ludhiana',
+  jalandhar: 'Jalandhar',
+  lucknow: 'Lucknow',
+};
+function normalizeCity(v) {
+  const c = clean(v);
+  if (!c) return '';
+  return CITY_ALIAS[c.toLowerCase()] || c;
+}
+
+/* ── Customer ki problem ──────────────────────────────────────────────
+   Zoho form mein problem har product ke alag dropdown + "Problem
+   Description" mein aati hai. Jo bhi column bhara ho (subject, ya naam mein
+   problem / issue / description) — sab jod ke ek line bana dete hain. */
+const PROBLEM_KEY = /problem|issue|description|complaint|subject/i;
+const PROBLEM_SKIP = /remarks|stage|action|app_log|resolved/i;
+function problemOf(r) {
+  const seen = new Set();
+  const out = [];
+  const add = (v) => {
+    const c = clean(v);
+    if (!c || c === '-Select-' || c === '—') return;
+    const k = c.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(c);
+  };
+  add(pickedProblem(r));
+  add(r.subject);
+  Object.keys(r || {}).forEach((key) => {
+    if (key === 'subject' || key === 'problem_type' || key === 'problem_other')
+      return;
+    if (PROBLEM_KEY.test(key) && !PROBLEM_SKIP.test(key)) add(r[key]);
+  });
+  return out.join(' · ');
+}
+
 function rowToTicket(r) {
-  const branch = clean(r.city) || '—';
+  const branch = normalizeCity(r.city) || '—';
   return {
     ticket_id: r.ticket_id,
     id: r.ticket_number || r.ticket_id,
@@ -965,9 +1255,11 @@ function rowToTicket(r) {
     customer: r.full_name || '—',
     phone: clean(r.mobile) || '—',
     email: clean(r.email_id) || '—',
-    area: clean(r.city) || '—',
-    equipment: clean(r.product) || 'Equipment',
-    subject: clean(r.subject) || '—',
+    area: branch !== '—' ? branchLabel(branch) : '—',
+    equipment:
+      [clean(r.product), realVal(r.product_type)].filter(Boolean).join(' · ') ||
+      'Equipment',
+    subject: problemOf(r) || '—',
     technician: clean(r.technician) || '',
     technicianPhone: clean(r.technician_phone) || '',
     opened: r.opening_time || r.created_at || null,
@@ -1187,16 +1479,18 @@ export default function App({
       patch.talk_date = f.date || null;
       patch.talk_time = f.time || null;
       patch.stage1_remarks = f.remarks || null;
+      patch.product_type = f.ptype || null;
+      patch.problem_type = f.problem || null;
+      patch.problem_other =
+        f.problem === 'Other' ? f.problemOther || null : null;
     } else if (toStage === 'tech') {
       patch.technician = techNameOf(f) || null;
       patch.technician_phone = techPhoneVal(f) || null;
+      patch.expected_date = f.expected || null;
       patch.tech_remarks = f.remarks || null;
-    } else if (toStage === 'status') {
+    } else if (toStage === 'resolution') {
       patch.action_taken = f.action || null;
       patch.action_other = f.action === 'Other' ? f.actionOther || null : null;
-      patch.expected_date = f.expected || null;
-      patch.stage2_remarks = f.remarks || null;
-    } else if (toStage === 'resolution') {
       patch.is_resolved = !!f.resolved;
       patch.stage3_remarks = f.remarks || null;
     }
@@ -1251,6 +1545,36 @@ export default function App({
       await sbPatch(ticketId, patch);
       ping(`${L('tMoved')} · ${sLabel(toStage)}`);
       jumpMobile(toStage);
+      applyLocal(ticketId, patch);
+    } catch (e) {
+      ping(`${L('tSaveFail')}: ` + e.message);
+    }
+  };
+
+  // ── Store transfer — ticket galat store pe aa gaya to dusre store bhejo.
+  // Sirf `city` column badalta hai; app_log mein From → To likha jaata hai.
+  const transferTicket = async (ticketId, toStore) => {
+    const cur = tickets.find((x) => x.ticket_id === ticketId);
+    if (!cur || !toStore || toStore === cur.branch) return;
+    const patch = {
+      city: toStore,
+      updated_at: new Date().toISOString(),
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: new Date().toISOString(),
+          stage: 'transfer',
+          label: 'Store transfer',
+          action: 'Transferred',
+          fields: { From: branchLabel(cur.branch), To: branchLabel(toStore) },
+          ...actorStamp(),
+        },
+      ],
+    };
+    try {
+      await sbPatch(ticketId, patch);
+      setActiveId(null);
+      ping(`${L('tTransferred')} · ${branchLabel(toStore)}`);
       applyLocal(ticketId, patch);
     } catch (e) {
       ping(`${L('tSaveFail')}: ` + e.message);
@@ -1340,6 +1664,7 @@ export default function App({
             isHead={session.isPower}
             canDelete={session.isPower}
             onDelete={() => removeEntry(active.ticket_id)}
+            onTransfer={(st) => transferTicket(active.ticket_id, st)}
             onClose={() => setActiveId(null)}
             onAdvance={(toStage) =>
               setModal({ ticketId: active.ticket_id, toStage, mode: 'move' })
@@ -1483,6 +1808,7 @@ export default function App({
           isHead={session.isPower}
           canDelete={session.isPower}
           onDelete={() => removeEntry(active.ticket_id)}
+          onTransfer={(st) => transferTicket(active.ticket_id, st)}
           onClose={() => setActiveId(null)}
           onAdvance={(toStage) =>
             setModal({ ticketId: active.ticket_id, toStage, mode: 'move' })
@@ -1593,7 +1919,6 @@ function Dashboard({ tickets, onOpen }) {
     received: (x) => x.stage === 'received',
     talk: (x) => x.stage === 'talk',
     tech: (x) => x.stage === 'tech',
-    status: (x) => x.stage === 'status',
     resolution: (x) => x.stage === 'resolution',
   };
 
@@ -1796,7 +2121,6 @@ function Dashboard({ tickets, onOpen }) {
                 <th>{sShort('received')}</th>
                 <th>{sShort('talk')}</th>
                 <th>{sShort('tech')}</th>
-                <th>{sShort('status')}</th>
                 <th>{sShort('resolution')}</th>
                 <th>{L('colPending')}</th>
                 <th>{L('colOverdue')}</th>
@@ -1819,7 +2143,7 @@ function Dashboard({ tickets, onOpen }) {
                       >
                         {list.length}
                       </td>
-                      {['received', 'talk', 'tech', 'status', 'resolution'].map((k) => (
+                      {['received', 'talk', 'tech', 'resolution'].map((k) => (
                         <td
                           key={k}
                           className={has(k) ? 'dash-td-click' : 'dash-td-zero'}
@@ -2927,7 +3251,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
       </div>
       <div className="card-equip">{d.subject}</div>
       <div className="card-meta">
-        <span className="ellip" style={{ maxWidth: 150 }}>
+        <span className="ellip" style={{ maxWidth: '100%' }}>
           <Package size={12} /> {d.equipment}
         </span>
       </div>
@@ -3048,9 +3372,11 @@ function Drawer({
   onEditStage,
   canDelete,
   onDelete,
+  onTransfer,
   isHead,
 }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [moveTo, setMoveTo] = useState('');
   const Icon = equipIcon(d.equipment);
   const closedMeta = CLOSED[d.stage] || null;
   const cancelled = !!closedMeta;
@@ -3074,6 +3400,8 @@ function Drawer({
       rows: [
         [L('kvDate'), show(niceDate(r.talk_date))],
         [L('kvTime'), show(niceTime(r.talk_time))],
+        [L('kvType'), show(realVal(r.product_type))],
+        [L('kvProblemShort'), show(pickedProblem(r))],
         [L('whatSaidShort'), show(r.stage1_remarks)],
       ],
     },
@@ -3083,31 +3411,20 @@ function Drawer({
       rows: [
         [L('techShort'), show(r.technician)],
         [L('techPhoneShort'), show(r.technician_phone)],
+        [L('expectedShort'), show(niceDate(r.expected_date))],
         [L('remarksShort'), show(r.tech_remarks)],
       ],
     },
     {
-      id: 'status',
+      id: 'resolution',
       i: 3,
       rows: [
         [
           L('workDoneShort'),
           show(r.action_taken === 'Other' ? r.action_other : r.action_taken),
         ],
-        [L('expectedShort'), show(niceDate(r.expected_date))],
-        [L('remarksShort'), show(r.stage2_remarks)],
-      ],
-    },
-    {
-      id: 'resolution',
-      i: 4,
-      rows: [
         [L('resolvedShort'), r.is_resolved ? L('yes') : L('no')],
-        [
-          L('workDoneShort'),
-          show(r.action_taken === 'Other' ? r.action_other : r.action_taken),
-        ],
-        [L('remarksShort'), show(r.stage3_remarks)],
+        [L('remarksShort'), show(r.stage3_remarks || r.stage2_remarks)],
       ],
     },
   ];
@@ -3300,11 +3617,46 @@ function Drawer({
           <KV label={L('kvPhone')} value={d.phone} />
           <KV label={L('kvEmail')} value={d.email} />
           <KV label={L('kvItem')} value={d.equipment} full />
-          <KV label={L('kvIssue')} value={d.subject} full />
+          <KV label={L('kvProblem')} value={d.subject} full />
           <KV label={L('kvStore')} value={branchLabel(d.branch)} />
           <KV label={L('kvOpened')} value={niceDateTime(d.opened) || '—'} />
           <KV label={L('kvManager')} value={d.manager} full />
         </div>
+
+        {onTransfer && !cancelled && d.stage !== 'resolution' && (
+          <div className="transfer-box">
+            <div className="sec-title" style={{ margin: '0 0 8px' }}>
+              <Building2 size={14} /> {L('transferTitle')}
+            </div>
+            <div className="transfer-row">
+              <select
+                className="inp"
+                value={moveTo}
+                onChange={(e) => setMoveTo(e.target.value)}
+              >
+                <option value="">{L('transferPh')}</option>
+                {STORE_ORDER.filter((c) => c !== d.branch).map((c) => (
+                  <option key={c} value={c}>
+                    {branchLabel(c)}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn-primary"
+                disabled={!moveTo}
+                onClick={() => {
+                  onTransfer(moveTo);
+                  setMoveTo('');
+                }}
+              >
+                <ArrowRight size={15} /> {L('transferBtn')}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 6 }}>
+              {L('transferNote')}
+            </div>
+          </div>
+        )}
 
         {blocks.map((b) => {
           const limit = cancelled || resolvedLock ? reachedIdx : idx + 1;
@@ -3352,7 +3704,11 @@ function Drawer({
                       key={k}
                       label={k}
                       value={v}
-                      full={k === L('remarksShort') || k === L('whatSaidShort')}
+                      full={
+                        k === L('remarksShort') ||
+                        k === L('whatSaidShort') ||
+                        k === L('kvProblemShort')
+                      }
                     />
                   ))}
                 </div>
@@ -3482,6 +3838,10 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   const nowTime = `${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
   const in3 = new Date(Date.now() + 3 * 86400000);
   const soonDate = `${in3.getFullYear()}-${_pad(in3.getMonth() + 1)}-${_pad(in3.getDate())}`;
+  const formGuess = guessFromForm(
+    r,
+    catalogOf(ticket && ticket._raw ? ticket._raw.product : ''),
+  );
   const [f, setF] = useState({
     // talk ki date/time ab MANUAL nahi — save karte waqt abhi ka time
     // apne aap bhar jayega (niche onSave me). Edit me purana rahega.
@@ -3496,9 +3856,7 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
     remarks:
       (toStage === 'resolution'
         ? r.stage3_remarks
-        : toStage === 'status'
-          ? r.stage2_remarks
-          : toStage === 'tech'
+        : toStage === 'tech'
             ? r.tech_remarks
             : r.stage1_remarks) || '',
     // technician — saved naam list me hai to dropdown, warna 'Other' + manual
@@ -3530,6 +3888,10 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
         ? String(r.expected_date).slice(0, 10)
         : soonDate,
     resolved: !!r.is_resolved,
+    // Stage 1 — product type + sahi problem
+    ptype: realVal(r.product_type) || formGuess.ptype,
+    problem: realVal(r.problem_type) || formGuess.problem,
+    problemOther: realVal(r.problem_other),
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const openPicker = (e) => {
@@ -3539,23 +3901,33 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
   };
   const otherAction = f.action === 'Other';
   const otherTech = f.tech === 'Other';
+  // Stage 1 — product ke hisaab se type aur problem ki list
+  const cat = catalogOf(ticket && ticket._raw ? ticket._raw.product : '');
+  const typeList = typeNamesOf(cat);
+  const needType = typeList.length > 0;
+  const probList = problemsFor(cat, f.ptype);
+  const otherProblem = !cat || f.problem === 'Other';
+  const talkOk = cat
+    ? (!needType || !!f.ptype) &&
+      !!f.problem &&
+      (f.problem !== 'Other' || !!f.problemOther.trim())
+    : !!f.problemOther.trim();
   const canSave =
     toStage === 'talk'
-      ? !!f.remarks.trim() // customer ne kya kaha — MANDATORY
+      ? talkOk
       : toStage === 'tech'
-        ? otherTech
-          ? !!(f.techOther.trim() && f.techPhoneOther.trim())
-          : !!f.tech
-      : toStage === 'status'
-        ? !!(f.action && (!otherAction || f.actionOther.trim()) && f.expected)
-        : toStage === 'resolution'
-          ? !!f.resolved
-          : true;
+        ? !!f.expected &&
+          (otherTech
+            ? !!(f.techOther.trim() && f.techPhoneOther.trim())
+            : !!f.tech)
+      : toStage === 'resolution'
+        ? !!(f.action && (!otherAction || f.actionOther.trim()) && f.resolved)
+        : true;
 
   // neeche wala textarea — stage ke hisaab se label
   const remarkLabel =
     toStage === 'talk'
-      ? L('whatCustomerSaid')
+      ? L('customerSaidOpt')
       : toStage === 'resolution'
         ? L('remarksResolve')
         : L('remarks');
@@ -3594,6 +3966,15 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
         </div>
       )}
       <div className="modal-body">
+        {ticket && ticket.subject && ticket.subject !== '—' && (
+          <div className="problem-line">
+            <AlertTriangle size={15} />
+            <span>
+              {L('kvProblem')}: <b>{ticket.subject}</b>
+              {ticket.equipment ? ` · ${ticket.equipment}` : ''}
+            </span>
+          </div>
+        )}
         {toStage === 'talk' && (
           <div className="auto-time">
             <Clock size={15} />
@@ -3611,6 +3992,64 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
               </b>
             </span>
           </div>
+        )}
+
+        {toStage === 'talk' && (
+          <>
+            {cat && needType && (
+              <Field label={L('productType')}>
+                <div className="chip-row">
+                  {typeList.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={f.ptype === t ? 'chip on' : 'chip'}
+                      onClick={() =>
+                        setF((p) => ({
+                          ...p,
+                          ptype: t,
+                          // type badla to purani problem hatao
+                          problem: problemsFor(cat, t).includes(p.problem)
+                            ? p.problem
+                            : '',
+                        }))
+                      }
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {cat && (!needType || f.ptype) && (
+              <Field label={L('exactProblem')}>
+                <select
+                  className="inp"
+                  value={f.problem}
+                  onChange={(e) => set('problem', e.target.value)}
+                >
+                  <option value="">{L('select')}</option>
+                  {probList.map((pr) => (
+                    <option key={pr} value={pr}>
+                      {pr}
+                    </option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
+              </Field>
+            )}
+            {otherProblem && (
+              <Field label={cat ? L('problemOtherLbl') : L('problemFree')}>
+                <input
+                  className="inp"
+                  placeholder={L('problemOtherPh')}
+                  value={f.problemOther}
+                  onChange={(e) => set('problemOther', e.target.value)}
+                />
+              </Field>
+            )}
+            {!talkOk && <div className="req-note">{L('problemRequired')}</div>}
+          </>
         )}
 
         {toStage === 'tech' && (
@@ -3663,10 +4102,31 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
                 )}
               </>
             )}
+            <Field label={L('expectedBy')}>
+                <input
+                  className="inp"
+                  type="date"
+                  value={f.expected}
+                  min="2024-01-01"
+                  max="2099-12-31"
+                  onClick={openPicker}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v && Number(v.slice(0, 4)) > 2099) return;
+                    set('expected', v);
+                  }}
+                />
+              {f.expected && (
+                <span className="tp-preview">📅 {niceDate(f.expected)}</span>
+              )}
+            </Field>
+            {!f.expected && (
+              <div className="req-note">{L('expectedRequired')}</div>
+            )}
           </>
         )}
 
-        {toStage === 'status' && (
+        {toStage === 'resolution' && (
           <>
             {r.technician && r.technician !== 'null' && (
               <div className="prev-line">
@@ -3676,6 +4136,14 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
                   {r.technician_phone && r.technician_phone !== 'null'
                     ? ` · ${r.technician_phone}`
                     : ''}
+                </span>
+              </div>
+            )}
+            {realVal(r.expected_date) && (
+              <div className="prev-line">
+                <Clock size={14} />
+                <span>
+                  {L('expectedShort')}: <b>{niceDate(r.expected_date)}</b>
                 </span>
               </div>
             )}
@@ -3706,42 +4174,11 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
             {otherAction && !f.actionOther.trim() && (
               <div className="req-note">{L('otherRequired')}</div>
             )}
-            <Field label={L('expectedBy')}>
-                <input
-                  className="inp"
-                  type="date"
-                  value={f.expected}
-                  min="2024-01-01"
-                  max="2099-12-31"
-                  onClick={openPicker}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v && Number(v.slice(0, 4)) > 2099) return;
-                    set('expected', v);
-                  }}
-                />
-              {f.expected && (
-                <span className="tp-preview">📅 {niceDate(f.expected)}</span>
-              )}
-            </Field>
           </>
         )}
 
         {toStage === 'resolution' && (
           <>
-            {r.action_taken && r.action_taken !== 'null' && (
-              <div className="prev-line">
-                <Wrench size={14} />
-                <span>
-                  {L('workWasDone')}:{' '}
-                  <b>
-                    {r.action_taken === 'Other'
-                      ? r.action_other
-                      : r.action_taken}
-                  </b>
-                </span>
-              </div>
-            )}
             <Check1
               checked={f.resolved}
               onChange={() => set('resolved', !f.resolved)}
@@ -3764,9 +4201,6 @@ function StageModal({ ticket, toStage, mode, onClose, onSave, embedded }) {
             onChange={(e) => set('remarks', e.target.value)}
           />
         </Field>
-        {toStage === 'talk' && !f.remarks.trim() && (
-          <div className="req-note">{L('saidRequired')}</div>
-        )}
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>
@@ -3853,11 +4287,13 @@ const ACT_KINDS = [
   { id: 'move', label: 'Stage move' },
   { id: 'edit', label: 'Edit' },
   { id: 'closed', label: 'Closed' },
+  { id: 'transfer', label: 'Store transfer' },
   { id: 'delete', label: 'Delete' },
 ];
 function actKind(ev) {
   if (!ev) return 'move';
   if (ev.stage === 'deleted') return 'delete';
+  if (ev.stage === 'transfer') return 'transfer';
   if (CLOSED[ev.stage]) return 'closed';
   if (ev.action === 'Edited') return 'edit';
   return 'move';
@@ -3865,7 +4301,9 @@ function actKind(ev) {
 function actIconOf(k) {
   return k === 'delete'
     ? Trash2
-    : k === 'edit'
+    : k === 'transfer'
+      ? Building2
+      : k === 'edit'
       ? Pencil
       : k === 'closed'
         ? AlertTriangle
@@ -3878,6 +4316,10 @@ function actTitle(ev) {
     ev.label ||
     ev.stage;
   if (k === 'delete') return 'Entry delete ki';
+  if (k === 'transfer') {
+    const f = ev.fields || {};
+    return `Store transfer · ${f.From || ''} → ${f.To || ''}`;
+  }
   if (k === 'closed') return `${lbl} mark kiya`;
   if (k === 'edit') return `${lbl} edit kiya`;
   return `${lbl} pe move kiya`;
@@ -4218,13 +4660,12 @@ function StyleTag() {
       .cat-body { padding: 14px 16px 18px; border-top: 1px solid ${T.line}; background: ${T.cream}; }
       .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
-      .hjs-complaints .board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; align-items: start; }
+      .hjs-complaints .board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; align-items: start; }
       .column { background: #FBF9F4; border: 1px solid ${T.line}; border-radius: 14px; padding: 6px; overflow: hidden; }
       .hjs-complaints .column:nth-child(1) { border-top: 3px solid ${T.slate}; }
       .hjs-complaints .column:nth-child(2) { border-top: 3px solid ${T.blue}; }
       .hjs-complaints .column:nth-child(3) { border-top: 3px solid ${T.violet}; }
-      .hjs-complaints .column:nth-child(4) { border-top: 3px solid ${T.amber}; }
-      .hjs-complaints .column:nth-child(5) { border-top: 3px solid ${T.green}; }
+      .hjs-complaints .column:nth-child(4) { border-top: 3px solid ${T.green}; }
       .col-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
       .col-pip { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .col-count { margin-left: auto; font-size: 11.5px; font-weight: 800; min-width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
@@ -4294,6 +4735,17 @@ function StyleTag() {
       .auto-time b { font-weight: 800; }
       .auto-time svg { flex-shrink: 0; }
 
+      .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .chip { border: 1.5px solid ${T.line}; background: #fff; color: ${T.ink}; border-radius: 11px; padding: 11px 14px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; min-height: 44px; }
+      .chip:hover { border-color: ${T.blue}; }
+      .chip.on { background: ${T.blueSoft}; border-color: ${T.blue}; color: ${T.blue}; }
+      .transfer-box { margin-top: 14px; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 14px; }
+      .transfer-row { display: flex; gap: 8px; }
+      .transfer-row .inp { flex: 1; min-width: 0; }
+      .transfer-row .btn-primary { flex-shrink: 0; padding: 11px 14px; }
+      .problem-line { display: flex; align-items: flex-start; gap: 8px; background: ${T.amberSoft}; border: 1px solid #eddcbf; color: ${T.ink}; border-radius: 11px; padding: 10px 13px; font-size: 13px; line-height: 1.45; }
+      .problem-line svg { color: ${T.amber}; flex-shrink: 0; margin-top: 2px; }
+      .problem-line b { font-weight: 800; }
       .created-note { margin-top: 22px; padding-top: 14px; border-top: 1px solid ${T.line}; font-size: 11.5px; color: ${T.inkSoft}; text-align: center; }
       .created-note b { color: ${T.ink}; font-weight: 700; }
       .timeline { margin-bottom: 8px; }
@@ -4421,7 +4873,7 @@ function StyleTag() {
       .act-foot { text-align: center; font-size: 11px; color: ${T.inkSoft}; padding: 20px 10px 4px; line-height: 1.5; }
       @media (max-width: 760px) { .act-panel { width: 100%; max-width: 100%; } .act-body { padding: 6px 12px 26px; } }
 
-      @media (max-width: 1400px) { .hjs-complaints .board { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; } }
+      @media (max-width: 1400px) { .hjs-complaints .board { gap: 10px; } }
       @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .hjs-complaints .board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       @media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } .login-hero { display: none; } .sidebar { display: none; } .hjs-complaints .board { grid-template-columns: 1fr; } }
       @media (max-width: 760px) {
