@@ -1236,7 +1236,15 @@ function problemOf(r) {
     out.push(c);
   };
   add(pickedProblem(r));
-  add(r.subject);
+  // form se subject = product placeholder ("BED") — wo problem nahi hai
+  const subj = clean(r.subject);
+  const prod = clean(r.product);
+  const subjIsProduct = !!subj && !!prod && subj.toLowerCase() === prod.toLowerCase();
+  const typeTxt = realVal(r.product_type);
+  if (!subjIsProduct) {
+    // Stage 1 ke baad subject "Type · Problem" hota hai — type dobara na dikhe
+    add(typeTxt && subj.startsWith(typeTxt + ' · ') ? subj.slice(typeTxt.length + 3) : subj);
+  }
   Object.keys(r || {}).forEach((key) => {
     if (key === 'subject' || key === 'problem_type' || key === 'problem_other')
       return;
@@ -1483,6 +1491,10 @@ export default function App({
       patch.problem_type = f.problem || null;
       patch.problem_other =
         f.problem === 'Other' ? f.problemOther || null : null;
+      // Form se subject = product (jaise "BED") aata hai. Stage 1 bharte hi
+      // subject ko asli problem bana dete hain — "Electric Bed · Remote not working"
+      const picked = f.problem === 'Other' ? f.problemOther : f.problem;
+      if (picked) patch.subject = [f.ptype, picked].filter(Boolean).join(' · ');
     } else if (toStage === 'tech') {
       patch.technician = techNameOf(f) || null;
       patch.technician_phone = techPhoneVal(f) || null;
