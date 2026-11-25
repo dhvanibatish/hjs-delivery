@@ -1333,7 +1333,9 @@ const CATS = [
 const CITY_ALIAS = {
   gurgaon: 'Gurugram',
   gurugram: 'Gurugram',
-  ncr: 'Noida', // ⚠ confirm: form ka "NCR" = Noida store?
+  // NCR + Noida dono ek hi "Noida" store (delivery app mein Delhi NCR login)
+  ncr: 'Noida',
+  'delhi ncr': 'Noida',
   noida: 'Noida',
   chandigarh: 'Mohali', // ⚠ confirm: Chandigarh tickets Mohali store handle karta hai?
   mohali: 'Mohali',
@@ -3017,7 +3019,7 @@ function Login({ onLogin }) {
             {mode !== 'tech' && (
               <>
                 <br />
-                Store PIN: <b>1001</b> se · Punjab: <b>3001</b> · Delhi NCR:{' '}
+                Store PIN: <b>1001</b> se · Punjab: <b>3001</b> · Delhi side:{' '}
                 <b>3002</b> · All stores: <b>2222</b>
               </>
             )}
