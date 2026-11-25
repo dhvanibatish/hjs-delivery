@@ -5,8 +5,8 @@
    mein jaata hai — wahi table jo ComplaintApp (?complaints) padhta hai.
 
    Flow:
-   1) Mobile number  → complaint_customer_lookup RPC (deliveries se naam,
-      products, store). Mila = form prefilled. Nahi mila = form phir bhi
+   1) Mobile number  → n8n webhook → Zoho Books (naam, invoices, products,
+      store). Workflow: n8n/complaint_lookup_workflow.json Mila = form prefilled. Nahi mila = form phir bhi
       khulta hai, customer khud bharta hai (ticket pe "not in records" note).
    2) Product (+ Bed / Wheelchair type), invoice number, problem, photos (max 3, compressed),
       voice note (max 60 sec), city.
@@ -25,6 +25,10 @@ const CONFIG = {
   bucket: 'complaint-media',
 };
 const HDRS = () => ({ apikey: CONFIG.key, Authorization: `Bearer ${CONFIG.key}` });
+
+/* n8n "Complaint Form - Books customer lookup" workflow ka Production URL.
+   n8n mein workflow kholo → Webhook node → Production URL copy karke yahan daalo. */
+const N8N_LOOKUP_URL = 'https://n8n.srv1171323.hstgr.cloud/webhook/hjs-complaint-lookup';
 
 /* Emergency / helpline — healthyjeenasikho.com ka official call number */
 const EMERGENCY = '+91 98769 78488';
@@ -129,6 +133,26 @@ async function sbRpc(fn, body) {
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
+}
+/* Books lookup (n8n) — 12 sec mein jawab na aaye to customer ko rokte nahi,
+   form "not in records" wala khul jaata hai. */
+async function booksLookup(phone) {
+  if (!N8N_LOOKUP_URL || N8N_LOOKUP_URL.includes('YOUR-N8N-DOMAIN')) return [];
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const res = await fetch(N8N_LOOKUP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_phone: phone }),
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`lookup ${res.status}`);
+    const j = await res.json();
+    return Array.isArray(j) ? j : Array.isArray(j && j.rows) ? j.rows : [];
+  } finally {
+    clearTimeout(tm);
+  }
 }
 async function sbUpload(blob, name) {
   const type = String(blob.type || 'application/octet-stream').split(';')[0];
@@ -342,7 +366,7 @@ export default function ComplaintForm() {
     setGateErr('');
     let c = null;
     try {
-      c = toCustomer(await sbRpc('complaint_customer_lookup', { p_phone: num }), num);
+      c = toCustomer(await booksLookup(num), num);
     } catch (e) {
       console.warn('[complaint lookup]', e);
       c = null; // lookup fail ho to bhi customer complaint daal sake
@@ -518,6 +542,7 @@ export default function ComplaintForm() {
         p_photos: photoUrls,
         p_voice: voiceUrl,
         p_invoice: invoice.trim() || null,
+        p_registered: !!cust.registered,
       });
       const out = Array.isArray(res) ? res[0] : res;
       const store = CITY_TO_STORE[city] || '';
