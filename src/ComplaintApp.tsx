@@ -1424,6 +1424,7 @@ export default function App({
   onResults = null,
   pickId = null,
   pickKey = 0,
+  onLogout: extLogout = null,
 }) {
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
@@ -1834,7 +1835,7 @@ export default function App({
         loading={loading}
         error={error}
         onReload={load}
-        onLogout={() => setSession(null)}
+        onLogout={hosted ? extLogout || (() => {}) : () => setSession(null)}
         onDone={markTechDone}
         toast={toast}
         lang={lang}
@@ -5587,3 +5588,6 @@ function StyleTag() {
     `}</style>
   );
 }
+
+// Delivery app (App.tsx) ke login se technician login ke liye
+export { TECHNICIANS, techSession, sbTechLogin };
