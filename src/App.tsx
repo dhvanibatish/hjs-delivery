@@ -1907,7 +1907,8 @@ export default function App() {
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
           session={session}
-          page={page}
+          // Technician view Complaints ka hi hissa hai — sidebar mein Complaints hi active dikhe
+          page={page === 'techadmin' ? 'complaints' : page}
           onNav={setPage}
         />
         <div
@@ -4729,7 +4730,6 @@ function Sidebar({ session, page, onNav }) {
     ...(isAll
       ? [
           { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
-          { id: 'techadmin', icon: Wrench, label: 'Technician view' },
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
         ]
@@ -4854,14 +4854,13 @@ function Topbar({
       </div>
       <select
         className="page-switch"
-        value={page}
+        value={page === 'techadmin' ? 'complaints' : page}
         onChange={(e) => onNav && onNav(e.target.value)}
       >
         <option value="deliveries">Deliveries</option>
         <option value="pickups">Pickups</option>
         {session.isHead && <option value="pickupadmin">Pickup Admin</option>}
         {session.isHead && <option value="complaints">Complaints</option>}
-        {session.isHead && <option value="techadmin">Technician view</option>}
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
       </select>
