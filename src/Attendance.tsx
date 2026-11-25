@@ -1222,11 +1222,16 @@ function DayListSheet({ title, rows, onClose }: any) {
 const AV_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#ea580c"];
 // full_name (lowercase) -> photo_url — app khulte hi employee_photos() se bharta hai
 const PHOTOS: Record<string, string> = {};
+// employee id -> photo_url (pakka match). Jo naam 2+ employees ka hai (jaise "Rahul Kumar"),
+// unki photo naam se NAHI lagti — sirf id se, warna ek ki photo dusre pe dikhti hai.
+const PHOTOS_ID: Record<string, string> = {};
+const PHOTO_SHARED = new Set<string>();
 
-const Avatar = ({ name, lg }: any) => {
+const Avatar = ({ name, id, lg }: any) => {
   const n = String(name || "?");
   const [broken, setBroken] = useState(false);
-  const src = PHOTOS[n.trim().toLowerCase()];
+  const key = n.trim().toLowerCase();
+  const src = (id && PHOTOS_ID[id]) || (PHOTO_SHARED.has(key) ? undefined : PHOTOS[key]);
   if (src && !broken) {
     return <img className={`att-av ${lg ? "lg" : ""}`} src={src} alt={n}
       loading="lazy" onError={() => setBroken(true)} />;
@@ -1269,6 +1274,7 @@ function PhotoPicker({ emp, label, onDone }: any) {
       const url = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl + `?v=${Date.now()}`;
       const { error } = await supabase.rpc("set_employee_photo", { p_emp: emp.id, p_url: url });
       if (error) throw error;
+      PHOTOS_ID[emp.id] = url;
       if (emp.full_name) PHOTOS[String(emp.full_name).trim().toLowerCase()] = url;
       window.dispatchEvent(new CustomEvent("hjs:photo-updated"));
       onDone?.(url);
@@ -1927,7 +1933,7 @@ function HomeScreen({ me }: any) {
 
           <div className="att-card att-punch">
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 11 }}>
-              <Avatar name={me.full_name} lg />
+              <Avatar name={me.full_name} id={me.id} lg />
             </div>
             <p><b>{me.emp_code}</b> · {me.full_name}</p>
             <p className="att-muted">{me.designation || me.role}</p>
@@ -3235,7 +3241,7 @@ function PersonSheet({ p, canEdit, onClose, onDeleted }: any) {
     <Sheet title={p.full_name} onClose={onClose}>
       <div className="att-card">
         <div className="att-flex" style={{ marginBottom: 14 }}>
-          <Avatar name={p.full_name} lg />
+          <Avatar name={p.full_name} id={p.id} lg />
           <div>
             <p style={{ fontSize: 17, fontWeight: 700 }}>{p.full_name}</p>
             <p className="att-muted">{p.emp_code} · {p.designation || "—"}</p>
@@ -6191,8 +6197,8 @@ function EmployeeSheet({ branches, teams, desigs, people, row, onClose, closeOnS
       <div className="att-card att-stack">
         {!isNew && (
           <div className="att-flex">
-            <Avatar name={row.full_name} lg />
-            <PhotoPicker emp={row} label={row.photo_url || PHOTOS[String(row.full_name || "").trim().toLowerCase()] ? "Change photo" : "Add photo"} />
+            <Avatar name={row.full_name} id={row.id} lg />
+            <PhotoPicker emp={row} label={row.photo_url || PHOTOS_ID[row.id] ? "Change photo" : "Add photo"} />
           </div>
         )}
         <div className="att-row2">
@@ -7771,7 +7777,7 @@ function MeScreen({ me }: any) {
   return (
     <div className="att-wrap att-narrow att-stack">
       <div className="att-card att-flex">
-        <Avatar name={me.full_name} lg />
+        <Avatar name={me.full_name} id={me.id} lg />
         <div>
           <h2 className="att-h1">{me.full_name}</h2>
           <p className="att-muted">{me.designation || me.role} · {me.emp_code}</p>
@@ -12736,13 +12742,22 @@ export default function Attendance() {
   // Employee photos ek baar load — Avatar har jagah inhe use karta hai
   useEffect(() => {
     if (!session) return;
-    supabase.rpc("employee_photos").then(({ data, error }) => {
-      if (error) { console.error("employee_photos failed:", error); return; }
+    (async () => {
+      let { data, error } = await supabase.rpc("employee_photos_v2");
+      if (error) {   // v2 SQL abhi nahi chala to purana tarika
+        console.error("employee_photos_v2 failed:", error);
+        ({ data, error } = await supabase.rpc("employee_photos"));
+        if (error) { console.error("employee_photos failed:", error); return; }
+      }
       (data || []).forEach((r: any) => {
-        if (r.full_name && r.photo_url) PHOTOS[String(r.full_name).trim().toLowerCase()] = r.photo_url;
+        const k = String(r.full_name || "").trim().toLowerCase();
+        if (r.name_shared && k) PHOTO_SHARED.add(k);
+        if (!r.photo_url) return;
+        if (r.id) PHOTOS_ID[r.id] = r.photo_url;
+        if (k) PHOTOS[k] = r.photo_url;
       });
       setPhotoTick((t) => t + 1);
-    });
+    })();
   }, [session]);
 
   useEffect(() => {
@@ -12828,7 +12843,7 @@ export default function Attendance() {
     <div className="att-center">
       <div className="att-card" style={{ maxWidth: 420, textAlign: "center" }}>
         <div className="att-flex" style={{ justifyContent: "center", marginBottom: 12 }}>
-          <Avatar name={me.full_name} lg />
+          <Avatar name={me.full_name} id={me.id} lg />
         </div>
         <h2 className="att-h1">Waiting for approval</h2>
         <p className="att-muted" style={{ marginTop: 8 }}>
