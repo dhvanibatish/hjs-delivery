@@ -75,6 +75,17 @@ async function sbPatch(ticketId, patch) {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+/* Technician login — PIN client mein nahi, Supabase RPC verify karta hai
+   (complaint_tech_login · SQL file: complaints_priority_technician.sql) */
+async function sbTechLogin(name, pin) {
+  const res = await fetch(`${CONFIG.url}/rest/v1/rpc/complaint_tech_login`, {
+    method: 'POST',
+    headers: { ...HDRS(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_name: name, p_pin: pin }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
+}
 const T = {
   forest: '#14392B',
   forestSoft: '#1E5138',
@@ -141,6 +152,36 @@ const TECHNICIANS = [
   { name: 'Pradeep', phone: '+91 97606 29197' },
   { name: 'Uday', phone: '+91 85957 59588' },
 ];
+/* ── PRIORITY ── sirf "All stores" (head) login set kar sakta hai.
+   Baaki sab (store manager, technician) sirf color dekhte hain. */
+const PRIORITIES = {
+  High: { id: 'High', label: 'High', hi: 'High', color: '#C62828', soft: '#FDE7E7', rank: 0 },
+  Medium: { id: 'Medium', label: 'Medium', hi: 'Medium', color: '#C77D28', soft: '#FBF0DE', rank: 1 },
+  Low: { id: 'Low', label: 'Low', hi: 'Low', color: '#2E7D32', soft: '#E7F0E8', rank: 2 },
+};
+const PRIO_NONE = { id: '', label: 'Not set', color: '#64748B', soft: '#EEF1F3', rank: 3 };
+const prioMeta = (p) => PRIORITIES[p] || PRIO_NONE;
+const byPriority = (a, b) => prioMeta(a.priority).rank - prioMeta(b.priority).rank;
+const canSetPriority = (session) => !!(session && session.isHead);
+
+function PriorityBadge({ p, small }) {
+  const m = prioMeta(p);
+  return (
+    <span
+      className="prio-badge"
+      style={{
+        background: m.soft,
+        color: m.color,
+        fontSize: small ? 10.5 : 11.5,
+        padding: small ? '2px 7px' : '4px 10px',
+      }}
+    >
+      <span className="col-pip" style={{ background: m.color }} />
+      {p ? m.label : L('prioNotSet')}
+    </span>
+  );
+}
+
 const techPhoneOf = (name) =>
   (TECHNICIANS.find((t) => t.name === name) || {}).phone || '';
 /* form ke fields se asli naam/phone — 'Other' hone par manual wale */
@@ -413,6 +454,25 @@ function sessionFor(branch) {
     storeName: isHead ? 'All stores' : branchLabel(branch),
   };
 }
+/* Technician session — sirf "Meri Tickets" view, koi aur page nahi */
+function techSession(name, phone) {
+  return {
+    branch: 'ALL',
+    authStore: 'TECH',
+    isTech: true,
+    techName: name,
+    techPhone: phone || '',
+    isHead: false,
+    isRegion: false,
+    isPower: false,
+    canSwitch: false,
+    switchList: [],
+    name,
+    storeName: 'Technician',
+  };
+}
+const sameName = (a, b) =>
+  String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 /* ── STAGES ────────────────────────────────────────────────────────────── */
 const STAGES = [
@@ -466,6 +526,9 @@ const STAGE_COLS = {
     technician_phone: null,
     tech_remarks: null,
     expected_date: null,
+    tech_done_at: null,
+    tech_done_by: null,
+    tech_done_remarks: null,
   },
   status: {
     action_taken: null,
@@ -533,6 +596,40 @@ function moveText(id) {
 
 /* ── UI text — har string dono language me. L('key') se aata hai. ──── */
 const TXT = {
+  // priority
+  priority: { en: 'Priority', hi: 'Priority' },
+  prioNotSet: { en: 'Not set', hi: 'Set nahi' },
+  prioClear: { en: 'Clear', hi: 'Hatao' },
+  prioOnlyHead: {
+    en: 'Only the All stores login can set priority.',
+    hi: 'Priority sirf All stores login set kar sakta hai.',
+  },
+  prioSetBy: { en: 'Set by', hi: 'Kisne set ki' },
+  tPrioSaved: { en: 'Priority updated', hi: 'Priority update hui' },
+  // technician
+  techDoneBadge: { en: 'Technician: work done', hi: 'Technician: kaam ho gaya' },
+  techDoneTitle: { en: 'Technician marked work done', hi: 'Technician ne kaam poora kiya' },
+  techDoneAt: { en: 'Done at', hi: 'Kab' },
+  techDoneRemark: { en: 'Technician remark', hi: 'Technician remark' },
+  myTickets: { en: 'My tickets', hi: 'Meri tickets' },
+  techOpen: { en: 'Open', hi: 'Open' },
+  techDoneTab: { en: 'Done (7 days)', hi: 'Ho gaya (7 din)' },
+  techNoOpen: {
+    en: 'No open tickets right now.',
+    hi: 'Abhi koi open ticket nahi hai.',
+  },
+  techNoDone: {
+    en: 'Nothing marked done in the last 7 days.',
+    hi: 'Pichhle 7 din mein koi kaam done mark nahi hua.',
+  },
+  techMarkDone: { en: 'Work done', hi: 'Kaam ho gaya' },
+  techConfirm: { en: 'Confirm — work done', hi: 'Confirm — kaam ho gaya' },
+  techRemarkPh: {
+    en: 'Remark (optional) — what was done',
+    hi: 'Remark (optional) — kya kaam kiya',
+  },
+  techCall: { en: 'Call', hi: 'Call karo' },
+  tTechDone: { en: 'Marked as done', hi: 'Done mark ho gaya' },
   // header / chips
   complaints: { en: 'complaints', hi: 'ki shikayatein' },
   storeManager: { en: 'Store manager', hi: 'Store manager' },
@@ -786,6 +883,14 @@ function L(key) {
   return HJS_LANG === 'hi' ? t.hi : t.en;
 }
 function eventLine(ev) {
+  if (ev && ev.stage === 'priority') {
+    const f = ev.fields || {};
+    return `Priority — ${f.From || 'Not set'} → ${f.To || 'Not set'}`;
+  }
+  if (ev && ev.stage === 'techdone')
+    return HJS_LANG === 'hi'
+      ? 'Technician ne kaam ho gaya mark kiya'
+      : 'Technician marked work done';
   if (ev && ev.stage === 'transfer') {
     const f = ev.fields || {};
     return HJS_LANG === 'hi'
@@ -1025,6 +1130,10 @@ function setActor(session) {
     ACTOR = { by: null, byName: null };
     return;
   }
+  if (session.isTech) {
+    ACTOR = { by: 'TECH', byName: `${session.techName} (Technician)` };
+    return;
+  }
   const code = session.authStore || session.branch;
   ACTOR = {
     by: code,
@@ -1043,6 +1152,7 @@ function actorText(ev) {
   const code = ev.by || '';
   if (!name && !code) return 'Record nahi (purana update)';
   if (code === 'ALL') return name || 'Head office';
+  if (code === 'TECH') return name || 'Technician';
   return name ? `${name} · ${branchLabel(code)}` : branchLabel(code);
 }
 
@@ -1274,6 +1384,9 @@ function rowToTicket(r) {
     expected: clean(r.expected_date) || '—',
     stage: statusToStage(r.status),
     rawStatus: r.status,
+    priority: PRIORITIES[clean(r.priority)] ? clean(r.priority) : '',
+    techDoneAt: r.tech_done_at || null,
+    techDone: !!r.tech_done_at,
     _raw: r,
   };
 }
@@ -1408,8 +1521,15 @@ export default function App({
 
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
+  // High priority wale har column/list mein sabse upar (stable sort —
+  // same priority ke andar purana order, yaani naya pehle, wahi rehta hai)
   const viewItems = useMemo(
-    () => scoped.filter((x) => inView(x, viewMode, vFrom, vTo)),
+    () =>
+      scoped
+        .filter((x) => inView(x, viewMode, vFrom, vTo))
+        .map((x, i) => [x, i])
+        .sort((a, b) => byPriority(a[0], b[0]) || a[1] - b[1])
+        .map((p) => p[0]),
     [scoped, viewMode, vFrom, vTo],
   );
 
@@ -1512,6 +1632,19 @@ export default function App({
   const applyMove = async (ticketId, toStage, fields, mode) => {
     const patch = buildPatch(toStage, fields, mode);
     const cur = tickets.find((x) => x.ticket_id === ticketId);
+    // technician badla to purana "kaam ho gaya" reset — naya banda fir se karega
+    if (
+      toStage === 'tech' &&
+      cur &&
+      cur.techDone &&
+      !sameName(patch.technician, cur.technician)
+    ) {
+      Object.assign(patch, {
+        tech_done_at: null,
+        tech_done_by: null,
+        tech_done_remarks: null,
+      });
+    }
     patch.app_log = [...existingLog(cur), makeEvent(toStage, fields, mode)];
     const landed = toStage;
     try {
@@ -1593,6 +1726,76 @@ export default function App({
     }
   };
 
+  // ── Priority — sirf head (All stores). UI ke saath yahan bhi check.
+  const setPriority = async (ticketId, p) => {
+    if (!canSetPriority(session)) {
+      ping(L('prioOnlyHead'));
+      return;
+    }
+    const cur = tickets.find((x) => x.ticket_id === ticketId);
+    if (!cur || (cur.priority || '') === (p || '')) return;
+    const now = new Date().toISOString();
+    const patch = {
+      priority: p || null,
+      priority_set_by: p ? ACTOR.byName || 'Head office' : null,
+      priority_set_at: p ? now : null,
+      updated_at: now,
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: now,
+          stage: 'priority',
+          label: 'Priority',
+          action: 'Priority',
+          fields: { From: cur.priority || 'Not set', To: p || 'Not set' },
+          ...actorStamp(),
+        },
+      ],
+    };
+    try {
+      await sbPatch(ticketId, patch);
+      ping(`${L('tPrioSaved')} · ${p || L('prioNotSet')}`);
+      applyLocal(ticketId, patch);
+    } catch (e) {
+      ping(`${L('tSaveFail')}: ` + e.message);
+    }
+  };
+
+  // ── Technician ne kaam poora kiya. Stage "Technician Assigned" hi
+  // rehti hai (status nahi badalta) — bas tech_done_* bhar jaate hain,
+  // taaki aage ka flow (Resolved) store/head pehle jaisa kar sake.
+  const markTechDone = async (ticketId, remarks) => {
+    const cur = tickets.find((x) => x.ticket_id === ticketId);
+    if (!cur || !session || !session.isTech) return;
+    if (cur.stage !== 'tech' || !sameName(cur.technician, session.techName))
+      return;
+    const now = new Date().toISOString();
+    const patch = {
+      tech_done_at: now,
+      tech_done_by: session.techName,
+      tech_done_remarks: remarks || null,
+      updated_at: now,
+      app_log: [
+        ...existingLog(cur),
+        {
+          ts: now,
+          stage: 'techdone',
+          label: 'Technician — work done',
+          action: 'Marked as',
+          fields: remarks ? { Remark: remarks } : {},
+          ...actorStamp(),
+        },
+      ],
+    };
+    try {
+      await sbPatch(ticketId, patch);
+      ping(`${L('tTechDone')} ✓`);
+      applyLocal(ticketId, patch);
+    } catch (e) {
+      ping(`${L('tSaveFail')}: ` + e.message);
+    }
+  };
+
   const removeEntry = async (ticketId) => {
     const cur = tickets.find((x) => x.ticket_id === ticketId);
     const patch = {
@@ -1621,6 +1824,24 @@ export default function App({
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // ── TECHNICIAN: sirf uska apna view — koi sidebar / dashboard / board nahi
+  if (session.isTech) {
+    return (
+      <TechView
+        session={session}
+        tickets={tickets}
+        loading={loading}
+        error={error}
+        onReload={load}
+        onLogout={() => setSession(null)}
+        onDone={markTechDone}
+        toast={toast}
+        lang={lang}
+        onLang={switchLang}
+      />
+    );
+  }
 
   // ── HOSTED: delivery app ke <main> ke andar — sirf content, koi chrome nahi
   if (hosted) {
@@ -1674,6 +1895,8 @@ export default function App({
           <Drawer
             d={active}
             isHead={session.isPower}
+            canPriority={canSetPriority(session)}
+            onPriority={(p) => setPriority(active.ticket_id, p)}
             canDelete={session.isPower}
             onDelete={() => removeEntry(active.ticket_id)}
             onTransfer={(st) => transferTicket(active.ticket_id, st)}
@@ -1818,6 +2041,8 @@ export default function App({
         <Drawer
           d={active}
           isHead={session.isPower}
+          canPriority={canSetPriority(session)}
+          onPriority={(p) => setPriority(active.ticket_id, p)}
           canDelete={session.isPower}
           onDelete={() => removeEntry(active.ticket_id)}
           onTransfer={(st) => transferTicket(active.ticket_id, st)}
@@ -2486,11 +2711,39 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
 function Login({ onLogin }) {
+  const [mode, setMode] = useState('store'); // store | tech
   const [branch, setBranch] = useState('');
+  const [tech, setTech] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const goTech = async () => {
+    if (!tech) {
+      setErr('Please choose your name first.');
+      return;
+    }
+    if (!pw) {
+      setErr('Enter your PIN.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      const rows = await sbTechLogin(tech, pw);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (!row || !row.name) {
+        setErr('Incorrect PIN.');
+        setBusy(false);
+        return;
+      }
+      onLogin(techSession(row.name, row.phone || techPhoneOf(row.name)));
+    } catch (e) {
+      setErr('Login error: ' + (e.message || 'unknown'));
+      setBusy(false);
+    }
+  };
   const go = async () => {
+    if (mode === 'tech') return goTech();
     if (!branch) {
       setErr('Please choose a store first.');
       return;
@@ -2565,13 +2818,53 @@ function Login({ onLogin }) {
       <div className="login-form">
         <div className="glass-card">
           <div style={{ marginBottom: 6 }}>
+            <div className="login-tabs">
+              {[
+                ['store', 'Store'],
+                ['tech', 'Technician'],
+              ].map(([k, lbl]) => (
+                <button
+                  key={k}
+                  className={mode === k ? 'login-tab on' : 'login-tab'}
+                  onClick={() => {
+                    setMode(k);
+                    setPw('');
+                    setErr('');
+                  }}
+                >
+                  {k === 'tech' ? <Wrench size={14} /> : <Building2 size={14} />}{' '}
+                  {lbl}
+                </button>
+              ))}
+            </div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
-              Store login
+              {mode === 'tech' ? 'Technician login' : 'Store login'}
             </div>
             <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>
-              Choose your store and enter the PIN.
+              {mode === 'tech'
+                ? 'Choose your name and enter your PIN.'
+                : 'Choose your store and enter the PIN.'}
             </div>
           </div>
+          {mode === 'tech' ? (
+            <Field label="Technician">
+              <select
+                className="inp"
+                value={tech}
+                onChange={(e) => {
+                  setTech(e.target.value);
+                  setErr('');
+                }}
+              >
+                <option value="">Select your name…</option>
+                {TECHNICIANS.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
           <Field label="Store">
             <select
               className="inp"
@@ -2595,6 +2888,7 @@ function Login({ onLogin }) {
               ))}
             </select>
           </Field>
+          )}
           <Field label="PIN">
             <input
               className="inp"
@@ -2614,7 +2908,7 @@ function Login({ onLogin }) {
           <button
             className="btn-primary"
             style={{ width: '100%', marginTop: 4 }}
-            disabled={!branch || !pw || busy}
+            disabled={(mode === 'tech' ? !tech : !branch) || !pw || busy}
             onClick={go}
           >
             {busy ? (
@@ -2637,12 +2931,266 @@ function Login({ onLogin }) {
             {CONFIGURED
               ? 'Live · Connected to Supabase'
               : 'Not connected · check Supabase key'}
-            <br />
-            Store PIN: <b>1001</b> se · Punjab: <b>3001</b> · Delhi NCR:{' '}
-            <b>3002</b> · All stores: <b>2222</b>
+            {mode !== 'tech' && (
+              <>
+                <br />
+                Store PIN: <b>1001</b> se · Punjab: <b>3001</b> · Delhi NCR:{' '}
+                <b>3002</b> · All stores: <b>2222</b>
+              </>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════ TECHNICIAN VIEW
+   Technician ko sirf ye page dikhta hai: uske naam pe assign hui open
+   tickets (stage = Technician Assigned). "Kaam ho gaya" dabate hi ticket
+   Done tab mein chala jaata hai; aage Resolved store/head karte hain. */
+function addressOf(r) {
+  const k = Object.keys(r || {}).find((x) => /address/i.test(x) && clean(r[x]));
+  return k ? clean(r[k]) : '';
+}
+function TechView({
+  session,
+  tickets,
+  loading,
+  error,
+  onReload,
+  onLogout,
+  onDone,
+  toast,
+  lang,
+  onLang,
+}) {
+  const [tab, setTab] = useState('open');
+  const [openId, setOpenId] = useState(null); // jis card pe confirm khula hai
+  const [remark, setRemark] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const mine = useMemo(
+    () =>
+      tickets.filter(
+        (x) =>
+          x.stage === 'tech' && sameName(x.technician, session.techName),
+      ),
+    [tickets, session.techName],
+  );
+  const openList = useMemo(
+    () =>
+      mine
+        .filter((x) => !x.techDone)
+        .sort(
+          (a, b) =>
+            byPriority(a, b) ||
+            String(a._raw.expected_date || '9999').localeCompare(
+              String(b._raw.expected_date || '9999'),
+            ),
+        ),
+    [mine],
+  );
+  const doneList = useMemo(
+    () =>
+      tickets
+        .filter(
+          (x) =>
+            x.techDone &&
+            sameName(x._raw.tech_done_by || x.technician, session.techName) &&
+            hoursSince(x.techDoneAt) <= 24 * 7,
+        )
+        .sort((a, b) => String(b.techDoneAt).localeCompare(String(a.techDoneAt))),
+    [tickets, session.techName],
+  );
+  const list = tab === 'open' ? openList : doneList;
+
+  const confirm = async (x) => {
+    setBusyId(x.ticket_id);
+    await onDone(x.ticket_id, remark.trim());
+    setBusyId(null);
+    setOpenId(null);
+    setRemark('');
+  };
+
+  return (
+    <div className="hjs-complaints tech-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="tech-top">
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>Technician</div>
+          <div className="ellip" style={{ fontWeight: 800, fontSize: 18 }}>
+            {session.techName}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className="tech-icon"
+            onClick={() => onLang(lang === 'hi' ? 'en' : 'hi')}
+            title="Language"
+          >
+            {lang === 'hi' ? 'EN' : 'Hi'}
+          </button>
+          <button className="tech-icon" onClick={onReload} title="Refresh">
+            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          </button>
+          <button className="tech-icon" onClick={onLogout} title="Logout">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="tech-body">
+        <div className="tech-h">{L('myTickets')}</div>
+        <div className="tech-tabs">
+          <button
+            className={tab === 'open' ? 'tech-tab on' : 'tech-tab'}
+            onClick={() => setTab('open')}
+          >
+            {L('techOpen')} <span className="tech-count">{openList.length}</span>
+          </button>
+          <button
+            className={tab === 'done' ? 'tech-tab on' : 'tech-tab'}
+            onClick={() => setTab('done')}
+          >
+            {L('techDoneTab')} <span className="tech-count">{doneList.length}</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="err">
+            <CloudOff size={18} color={T.red} />
+            <div>
+              <b>{L('connectFail')}</b> {error}
+            </div>
+          </div>
+        )}
+        {loading && tickets.length === 0 && (
+          <div className="loading">{L('loadingTickets')}</div>
+        )}
+        {!loading && list.length === 0 && (
+          <div className="tech-empty">
+            {tab === 'open' ? L('techNoOpen') : L('techNoDone')}
+          </div>
+        )}
+
+        {list.map((x) => {
+          const r = x._raw || {};
+          const pm = prioMeta(x.priority);
+          const Icon = equipIcon(x.equipment);
+          const addr = addressOf(r);
+          const tel = String(x.phone || '').replace(/[^\d+]/g, '');
+          const isOpen = openId === x.ticket_id;
+          return (
+            <div
+              key={x.ticket_id}
+              className="tech-card"
+              style={{ borderLeft: `5px solid ${pm.color}` }}
+            >
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <div className="eq-ico" style={{ background: pm.soft }}>
+                  <Icon size={17} color={pm.color} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="card-name">{x.customer}</div>
+                  <div className="ellip card-id">#{x.id}</div>
+                </div>
+                <PriorityBadge p={x.priority} small />
+              </div>
+              <div className="card-equip">{x.subject}</div>
+              <div className="card-meta">
+                <span className="ellip" style={{ maxWidth: '100%' }}>
+                  <Package size={12} /> {x.equipment}
+                </span>
+              </div>
+              <div className="card-meta">
+                <span>
+                  <MapPin size={12} /> {x.area}
+                </span>
+                {x.manager && x.manager !== '—' && (
+                  <span className="ellip" style={{ maxWidth: 150 }}>
+                    <User size={12} /> {x.manager}
+                  </span>
+                )}
+              </div>
+              {addr && (
+                <div className="card-meta">
+                  <span style={{ whiteSpace: 'normal' }}>
+                    <MapPin size={12} /> {addr}
+                  </span>
+                </div>
+              )}
+              <div className="card-meta">
+                <span>
+                  <Clock size={12} /> {L('expectedShort')}:{' '}
+                  <b>{niceDate(r.expected_date) || '—'}</b>
+                </span>
+              </div>
+              {r.tech_remarks && (
+                <div className="tech-note">{r.tech_remarks}</div>
+              )}
+
+              {tab === 'open' ? (
+                <>
+                  <div className="tech-actions">
+                    {tel && (
+                      <a className="tech-call" href={`tel:${tel}`}>
+                        <Phone size={15} /> {L('techCall')}
+                      </a>
+                    )}
+                    {!isOpen && (
+                      <button
+                        className="tech-done-btn"
+                        onClick={() => {
+                          setOpenId(x.ticket_id);
+                          setRemark('');
+                        }}
+                      >
+                        <CheckCircle2 size={16} /> {L('techMarkDone')}
+                      </button>
+                    )}
+                  </div>
+                  {isOpen && (
+                    <div className="tech-confirm">
+                      <textarea
+                        className="inp"
+                        rows={2}
+                        placeholder={L('techRemarkPh')}
+                        value={remark}
+                        onChange={(e) => setRemark(e.target.value)}
+                      />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button
+                          className="btn-ghost"
+                          style={{ flex: 1 }}
+                          onClick={() => setOpenId(null)}
+                          disabled={busyId === x.ticket_id}
+                        >
+                          {L('cancel')}
+                        </button>
+                        <button
+                          className="btn-primary"
+                          style={{ flex: 2 }}
+                          onClick={() => confirm(x)}
+                          disabled={busyId === x.ticket_id}
+                        >
+                          <Check size={16} /> {L('techConfirm')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="card-techdone" style={{ marginTop: 10 }}>
+                  <CheckCircle2 size={12} /> {fmtFullDateTime(x.techDoneAt)}
+                  {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {toast && <Toast msg={toast} />}
     </div>
   );
 }
@@ -3250,8 +3798,17 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const next = closed ? null : STAGES[stageIndex(d.stage) + 1];
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
+  const pm = prioMeta(d.priority);
   return (
-    <div className={cancelled ? 'card is-cancelled' : 'card'} onClick={onOpen}>
+    <div
+      className={cancelled ? 'card is-cancelled' : 'card'}
+      onClick={onOpen}
+      style={
+        d.priority && !closed
+          ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
+          : undefined
+      }
+    >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -3260,6 +3817,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
           <div className="card-name">{d.customer}</div>
           <div className="ellip card-id">#{d.id}</div>
         </div>
+        {d.priority && <PriorityBadge p={d.priority} small />}
       </div>
       <div className="card-equip">{d.subject}</div>
       <div className="card-meta">
@@ -3294,6 +3852,11 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
             <b>{d.technician}</b>
             {d.technicianPhone ? ` · ${d.technicianPhone}` : ''}
           </span>
+        </div>
+      )}
+      {d.techDone && d.stage === 'tech' && (
+        <div className="card-techdone">
+          <CheckCircle2 size={12} /> {L('techDoneBadge')}
         </div>
       )}
       {closed ? (
@@ -3386,6 +3949,8 @@ function Drawer({
   onDelete,
   onTransfer,
   isHead,
+  canPriority = false,
+  onPriority = null,
 }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [moveTo, setMoveTo] = useState('');
@@ -3476,6 +4041,67 @@ function Drawer({
           <span className="col-pip" style={{ background: stage.color }} />{' '}
           {cancelled ? stage.label : sLabel(d.stage)}
         </span>
+
+        {/* ── Priority ── head set kare, baaki sirf dekhein */}
+        <div className="prio-box">
+          <div className="prio-head">
+            <span className="sec-title" style={{ margin: 0 }}>
+              {L('priority')}
+            </span>
+            <PriorityBadge p={d.priority} />
+          </div>
+          {canPriority && onPriority && !cancelled && d.stage !== 'resolution' ? (
+            <div className="prio-pick">
+              {Object.values(PRIORITIES).map((m) => {
+                const on = d.priority === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    className="prio-btn"
+                    style={{
+                      background: on ? m.color : m.soft,
+                      color: on ? '#fff' : m.color,
+                      borderColor: m.color,
+                    }}
+                    onClick={() => onPriority(m.id)}
+                  >
+                    {on && <Check size={12} style={{ marginRight: 3, verticalAlign: -1 }} />}
+                    {m.label}
+                  </button>
+                );
+              })}
+              {d.priority && (
+                <button className="prio-btn prio-clear" onClick={() => onPriority('')}>
+                  {L('prioClear')}
+                </button>
+              )}
+            </div>
+          ) : null}
+          {d.priority && r.priority_set_by && (
+            <div className="prio-meta">
+              {L('prioSetBy')}: <b>{r.priority_set_by}</b>
+              {r.priority_set_at ? ` · ${fmtFullDateTime(r.priority_set_at)}` : ''}
+            </div>
+          )}
+        </div>
+
+        {d.techDone && (
+          <div className="techdone-note">
+            <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontWeight: 800 }}>{L('techDoneTitle')}</div>
+              <div style={{ fontSize: 12, marginTop: 2, opacity: 0.9 }}>
+                {r.tech_done_by || d.technician} · {L('techDoneAt')}:{' '}
+                {fmtFullDateTime(r.tech_done_at)}
+              </div>
+              {r.tech_done_remarks && (
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  {L('techDoneRemark')}: {r.tech_done_remarks}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {cancelled ? (
           <>
@@ -4328,6 +4954,11 @@ function actTitle(ev) {
     ev.label ||
     ev.stage;
   if (k === 'delete') return 'Entry delete ki';
+  if (ev.stage === 'priority') {
+    const f = ev.fields || {};
+    return `Priority · ${f.From || 'Not set'} → ${f.To || 'Not set'}`;
+  }
+  if (ev.stage === 'techdone') return 'Technician ne kaam ho gaya mark kiya';
   if (k === 'transfer') {
     const f = ev.fields || {};
     return `Store transfer · ${f.From || ''} → ${f.To || ''}`;
@@ -4839,6 +5470,39 @@ function StyleTag() {
       .btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
       .btn-ghost { background: #fff; color: ${T.ink}; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px 18px; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer; }
       .btn-ghost:hover { background: ${T.beige}; }
+      /* priority */
+      .prio-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 20px; font-weight: 800; white-space: nowrap; flex-shrink: 0; }
+      .prio-badge .col-pip { width: 7px; height: 7px; }
+      .prio-box { margin-top: 14px; border: 1px solid ${T.line}; border-radius: 13px; padding: 11px 12px; background: #fff; }
+      .prio-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .prio-pick { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+      .prio-btn { border: 1.5px solid; border-radius: 10px; padding: 7px 13px; font-size: 12.5px; font-weight: 800; font-family: inherit; cursor: pointer; }
+      .prio-clear { background: #fff !important; color: ${T.inkSoft} !important; border-color: ${T.line} !important; }
+      .prio-meta { font-size: 11.5px; color: ${T.inkSoft}; margin-top: 8px; }
+      .card-techdone { display: flex; align-items: center; gap: 6px; margin-top: 8px; background: ${T.mint}; color: ${T.green}; border-radius: 9px; padding: 6px 9px; font-size: 11.5px; font-weight: 700; }
+      .techdone-note { display: flex; gap: 10px; margin-top: 12px; background: ${T.mint}; color: ${T.green}; border: 1px solid #cfe3d0; border-radius: 13px; padding: 11px 12px; font-size: 13px; }
+      /* login tabs */
+      .login-tabs { display: flex; gap: 6px; background: ${T.beige}; border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+      .login-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; background: transparent; border-radius: 9px; padding: 9px; font-size: 13px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .login-tab.on { background: #fff; color: ${T.forest}; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+      /* technician view */
+      .tech-wrap { background: ${T.beige}; min-height: 100vh; color: ${T.ink}; }
+      .tech-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: ${T.forest}; color: #fff; padding: 14px 16px; }
+      .tech-icon { min-width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; font-family: inherit; cursor: pointer; }
+      .tech-body { max-width: 640px; margin: 0 auto; padding: 16px 14px 60px; }
+      .tech-h { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 10px; }
+      .tech-tabs { display: flex; gap: 6px; background: #fff; border: 1px solid ${T.line}; border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+      .tech-tab { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 10px; font-size: 13.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
+      .tech-tab.on { background: ${T.forest}; color: #fff; }
+      .tech-count { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 4px; border-radius: 10px; background: rgba(0,0,0,.08); font-size: 11.5px; }
+      .tech-tab.on .tech-count { background: rgba(255,255,255,.2); }
+      .tech-empty { text-align: center; color: ${T.inkSoft}; padding: 40px 10px; font-size: 14px; }
+      .tech-card { background: #fff; border: 1px solid ${T.line}; border-radius: 15px; padding: 14px; margin-bottom: 12px; }
+      .tech-note { margin-top: 8px; font-size: 12.5px; background: ${T.beige}; border-radius: 9px; padding: 7px 9px; color: ${T.ink}; }
+      .tech-actions { display: flex; gap: 8px; margin-top: 12px; }
+      .tech-call { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px; font-size: 14px; font-weight: 700; color: ${T.forest}; text-decoration: none; background: #fff; }
+      .tech-done-btn { flex: 2; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 11px; padding: 12px; font-size: 14px; font-weight: 800; font-family: inherit; color: #fff; background: ${T.green}; cursor: pointer; }
+      .tech-confirm { margin-top: 12px; }
 
       .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
       @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
