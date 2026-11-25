@@ -10,12 +10,13 @@
       khulta hai, customer khud bharta hai (ticket pe "not in records" note).
    2) Product (+ Bed / Wheelchair type), invoice number, problem, photos (max 3, compressed),
       voice note (max 60 sec), city.
-   3) Photos/voice → Storage bucket `complaint-media`, phir complaint_submit
-      RPC ticket banata hai (status "Open").
+   3) Photos/voice → Storage bucket `complaint-media`, phir n8n pehle
+      Zoho Desk ticket banata hai aur wahi Desk id/number Supabase tickets mein
+      daalta hai (n8n/complaint_submit_workflow.json).
    4) Success: ticket number, "1 ghante mein contact", assigned store ka
       number aur emergency number.
 
-   SQL (bucket + 2 RPCs + 4 columns): supabase/complaint_form.sql
+   SQL (bucket + upload rule + naye columns): supabase/complaint_form.sql
    ══════════════════════════════════════════════════════════════════════ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -29,6 +30,10 @@ const HDRS = () => ({ apikey: CONFIG.key, Authorization: `Bearer ${CONFIG.key}` 
 /* n8n "Complaint Form - Books customer lookup" workflow ka Production URL.
    n8n mein workflow kholo → Webhook node → Production URL copy karke yahan daalo. */
 const N8N_LOOKUP_URL = 'https://n8n.srv1171323.hstgr.cloud/webhook/hjs-complaint-lookup';
+/* n8n "Complaint Form (web) - Desk ticket + Supabase" — pehle Zoho Desk ticket,
+   phir wahi Desk id/number Supabase tickets mein. Form khud Supabase mein
+   ticket nahi daalta (Desk bypass nahi hota). */
+const N8N_SUBMIT_URL = 'https://n8n.srv1171323.hstgr.cloud/webhook/hjs-complaint-submit';
 
 /* Emergency / helpline — healthyjeenasikho.com ka official call number */
 const EMERGENCY = '+91 98769 78488';
@@ -125,15 +130,6 @@ const VOICE_SEC = 60;
 const AUDIO_MB = 3;
 
 /* ─── Supabase ─────────────────────────────────────────────────────────── */
-async function sbRpc(fn, body) {
-  const res = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, {
-    method: 'POST',
-    headers: { ...HDRS(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json();
-}
 /* Books lookup (n8n) — 12 sec mein jawab na aaye to customer ko rokte nahi,
    form "not in records" wala khul jaata hai. */
 async function booksLookup(phone) {
@@ -150,6 +146,23 @@ async function booksLookup(phone) {
     if (!res.ok) throw new Error(`lookup ${res.status}`);
     const j = await res.json();
     return Array.isArray(j) ? j : Array.isArray(j && j.rows) ? j.rows : [];
+  } finally {
+    clearTimeout(tm);
+  }
+}
+async function submitToDesk(payload) {
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), 45000);
+  try {
+    const res = await fetch(N8N_SUBMIT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctl.signal,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok || !j.ticket_number) throw new Error(`submit ${res.status} ${j.error || ''}`);
+    return j;
   } finally {
     clearTimeout(tm);
   }
@@ -530,24 +543,24 @@ export default function ComplaintForm() {
       for (let i = 0; i < photos.length; i++) photoUrls.push(await put(photos[i].blob, `photo-${i + 1}.jpg`));
       const voiceUrl = voice ? await put(voice.blob, `voice.${extOf(voice.blob.type)}`) : null;
       const product = picked.cat === 'Other' ? picked.name : picked.cat;
-      const res = await sbRpc('complaint_submit', {
-        p_name: (cust.registered ? cust.name || name : name).trim(),
-        p_phone: num,
-        p_email: email.trim() || null,
-        p_city: city,
-        p_product: product,
-        p_product_type: typeDef ? ptype : null,
-        p_item_name: picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
-        p_description: desc.trim(),
-        p_photos: photoUrls,
-        p_voice: voiceUrl,
-        p_invoice: invoice.trim() || null,
-        p_registered: !!cust.registered,
+      const out = await submitToDesk({
+        name: (cust.registered ? cust.name || name : name).trim(),
+        phone: num,
+        email: email.trim() || null,
+        city,
+        product,
+        product_type: typeDef ? ptype : null,
+        item_name: picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
+        description: desc.trim(),
+        photos: photoUrls,
+        voice: voiceUrl,
+        invoice: invoice.trim() || null,
+        registered: !!cust.registered,
       });
-      const out = Array.isArray(res) ? res[0] : res;
       const store = CITY_TO_STORE[city] || '';
       setDone({
-        ticket: (out && (out.ticket_number || out.ticket_id)) || '',
+        ticket: (out && out.ticket_number) || '',
+        duplicate: !!(out && out.duplicate),
         registered: out && typeof out.registered === 'boolean' ? out.registered : cust.registered,
         store,
         contact: STORE_CONTACT[store] || null,
@@ -922,9 +935,14 @@ export default function ComplaintForm() {
                     <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <h2>Your complaint has been registered</h2>
+                <h2>{done.duplicate ? 'Your complaint is already registered' : 'Your complaint has been registered'}</h2>
                 <div className="muted">Thank you, {done.name}</div>
-                {done.ticket && <div className="tid">Ticket {done.ticket}</div>}
+                {done.ticket && <div className="tid">Ticket #{done.ticket}</div>}
+                {done.duplicate && (
+                  <div className="muted" style={{ marginTop: 8, fontSize: 14 }}>
+                    You already raised a complaint for this product today - our team is working on it.
+                  </div>
+                )}
               </div>
               <div className="perf" />
               <div className="sec">
