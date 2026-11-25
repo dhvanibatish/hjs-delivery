@@ -297,6 +297,18 @@ export default function ComplaintForm() {
 
   useEffect(() => {
     document.title = 'Product Service Request · Healthy Jeena Sikho';
+    // phone dark mode mein bhi form light hi rahe (Zoho form jaisa)
+    const add = (name, content) => {
+      let m = document.querySelector(`meta[name="${name}"]`);
+      if (!m) {
+        m = document.createElement('meta');
+        m.setAttribute('name', name);
+        document.head.appendChild(m);
+      }
+      m.setAttribute('content', content);
+    };
+    add('color-scheme', 'light only');
+    add('theme-color', '#eef3ea');
   }, []);
 
   /* product options: registered → uske products; warna saari list */
@@ -548,6 +560,16 @@ export default function ComplaintForm() {
         <div className="rule" />
 
         {step === 'gate' && (
+          <>
+          <section className="intro">
+            <div className="intro-ic" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round"/></svg>
+            </div>
+            <div>
+              <div className="intro-t">Product not working right?</div>
+              <div className="intro-s">Tell us here and our team will call you within 1 hour.</div>
+            </div>
+          </section>
           <section className="card">
             <label className="l" htmlFor="cf-phone">
               Registered Mobile Number <span className="req">*</span>
@@ -579,6 +601,26 @@ export default function ComplaintForm() {
               </button>
             </div>
           </section>
+          <section className="card steps">
+            <div className="steps-h">How it works</div>
+            {[
+              ['Enter your mobile number', 'We find your name and products'],
+              ['Tell us the problem', 'Add photos or a voice note if you like'],
+              ['We call you within 1 hour', 'Your nearest HJS store takes it up'],
+            ].map(([a, b], i) => (
+              <div className="st" key={a}>
+                <span className="st-n">{i + 1}</span>
+                <span>
+                  <b>{a}</b>
+                  <small>{b}</small>
+                </span>
+              </div>
+            ))}
+          </section>
+          <div className="help-line">
+            Urgent? Call <a href={tel(EMERGENCY)}>{EMERGENCY}</a>
+          </div>
+          </>
         )}
 
         {step === 'form' && (
@@ -946,18 +988,30 @@ function Leaves() {
    phones ke liye light-dark() / :has() / aspect-ratio use nahi kiye. */
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap');
-html,body{margin:0;padding:0}
+html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 #root{max-width:none!important;width:100%!important;margin:0!important;padding:0!important;text-align:left!important}
-.hjs-cform{--bg:#eef3ea;--card:#fbfaf5;--ink:#1f2a1f;--mute:#6b7a68;--leaf:#6aae3c;--leafd:#3f7d1f;--line:#b9d6a3;--inbg:#fff;--lock:#f2f6ee;--soft:#e6f2dc;--red:#c0392b;--redbg:#fdecea;--ring:#dcefcd;
+.hjs-cform{color-scheme:light;--bg:#eef3ea;--card:#fbfaf5;--ink:#1f2a1f;--mute:#6b7a68;--leaf:#6aae3c;--leafd:#3f7d1f;--line:#b9d6a3;--inbg:#fff;--lock:#f2f6ee;--soft:#e6f2dc;--red:#c0392b;--redbg:#fdecea;--ring:#dcefcd;
   min-height:100vh;color:var(--ink);font:16px/1.5 Lora,Georgia,serif;overflow-x:hidden;position:relative;
   background:var(--bg) radial-gradient(1200px 500px at 50% -120px,#dcebd0,transparent)}
-@media(prefers-color-scheme:dark){.hjs-cform{--bg:#0f1a12;--card:#18241b;--ink:#e5ede3;--mute:#9fb09c;--leafd:#9ad270;--line:#3a5a2c;--inbg:#111a13;--lock:#1d2b20;--soft:#22351f;--red:#ff8a7a;--redbg:#3a1c18;--ring:#2c4a22;background:var(--bg)}}
 .hjs-cform *{box-sizing:border-box;min-width:0}
 .hjs-cform .leaves{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.5}
 .hjs-cform .wrap{position:relative;z-index:1;max-width:640px;margin:0 auto;padding:22px max(4vw,12px) 60px}
 .hjs-cform .logo{display:flex;justify-content:center;align-items:center;gap:8px;color:var(--leaf);font-weight:700;font-size:24px;font-family:system-ui,sans-serif}
 .hjs-cform h1{font-family:Lora,Georgia,serif;letter-spacing:normal;text-align:center;font-size:clamp(26px,5vw,32px);line-height:1.1;margin:14px 0 6px;font-weight:700;color:var(--ink)}
 .hjs-cform .rule{height:1px;background:var(--line);margin:0 0 18px}
+.hjs-cform .intro{display:flex;gap:14px;align-items:center;background:linear-gradient(135deg,#6aae3c,#3f7d1f);color:#fff;border-radius:14px;padding:18px 18px;margin-bottom:16px;box-shadow:0 6px 18px rgba(63,125,31,.25)}
+.hjs-cform .intro-ic{width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex:none}
+.hjs-cform .intro-t{font-size:19px;font-weight:700;line-height:1.25}
+.hjs-cform .intro-s{font:14.5px/1.45 system-ui,sans-serif;opacity:.95;margin-top:3px}
+.hjs-cform .steps-h{font-weight:700;font-size:16px;margin-bottom:10px}
+.hjs-cform .st{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-top:1px dashed var(--line)}
+.hjs-cform .steps-h + .st{border-top:0}
+.hjs-cform .st-n{width:30px;height:30px;border-radius:50%;background:var(--soft);color:var(--leafd);font:700 15px system-ui,sans-serif;display:flex;align-items:center;justify-content:center;flex:none}
+.hjs-cform .st b{display:block;font-weight:600;font-size:15.5px}
+.hjs-cform .st small{display:block;color:var(--mute);font:13.5px system-ui,sans-serif;margin-top:1px}
+.hjs-cform .help-line{text-align:center;color:var(--mute);font:14.5px system-ui,sans-serif;margin-top:4px}
+.hjs-cform .help-line a{color:var(--leafd);font-weight:700;white-space:nowrap;text-decoration:none;display:inline-block;padding:10px 4px}
+.hjs-cform .btn:disabled{background:#a9cf8c;opacity:1;color:#fff}
 .hjs-cform .card{background:var(--card);border-radius:10px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(30,60,20,.08)}
 .hjs-cform .l{display:block;font-size:15px;margin-bottom:6px;font-weight:500}
 .hjs-cform .req{color:var(--red)}
