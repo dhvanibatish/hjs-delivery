@@ -1457,8 +1457,11 @@ export default function App() {
     (page === 'dashboard' && dashKind === 'pickups') ||
     (page === 'sla' && slaKind === 'pickups');
   const showComplaints =
-    page === 'complaints' || (page === 'dashboard' && dashKind === 'complaints');
-  const inModule = page === 'pickups' || page === 'complaints';
+    page === 'complaints' ||
+    page === 'techadmin' ||
+    (page === 'dashboard' && dashKind === 'complaints');
+  const inModule =
+    page === 'pickups' || page === 'complaints' || page === 'techadmin';
   const switchLang = (l) => {
     setHjsLang(l);
     setLang(HJS_LANG);
@@ -1890,15 +1893,6 @@ export default function App() {
     return (
       <ComplaintsModule session={session} onLogout={() => setSession(null)} />
     );
-  // Head ne app ke andar se "Technician view" (Tech Admin) choose kiya —
-  // "← App" dabate hi wapas Complaints pe
-  if (session.isHead && page === 'techadmin')
-    return (
-      <ComplaintsModule
-        session={techSession(TECH_ADMIN, '', true, true)}
-        onLogout={() => setPage('complaints')}
-      />
-    );
 
   return (
     <div
@@ -2105,9 +2099,16 @@ export default function App() {
               <div style={{ display: showComplaints ? 'block' : 'none' }}>
                 <ComplaintsModule
                   session={session}
-                  view={page === 'dashboard' ? 'dashboard' : 'board'}
+                  view={
+                    page === 'dashboard'
+                      ? 'dashboard'
+                      : page === 'techadmin'
+                        ? 'techadmin'
+                        : 'board'
+                  }
+                  onNav={setPage}
                   reloadKey={reloadTick}
-                  openLogKey={page === 'complaints' ? logTick : 0}
+                  openLogKey={page === 'complaints' || page === 'techadmin' ? logTick : 0}
                   lang={lang}
                   search={search}
                   onResults={setComplaintRows}
