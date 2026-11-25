@@ -8,7 +8,7 @@
    1) Mobile number  → complaint_customer_lookup RPC (deliveries se naam,
       products, store). Mila = form prefilled. Nahi mila = form phir bhi
       khulta hai, customer khud bharta hai (ticket pe "not in records" note).
-   2) Product (+ Bed / Wheelchair type), problem, photos (max 3, compressed),
+   2) Product (+ Bed / Wheelchair type), invoice number, problem, photos (max 3, compressed),
       voice note (max 60 sec), city.
    3) Photos/voice → Storage bucket `complaint-media`, phir complaint_submit
       RPC ticket banata hai (status "Open").
@@ -198,13 +198,18 @@ function toCustomer(rows, num) {
   if (!Array.isArray(rows) || !rows.length) return null;
   const seen = new Set();
   const products = [];
+  const invoices = [];
   rows.forEach((r) => {
+    const inv = String(r.invoice || '').trim();
+    if (inv && !invoices.some((x) => x.invoice === inv))
+      invoices.push({ invoice: inv, store: String(r.store || '').toUpperCase(), items: itemNames(r).join(', ') });
     itemNames(r).forEach((n) => {
       const cat = catOf(n);
       const k = n.toLowerCase();
       if (!cat || seen.has(k)) return;
       seen.add(k);
-      products.push({ name: n, cat, type: guessType(cat, n) });
+      // product jis (latest) invoice pe aaya — wahi invoice + store
+      products.push({ name: n, cat, type: guessType(cat, n), invoice: inv, store: String(r.store || '').toUpperCase() });
     });
   });
   const code = String(rows[0].store || '').toUpperCase();
@@ -214,6 +219,7 @@ function toCustomer(rows, num) {
     phone: num,
     city: CODE_TO_CITY[code] || '',
     products,
+    invoices,
   };
 }
 function shrinkImage(file) {
@@ -273,6 +279,7 @@ export default function ComplaintForm() {
   const [other, setOther] = useState('');
   const [desc, setDesc] = useState('');
   const [city, setCity] = useState('');
+  const [invoice, setInvoice] = useState('');
   const [photos, setPhotos] = useState([]); // {blob,url}
   const [photoErr, setPhotoErr] = useState('');
   const [busyPhotos, setBusyPhotos] = useState(false);
@@ -283,6 +290,10 @@ export default function ComplaintForm() {
   const [sending, setSending] = useState(false);
   const [sendErr, setSendErr] = useState('');
   const [done, setDone] = useState(null);
+  // ek complaint ki saari files ek hi folder mein: <mobile>/<date-time>-<random>/
+  // Submit fail hua aur dobara dabaya to wahi folder + pehle se upload hui
+  // files dobara use hoti hain (duplicate files nahi banti).
+  const upRef = useRef({ folder: '', urls: new Map() });
 
   useEffect(() => {
     document.title = 'Product Service Request · Healthy Jeena Sikho';
@@ -291,7 +302,7 @@ export default function ComplaintForm() {
   /* product options: registered → uske products; warna saari list */
   const prodOptions = useMemo(() => {
     if (cust && cust.registered && cust.products.length)
-      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${p.cat})`, cat: p.cat, type: p.type, name: p.name }));
+      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${p.cat})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store }));
     return PRODUCTS.map((c) => ({ value: `c:${c}`, label: c, cat: c, type: '', name: c }));
   }, [cust]);
   const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
@@ -324,7 +335,7 @@ export default function ComplaintForm() {
       console.warn('[complaint lookup]', e);
       c = null; // lookup fail ho to bhi customer complaint daal sake
     }
-    const cu = c || { registered: false, name: '', phone: num, city: '', products: [] };
+    const cu = c || { registered: false, name: '', phone: num, city: '', products: [], invoices: [] };
     setCust(cu);
     resetForm(cu);
     setChecking(false);
@@ -337,6 +348,7 @@ export default function ComplaintForm() {
     const only = cu && cu.registered && cu.products.length === 1;
     setProd(only ? 'p0' : '');
     setPtype(only ? cu.products[0].type : '');
+    setInvoice(only ? cu.products[0].invoice || '' : cu && cu.registered && cu.invoices.length === 1 ? cu.invoices[0].invoice : '');
     setOther('');
     setDesc('');
     setCity(cu ? cu.city : '');
@@ -347,6 +359,7 @@ export default function ComplaintForm() {
     setSendErr('');
   };
   const backToGate = () => {
+    upRef.current = { folder: '', urls: new Map() };
     resetForm(null);
     setCust(null);
     setNum('');
@@ -463,10 +476,23 @@ export default function ComplaintForm() {
     setSending(true);
     setSendErr('');
     try {
-      const folder = `${num}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const up = upRef.current;
+      if (!up.folder || !up.folder.startsWith(num + '/')) {
+        const d = new Date();
+        const p2 = (n) => String(n).padStart(2, '0');
+        const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+        const rand = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, '0')).join('');
+        up.folder = `${num}/${stamp}-${rand}`;
+        up.urls = new Map();
+      }
+      const put = async (blob, file) => {
+        const key = `${file}|${blob.size}`;
+        if (!up.urls.has(key)) up.urls.set(key, await sbUpload(blob, `${up.folder}/${file}`));
+        return up.urls.get(key);
+      };
       const photoUrls = [];
-      for (let i = 0; i < photos.length; i++) photoUrls.push(await sbUpload(photos[i].blob, `${folder}/photo-${i + 1}.jpg`));
-      const voiceUrl = voice ? await sbUpload(voice.blob, `${folder}/voice.${extOf(voice.blob.type)}`) : null;
+      for (let i = 0; i < photos.length; i++) photoUrls.push(await put(photos[i].blob, `photo-${i + 1}.jpg`));
+      const voiceUrl = voice ? await put(voice.blob, `voice.${extOf(voice.blob.type)}`) : null;
       const product = picked.cat === 'Other' ? picked.name : picked.cat;
       const res = await sbRpc('complaint_submit', {
         p_name: (cust.registered ? cust.name || name : name).trim(),
@@ -479,6 +505,7 @@ export default function ComplaintForm() {
         p_description: desc.trim(),
         p_photos: photoUrls,
         p_voice: voiceUrl,
+        p_invoice: invoice.trim() || null,
       });
       const out = Array.isArray(res) ? res[0] : res;
       const store = CITY_TO_STORE[city] || '';
@@ -490,6 +517,7 @@ export default function ComplaintForm() {
         name: (cust.registered ? cust.name || name : name).trim(),
         product: `${picked.cat === 'Other' ? picked.name : picked.name}${typeDef ? ' · ' + (typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1] : ''}`,
         city,
+        invoice: invoice.trim(),
         desc: desc.trim(),
         photos: photoUrls.length,
         voice: !!voiceUrl,
@@ -614,6 +642,11 @@ export default function ComplaintForm() {
                   setProd(v);
                   const o = prodOptions.find((x) => x.value === v);
                   setPtype(o ? o.type : '');
+                  // registered: product ka invoice aur store apne aap
+                  if (o && o.invoice) {
+                    setInvoice(o.invoice);
+                    if (CODE_TO_CITY[o.store]) setCity(CODE_TO_CITY[o.store]);
+                  }
                 }}
               >
                 {!(reg && prodOptions.length === 1) && <option value="">-Select-</option>}
@@ -648,6 +681,34 @@ export default function ComplaintForm() {
                   <input id="cf-other" type="text" maxLength={60} value={other} onChange={(e) => setOther(e.target.value)} />
                 </div>
               )}
+            </div>
+
+            <div className="card">
+              <label className="l" htmlFor="cf-inv">
+                Invoice Number <span className="opt">(optional)</span>
+              </label>
+              {reg && cust.invoices.length > 0 ? (
+                <select id="cf-inv" value={invoice} onChange={(e) => setInvoice(e.target.value)}>
+                  <option value="">Not sure</option>
+                  {cust.invoices.map((x) => (
+                    <option key={x.invoice} value={x.invoice}>
+                      {x.invoice}
+                      {x.items ? ` · ${x.items.length > 40 ? x.items.slice(0, 40) + '…' : x.items}` : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="cf-inv"
+                  type="text"
+                  autoCapitalize="characters"
+                  placeholder="e.g. NWD/25-26/1234"
+                  maxLength={40}
+                  value={invoice}
+                  onChange={(e) => setInvoice(e.target.value.toUpperCase())}
+                />
+              )}
+              <p className="help">{reg && cust.invoices.length > 0 ? 'Picked from the product you chose - change it if needed' : 'Written on your HJS bill or WhatsApp invoice'}</p>
             </div>
 
             <div className="card">
@@ -822,6 +883,12 @@ export default function ComplaintForm() {
                 </div>
                 <div className="sum">
                   Product: <b>{done.product}</b>
+                  {done.invoice && (
+                    <>
+                      <br />
+                      Invoice: <b>{done.invoice}</b>
+                    </>
+                  )}
                   <br />
                   City: <b>{done.city}</b>
                   <br />
