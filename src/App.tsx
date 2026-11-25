@@ -2,8 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import PickupsModule from './Pickups.tsx';
 import ComplaintsModule, {
   TECHNICIANS as COMPLAINT_TECHS,
+  TECH_ADMIN,
   techSession,
   sbTechLogin,
+  sameName,
 } from './ComplaintApp.tsx';
 import {
   Truck,
@@ -1883,10 +1885,19 @@ export default function App() {
 
   if (!session) return <Login onLogin={setSession} />;
 
-  // Technician login → sirf complaints ka "Meri tickets" view, aur kuch nahi
+  // Technician / Tech Admin login → sirf complaints ka technician view
   if (session.isTech)
     return (
       <ComplaintsModule session={session} onLogout={() => setSession(null)} />
+    );
+  // Head ne app ke andar se "Technician view" (Tech Admin) choose kiya —
+  // "← App" dabate hi wapas Complaints pe
+  if (session.isHead && page === 'techadmin')
+    return (
+      <ComplaintsModule
+        session={techSession(TECH_ADMIN, '', true, true)}
+        onLogout={() => setPage('complaints')}
+      />
     );
 
   return (
@@ -4482,7 +4493,13 @@ function Login({ onLogin }) {
         setBusy(false);
         return;
       }
-      onLogin(techSession(row.name, row.phone || ''));
+      onLogin(
+        techSession(
+          row.name,
+          row.phone || '',
+          !!row.is_admin || sameName(row.name, TECH_ADMIN),
+        ),
+      );
     } catch (e) {
       setErr('Login error: ' + (e.message || 'unknown'));
       setBusy(false);
@@ -4622,6 +4639,7 @@ function Login({ onLogin }) {
                 }}
               >
                 <option value="">Apna naam chuno…</option>
+                <option value={TECH_ADMIN}>Tech Admin (saare technicians)</option>
                 {COMPLAINT_TECHS.map((t) => (
                   <option key={t.name} value={t.name}>
                     {t.name}
@@ -4710,6 +4728,7 @@ function Sidebar({ session, page, onNav }) {
     ...(isAll
       ? [
           { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
+          { id: 'techadmin', icon: Wrench, label: 'Technician view' },
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
         ]
@@ -4841,6 +4860,7 @@ function Topbar({
         <option value="pickups">Pickups</option>
         {session.isHead && <option value="pickupadmin">Pickup Admin</option>}
         {session.isHead && <option value="complaints">Complaints</option>}
+        {session.isHead && <option value="techadmin">Technician view</option>}
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
       </select>

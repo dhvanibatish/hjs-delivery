@@ -455,11 +455,16 @@ function sessionFor(branch) {
   };
 }
 /* Technician session — sirf "Meri Tickets" view, koi aur page nahi */
-function techSession(name, phone) {
+/* Tech Admin = saare technicians ki tickets ek jagah.
+   viaHead = head (All stores) ne app ke andar se switch kiya hai */
+const TECH_ADMIN = 'Tech Admin';
+function techSession(name, phone, isTechAdmin = false, viaHead = false) {
   return {
     branch: 'ALL',
     authStore: 'TECH',
     isTech: true,
+    isTechAdmin: !!isTechAdmin,
+    viaHead: !!viaHead,
     techName: name,
     techPhone: phone || '',
     isHead: false,
@@ -612,6 +617,9 @@ const TXT = {
   techDoneAt: { en: 'Done at', hi: 'Kab' },
   techDoneRemark: { en: 'Technician remark', hi: 'Technician remark' },
   myTickets: { en: 'My tickets', hi: 'Meri tickets' },
+  allTechTickets: { en: 'All technician tickets', hi: 'Saare technicians ki tickets' },
+  allTechs: { en: 'All technicians', hi: 'Saare technicians' },
+  techAdminView: { en: 'Technician view', hi: 'Technician view' },
   techOpen: { en: 'Open', hi: 'Open' },
   techDoneTab: { en: 'Done (7 days)', hi: 'Ho gaya (7 din)' },
   techNoOpen: {
@@ -1131,7 +1139,14 @@ function setActor(session) {
     return;
   }
   if (session.isTech) {
-    ACTOR = { by: 'TECH', byName: `${session.techName} (Technician)` };
+    ACTOR = {
+      by: 'TECH',
+      byName: session.viaHead
+        ? 'Head office (Tech Admin)'
+        : session.isTechAdmin
+          ? 'Tech Admin'
+          : `${session.techName} (Technician)`,
+    };
     return;
   }
   const code = session.authStore || session.branch;
@@ -1765,15 +1780,18 @@ export default function App({
   // ── Technician ne kaam poora kiya. Stage "Technician Assigned" hi
   // rehti hai (status nahi badalta) — bas tech_done_* bhar jaate hain,
   // taaki aage ka flow (Resolved) store/head pehle jaisa kar sake.
-  const markTechDone = async (ticketId, remarks) => {
+  const markTechDone = async (ticketId, remarks, sess = session) => {
+    const session = sess; // head ke Tech Admin switch mein alag session aata hai
     const cur = tickets.find((x) => x.ticket_id === ticketId);
     if (!cur || !session || !session.isTech) return;
-    if (cur.stage !== 'tech' || !sameName(cur.technician, session.techName))
+    if (cur.stage !== 'tech') return;
+    // technician sirf apni ticket; Tech Admin kisi ki bhi done kar sakta hai
+    if (!session.isTechAdmin && !sameName(cur.technician, session.techName))
       return;
     const now = new Date().toISOString();
     const patch = {
       tech_done_at: now,
-      tech_done_by: session.techName,
+      tech_done_by: cur.technician || session.techName,
       tech_done_remarks: remarks || null,
       updated_at: now,
       app_log: [
@@ -1783,7 +1801,10 @@ export default function App({
           stage: 'techdone',
           label: 'Technician — work done',
           action: 'Marked as',
-          fields: remarks ? { Remark: remarks } : {},
+          fields: {
+            ...(session.isTechAdmin ? { Technician: cur.technician || '—' } : {}),
+            ...(remarks ? { Remark: remarks } : {}),
+          },
           ...actorStamp(),
         },
       ],
@@ -1825,6 +1846,26 @@ export default function App({
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // ── HEAD → Tech Admin view (app ke andar se switch, logout nahi)
+  if (!hosted && session.isHead && ownPage === 'techadmin') {
+    const ts = techSession(TECH_ADMIN, '', true, true);
+    setActor(ts);
+    return (
+      <TechView
+        session={ts}
+        tickets={tickets}
+        loading={loading}
+        error={error}
+        onReload={load}
+        onLogout={() => setOwnPage('tickets')}
+        onDone={(id, rm) => markTechDone(id, rm, ts)}
+        toast={toast}
+        lang={lang}
+        onLang={switchLang}
+      />
+    );
+  }
 
   // ── TECHNICIAN: sirf uska apna view — koi sidebar / dashboard / board nahi
   if (session.isTech) {
@@ -2737,7 +2778,13 @@ function Login({ onLogin }) {
         setBusy(false);
         return;
       }
-      onLogin(techSession(row.name, row.phone || techPhoneOf(row.name)));
+      onLogin(
+        techSession(
+          row.name,
+          row.phone || techPhoneOf(row.name),
+          !!row.is_admin || sameName(row.name, TECH_ADMIN),
+        ),
+      );
     } catch (e) {
       setErr('Login error: ' + (e.message || 'unknown'));
       setBusy(false);
@@ -2858,6 +2905,7 @@ function Login({ onLogin }) {
                 }}
               >
                 <option value="">Select your name…</option>
+                <option value={TECH_ADMIN}>Tech Admin (all technicians)</option>
                 {TECHNICIANS.map((t) => (
                   <option key={t.name} value={t.name}>
                     {t.name}
@@ -2970,15 +3018,30 @@ function TechView({
   const [openId, setOpenId] = useState(null); // jis card pe confirm khula hai
   const [remark, setRemark] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const admin = !!session.isTechAdmin;
+  const [techFilter, setTechFilter] = useState(''); // admin: '' = sab
+
+  // admin: kisi bhi technician ki ticket; technician: sirf apni
+  const forMe = (name) =>
+    admin
+      ? !techFilter || sameName(name, techFilter)
+      : sameName(name, session.techName);
 
   const mine = useMemo(
     () =>
-      tickets.filter(
-        (x) =>
-          x.stage === 'tech' && sameName(x.technician, session.techName),
-      ),
-    [tickets, session.techName],
+      tickets.filter((x) => x.stage === 'tech' && forMe(x.technician)),
+    // eslint-disable-next-line
+    [tickets, session.techName, admin, techFilter],
   );
+  // admin filter ke liye: har technician ki open tickets ka count
+  const techCounts = useMemo(() => {
+    const m = {};
+    tickets.forEach((x) => {
+      if (x.stage === 'tech' && !x.techDone && x.technician)
+        m[x.technician] = (m[x.technician] || 0) + 1;
+    });
+    return m;
+  }, [tickets]);
   const openList = useMemo(
     () =>
       mine
@@ -2998,11 +3061,13 @@ function TechView({
         .filter(
           (x) =>
             x.techDone &&
-            sameName(x._raw.tech_done_by || x.technician, session.techName) &&
+            x.stage !== 'deleted' &&
+            forMe(x._raw.tech_done_by || x.technician) &&
             hoursSince(x.techDoneAt) <= 24 * 7,
         )
         .sort((a, b) => String(b.techDoneAt).localeCompare(String(a.techDoneAt))),
-    [tickets, session.techName],
+    // eslint-disable-next-line
+    [tickets, session.techName, admin, techFilter],
   );
   const list = tab === 'open' ? openList : doneList;
 
@@ -3019,9 +3084,11 @@ function TechView({
       <StyleTag />
       <div className="tech-top">
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>Technician</div>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            {admin ? 'All technicians' : 'Technician'}
+          </div>
           <div className="ellip" style={{ fontWeight: 800, fontSize: 18 }}>
-            {session.techName}
+            {admin ? 'Tech Admin' : session.techName}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -3035,14 +3102,40 @@ function TechView({
           <button className="tech-icon" onClick={onReload} title="Refresh">
             <RefreshCw size={16} className={loading ? 'spin' : ''} />
           </button>
-          <button className="tech-icon" onClick={onLogout} title="Logout">
-            <LogOut size={16} />
-          </button>
+          {session.viaHead ? (
+            <button className="tech-icon tech-back" onClick={onLogout} title="Back">
+              <ArrowLeft size={15} /> App
+            </button>
+          ) : (
+            <button className="tech-icon" onClick={onLogout} title="Logout">
+              <LogOut size={16} />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="tech-body">
-        <div className="tech-h">{L('myTickets')}</div>
+        <div className="tech-h">{admin ? L('allTechTickets') : L('myTickets')}</div>
+        {admin && (
+          <select
+            className="inp"
+            style={{ marginBottom: 12 }}
+            value={techFilter}
+            onChange={(e) => setTechFilter(e.target.value)}
+          >
+            <option value="">{L('allTechs')}</option>
+            {Array.from(
+              new Set([
+                ...TECHNICIANS.map((t) => t.name),
+                ...Object.keys(techCounts),
+              ]),
+            ).map((n) => (
+              <option key={n} value={n}>
+                {n} ({techCounts[n] || 0})
+              </option>
+            ))}
+          </select>
+        )}
         <div className="tech-tabs">
           <button
             className={tab === 'open' ? 'tech-tab on' : 'tech-tab'}
@@ -3098,6 +3191,15 @@ function TechView({
                 </div>
                 <PriorityBadge p={x.priority} small />
               </div>
+              {admin && (
+                <div className="card-tech" style={{ marginTop: 8 }}>
+                  <Wrench size={12} />
+                  <span className="ellip">
+                    <b>{x.technician || '—'}</b>
+                    {x.technicianPhone ? ` · ${x.technicianPhone}` : ''}
+                  </span>
+                </div>
+              )}
               <div className="card-equip">{x.subject}</div>
               <div className="card-meta">
                 <span className="ellip" style={{ maxWidth: '100%' }}>
@@ -3202,6 +3304,9 @@ function Sidebar({ session, page, onNav }) {
   const nav = [
     { id: 'tickets', icon: LayoutDashboard, label: 'Complaints' },
     ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
+    ...(session.isHead
+      ? [{ id: 'techadmin', icon: Wrench, label: 'Technician view' }]
+      : []),
     { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
     { id: 'reports', icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
@@ -5504,6 +5609,7 @@ function StyleTag() {
       .tech-call { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid ${T.line}; border-radius: 11px; padding: 12px; font-size: 14px; font-weight: 700; color: ${T.forest}; text-decoration: none; background: #fff; }
       .tech-done-btn { flex: 2; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 11px; padding: 12px; font-size: 14px; font-weight: 800; font-family: inherit; color: #fff; background: ${T.green}; cursor: pointer; }
       .tech-confirm { margin-top: 12px; }
+      .tech-back { gap: 4px; padding: 0 10px; }
 
       .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
       @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
@@ -5590,4 +5696,4 @@ function StyleTag() {
 }
 
 // Delivery app (App.tsx) ke login se technician login ke liye
-export { TECHNICIANS, techSession, sbTechLogin };
+export { TECHNICIANS, TECH_ADMIN, techSession, sbTechLogin, sameName };
