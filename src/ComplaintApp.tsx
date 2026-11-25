@@ -1884,6 +1884,7 @@ export default function App({
         onOpen={(x) => setActiveId(x.ticket_id)}
         onDone={(id, rm) => markTechDone(id, rm, headTech)}
         embedded
+        onlyAssigned={!session.isHead}
       />
     </>
   ) : null;
@@ -3064,7 +3065,15 @@ function ViewSwitch({ value, onChange }) {
   );
 }
 
-function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
+function TechBoard({
+  session,
+  tickets,
+  loading,
+  onOpen,
+  onDone,
+  embedded,
+  onlyAssigned = false, // store login: sirf wahi technicians jo is store ki tickets pe lage
+}) {
   const admin = !!session.isTechAdmin;
   const [tab, setTab] = useState('open');
   const [statF, setStatF] = useState(''); // '' | high | late | today — box click filter
@@ -3119,8 +3128,21 @@ function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
     });
     return m;
   }, [live]);
+  // store: sirf is store ki tickets (open ya done) pe assign hue technicians;
+  // head: poori technician list
+  const assignedNames = Array.from(
+    new Set(
+      live
+        .filter((x) => x.technician && (x.stage === 'tech' || x.techDone))
+        .map((x) => x.technician),
+    ),
+  );
   const techNames = Array.from(
-    new Set([...Object.keys(techCounts), ...TECHNICIANS.map((t) => t.name)]),
+    new Set(
+      onlyAssigned
+        ? assignedNames
+        : [...Object.keys(techCounts), ...TECHNICIANS.map((t) => t.name)],
+    ),
   ).sort((a, b) => (techCounts[b] || 0) - (techCounts[a] || 0));
   const totalOpen = Object.values(techCounts).reduce((a, b) => a + b, 0);
 
