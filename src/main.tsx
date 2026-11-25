@@ -6,6 +6,8 @@ import Pickups from './Pickups.tsx'
 import ComplaintApp from './ComplaintApp.tsx'
 import Attendance from './Attendance.tsx'
 import Physio from './Physio.tsx'
+// Customer complaint form — public link: /?complaintform (alag file, sirf wahin load hoti hai)
+const ComplaintForm = lazy(() => import('./ComplaintForm.tsx'))
 // Pickup Test — alag file, sirf ?pickuptest pe load hoti hai (baaki app pe asar nahi)
 const PickupTest = lazy(() => import('./pickup_test.tsx'))
 
@@ -15,9 +17,10 @@ const isComplaint = params.has('complaints')
 const isAttendance = params.has('attendance')
 const isPhysio = params.has('physio')
 const isPickupTest = params.has('pickuptest')
+const isComplaintForm = params.has('complaintform')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isPickupTest ? <Suspense fallback={null}><PickupTest /></Suspense> : isComplaint ? <ComplaintApp /> : isPickup ? <Pickups /> : isAttendance ? <Attendance /> : isPhysio ? <Physio /> : <App />}
+    {isComplaintForm ? <Suspense fallback={null}><ComplaintForm /></Suspense> : isPickupTest ? <Suspense fallback={null}><PickupTest /></Suspense> : isComplaint ? <ComplaintApp /> : isPickup ? <Pickups /> : isAttendance ? <Attendance /> : isPhysio ? <Physio /> : <App />}
   </StrictMode>,
 )
