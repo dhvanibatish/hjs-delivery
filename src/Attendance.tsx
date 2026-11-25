@@ -5846,14 +5846,14 @@ function TodayTab({ me }: any) {
                     .filter(Boolean).join(" + ");
                   const lbl = (m: string) => (m === "Present" ? "Full Day"
                     : m === LSL_MARK ? "Late Short Leave" : m);
-                  // LSL ka manager ke paas sirf rakho / hatao (Full Day)
-                  const opts = r.log.auto_cut === LSL_MARK
-                    ? [LSL_MARK, "Present"] : ["Short Leave", "Half Day", "Present"];
+                  // Late Short Leave ko koi Full Day nahi kar sakta — sirf dikhti hai
+                  const isLsl = r.log.auto_cut === LSL_MARK;
+                  const opts = ["Short Leave", "Half Day", "Present"];
                   return (
                     // apni line par, poori chaudai — mobile par naam nahi dabta
                     <div style={{ flexBasis: "100%", display: "flex", alignItems: "center",
                                   gap: 8, flexWrap: "wrap", paddingLeft: 46, marginTop: 2 }}>
-                      {!canWaive(r) ? (
+                      {!canWaive(r) || isLsl ? (
                         <span className={pillClass(cur === LSL_MARK ? "Short Leave" : cur)}>{lbl(cur)} · {why}</span>
                       ) : (
                         <div style={{ display: "inline-flex", border: "1px solid #d0d5dd",
