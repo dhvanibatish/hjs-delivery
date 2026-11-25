@@ -10,12 +10,12 @@ import ComplaintsModule, {
 } from './ComplaintApp.tsx';
 
 /* Delivery app ka store code → Complaints app ka store naam.
-   MOH/CHD dono Mohali, NCR/NOD dono Noida (complaint app mein ek hi store). */
+   Mohali Showroom (MOH) → Mohali, Noida Showroom (NOD) → Noida.
+   Head Office (CHD) aur Delhi NCR (NCR) ka complaints mein apna store nahi —
+   unhe Complaints nahi dikhta. */
 const COMPLAINT_STORE = {
   MOH: 'Mohali',
-  CHD: 'Mohali',
   GGN: 'Gurugram',
-  NCR: 'Noida',
   NOD: 'Noida',
   LDH: 'Ludhiana',
   JAL: 'Jalandhar',
@@ -4751,8 +4751,10 @@ function Sidebar({ session, page, onNav }) {
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
     // Pickup Admin — supervisor check, sirf head login
     ...(isAll ? [{ id: 'pickupadmin', icon: ShieldCheck, label: 'Pickup Admin' }] : []),
-    // Complaints har store ko — apne store ki complaints + technician view
-    { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
+    // Complaints: head + jin stores ka complaints mein store hai
+    ...(isAll || COMPLAINT_STORE[session.branch]
+      ? [{ id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' }]
+      : []),
     ...(isAll
       ? [
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
@@ -4885,7 +4887,9 @@ function Topbar({
         <option value="deliveries">Deliveries</option>
         <option value="pickups">Pickups</option>
         {session.isHead && <option value="pickupadmin">Pickup Admin</option>}
-        <option value="complaints">Complaints</option>
+        {(session.isHead || COMPLAINT_STORE[session.branch]) && (
+          <option value="complaints">Complaints</option>
+        )}
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
       </select>
