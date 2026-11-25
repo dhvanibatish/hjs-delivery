@@ -10,13 +10,13 @@ import ComplaintsModule, {
 } from './ComplaintApp.tsx';
 
 /* Delivery app ka store code → Complaints app ka store naam.
-   Mohali Showroom (MOH) → Mohali, Noida Showroom (NOD) → Noida.
-   Head Office (CHD) aur Delhi NCR (NCR) ka complaints mein apna store nahi —
-   unhe Complaints nahi dikhta. */
+   Abhi (invoice number aane tak): saari Noida/NCR complaints → Delhi NCR,
+   saari Mohali/Chandigarh complaints → Head Office. Mohali Showroom (MOH) aur
+   Noida Showroom (NOD) ko Complaints nahi dikhta. */
 const COMPLAINT_STORE = {
-  MOH: 'Mohali',
+  CHD: 'Mohali',
   GGN: 'Gurugram',
-  NOD: 'Noida',
+  NCR: 'Noida',
   LDH: 'Ludhiana',
   JAL: 'Jalandhar',
   JPR: 'Jaipur',
