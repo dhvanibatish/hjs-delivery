@@ -626,6 +626,8 @@ const TXT = {
     hi: 'Technicians ko assign hui tickets — details ke liye card pe tap karein',
   },
   overdue: { en: 'Overdue', hi: 'Late' },
+  filterOn: { en: 'Showing', hi: 'Dikha rahe' },
+  techNoMatch: { en: 'No tickets for this filter.', hi: 'Is filter mein koi ticket nahi.' },
   techDoneQ: { en: 'Work finished on this ticket?', hi: 'Is ticket ka kaam ho gaya?' },
   doneToday: { en: 'Done today', hi: 'Aaj done' },
   techOpen: { en: 'Open', hi: 'Open' },
@@ -2011,7 +2013,13 @@ export default function App({
       <div style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
           session={session}
-          page={session.isHead || session.isRegion ? page : 'tickets'}
+          page={
+            session.isHead || session.isRegion
+              ? page === 'techadmin'
+                ? 'tickets'
+                : page
+              : 'tickets'
+          }
           onNav={setPage}
         />
         <div
@@ -3057,6 +3065,7 @@ function ViewSwitch({ value, onChange }) {
 function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
   const admin = !!session.isTechAdmin;
   const [tab, setTab] = useState('open');
+  const [statF, setStatF] = useState(''); // '' | high | late | today — box click filter
   const [techFilter, setTechFilter] = useState(''); // admin: '' = sab
   const [openId, setOpenId] = useState(null); // jis card pe confirm khula hai
   const [remark, setRemark] = useState('');
@@ -3131,7 +3140,31 @@ function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
       s: T.mint,
     },
   ];
-  const list = tab === 'open' ? openList : doneList;
+  const baseList = tab === 'open' ? openList : doneList;
+  const list =
+    statF === 'high'
+      ? baseList.filter((x) => x.priority === 'High')
+      : statF === 'late'
+        ? baseList.filter(isOverdue)
+        : statF === 'today'
+          ? baseList.filter((x) => isToday(x.techDoneAt))
+          : baseList;
+  // box click: us hisaab se tab + filter; same box dobara = filter hatao
+  const pickStat = (k) => {
+    if (k === 'open') {
+      setTab('open');
+      setStatF('');
+      return;
+    }
+    if (statF === k) {
+      setStatF('');
+      return;
+    }
+    setTab(k === 'today' ? 'done' : 'open');
+    setStatF(k);
+  };
+  const statActive = (k) =>
+    k === 'open' ? tab === 'open' && !statF : statF === k;
 
   const confirm = async (x) => {
     setBusyId(x.ticket_id);
@@ -3155,14 +3188,23 @@ function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
       )}
 
       <div className="tb-stats">
-        {stats.map((st) => (
-          <div key={st.k} className="tb-stat">
-            <span className="tb-stat-n" style={{ color: st.c }}>{st.n}</span>
-            <span className="tb-stat-l">
-              <span className="col-pip" style={{ background: st.c }} /> {st.label}
-            </span>
-          </div>
-        ))}
+        {stats.map((st) => {
+          const on = statActive(st.k);
+          return (
+            <button
+              key={st.k}
+              className={on ? 'tb-stat on' : 'tb-stat'}
+              style={on ? { borderColor: st.c, background: st.s } : null}
+              onClick={() => pickStat(st.k)}
+            >
+              <span className="tb-stat-n" style={{ color: st.c }}>{st.n}</span>
+              <span className="tb-stat-l">
+                <span className="col-pip" style={{ background: st.c }} /> {st.label}
+                {on && st.k !== 'open' && <X size={12} style={{ marginLeft: 'auto' }} />}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {admin && (
@@ -3188,13 +3230,19 @@ function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
       <div className="layout-toggle" style={{ marginBottom: 14 }}>
         <button
           className={tab === 'open' ? 'lt-btn active' : 'lt-btn'}
-          onClick={() => setTab('open')}
+          onClick={() => {
+            setTab('open');
+            if (statF === 'today') setStatF('');
+          }}
         >
           {L('techOpen')} · {openList.length}
         </button>
         <button
           className={tab === 'done' ? 'lt-btn active' : 'lt-btn'}
-          onClick={() => setTab('done')}
+          onClick={() => {
+            setTab('done');
+            if (statF === 'high' || statF === 'late') setStatF('');
+          }}
         >
           {L('techDoneTab')} · {doneList.length}
         </button>
@@ -3203,9 +3251,18 @@ function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
       {loading && tickets.length === 0 && (
         <div className="loading">{L('loadingTickets')}</div>
       )}
+      {statF && (
+        <div className="tb-filter-note">
+          {L('filterOn')}:{' '}
+          <b>{(stats.find((x) => x.k === statF) || {}).label}</b> · {list.length}
+          <button className="tb-clear" onClick={() => setStatF('')}>
+            <X size={12} /> {L('prioClear')}
+          </button>
+        </div>
+      )}
       {!loading && list.length === 0 && (
         <div className="tech-empty">
-          {tab === 'open' ? L('techNoOpen') : L('techNoDone')}
+          {statF ? L('techNoMatch') : tab === 'open' ? L('techNoOpen') : L('techNoDone')}
         </div>
       )}
 
@@ -3462,9 +3519,6 @@ function Sidebar({ session, page, onNav }) {
   const nav = [
     { id: 'tickets', icon: LayoutDashboard, label: 'Complaints' },
     ...(isAll ? [{ id: 'dashboard', icon: BarChart3, label: 'Dashboard' }] : []),
-    ...(session.isHead
-      ? [{ id: 'techadmin', icon: Wrench, label: 'Technician view' }]
-      : []),
     { id: 'pickups', icon: RotateCcw, label: 'Pickups', soon: true },
     { id: 'reports', icon: ClipboardCheck, label: 'Reports', soon: true },
   ];
@@ -5775,7 +5829,12 @@ function StyleTag() {
       .tech-back { gap: 4px; padding: 0 10px; }
       /* TechBoard — app ke baaki pages jaisa look */
       .tb-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-      .tb-stat { background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+      .tb-stat { background: #fff; border: 1.5px solid ${T.line}; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; align-items: stretch; gap: 4px; text-align: left; font-family: inherit; cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s, background .12s; }
+      .tb-stat:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20,57,43,.08); }
+      .tb-stat.on { box-shadow: 0 4px 14px rgba(20,57,43,.10); }
+      .tb-filter-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: ${T.inkSoft}; margin: -4px 0 12px; }
+      .tb-filter-note b { color: ${T.ink}; }
+      .tb-clear { display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${T.line}; background: #fff; border-radius: 20px; padding: 3px 9px; font-size: 11.5px; font-weight: 700; font-family: inherit; color: ${T.inkSoft}; cursor: pointer; }
       .tb-stat-n { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1; }
       .tb-stat-l { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: ${T.inkSoft}; }
       .tb-chips { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
