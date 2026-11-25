@@ -620,6 +620,14 @@ const TXT = {
   allTechTickets: { en: 'All technician tickets', hi: 'Saare technicians ki tickets' },
   allTechs: { en: 'All technicians', hi: 'Saare technicians' },
   techAdminView: { en: 'Technician view', hi: 'Technician view' },
+  boardView: { en: 'Complaints board', hi: 'Complaints board' },
+  techBoardSub: {
+    en: 'Tickets assigned to technicians — tap any card for full details',
+    hi: 'Technicians ko assign hui tickets — details ke liye card pe tap karein',
+  },
+  overdue: { en: 'Overdue', hi: 'Late' },
+  techDoneQ: { en: 'Work finished on this ticket?', hi: 'Is ticket ka kaam ho gaya?' },
+  doneToday: { en: 'Done today', hi: 'Aaj done' },
   techOpen: { en: 'Open', hi: 'Open' },
   techDoneTab: { en: 'Done (7 days)', hi: 'Ho gaya (7 din)' },
   techNoOpen: {
@@ -1440,6 +1448,7 @@ export default function App({
   pickId = null,
   pickKey = 0,
   onLogout: extLogout = null,
+  onNav: extNav = null, // hosted: delivery app ka page badlo (complaints ⇄ techadmin)
 }) {
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
@@ -1467,7 +1476,13 @@ export default function App({
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
-  const page = hosted ? (view === 'dashboard' ? 'dashboard' : 'tickets') : ownPage;
+  const page = hosted
+    ? view === 'dashboard'
+      ? 'dashboard'
+      : view === 'techadmin'
+        ? 'techadmin'
+        : 'tickets'
+    : ownPage;
   const setPage = hosted ? () => {} : setOwnPage;
   const switchLang = (l) => {
     setHjsLang(l);
@@ -1847,25 +1862,27 @@ export default function App({
 
   if (!session) return <Login onLogin={setSession} />;
 
-  // ── HEAD → Tech Admin view (app ke andar se switch, logout nahi)
-  if (!hosted && session.isHead && ownPage === 'techadmin') {
-    const ts = techSession(TECH_ADMIN, '', true, true);
-    setActor(ts);
-    return (
-      <TechView
-        session={ts}
-        tickets={tickets}
+  // ── HEAD → Technician view: app ke andar ek page (sidebar/topbar wahi).
+  // Board ⇄ Technician view ka toggle dono pages pe upar rehta hai.
+  const headTech = session.isHead ? techSession(TECH_ADMIN, '', true, true) : null;
+  const goView = (v) => {
+    setActiveId(null);
+    if (hosted) extNav && extNav(v === 'techadmin' ? 'techadmin' : 'complaints');
+    else setOwnPage(v === 'techadmin' ? 'techadmin' : 'tickets');
+  };
+  const techBoardEl = headTech ? (
+    <>
+      <ViewSwitch value="techadmin" onChange={goView} />
+      <TechBoard
+        session={headTech}
+        tickets={scoped}
         loading={loading}
-        error={error}
-        onReload={load}
-        onLogout={() => setOwnPage('tickets')}
-        onDone={(id, rm) => markTechDone(id, rm, ts)}
-        toast={toast}
-        lang={lang}
-        onLang={switchLang}
+        onOpen={(x) => setActiveId(x.ticket_id)}
+        onDone={(id, rm) => markTechDone(id, rm, headTech)}
+        embedded
       />
-    );
-  }
+    </>
+  ) : null;
 
   // ── TECHNICIAN: sirf uska apna view — koi sidebar / dashboard / board nahi
   if (session.isTech) {
@@ -1890,10 +1907,13 @@ export default function App({
     return (
       <div className="hjs-complaints">
         <StyleTag />
-        {page === 'dashboard' ? (
+        {page === 'techadmin' && headTech ? (
+          techBoardEl
+        ) : page === 'dashboard' ? (
           <Dashboard tickets={scoped} onOpen={(x) => setActiveId(x.ticket_id)} />
         ) : (
           <>
+            {headTech && extNav && <ViewSwitch value="board" onChange={goView} />}
             <Header
               session={session}
               live={CONFIGURED}
@@ -2019,13 +2039,16 @@ export default function App({
             onLang={switchLang}
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
-            {(session.isHead || session.isRegion) && page === 'dashboard' ? (
+            {page === 'techadmin' && headTech ? (
+              techBoardEl
+            ) : (session.isHead || session.isRegion) && page === 'dashboard' ? (
               <Dashboard
                 tickets={scoped}
                 onOpen={(x) => setActiveId(x.ticket_id)}
               />
             ) : (
               <>
+                {headTech && <ViewSwitch value="board" onChange={goView} />}
                 <Header
                   session={session}
                   live={CONFIGURED}
@@ -2995,57 +3018,64 @@ function Login({ onLogin }) {
 }
 
 /* ═══════════════════════════════════════════════════ TECHNICIAN VIEW
-   Technician ko sirf ye page dikhta hai: uske naam pe assign hui open
-   tickets (stage = Technician Assigned). "Kaam ho gaya" dabate hi ticket
-   Done tab mein chala jaata hai; aage Resolved store/head karte hain. */
+   TechBoard = andar ka content (stats + technician chips + tabs + cards).
+   Do jagah use hota hai:
+   1) TechView  — technician / Tech Admin login ka apna mobile shell
+   2) Head ke liye app ke andar ek page (sidebar/topbar wahi rehte hain)
+   Har card click → details drawer. "Kaam ho gaya" card pe bhi, drawer mein bhi. */
 function addressOf(r) {
   const k = Object.keys(r || {}).find((x) => /address/i.test(x) && clean(r[x]));
   return k ? clean(r[k]) : '';
 }
-function TechView({
-  session,
-  tickets,
-  loading,
-  error,
-  onReload,
-  onLogout,
-  onDone,
-  toast,
-  lang,
-  onLang,
-}) {
+const isOverdue = (x) => {
+  const e = clean(x && x._raw && x._raw.expected_date);
+  return !!e && !x.techDone && e.slice(0, 10) < todayStr();
+};
+
+/* Head ke liye: Complaints board ⇄ Technician view (dono taraf ek click) */
+function ViewSwitch({ value, onChange }) {
+  return (
+    <div className="dash-switch" style={{ marginBottom: 16 }}>
+      <div className="layout-toggle">
+        <button
+          className={value === 'board' ? 'lt-btn active' : 'lt-btn'}
+          onClick={() => onChange('board')}
+        >
+          <LayoutDashboard size={14} /> {L('boardView')}
+        </button>
+        <button
+          className={value === 'techadmin' ? 'lt-btn active' : 'lt-btn'}
+          onClick={() => onChange('techadmin')}
+        >
+          <Wrench size={14} /> {L('techAdminView')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TechBoard({ session, tickets, loading, onOpen, onDone, embedded }) {
+  const admin = !!session.isTechAdmin;
   const [tab, setTab] = useState('open');
+  const [techFilter, setTechFilter] = useState(''); // admin: '' = sab
   const [openId, setOpenId] = useState(null); // jis card pe confirm khula hai
   const [remark, setRemark] = useState('');
   const [busyId, setBusyId] = useState(null);
-  const admin = !!session.isTechAdmin;
-  const [techFilter, setTechFilter] = useState(''); // admin: '' = sab
 
+  const live = useMemo(
+    () => tickets.filter((x) => x.stage !== 'deleted'),
+    [tickets],
+  );
   // admin: kisi bhi technician ki ticket; technician: sirf apni
   const forMe = (name) =>
     admin
       ? !techFilter || sameName(name, techFilter)
       : sameName(name, session.techName);
 
-  const mine = useMemo(
-    () =>
-      tickets.filter((x) => x.stage === 'tech' && forMe(x.technician)),
-    // eslint-disable-next-line
-    [tickets, session.techName, admin, techFilter],
-  );
-  // admin filter ke liye: har technician ki open tickets ka count
-  const techCounts = useMemo(() => {
-    const m = {};
-    tickets.forEach((x) => {
-      if (x.stage === 'tech' && !x.techDone && x.technician)
-        m[x.technician] = (m[x.technician] || 0) + 1;
-    });
-    return m;
-  }, [tickets]);
   const openList = useMemo(
     () =>
-      mine
-        .filter((x) => !x.techDone)
+      live
+        .filter((x) => x.stage === 'tech' && !x.techDone && forMe(x.technician))
         .sort(
           (a, b) =>
             byPriority(a, b) ||
@@ -3053,22 +3083,54 @@ function TechView({
               String(b._raw.expected_date || '9999'),
             ),
         ),
-    [mine],
+    // eslint-disable-next-line
+    [live, session.techName, admin, techFilter],
   );
   const doneList = useMemo(
     () =>
-      tickets
+      live
         .filter(
           (x) =>
             x.techDone &&
-            x.stage !== 'deleted' &&
             forMe(x._raw.tech_done_by || x.technician) &&
             hoursSince(x.techDoneAt) <= 24 * 7,
         )
         .sort((a, b) => String(b.techDoneAt).localeCompare(String(a.techDoneAt))),
     // eslint-disable-next-line
-    [tickets, session.techName, admin, techFilter],
+    [live, session.techName, admin, techFilter],
   );
+  // admin chips: har technician ki open tickets
+  const techCounts = useMemo(() => {
+    const m = {};
+    live.forEach((x) => {
+      if (x.stage === 'tech' && !x.techDone && x.technician)
+        m[x.technician] = (m[x.technician] || 0) + 1;
+    });
+    return m;
+  }, [live]);
+  const techNames = Array.from(
+    new Set([...Object.keys(techCounts), ...TECHNICIANS.map((t) => t.name)]),
+  ).sort((a, b) => (techCounts[b] || 0) - (techCounts[a] || 0));
+  const totalOpen = Object.values(techCounts).reduce((a, b) => a + b, 0);
+
+  const stats = [
+    { k: 'open', label: L('techOpen'), n: openList.length, c: T.violet, s: T.violetSoft },
+    {
+      k: 'high',
+      label: 'High',
+      n: openList.filter((x) => x.priority === 'High').length,
+      c: PRIORITIES.High.color,
+      s: PRIORITIES.High.soft,
+    },
+    { k: 'late', label: L('overdue'), n: openList.filter(isOverdue).length, c: T.amber, s: T.amberSoft },
+    {
+      k: 'today',
+      label: L('doneToday'),
+      n: doneList.filter((x) => isToday(x.techDoneAt)).length,
+      c: T.green,
+      s: T.mint,
+    },
+  ];
   const list = tab === 'open' ? openList : doneList;
 
   const confirm = async (x) => {
@@ -3080,106 +3142,87 @@ function TechView({
   };
 
   return (
-    <div className="hjs-complaints tech-wrap" style={{ fontFamily: FONT }}>
-      <StyleTag />
-      <div className="tech-top">
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>
-            {admin ? 'All technicians' : 'Technician'}
-          </div>
-          <div className="ellip" style={{ fontWeight: 800, fontSize: 18 }}>
-            {admin ? 'Tech Admin' : session.techName}
+    <div className={embedded ? 'tb tb-embedded' : 'tb'}>
+      {embedded && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>
+            {L('techBoardSub')}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button
-            className="tech-icon"
-            onClick={() => onLang(lang === 'hi' ? 'en' : 'hi')}
-            title="Language"
-          >
-            {lang === 'hi' ? 'EN' : 'Hi'}
-          </button>
-          <button className="tech-icon" onClick={onReload} title="Refresh">
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-          </button>
-          {session.viaHead ? (
-            <button className="tech-icon tech-back" onClick={onLogout} title="Back">
-              <ArrowLeft size={15} /> App
-            </button>
-          ) : (
-            <button className="tech-icon" onClick={onLogout} title="Logout">
-              <LogOut size={16} />
-            </button>
-          )}
-        </div>
+      )}
+      {!embedded && (
+        <div className="tech-h">{admin ? L('allTechTickets') : L('myTickets')}</div>
+      )}
+
+      <div className="tb-stats">
+        {stats.map((st) => (
+          <div key={st.k} className="tb-stat">
+            <span className="tb-stat-n" style={{ color: st.c }}>{st.n}</span>
+            <span className="tb-stat-l">
+              <span className="col-pip" style={{ background: st.c }} /> {st.label}
+            </span>
+          </div>
+        ))}
       </div>
 
-      <div className="tech-body">
-        <div className="tech-h">{admin ? L('allTechTickets') : L('myTickets')}</div>
-        {admin && (
-          <select
-            className="inp"
-            style={{ marginBottom: 12 }}
-            value={techFilter}
-            onChange={(e) => setTechFilter(e.target.value)}
-          >
-            <option value="">{L('allTechs')}</option>
-            {Array.from(
-              new Set([
-                ...TECHNICIANS.map((t) => t.name),
-                ...Object.keys(techCounts),
-              ]),
-            ).map((n) => (
-              <option key={n} value={n}>
-                {n} ({techCounts[n] || 0})
-              </option>
-            ))}
-          </select>
-        )}
-        <div className="tech-tabs">
+      {admin && (
+        <div className="tb-chips">
           <button
-            className={tab === 'open' ? 'tech-tab on' : 'tech-tab'}
-            onClick={() => setTab('open')}
+            className={!techFilter ? 'tb-chip on' : 'tb-chip'}
+            onClick={() => setTechFilter('')}
           >
-            {L('techOpen')} <span className="tech-count">{openList.length}</span>
+            {L('allTechs')} <span className="tb-chip-n">{totalOpen}</span>
           </button>
-          <button
-            className={tab === 'done' ? 'tech-tab on' : 'tech-tab'}
-            onClick={() => setTab('done')}
-          >
-            {L('techDoneTab')} <span className="tech-count">{doneList.length}</span>
-          </button>
+          {techNames.map((n) => (
+            <button
+              key={n}
+              className={sameName(techFilter, n) ? 'tb-chip on' : 'tb-chip'}
+              onClick={() => setTechFilter(sameName(techFilter, n) ? '' : n)}
+            >
+              {n} <span className="tb-chip-n">{techCounts[n] || 0}</span>
+            </button>
+          ))}
         </div>
+      )}
 
-        {error && (
-          <div className="err">
-            <CloudOff size={18} color={T.red} />
-            <div>
-              <b>{L('connectFail')}</b> {error}
-            </div>
-          </div>
-        )}
-        {loading && tickets.length === 0 && (
-          <div className="loading">{L('loadingTickets')}</div>
-        )}
-        {!loading && list.length === 0 && (
-          <div className="tech-empty">
-            {tab === 'open' ? L('techNoOpen') : L('techNoDone')}
-          </div>
-        )}
+      <div className="layout-toggle" style={{ marginBottom: 14 }}>
+        <button
+          className={tab === 'open' ? 'lt-btn active' : 'lt-btn'}
+          onClick={() => setTab('open')}
+        >
+          {L('techOpen')} · {openList.length}
+        </button>
+        <button
+          className={tab === 'done' ? 'lt-btn active' : 'lt-btn'}
+          onClick={() => setTab('done')}
+        >
+          {L('techDoneTab')} · {doneList.length}
+        </button>
+      </div>
 
+      {loading && tickets.length === 0 && (
+        <div className="loading">{L('loadingTickets')}</div>
+      )}
+      {!loading && list.length === 0 && (
+        <div className="tech-empty">
+          {tab === 'open' ? L('techNoOpen') : L('techNoDone')}
+        </div>
+      )}
+
+      <div className="tb-grid">
         {list.map((x) => {
           const r = x._raw || {};
           const pm = prioMeta(x.priority);
           const Icon = equipIcon(x.equipment);
-          const addr = addressOf(r);
           const tel = String(x.phone || '').replace(/[^\d+]/g, '');
           const isOpen = openId === x.ticket_id;
+          const late = isOverdue(x);
           return (
             <div
               key={x.ticket_id}
-              className="tech-card"
-              style={{ borderLeft: `5px solid ${pm.color}` }}
+              className="card tb-card"
+              onClick={() => onOpen && onOpen(x)}
+              style={{ borderLeft: `4px solid ${pm.color}` }}
             >
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <div className="eq-ico" style={{ background: pm.soft }}>
@@ -3191,15 +3234,6 @@ function TechView({
                 </div>
                 <PriorityBadge p={x.priority} small />
               </div>
-              {admin && (
-                <div className="card-tech" style={{ marginTop: 8 }}>
-                  <Wrench size={12} />
-                  <span className="ellip">
-                    <b>{x.technician || '—'}</b>
-                    {x.technicianPhone ? ` · ${x.technicianPhone}` : ''}
-                  </span>
-                </div>
-              )}
               <div className="card-equip">{x.subject}</div>
               <div className="card-meta">
                 <span className="ellip" style={{ maxWidth: '100%' }}>
@@ -3216,32 +3250,32 @@ function TechView({
                   </span>
                 )}
               </div>
-              {addr && (
-                <div className="card-meta">
-                  <span style={{ whiteSpace: 'normal' }}>
-                    <MapPin size={12} /> {addr}
+              <div className="card-meta">
+                <span style={late ? { color: T.red, fontWeight: 700 } : null}>
+                  <Clock size={12} /> {L('expectedShort')}:{' '}
+                  <b>{niceDate(r.expected_date) || '—'}</b>
+                  {late ? ` · ${L('overdue')}` : ''}
+                </span>
+              </div>
+              {admin && (
+                <div className="card-tech">
+                  <Wrench size={12} />
+                  <span className="ellip">
+                    <b>{x.technician || '—'}</b>
+                    {x.technicianPhone ? ` · ${x.technicianPhone}` : ''}
                   </span>
                 </div>
               )}
-              <div className="card-meta">
-                <span>
-                  <Clock size={12} /> {L('expectedShort')}:{' '}
-                  <b>{niceDate(r.expected_date) || '—'}</b>
-                </span>
-              </div>
-              {r.tech_remarks && (
-                <div className="tech-note">{r.tech_remarks}</div>
-              )}
 
               {tab === 'open' ? (
-                <>
-                  <div className="tech-actions">
-                    {tel && (
-                      <a className="tech-call" href={`tel:${tel}`}>
-                        <Phone size={15} /> {L('techCall')}
-                      </a>
-                    )}
-                    {!isOpen && (
+                <div onClick={(e) => e.stopPropagation()}>
+                  {!isOpen ? (
+                    <div className="tech-actions">
+                      {tel && (
+                        <a className="tech-call" href={`tel:${tel}`}>
+                          <Phone size={14} /> {L('techCall')}
+                        </a>
+                      )}
                       <button
                         className="tech-done-btn"
                         onClick={() => {
@@ -3249,11 +3283,10 @@ function TechView({
                           setRemark('');
                         }}
                       >
-                        <CheckCircle2 size={16} /> {L('techMarkDone')}
+                        <CheckCircle2 size={15} /> {L('techMarkDone')}
                       </button>
-                    )}
-                  </div>
-                  {isOpen && (
+                    </div>
+                  ) : (
                     <div className="tech-confirm">
                       <textarea
                         className="inp"
@@ -3277,14 +3310,14 @@ function TechView({
                           onClick={() => confirm(x)}
                           disabled={busyId === x.ticket_id}
                         >
-                          <Check size={16} /> {L('techConfirm')}
+                          <Check size={15} /> {L('techConfirm')}
                         </button>
                       </div>
                     </div>
                   )}
-                </>
+                </div>
               ) : (
-                <div className="card-techdone" style={{ marginTop: 10 }}>
+                <div className="card-techdone">
                   <CheckCircle2 size={12} /> {fmtFullDateTime(x.techDoneAt)}
                   {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
                 </div>
@@ -3293,7 +3326,132 @@ function TechView({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/* Technician / Tech Admin login ka apna shell (mobile-first). Card click →
+   read-only details drawer — stage, transfer, delete jaise koi control nahi. */
+function TechView({
+  session,
+  tickets,
+  loading,
+  error,
+  onReload,
+  onLogout,
+  onDone,
+  toast,
+  lang,
+  onLang,
+}) {
+  const [activeId, setActiveId] = useState(null);
+  const active = tickets.find((x) => x.ticket_id === activeId) || null;
+  const canDoneActive =
+    active &&
+    active.stage === 'tech' &&
+    !active.techDone &&
+    (session.isTechAdmin || sameName(active.technician, session.techName));
+  return (
+    <div className="hjs-complaints tech-wrap" style={{ fontFamily: FONT }}>
+      <StyleTag />
+      <div className="tech-top">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div className="brand-badge" style={{ width: 36, height: 36 }}>
+            <Wrench size={17} color="#fff" />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, opacity: 0.7 }}>
+              HJS Complaints · {session.isTechAdmin ? 'All technicians' : 'Technician'}
+            </div>
+            <div className="ellip" style={{ fontWeight: 800, fontSize: 16.5 }}>
+              {session.isTechAdmin ? 'Tech Admin' : session.techName}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className="tech-icon"
+            onClick={() => onLang(lang === 'hi' ? 'en' : 'hi')}
+            title="Language"
+          >
+            {lang === 'hi' ? 'EN' : 'Hi'}
+          </button>
+          <button className="tech-icon" onClick={onReload} title="Refresh">
+            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          </button>
+          <button className="tech-icon" onClick={onLogout} title="Logout">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="tech-body">
+        {error && (
+          <div className="err">
+            <CloudOff size={18} color={T.red} />
+            <div>
+              <b>{L('connectFail')}</b> {error}
+            </div>
+          </div>
+        )}
+        <TechBoard
+          session={session}
+          tickets={tickets}
+          loading={loading}
+          onOpen={(x) => setActiveId(x.ticket_id)}
+          onDone={onDone}
+        />
+      </div>
+
+      {active && (
+        <Drawer
+          d={active}
+          readOnly
+          onClose={() => setActiveId(null)}
+          extra={
+            canDoneActive ? (
+              <TechDoneBox
+                onDone={async (rm) => {
+                  await onDone(active.ticket_id, rm);
+                }}
+              />
+            ) : null
+          }
+        />
+      )}
       {toast && <Toast msg={toast} />}
+    </div>
+  );
+}
+
+/* Drawer ke andar "Kaam ho gaya" — technician details dekh ke wahin se done kare */
+function TechDoneBox({ onDone }) {
+  const [remark, setRemark] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="techdone-box">
+      <div style={{ fontWeight: 800, fontSize: 13.5, color: T.green, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <CheckCircle2 size={15} /> {L('techDoneQ')}
+      </div>
+      <textarea
+        className="inp"
+        rows={2}
+        placeholder={L('techRemarkPh')}
+        value={remark}
+        onChange={(e) => setRemark(e.target.value)}
+      />
+      <button
+        className="btn-primary"
+        style={{ width: '100%', marginTop: 8 }}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await onDone(remark.trim());
+          setBusy(false);
+        }}
+      >
+        <CheckCircle2 size={16} /> {L('techConfirm')}
+      </button>
     </div>
   );
 }
@@ -4057,6 +4215,8 @@ function Drawer({
   isHead,
   canPriority = false,
   onPriority = null,
+  readOnly = false, // technician: sirf dekhe, koi stage/transfer/delete nahi
+  extra = null, // drawer ke upar extra action (jaise "Kaam ho gaya")
 }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [moveTo, setMoveTo] = useState('');
@@ -4209,7 +4369,9 @@ function Drawer({
           </div>
         )}
 
-        {cancelled ? (
+        {extra}
+
+        {readOnly ? null : cancelled ? (
           <>
             <div
               className="cancel-note"
@@ -4407,7 +4569,8 @@ function Drawer({
           if (b.i > limit) return null;
           const st = STAGES[b.i];
           const filled = cancelled ? b.i <= reachedIdx : b.i <= idx;
-          const editable = filled && !cancelled && !resolvedLock;
+          if (readOnly && !filled) return null;
+          const editable = filled && !cancelled && !resolvedLock && !readOnly;
           return (
             <div
               key={b.id}
@@ -4421,7 +4584,7 @@ function Drawer({
                   <span className="col-pip" style={{ background: st.color }} />{' '}
                   {sLabel(st.id)}
                 </span>
-                {editable ? (
+                {readOnly ? null : editable ? (
                   <button className="mini-edit" onClick={() => onEditStage(b.id)}>
                     <Pencil size={13} /> {L('edit')}
                   </button>
@@ -5610,6 +5773,27 @@ function StyleTag() {
       .tech-done-btn { flex: 2; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 11px; padding: 12px; font-size: 14px; font-weight: 800; font-family: inherit; color: #fff; background: ${T.green}; cursor: pointer; }
       .tech-confirm { margin-top: 12px; }
       .tech-back { gap: 4px; padding: 0 10px; }
+      /* TechBoard — app ke baaki pages jaisa look */
+      .tb-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+      .tb-stat { background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+      .tb-stat-n { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1; }
+      .tb-stat-l { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: ${T.inkSoft}; }
+      .tb-chips { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
+      .tb-chips::-webkit-scrollbar { display: none; }
+      .tb-chip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; border: 1px solid ${T.line}; background: #fff; color: ${T.ink}; border-radius: 20px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer; transition: background .12s, color .12s; }
+      .tb-chip:hover { border-color: ${T.forest}; }
+      .tb-chip.on { background: ${T.forest}; border-color: ${T.forest}; color: #fff; }
+      .tb-chip-n { min-width: 18px; padding: 0 6px; border-radius: 10px; background: ${T.beige}; color: ${T.inkSoft}; font-size: 11px; text-align: center; }
+      .tb-chip.on .tb-chip-n { background: rgba(255,255,255,.2); color: #fff; }
+      .tb-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+      .tb-embedded .tb-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); align-items: start; }
+      .tb-card { cursor: pointer; }
+      .tb-card .tech-actions { margin-top: 12px; }
+      .tb-card .tech-call, .tb-card .tech-done-btn { padding: 10px; font-size: 13px; }
+      .techdone-box { margin-top: 12px; border: 1px solid #cfe3d0; background: ${T.mint}; border-radius: 13px; padding: 11px 12px; }
+      @media (max-width: 760px) {
+        .tb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
 
       .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: ${T.forest}; color: #fff; padding: 13px 20px; border-radius: 13px; font-size: 13.5px; font-weight: 600; z-index: 80; display: flex; align-items: center; gap: 9px; box-shadow: 0 10px 30px rgba(20,57,43,.35); animation: up .25s ease; max-width: 90vw; }
       @keyframes up { from { transform: translate(-50%,14px); opacity: 0 } to { transform: translate(-50%,0); opacity: 1 } }
