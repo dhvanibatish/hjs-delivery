@@ -1864,9 +1864,11 @@ export default function App({
 
   if (!session) return <Login onLogin={setSession} />;
 
-  // ── HEAD → Technician view: app ke andar ek page (sidebar/topbar wahi).
+  // ── Technician view: app ke andar ek page (sidebar/topbar wahi).
+  // Head = saare stores; region / store login = sirf apne store(s) ki
+  // technician tickets (scoped pehle se store-wise filter hota hai).
   // Board ⇄ Technician view ka toggle dono pages pe upar rehta hai.
-  const headTech = session.isHead ? techSession(TECH_ADMIN, '', true, true) : null;
+  const headTech = !session.isTech ? techSession(TECH_ADMIN, '', true, true) : null;
   const goView = (v) => {
     setActiveId(null);
     if (hosted) extNav && extNav(v === 'techadmin' ? 'techadmin' : 'complaints');
@@ -5939,4 +5941,15 @@ function StyleTag() {
 }
 
 // Delivery app (App.tsx) ke login se technician login ke liye
-export { TECHNICIANS, TECH_ADMIN, techSession, sbTechLogin, sameName };
+/* Delivery app ke store login ke liye complaints session (sirf us store ka) */
+function complaintStoreSession(store, deliveryCode) {
+  return { ...sessionFor(store), deliveryCode: deliveryCode || null };
+}
+export {
+  TECHNICIANS,
+  TECH_ADMIN,
+  techSession,
+  sbTechLogin,
+  sameName,
+  complaintStoreSession,
+};
