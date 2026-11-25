@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import PickupsModule from './Pickups.tsx';
-import ComplaintsModule from './ComplaintApp.tsx';
+import ComplaintsModule, {
+  TECHNICIANS as COMPLAINT_TECHS,
+  techSession,
+  sbTechLogin,
+} from './ComplaintApp.tsx';
 import {
   Truck,
   Package,
@@ -22,6 +26,7 @@ import {
   ShieldCheck,
   LogOut,
   Building2,
+  Wrench,
   Car,
   ArrowRight,
   ArrowLeft,
@@ -1485,7 +1490,8 @@ export default function App() {
     setLoading(false);
   };
   useEffect(() => {
-    if (session) load(); /* eslint-disable-next-line */
+    // technician ko deliveries ka data nahi chahiye — fetch hi mat karo
+    if (session && !session.isTech) load(); /* eslint-disable-next-line */
   }, [session, fullHistory]);
 
   const scoped = useMemo(() => {
@@ -1876,6 +1882,12 @@ export default function App() {
   };
 
   if (!session) return <Login onLogin={setSession} />;
+
+  // Technician login → sirf complaints ka "Meri tickets" view, aur kuch nahi
+  if (session.isTech)
+    return (
+      <ComplaintsModule session={session} onLogout={() => setSession(null)} />
+    );
 
   return (
     <div
@@ -4427,12 +4439,57 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit, onCancel }) 
 }
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
+const LOGIN_TAB = (on) => ({
+  flex: 1,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  border: 'none',
+  borderRadius: 9,
+  padding: 9,
+  fontSize: 13,
+  fontWeight: 700,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+  background: on ? '#fff' : 'transparent',
+  color: on ? T.forest : T.inkSoft,
+  boxShadow: on ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
+});
 function Login({ onLogin }) {
+  const [mode, setMode] = useState('store'); // store | tech
   const [branch, setBranch] = useState('');
+  const [tech, setTech] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const goTech = async () => {
+    if (!tech) {
+      setErr('Pehle apna naam choose karo.');
+      return;
+    }
+    if (!pw) {
+      setErr('PIN daalo.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      const rows = await sbTechLogin(tech, pw);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (!row || !row.name) {
+        setErr('Galat PIN.');
+        setBusy(false);
+        return;
+      }
+      onLogin(techSession(row.name, row.phone || ''));
+    } catch (e) {
+      setErr('Login error: ' + (e.message || 'unknown'));
+      setBusy(false);
+    }
+  };
   const go = async () => {
+    if (mode === 'tech') return goTech();
     if (!branch) {
       setErr('Pehle store choose karo.');
       return;
@@ -4517,13 +4574,62 @@ function Login({ onLogin }) {
       <div className="login-form">
         <div className="glass-card">
           <div style={{ marginBottom: 6 }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 6,
+                background: T.beige,
+                borderRadius: 12,
+                padding: 4,
+                marginBottom: 16,
+              }}
+            >
+              {[
+                ['store', 'Store'],
+                ['tech', 'Technician'],
+              ].map(([k, lbl]) => (
+                <button
+                  key={k}
+                  style={LOGIN_TAB(mode === k)}
+                  onClick={() => {
+                    setMode(k);
+                    setPw('');
+                    setErr('');
+                  }}
+                >
+                  {k === 'tech' ? <Wrench size={14} /> : <Building2 size={14} />}{' '}
+                  {lbl}
+                </button>
+              ))}
+            </div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
-              Store login
+              {mode === 'tech' ? 'Technician login' : 'Store login'}
             </div>
             <div style={{ fontSize: 13.5, color: T.inkSoft, marginTop: 4 }}>
-              Apna store choose karke password daalo.
+              {mode === 'tech'
+                ? 'Apna naam choose karke PIN daalo.'
+                : 'Apna store choose karke password daalo.'}
             </div>
           </div>
+          {mode === 'tech' ? (
+            <Field label="Technician">
+              <select
+                className="inp"
+                value={tech}
+                onChange={(e) => {
+                  setTech(e.target.value);
+                  setErr('');
+                }}
+              >
+                <option value="">Apna naam chuno…</option>
+                {COMPLAINT_TECHS.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
           <Field label="Store">
             <select
               className="inp"
@@ -4542,7 +4648,8 @@ function Login({ onLogin }) {
               ))}
             </select>
           </Field>
-          <Field label="Password">
+          )}
+          <Field label={mode === 'tech' ? 'PIN' : 'Password'}>
             <input
               className="inp"
               type="password"
@@ -4561,7 +4668,7 @@ function Login({ onLogin }) {
           <button
             className="btn-primary"
             style={{ width: '100%', marginTop: 4 }}
-            disabled={!branch || !pw || busy}
+            disabled={(mode === 'tech' ? !tech : !branch) || !pw || busy}
             onClick={go}
           >
             {busy ? (
