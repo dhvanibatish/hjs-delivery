@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   MessageSquareWarning,
   Package,
@@ -35,6 +35,8 @@ import {
   Copy,
   Info,
   Trash2,
+  Camera,
+  Mic,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -71,6 +73,16 @@ async function sbPatch(ticketId, patch) {
       },
       body: JSON.stringify(patch),
     },
+  );
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
+}
+/* Naye tickets check karne ke liye halki query — sirf latest 25 ki 5
+   columns (poori table nahi). Naya ticket_id dikhe tabhi poora reload. */
+async function sbLatest() {
+  const res = await fetch(
+    `${CONFIG.url}/rest/v1/${CONFIG.table}?select=ticket_id,full_name,product,city,status&order=created_at.desc&limit=25`,
+    { headers: HDRS() },
   );
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
@@ -214,6 +226,27 @@ const CATALOG = [
         'Mattress issue',
         'Welding issue',
         'Side railing issue',
+      ],
+      // Customer form se aate hain — abhi Electric Bed wali list hi
+      'Paramount Bed': [
+        'Not turning on',
+        'Physical damage',
+        'Remote not working',
+        'Wheel lock problem',
+        'Motor not working',
+        'Plug out / Power plug disconnected',
+        'Wire loose',
+        'Mattress issue',
+        'Side railing issue',
+      ],
+      'Recliner Bed': [
+        'Not turning on',
+        'Physical damage',
+        'Remote not working',
+        'Motor not working',
+        'Plug out / Power plug disconnected',
+        'Wire loose',
+        'Mattress issue',
       ],
       'Manual Bed': [
         'Loose parts / Nut bolt loose',
@@ -1499,15 +1532,17 @@ export default function App({
     setTimeout(() => setToast(null), 3000);
   };
 
-  const load = async () => {
-    setLoading(true);
+  const loadedRef = useRef(false); // pehla load ho chuka? (poll tabhi chalega)
+  const load = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       setTickets((await sbSelect()).map(rowToTicket));
+      loadedRef.current = true;
     } catch (e) {
       setError(e.message || 'Fetch failed');
     }
-    setLoading(false);
+    if (!quiet) setLoading(false);
   };
   useEffect(() => {
     if (session) load(); /* eslint-disable-next-line */
@@ -1553,6 +1588,60 @@ export default function App({
     if (!list) return tickets; // ALL
     return tickets.filter((x) => list.includes(x.branch));
   }, [tickets, session]);
+
+  // ── Untouched = abhi bhi "Ticket Received" pe, kisi ne haath nahi lagaya.
+  // Bell pe count + list; purani pehle (sabse zyada der se ruki hui upar).
+  const untouched = useMemo(
+    () =>
+      scoped
+        .filter((x) => x.stage === 'received')
+        .sort((a, b) =>
+          String(createdTs(a) || '').localeCompare(String(createdTs(b) || '')),
+        ),
+    [scoped],
+  );
+  // standalone app: tab ke title mein bhi count — "(3) HJS Complaints"
+  useEffect(() => {
+    if (hosted || !session || session.isTech || typeof document === 'undefined') return;
+    const base = 'HJS Complaints';
+    document.title = untouched.length ? `(${untouched.length}) ${base}` : base;
+  }, [untouched.length, hosted, session]);
+
+  // ── Har 60 sec naye tickets check. Naya ticket mila (aur is login ke
+  // store ka hai) to browser notification + list reload.
+  const ticketsRef = useRef(tickets);
+  ticketsRef.current = tickets;
+  const viewRef = useRef(null);
+  viewRef.current = viewBranch || (session && session.branch);
+  useEffect(() => {
+    if (!session || session.isTech || !CONFIGURED) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop || !loadedRef.current) return; // pehla load abhi nahi hua
+      try {
+        const rows = await sbLatest();
+        const known = new Set(ticketsRef.current.map((x) => x.ticket_id));
+        const list = storesOf(viewRef.current);
+        const fresh = rows.filter(
+          (r) =>
+            !known.has(r.ticket_id) &&
+            statusToStage(r.status) === 'received' &&
+            (!list || list.includes(normalizeCity(r.city))),
+        );
+        if (!rows.some((r) => !known.has(r.ticket_id))) return;
+        await load(true);
+        if (fresh.length) notifyNew(fresh);
+      } catch (e) {
+        console.warn('[complaints poll]', e);
+      }
+    };
+    const id = setInterval(tick, 60000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line
+  }, [session]);
 
   const hostSearch = hosted ? String(extSearch || '').trim().toLowerCase() : '';
 
@@ -1616,7 +1705,8 @@ export default function App({
           String(x.id).toLowerCase().includes(q) ||
           x.area.toLowerCase().includes(q) ||
           x.equipment.toLowerCase().includes(q) ||
-          String(x.phone).toLowerCase().includes(q),
+          String(x.phone).toLowerCase().includes(q) ||
+          clean(x._raw && x._raw.invoice_number).toLowerCase().includes(q),
       )
       .slice(0, 8);
   }, [scoped, search]);
@@ -1935,6 +2025,12 @@ export default function App({
               onLayoutMode={setLayoutMode}
               onSwitchStore={(b) => setViewBranch(b)}
               branchView={viewBranch || session.branch}
+              bell={
+                <NotifyBell
+                  items={untouched}
+                  onOpen={(x) => setActiveId(x.ticket_id)}
+                />
+              }
             />
             {error && (
               <div className="err">
@@ -2050,6 +2146,12 @@ export default function App({
             onActivity={() => setShowLog(true)}
             lang={lang}
             onLang={switchLang}
+            bell={
+              <NotifyBell
+                items={untouched}
+                onOpen={(x) => setActiveId(x.ticket_id)}
+              />
+            }
           />
           <main style={{ padding: '26px 30px 60px', flex: 1 }}>
             {page === 'techadmin' && headTech ? (
@@ -3614,6 +3716,7 @@ function Topbar({
   onLogout,
   lang,
   onLang,
+  bell = null,
 }) {
   return (
     <header className="topbar">
@@ -3697,10 +3800,7 @@ function Topbar({
         <button className="icon-btn" onClick={onReload} title="Reload">
           <RefreshCw size={17} color={T.ink} className={loading ? 'spin' : ''} />
         </button>
-        <button className="icon-btn">
-          <Bell size={18} color={T.ink} />
-          <span className="dot" />
-        </button>
+        {bell}
         <div className="tb-user">
           <div className="avatar">
             {(session.name || 'M').slice(0, 1).toUpperCase()}
@@ -3734,6 +3834,7 @@ function Header({
   onLayoutMode,
   onSwitchStore,
   branchView,
+  bell = null,
 }) {
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -3873,6 +3974,7 @@ function Header({
             </select>
           </div>
         )}
+        {bell}
         <span
           className="live-chip"
           style={{
@@ -3889,6 +3991,166 @@ function Header({
             : L('demoData')}
         </span>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════ NOTIFICATIONS
+   Bell = jin tickets ko kisi ne haath nahi lagaya (stage "Ticket Received").
+   Customer ko "1 ghante mein contact" bola gaya hai — 1 ghante se purani
+   untouched ticket laal dikhti hai. Browser notification tab tak aati hai
+   jab tak app ka tab khula hai (chahe dusre tab pe ho). */
+const canNotify = () => typeof window !== 'undefined' && 'Notification' in window;
+function notifyNew(rows) {
+  if (!canNotify() || Notification.permission !== 'granted') return;
+  const send = (title, body, tag) => {
+    try {
+      const n = new Notification(title, { body, tag, icon: '/favicon.png' });
+      n.onclick = () => {
+        window.focus();
+        n.close();
+      };
+    } catch (e) {
+      console.warn('[notify]', e);
+    }
+  };
+  if (rows.length > 3) {
+    send(`${rows.length} new complaints`, 'Open HJS Complaints to pick them up', 'hjs-cmp-many');
+    return;
+  }
+  rows.forEach((r) =>
+    send(
+      `New complaint · ${clean(r.full_name) || 'Customer'}`,
+      [clean(r.product), normalizeCity(r.city)].filter(Boolean).join(' · '),
+      `hjs-cmp-${r.ticket_id}`,
+    ),
+  );
+}
+function agoText(ts) {
+  const m = Math.max(0, Math.round(hoursSince(ts) * 60));
+  if (m < 1) return HJS_LANG === 'hi' ? 'abhi' : 'just now';
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hr ${m % 60 ? (m % 60) + ' min' : ''}`.trim();
+  return `${Math.floor(h / 24)} ${HJS_LANG === 'hi' ? 'din' : 'd'}`;
+}
+function NotifyBell({ items, onOpen }) {
+  const [open, setOpen] = useState(false);
+  const [perm, setPerm] = useState(() => (canNotify() ? Notification.permission : 'unsupported'));
+  const ref = useRef(null);
+  const [, setNow] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setNow((n) => n + 1), 60000); // "x min" update
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false);
+    document.addEventListener('mousedown', off);
+    document.addEventListener('touchstart', off);
+    return () => {
+      document.removeEventListener('mousedown', off);
+      document.removeEventListener('touchstart', off);
+    };
+  }, [open]);
+  const n = items.length;
+  const late = items.filter((x) => hoursSince(createdTs(x)) >= 1).length;
+  const askPerm = async () => {
+    try {
+      setPerm(await Notification.requestPermission());
+    } catch (_) {
+      setPerm('denied');
+    }
+  };
+  return (
+    <div className="nb-wrap" ref={ref}>
+      <button
+        className={n ? 'icon-btn nb-btn has' : 'icon-btn nb-btn'}
+        onClick={() => setOpen((v) => !v)}
+        title={HJS_LANG === 'hi' ? 'Jin tickets ko haath nahi laga' : 'Untouched tickets'}
+        aria-label={`${n} untouched tickets`}
+      >
+        <Bell size={18} color={late ? T.red : T.ink} />
+        {n > 0 && (
+          <span className="nb-count" style={{ background: late ? T.red : T.amber }}>
+            {n > 99 ? '99+' : n}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="nb-panel">
+          <div className="nb-head">
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 14.5 }}>
+                {HJS_LANG === 'hi' ? 'Kisi ne haath nahi lagaya' : 'Not picked up yet'} · {n}
+              </div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>
+                {late
+                  ? HJS_LANG === 'hi'
+                    ? `${late} ticket 1 ghante se zyada purani — customer ko 1 ghante ka bola hai`
+                    : `${late} waiting over 1 hour — customers were promised a call within 1 hour`
+                  : HJS_LANG === 'hi'
+                    ? 'Stage "Ticket Mila" pe rukhi tickets'
+                    : 'Tickets still at "Ticket Received"'}
+              </div>
+            </div>
+          </div>
+          {perm !== 'granted' && perm !== 'unsupported' && (
+            <div className="nb-perm">
+              {perm === 'denied' ? (
+                <span>
+                  {HJS_LANG === 'hi'
+                    ? 'Browser ne notifications block ki hain — address bar ke 🔒 se Allow karein.'
+                    : 'Notifications are blocked — allow them from the lock icon in the address bar.'}
+                </span>
+              ) : (
+                <>
+                  <span>
+                    {HJS_LANG === 'hi'
+                      ? 'Nayi complaint aate hi alert chahiye?'
+                      : 'Get an alert when a new complaint comes in?'}
+                  </span>
+                  <button className="btn-primary nb-on" onClick={askPerm}>
+                    <Bell size={14} /> {HJS_LANG === 'hi' ? 'Alerts on karein' : 'Turn on alerts'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          <div className="nb-list">
+            {n === 0 ? (
+              <div className="empty" style={{ padding: '22px 0' }}>
+                {HJS_LANG === 'hi' ? 'Saari tickets pe kaam shuru ho chuka hai' : 'Every ticket has been picked up'}
+              </div>
+            ) : (
+              items.map((x) => {
+                const lateOne = hoursSince(createdTs(x)) >= 1;
+                return (
+                  <button
+                    key={x.ticket_id}
+                    className="nb-row"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpen(x);
+                    }}
+                  >
+                    <span className="col-pip" style={{ background: lateOne ? T.red : T.amber, marginTop: 6 }} />
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <span className="nb-name ellip">{x.customer}</span>
+                      <span className="nb-sub ellip">
+                        {x.equipment} · {branchLabel(x.branch)}
+                      </span>
+                    </span>
+                    <span className="nb-age" style={{ color: lateOne ? T.red : T.inkSoft }}>
+                      {agoText(createdTs(x))}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4164,6 +4426,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         {d.priority && <PriorityBadge p={d.priority} small />}
       </div>
       <div className="card-equip">{d.subject}</div>
+      <MediaChips r={d._raw || {}} />
       <div className="card-meta">
         <span className="ellip" style={{ maxWidth: '100%' }}>
           <Package size={12} /> {d.equipment}
@@ -4388,6 +4651,9 @@ function Drawer({
           {cancelled ? stage.label : sLabel(d.stage)}
         </span>
 
+        {/* Customer form ki photos / voice — sabse upar, turant dikhe */}
+        <CustomerMedia r={r} />
+
         {/* ── Priority ── head set kare, baaki sirf dekhein */}
         <div className="prio-box">
           <div className="prio-head">
@@ -4603,6 +4869,7 @@ function Drawer({
           <KV label={L('kvPhone')} value={d.phone} />
           <KV label={L('kvEmail')} value={d.email} />
           <KV label={L('kvItem')} value={d.equipment} full />
+          {clean(r.invoice_number) && <KV label="Invoice" value={clean(r.invoice_number)} />}
           <KV label={L('kvProblem')} value={d.subject} full />
           <KV label={L('kvStore')} value={branchLabel(d.branch)} />
           <KV label={L('kvOpened')} value={niceDateTime(d.opened) || '—'} />
@@ -4794,6 +5061,85 @@ function Drawer({
           Ticket app mein aaya: <b>{fmtFullDateTime(createdTs(d)) || '—'}</b>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* Customer form (?complaintform) se aayi photos + voice note */
+function mediaList(v) {
+  let a = v;
+  if (typeof a === 'string') {
+    try {
+      a = JSON.parse(a);
+    } catch (_) {
+      a = a ? [a] : [];
+    }
+  }
+  return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && /^https:\/\//.test(x)) : [];
+}
+/* Card pe chhote chips: photos / voice / invoice / naya number */
+function MediaChips({ r }) {
+  const ph = mediaList(r.photo_urls).length;
+  const vo = typeof r.voice_url === 'string' && /^https:\/\//.test(r.voice_url);
+  const inv = clean(r.invoice_number);
+  const unreg = r.customer_registered === false;
+  if (!ph && !vo && !inv && !unreg) return null;
+  return (
+    <div className="cm-chips">
+      {ph > 0 && (
+        <span className="cm-chip">
+          <Camera size={12} /> {ph}
+        </span>
+      )}
+      {vo && (
+        <span className="cm-chip">
+          <Mic size={12} /> {HJS_LANG === 'hi' ? 'Voice' : 'Voice'}
+        </span>
+      )}
+      {inv && <span className="cm-chip ellip" style={{ maxWidth: 150 }}>#{inv}</span>}
+      {unreg && <span className="cm-chip warn">{HJS_LANG === 'hi' ? 'Naya number' : 'Not in records'}</span>}
+    </div>
+  );
+}
+function CustomerMedia({ r }) {
+  const photos = mediaList(r.photo_urls);
+  const voice = typeof r.voice_url === 'string' && /^https:\/\//.test(r.voice_url) ? r.voice_url : '';
+  const unreg = r.customer_registered === false;
+  if (!photos.length && !voice && !unreg) return null;
+  return (
+    <div className="cm-box">
+      <div className="sec-title" style={{ margin: '0 0 8px' }}>
+        <MessageSquareWarning size={14} /> {HJS_LANG === 'hi' ? 'Customer ne bheja' : 'Sent by customer'}
+        {photos.length > 0 && <span className="cm-n">{photos.length} {HJS_LANG === 'hi' ? 'photo' : photos.length > 1 ? 'photos' : 'photo'}</span>}
+      </div>
+      {unreg && (
+        <div className="cm-unreg">
+          <AlertTriangle size={14} />{' '}
+          {HJS_LANG === 'hi'
+            ? 'Ye number hamare records mein nahi mila — pehle customer verify karein.'
+            : 'This number is not in our records — verify the customer first.'}
+        </div>
+      )}
+      {photos.length > 0 && (
+        <div className="cm-photos">
+          {photos.map((u, i) => (
+            <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="cm-ph">
+              <img src={u} alt={`Customer photo ${i + 1}`} loading="lazy" />
+            </a>
+          ))}
+        </div>
+      )}
+      {voice && (
+        <div className="cm-voice">
+          <div className="cm-vl">
+            <Mic size={13} /> {HJS_LANG === 'hi' ? 'Customer ki voice note' : "Customer's voice note"}
+          </div>
+          <audio className="cm-audio" src={voice} controls preload="metadata" />
+        </div>
+      )}
+      {photos.length > 0 && (
+        <div className="cm-hint">{HJS_LANG === 'hi' ? 'Photo pe tap karein — badi khulegi' : 'Tap a photo to open it full size'}</div>
+      )}
     </div>
   );
 }
@@ -5875,6 +6221,33 @@ function StyleTag() {
       .tb-card { cursor: pointer; }
       .tb-card .tech-actions { margin-top: 12px; }
       .tb-card .tech-call, .tb-card .tech-done-btn { padding: 10px; font-size: 13px; }
+      .nb-wrap { position: relative; }
+      .nb-btn.has { border-color: #e9cfc4; }
+      .nb-count { position: absolute; top: -6px; right: -6px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; color: #fff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; line-height: 1; }
+      .nb-panel { position: absolute; top: 46px; right: 0; width: 340px; max-width: calc(100vw - 24px); background: #fff; border: 1px solid ${T.line}; border-radius: 14px; box-shadow: 0 14px 34px rgba(20,57,43,.18); z-index: 70; overflow: hidden; text-align: left; }
+      .nb-head { padding: 13px 14px 11px; border-bottom: 1px solid ${T.line}; }
+      .nb-perm { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; background: ${T.amberSoft}; color: ${T.ink}; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid ${T.line}; }
+      .nb-on { align-self: flex-start; padding: 8px 12px; font-size: 12.5px; }
+      .nb-list { max-height: 360px; overflow-y: auto; padding: 6px; }
+      .nb-row { display: flex; align-items: flex-start; gap: 9px; width: 100%; text-align: left; background: transparent; border: none; border-radius: 10px; padding: 9px 10px; cursor: pointer; font-family: inherit; color: ${T.ink}; }
+      .nb-row:hover { background: ${T.cream}; }
+      .nb-name { display: block; font-size: 13.5px; font-weight: 700; }
+      .nb-sub { display: block; font-size: 11.5px; color: ${T.inkSoft}; margin-top: 1px; }
+      .nb-age { flex-shrink: 0; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+      @media (max-width: 760px) { .nb-panel { position: fixed; top: 112px; left: 12px; right: 12px; width: auto; max-width: none; } }
+      .cm-box { margin-top: 14px; background: #fff; border: 1px solid ${T.line}; border-radius: 14px; padding: 12px 14px; }
+      .cm-unreg { display: flex; align-items: center; gap: 6px; background: ${T.amberSoft}; color: ${T.amber}; border-radius: 10px; padding: 8px 10px; font-size: 12.5px; font-weight: 700; margin-bottom: 10px; }
+      .cm-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .cm-ph { display: block; position: relative; height: 0; padding-bottom: 100%; border-radius: 10px; overflow: hidden; background: ${T.beige}; }
+      .cm-ph img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+      .cm-audio { width: 100%; display: block; }
+      .cm-voice { margin-top: 10px; background: ${T.cream}; border: 1px solid ${T.line}; border-radius: 12px; padding: 8px 10px; }
+      .cm-vl { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: ${T.forestSoft}; margin-bottom: 6px; }
+      .cm-n { margin-left: auto; font-size: 11px; font-weight: 700; color: ${T.inkSoft}; }
+      .cm-hint { font-size: 11px; color: ${T.inkSoft}; margin-top: 6px; }
+      .cm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .cm-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.forestSoft}; background: ${T.mint}; border-radius: 8px; padding: 3px 8px; }
+      .cm-chip.warn { color: ${T.amber}; background: ${T.amberSoft}; }
       .techdone-box { margin-top: 12px; border: 1px solid #cfe3d0; background: ${T.mint}; border-radius: 13px; padding: 11px 12px; }
       @media (max-width: 760px) {
         .tb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
