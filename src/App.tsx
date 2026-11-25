@@ -6,7 +6,24 @@ import ComplaintsModule, {
   techSession,
   sbTechLogin,
   sameName,
+  complaintStoreSession,
 } from './ComplaintApp.tsx';
+
+/* Delivery app ka store code → Complaints app ka store naam.
+   MOH/CHD dono Mohali, NCR/NOD dono Noida (complaint app mein ek hi store). */
+const COMPLAINT_STORE = {
+  MOH: 'Mohali',
+  CHD: 'Mohali',
+  GGN: 'Gurugram',
+  NCR: 'Noida',
+  NOD: 'Noida',
+  LDH: 'Ludhiana',
+  JAL: 'Jalandhar',
+  JPR: 'Jaipur',
+  LKO: 'Lucknow',
+  NWD: 'Shastri Nagar',
+  JKP: 'Janakpuri',
+};
 import {
   Truck,
   Package,
@@ -1450,6 +1467,13 @@ export default function App() {
   // head store switch kar le tab bhi wo head hi rehta hai — Dashboard /
   // SLA / Complaints gayab nahi hone chahiye
   const isAllStores = session && session.isHead;
+  // Complaints module ka session: head = sab; store = uska complaint-store
+  const complaintSession = useMemo(() => {
+    if (!session || session.isTech) return null;
+    if (session.isHead) return session;
+    const st = COMPLAINT_STORE[session.branch];
+    return st ? complaintStoreSession(st, session.branch) : null;
+  }, [session]);
   // Pickups module SLA page pe bhi mount hota hai — pickup SLA wahin banti hai
   const showPickups =
     page === 'pickups' ||
@@ -2096,10 +2120,10 @@ export default function App() {
                 />
               </div>
             )}
-            {isAllStores && (
+            {complaintSession && (
               <div style={{ display: showComplaints ? 'block' : 'none' }}>
                 <ComplaintsModule
-                  session={session}
+                  session={complaintSession}
                   view={
                     page === 'dashboard'
                       ? 'dashboard'
@@ -4727,9 +4751,10 @@ function Sidebar({ session, page, onNav }) {
     { id: 'pickups', icon: RotateCcw, label: 'Pickups' },
     // Pickup Admin — supervisor check, sirf head login
     ...(isAll ? [{ id: 'pickupadmin', icon: ShieldCheck, label: 'Pickup Admin' }] : []),
+    // Complaints har store ko — apne store ki complaints + technician view
+    { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
     ...(isAll
       ? [
-          { id: 'complaints', icon: MessageSquareWarning, label: 'Complaints' },
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
         ]
@@ -4860,7 +4885,7 @@ function Topbar({
         <option value="deliveries">Deliveries</option>
         <option value="pickups">Pickups</option>
         {session.isHead && <option value="pickupadmin">Pickup Admin</option>}
-        {session.isHead && <option value="complaints">Complaints</option>}
+        <option value="complaints">Complaints</option>
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
       </select>
