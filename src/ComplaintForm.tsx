@@ -601,11 +601,12 @@ export default function ComplaintForm() {
       <Leaves />
       <main className="wrap">
         <div className="logo">
-          <svg width="30" height="34" viewBox="0 0 30 34" aria-hidden="true">
-            <path d="M15 2c7 6 10 13 6 21-2 4-6 7-6 9 0-2-4-5-6-9C5 15 8 8 15 2z" fill="#6aae3c" opacity=".35" />
-            <path d="M15 6v26M15 14l-5-4M15 20l6-5" stroke="#6aae3c" strokeWidth="2.4" strokeLinecap="round" fill="none" />
-          </svg>
-          Healthy Jeena Sikho
+          <img
+            src="https://static.wixstatic.com/media/246422_fd02ae3467bf4541aaaaed938b7a5bdb~mv2.jpeg/v1/crop/x_69,y_226,w_656,h_151/fill/w_656,h_151,al_c,q_90/hjs-logo.jpg"
+            alt="Healthy Jeena Sikho"
+            width="218"
+            height="50"
+          />
         </div>
         <h1>{step === 'done' ? 'Request received' : 'Product Service Request'}</h1>
         <div className="rule" />
@@ -727,7 +728,7 @@ export default function ComplaintForm() {
               <label className="l" htmlFor="cf-prod">
                 Product <span className="req">*</span>
               </label>
-              <div className={typeDef ? 'row2' : ''}>
+              <div>
                 <select
                   id="cf-prod"
                   value={prod}
@@ -749,17 +750,28 @@ export default function ComplaintForm() {
                   ))}
                   <option value="other">{reg ? 'Other product' : 'Other'}</option>
                 </select>
-                {typeDef && (
-                  <select id="cf-type" value={ptype} onChange={(e) => setPtype(e.target.value)} aria-label={typeDef.label}>
-                    <option value="">{typeDef.label} *</option>
-                    {typeDef.opts.map(([v, l]) => (
-                      <option key={v} value={v}>
-                        {l}
-                      </option>
-                    ))}
-                  </select>
-                )}
               </div>
+              {typeDef && (
+                <div className="types" role="radiogroup" aria-label={typeDef.label}>
+                  <span className="tl">
+                    {typeDef.label} <span className="req">*</span>
+                  </span>
+                  <div className="tchips">
+                    {typeDef.opts.map(([v, l]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        role="radio"
+                        aria-checked={ptype === v}
+                        className={'tchip' + (ptype === v ? ' on' : '')}
+                        onClick={() => setPtype(v)}
+                      >
+                        {l.replace(/ (Bed|Wheelchair)$/, '')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {prod === 'other' && (
                 <input
                   id="cf-other"
@@ -1029,7 +1041,13 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform *{box-sizing:border-box;min-width:0}
 .hjs-cform .leaves{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.5}
 .hjs-cform .wrap{position:relative;z-index:1;max-width:640px;margin:0 auto;padding:22px max(4vw,12px) 60px}
-.hjs-cform .logo{display:flex;justify-content:center;align-items:center;gap:8px;color:var(--leaf);font-weight:700;font-size:24px;font-family:system-ui,sans-serif}
+.hjs-cform .logo{display:flex;justify-content:center;align-items:center;height:44px}
+.hjs-cform .logo img{height:40px;width:auto;max-width:72vw;mix-blend-mode:multiply;display:block}
+.hjs-cform .types{margin-top:10px}
+.hjs-cform .tl{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink)}
+.hjs-cform .tchips{display:flex;flex-wrap:wrap;gap:8px}
+.hjs-cform .tchip{flex:1 1 auto;min-height:40px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);background:#fff;color:var(--ink);font:600 14px system-ui,sans-serif;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.hjs-cform .tchip.on{background:var(--leaf);border-color:var(--leaf);color:#fff}
 .hjs-cform h1{font-family:Lora,Georgia,serif;letter-spacing:normal;text-align:center;font-size:clamp(26px,5vw,32px);line-height:1.1;margin:14px 0 6px;font-weight:700;color:var(--ink)}
 .hjs-cform .rule{height:1px;background:var(--line);margin:0 0 18px}
 .hjs-cform .intro{display:flex;gap:14px;align-items:center;background:linear-gradient(135deg,#6aae3c,#3f7d1f);color:#fff;border-radius:14px;padding:18px 18px;margin-bottom:16px;box-shadow:0 6px 18px rgba(63,125,31,.25)}
