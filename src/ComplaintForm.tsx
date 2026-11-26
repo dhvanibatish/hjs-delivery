@@ -362,6 +362,9 @@ export default function ComplaintForm() {
   }, [cust]);
   const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
   const typeDef = picked ? TYPES[picked.cat] : null;
+  // Books item se type mila (registered) → sirf wahi dikhao, baaki options nahi
+  const typeAuto = !!(typeDef && picked && picked.type && ptype === picked.type);
+  const typeLabel = typeDef ? ((typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1]) : '';
 
   // Invoice ka store code (CHD/…, NWD/…) → city. Mila to city ka sawaal nahi puchte.
   const invCode = String(invoice || '').split('/')[0].trim().toUpperCase();
@@ -756,7 +759,15 @@ export default function ComplaintForm() {
                   <option value="other">{reg ? 'Other product' : 'Other'}</option>
                 </select>
               </div>
-              {typeDef && (
+              {typeAuto && (
+                <div className="facts">
+                  <span className="fact">
+                    <small>{typeDef.label}</small>
+                    <b>{typeLabel}</b>
+                  </span>
+                </div>
+              )}
+              {typeDef && !typeAuto && (
                 <div className="types" role="radiogroup" aria-label={typeDef.label}>
                   <span className="tl">
                     {typeDef.label} <span className="req">*</span>
