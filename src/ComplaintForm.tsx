@@ -185,7 +185,8 @@ const tel = (s) => 'tel:' + String(s).replace(/[^\d+]/g, '');
 function catOf(name) {
   const t = String(name || '').toLowerCase();
   if (/wheel\s*chair/.test(t)) return 'Wheelchair';
-  if (/bed|fowler|recliner/.test(t)) return 'BED';
+  // bed sheet / bed pan / over-the-bed table / sieve bed (OC) — bed nahi, accessory
+  if (/bed|fowler|recliner/.test(t) && !/sheet|pan\b|table|locker|towel|cover|si[ee]ve|seive|traction|attandant|attendant|bath/.test(t)) return 'BED';
   if (/bipap|cpap|\bpap\b/.test(t)) return 'BIPAP / CPAP';
   if (/cylinder/.test(t)) return 'Oxygen Cylinder';
   if (/concentrat|\boc\b|oc-|\d\s*l(pm|tr)?\b/.test(t)) return 'OC-5L / OC-10L';
@@ -194,18 +195,22 @@ function catOf(name) {
   if (/suction/.test(t)) return 'Suction Machine';
   return '';
 }
+/* Books item ke naam se type — HJS Books ke asli item naam dekh ke banaya
+   (Nov 2026: 185 wheelchair + 89 bed items). Wheelchair/Bed ka type hamesha
+   set hota hai; customer chahe to button daba ke badal sakta hai. */
 function guessType(cat, name) {
   const t = String(name || '').toLowerCase();
   if (cat === 'BED') {
     if (/paramount/.test(t)) return 'Paramount Bed';
-    if (/recliner/.test(t)) return 'Recliner Bed';
-    if (/electric|motor|5\s*func|3\s*func/.test(t)) return 'Electric Bed';
-    if (/manual|semi|fowler|crank/.test(t)) return 'Manual Bed';
+    if (/recliner|reclining/.test(t)) return 'Recliner Bed';
+    if (/manual|semi\s*fowler|full+y?\s*fowler|crank/.test(t) && !/motori[sz]/.test(t)) return 'Manual Bed';
+    if (/electric|motori[sz]|\bmot\b|icu|hybrid|\b[1-7]\s*-?\s*f\b|[1-7]\s*-?\s*f(unc|n)|[1-7]\s*function|remote|power supply/.test(t)) return 'Electric Bed';
+    return 'Manual Bed';
   }
   if (cat === 'Wheelchair') {
-    if (/stair/.test(t)) return 'Stair-Climbing';
-    if (/motor|electric|power/.test(t)) return 'Motorized Wheelchair';
-    if (/manual|fold|standard/.test(t)) return 'Manual Wheelchair';
+    if (/stair|climb/.test(t)) return 'Stair-Climbing';
+    if (/motori[sz]|\bmot\b|mot-|electric|power|joystick|remote|evox|e-?flexx|tetra|zip lite|jazzy|urja|mayra|\bkp[\s-]?\d|morgan|sp 100|mhl[\s-]?1007|freedom e\b|hs-6100/.test(t)) return 'Motorized Wheelchair';
+    return 'Manual Wheelchair';
   }
   return '';
 }
