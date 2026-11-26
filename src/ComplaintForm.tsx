@@ -317,6 +317,7 @@ export default function ComplaintForm() {
   const [desc, setDesc] = useState('');
   const [city, setCity] = useState('');
   const [invoice, setInvoice] = useState('');
+  const [editInv, setEditInv] = useState(false);
   const [photos, setPhotos] = useState([]); // {blob,url}
   const [photoErr, setPhotoErr] = useState('');
   const [busyPhotos, setBusyPhotos] = useState(false);
@@ -357,9 +358,19 @@ export default function ComplaintForm() {
   const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
   const typeDef = picked ? TYPES[picked.cat] : null;
 
+  // Invoice ka store code (CHD/…, NWD/…) → city. Mila to city ka sawaal nahi puchte.
+  const invCode = String(invoice || '').split('/')[0].trim().toUpperCase();
+  const cityFromInvoice = invoice && invoice.includes('/') ? CODE_TO_CITY[invCode] || '' : '';
+  useEffect(() => {
+    if (cityFromInvoice && city !== cityFromInvoice) setCity(cityFromInvoice);
+  }, [cityFromInvoice]); // eslint-disable-line
+  const storeContact = STORE_CONTACT[CITY_TO_STORE[cityFromInvoice || city]] || null;
+  // Chip sirf Books se aayi invoice pe; khud type karne wale ko text box hi dikhe
+  const invKnown = !!(cust && cust.registered && cust.invoices.some((x) => x.invoice === invoice));
+
   const missing = [];
   if (step === 'form') {
-    if (!(cust && cust.registered) && name.trim().length < 2) missing.push('full name');
+    if (!(cust && cust.registered && cust.name) && name.trim().length < 2) missing.push('full name');
     if (!picked) missing.push('product');
     if (prod === 'other' && !other.trim()) missing.push('product name');
     if (typeDef && !ptype) missing.push(typeDef.label.toLowerCase());
@@ -398,6 +409,7 @@ export default function ComplaintForm() {
     setProd(only ? 'p0' : '');
     setPtype(only ? cu.products[0].type : '');
     setInvoice(only ? cu.products[0].invoice || '' : cu && cu.registered && cu.invoices.length === 1 ? cu.invoices[0].invoice : '');
+    setEditInv(false);
     setOther('');
     setDesc('');
     setCity(cu ? cu.city : '');
@@ -555,6 +567,7 @@ export default function ComplaintForm() {
         photos: photoUrls,
         voice: voiceUrl,
         invoice: invoice.trim() || null,
+        store: storeContact ? storeContact.name : null,
         registered: !!cust.registered,
       });
       const store = CITY_TO_STORE[city] || '';
@@ -663,117 +676,126 @@ export default function ComplaintForm() {
 
         {step === 'form' && (
           <form onSubmit={submit} noValidate>
-            {!reg && (
-              <div className="card unreg" role="status">
-                <b>We couldn't find this number in our records.</b> No problem, you can still raise your complaint. Please fill your details
-                below and our team will verify them.
-              </div>
-            )}
-            <div className="card">
-              <label className="l" htmlFor="cf-name">
-                Full Name <span className="req">*</span>
-              </label>
-              <input
-                id="cf-name"
-                type="text"
-                readOnly={reg && !!cust.name}
-                placeholder={reg && cust.name ? '' : 'Enter your full name'}
-                value={reg && cust.name ? cust.name : name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={80}
-              />
-            </div>
-            <div className="card">
-              <div className="row">
-                <div>
-                  <label className="l" htmlFor="cf-mob">
-                    Registered Mobile Number <span className="req">*</span>
-                  </label>
-                  <input id="cf-mob" type="tel" readOnly value={fmtPhone(num)} />
-                </div>
-                <div>
-                  <label className="l" htmlFor="cf-email">
-                    Email Address
-                  </label>
-                  <input id="cf-email" type="email" placeholder="you@example.com" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} />
-                </div>
-              </div>
-              <div className="lockt">
-                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5" y="10" width="14" height="11" rx="2" fill="currentColor" />
-                  <path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" strokeWidth="2" />
+            {/* ── Kaun hai: number mila to sirf naam + number, Back button ── */}
+            <div className="card who">
+              <button type="button" className="back" onClick={backToGate} aria-label="Back - change number">
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <span className="locktxt">{reg ? 'Name and mobile are taken from your HJS account' : 'Mobile number you entered'}</span>
-                <button type="button" className="chg" onClick={backToGate}>
-                  Not you? Change number
-                </button>
+                Back
+              </button>
+              <div className="who-main">
+                <span className="av" aria-hidden="true">
+                  {((reg && cust.name) || name || '?').trim().charAt(0).toUpperCase() || '?'}
+                </span>
+                <span className="who-txt">
+                  <b>{reg && cust.name ? cust.name : name.trim() || 'New customer'}</b>
+                  <small>
+                    {fmtPhone(num)}
+                    {reg ? ' · HJS customer' : ''}
+                  </small>
+                </span>
               </div>
+              {(!reg || !cust.name) && (
+                <div className="unreg-box">
+                  {!reg && <div className="unreg-t">Number not in our records - please add your name</div>}
+                  <input
+                    id="cf-name"
+                    type="text"
+                    placeholder="Full name *"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={80}
+                    autoComplete="name"
+                  />
+                  <input
+                    id="cf-email"
+                    type="email"
+                    placeholder="Email (optional)"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    maxLength={120}
+                    style={{ marginTop: 8 }}
+                  />
+                </div>
+              )}
             </div>
 
+            {/* ── Product + type + invoice + store (ek hi card) ── */}
             <div className="card">
               <label className="l" htmlFor="cf-prod">
                 Product <span className="req">*</span>
               </label>
-              <select
-                id="cf-prod"
-                value={prod}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setProd(v);
-                  const o = prodOptions.find((x) => x.value === v);
-                  setPtype(o ? o.type : '');
-                  // registered: product ka invoice aur store apne aap
-                  if (o && o.invoice) {
-                    setInvoice(o.invoice);
-                    if (CODE_TO_CITY[o.store]) setCity(CODE_TO_CITY[o.store]);
-                  }
-                }}
-              >
-                {!(reg && prodOptions.length === 1) && <option value="">-Select-</option>}
-                {prodOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-                <option value="other">{reg ? 'Other product' : 'Other'}</option>
-              </select>
-              <p className="help">{reg ? (prodOptions.length === 1 ? 'Your product with us' : 'Only products you have with us are shown') : 'Select the product you have from HJS'}</p>
-              {typeDef && (
-                <div className="sub">
-                  <label className="l" htmlFor="cf-type">
-                    {typeDef.label} <span className="req">*</span>
-                  </label>
-                  <select id="cf-type" value={ptype} onChange={(e) => setPtype(e.target.value)}>
-                    <option value="">-Select-</option>
+              <div className={typeDef ? 'row2' : ''}>
+                <select
+                  id="cf-prod"
+                  value={prod}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setProd(v);
+                    const o = prodOptions.find((x) => x.value === v);
+                    setPtype(o ? o.type : '');
+                    setEditInv(false);
+                    // registered: product ka invoice apne aap (store/city invoice se)
+                    if (o && o.invoice) setInvoice(o.invoice);
+                  }}
+                >
+                  {!(reg && prodOptions.length === 1) && <option value="">-Select product-</option>}
+                  {prodOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                  <option value="other">{reg ? 'Other product' : 'Other'}</option>
+                </select>
+                {typeDef && (
+                  <select id="cf-type" value={ptype} onChange={(e) => setPtype(e.target.value)} aria-label={typeDef.label}>
+                    <option value="">{typeDef.label} *</option>
                     {typeDef.opts.map(([v, l]) => (
                       <option key={v} value={v}>
                         {l}
                       </option>
                     ))}
                   </select>
-                </div>
-              )}
+                )}
+              </div>
               {prod === 'other' && (
-                <div className="sub">
-                  <label className="l" htmlFor="cf-other">
-                    Product name <span className="req">*</span>
-                  </label>
-                  <input id="cf-other" type="text" maxLength={60} value={other} onChange={(e) => setOther(e.target.value)} />
-                </div>
+                <input
+                  id="cf-other"
+                  type="text"
+                  placeholder="Product name *"
+                  maxLength={60}
+                  value={other}
+                  onChange={(e) => setOther(e.target.value)}
+                  style={{ marginTop: 8 }}
+                />
               )}
-            </div>
 
-            <div className="card">
-              <label className="l" htmlFor="cf-inv">
-                Invoice Number <span className="opt">(optional)</span>
-              </label>
-              {reg && cust.invoices.length > 0 ? (
-                <select id="cf-inv" value={invoice} onChange={(e) => setInvoice(e.target.value)}>
-                  <option value="">Not sure</option>
+              {/* Invoice mila → chip; city/store invoice se, city sawaal chhup jaata hai */}
+              {invKnown && !editInv ? (
+                <div className="facts">
+                  <span className="fact">
+                    <small>Invoice</small>
+                    <b>{invoice}</b>
+                  </span>
+                  {storeContact && (
+                    <span className="fact">
+                      <small>Store</small>
+                      <b>{storeContact.name.replace(/^HJS /, '')}</b>
+                    </span>
+                  )}
+                  <button type="button" className="chg" onClick={() => setEditInv(true)}>
+                    Change
+                  </button>
+                </div>
+              ) : reg && cust.invoices.length > 0 ? (
+                <select id="cf-inv" value={invoice} onChange={(e) => setInvoice(e.target.value)} style={{ marginTop: 8 }}>
+                  <option value="">Invoice number - not sure</option>
                   {cust.invoices.map((x) => (
                     <option key={x.invoice} value={x.invoice}>
                       {x.invoice}
-                      {x.items ? ` · ${x.items.length > 40 ? x.items.slice(0, 40) + '…' : x.items}` : ''}
+                      {x.items ? ` · ${x.items.length > 34 ? x.items.slice(0, 34) + '…' : x.items}` : ''}
                     </option>
                   ))}
                 </select>
@@ -782,33 +804,72 @@ export default function ComplaintForm() {
                   id="cf-inv"
                   type="text"
                   autoCapitalize="characters"
-                  placeholder="e.g. NWD/25-26/1234"
+                  placeholder="Invoice number (optional) e.g. NWD/25-26/1234"
                   maxLength={40}
                   value={invoice}
                   onChange={(e) => setInvoice(e.target.value.toUpperCase())}
+                  style={{ marginTop: 8 }}
                 />
               )}
-              <p className="help">{reg && cust.invoices.length > 0 ? 'Picked from the product you chose - change it if needed' : 'Written on your HJS bill or WhatsApp invoice'}</p>
+              {!cityFromInvoice && (
+                <select id="cf-city" value={city} onChange={(e) => setCity(e.target.value)} style={{ marginTop: 8 }} aria-label="City">
+                  {!city && <option value="">Select your city *</option>}
+                  {CITIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
+            {/* ── Problem + photo + voice (ek hi card) ── */}
             <div className="card">
               <label className="l" htmlFor="cf-desc">
-                Problem Description <span className="req">*</span>
+                What's the problem? <span className="req">*</span>
               </label>
               <textarea
                 id="cf-desc"
                 maxLength={500}
-                placeholder="e.g. Bed remote stopped working since morning, bed is stuck in upright position"
+                placeholder="e.g. Bed remote stopped working since morning"
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
               />
               <div className="count">{desc.length}/500</div>
-            </div>
 
-            <div className="card">
-              <span className="l">
-                Product Photos <span className="opt">(optional, up to 3)</span>
-              </span>
+              <div className="media">
+                <label className={photos.length >= MAX_PHOTOS || busyPhotos ? 'mbtn off' : 'mbtn'}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="6" width="18" height="14" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                  {busyPhotos ? 'Processing…' : `Photo ${photos.length}/${MAX_PHOTOS}`}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={photos.length >= MAX_PHOTOS || busyPhotos}
+                    onChange={(e) => {
+                      addPhotos(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {!voice && (
+                  <button type="button" className={rec.on ? 'mbtn recon' : 'mbtn'} onClick={toggleRec}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
+                      <path d="M6 11a6 6 0 0 0 12 0M12 17v4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                    {rec.on ? `Stop ${mmss(rec.sec)}` : 'Voice note'}
+                  </button>
+                )}
+              </div>
+              {rec.on && (
+                <div className="track" style={{ marginTop: 8 }}>
+                  <i style={{ width: `${Math.min(100, (rec.sec / VOICE_SEC) * 100)}%` }} />
+                </div>
+              )}
               {photos.length > 0 && (
                 <div className="thumbs">
                   {photos.map((p, i) => (
@@ -817,109 +878,38 @@ export default function ComplaintForm() {
                       <button type="button" aria-label={`Remove photo ${i + 1}`} onClick={() => removePhoto(i)}>
                         ×
                       </button>
-                      <small>{Math.round(p.blob.size / 1024)} KB</small>
                     </div>
                   ))}
                 </div>
               )}
-              {photos.length < MAX_PHOTOS && (
-                <label className="drop">
-                  <svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="3" y="6" width="18" height="14" rx="3" fill="none" stroke="#6aae3c" strokeWidth="1.8" />
-                    <circle cx="12" cy="13" r="3.5" fill="none" stroke="#6aae3c" strokeWidth="1.8" />
-                    <path d="M8 6l1.5-2.5h5L16 6" fill="none" stroke="#6aae3c" strokeWidth="1.8" />
-                  </svg>
-                  <strong>{busyPhotos ? 'Processing photo…' : 'Take or upload a photo'}</strong>
-                  <div className="pills">
-                    <span>Auto-compressed to under 500 KB</span>
-                  </div>
+              {voice && (
+                <div className="vrow">
+                  <audio src={voice.url} controls />
+                  <button type="button" className="linkbtn" onClick={clearVoice} aria-label="Delete voice note">
+                    Delete
+                  </button>
+                </div>
+              )}
+              {!voice && !rec.on && (
+                <label className="altup">
+                  Mic not working? <span>Upload a voice note</span>
                   <input
                     type="file"
-                    accept="image/*"
-                    multiple
+                    accept="audio/*"
                     onChange={(e) => {
-                      addPhotos(e.target.files);
+                      uploadVoice(e.target.files[0]);
                       e.target.value = '';
                     }}
                   />
                 </label>
               )}
-              {photoErr && <div className="err">{photoErr}</div>}
-            </div>
-
-            <div className="card">
-              <span className="l">
-                Voice Note <span className="opt">(optional, up to 60 sec)</span>
-              </span>
-              <p className="help" style={{ margin: '0 0 10px' }}>
-                Tell us the problem in your own words, in Hindi or English
-              </p>
-              {!voice ? (
-                <>
-                  <div className="rec">
-                    <button type="button" className={rec.on ? 'mic on' : 'mic'} aria-label={rec.on ? 'Stop recording' : 'Start recording'} onClick={toggleRec}>
-                      <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
-                        <rect x="9" y="3" width="6" height="11" rx="3" fill="#fff" />
-                        <path d="M6 11a6 6 0 0 0 12 0M12 17v4" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                    <div className="recinfo">
-                      <b>{rec.on ? 'Recording… tap to stop' : 'Tap to record'}</b>
-                      <span>
-                        {mmss(rec.sec)} / 1:00
-                      </span>
-                      <div className="track">
-                        <i style={{ width: `${Math.min(100, (rec.sec / VOICE_SEC) * 100)}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                  <label className="altup">
-                    Mic not working? <span>Upload a voice note</span>
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      onChange={(e) => {
-                        uploadVoice(e.target.files[0]);
-                        e.target.value = '';
-                      }}
-                    />
-                  </label>
-                </>
-              ) : (
-                <div>
-                  <audio src={voice.url} controls />
-                  <div className="vmeta">
-                    <span>
-                      {voice.dur ? mmss(voice.dur) + ' · ' : ''}
-                      {Math.round(voice.blob.size / 1024)} KB{voice.note ? ' · ' + voice.note : ''}
-                    </span>
-                    <button type="button" className="linkbtn" onClick={clearVoice}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-              {voiceErr && <div className="err">{voiceErr}</div>}
-            </div>
-
-            <div className="card">
-              <label className="l" htmlFor="cf-city">
-                Select the city <span className="req">*</span>
-              </label>
-              <select id="cf-city" value={city} onChange={(e) => setCity(e.target.value)}>
-                {!city && <option value="">-Select-</option>}
-                {CITIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              {(photoErr || voiceErr) && <div className="err">{photoErr || voiceErr}</div>}
             </div>
 
             {sendErr && <div className="card senderr">{sendErr}</div>}
             <div className="btnrow">
               <button className="btn" type="submit" disabled={missing.length > 0 || sending}>
-                {sending ? 'Sending…' : 'Submit'}
+                {sending ? 'Sending…' : 'Submit complaint'}
               </button>
               <div className="missing">{missing.length ? 'Please fill: ' + missing.join(', ') : ''}</div>
             </div>
@@ -1055,13 +1045,35 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform .help-line{text-align:center;color:var(--mute);font:14.5px system-ui,sans-serif;margin-top:4px}
 .hjs-cform .help-line a{color:var(--leafd);font-weight:700;white-space:nowrap;text-decoration:none;display:inline-block;padding:10px 4px}
 .hjs-cform .btn:disabled{background:#a9cf8c;opacity:1;color:#fff}
+.hjs-cform .who{padding:12px 14px}
+.hjs-cform .back{display:inline-flex;align-items:center;gap:2px;background:none;border:0;color:var(--leafd);font:600 15px system-ui,sans-serif;cursor:pointer;padding:6px 8px 6px 0;min-height:40px}
+.hjs-cform .who-main{display:flex;align-items:center;gap:12px;margin-top:2px}
+.hjs-cform .av{width:42px;height:42px;border-radius:50%;background:var(--soft);color:var(--leafd);display:flex;align-items:center;justify-content:center;font:700 18px system-ui,sans-serif;flex:none}
+.hjs-cform .who-txt b{display:block;font-size:17px;line-height:1.2}
+.hjs-cform .who-txt small{display:block;color:var(--mute);font:14px system-ui,sans-serif;margin-top:2px}
+.hjs-cform .unreg-box{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.hjs-cform .unreg-t{font:600 13.5px system-ui,sans-serif;color:#8a6a10;background:#fff8e6;border-radius:8px;padding:6px 10px;margin-bottom:8px}
+.hjs-cform .row2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:8px}
+.hjs-cform .facts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.hjs-cform .fact{background:var(--soft);border-radius:10px;padding:5px 10px;font-family:system-ui,sans-serif;line-height:1.25}
+.hjs-cform .fact small{display:block;color:var(--mute);font-size:11px}
+.hjs-cform .fact b{font-size:14px;color:var(--ink);font-weight:600}
+.hjs-cform .media{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:10px}
+.hjs-cform .mbtn{position:relative;display:flex;align-items:center;justify-content:center;gap:7px;min-height:46px;border:1.5px dashed var(--line);border-radius:12px;background:var(--inbg);color:var(--leafd);font:600 15px system-ui,sans-serif;cursor:pointer;padding:0 8px}
+.hjs-cform .mbtn input{position:absolute;opacity:0;width:1px;height:1px}
+.hjs-cform .mbtn.off{opacity:.5;cursor:default}
+.hjs-cform .mbtn.recon{border-style:solid;border-color:#c0392b;color:#c0392b;background:#fdecea}
+.hjs-cform .vrow{display:flex;align-items:center;gap:6px;margin-top:10px}
+.hjs-cform .vrow audio{flex:1;min-width:0;height:40px}
+.hjs-cform .thumbs{margin-top:10px;margin-bottom:0}
+@media(max-width:360px){.hjs-cform .row2{grid-template-columns:minmax(0,1fr)}}
 .hjs-cform .card{background:var(--card);border-radius:10px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(30,60,20,.08)}
 .hjs-cform .l{display:block;font-size:15px;margin-bottom:6px;font-weight:500}
 .hjs-cform .req{color:var(--red)}
 .hjs-cform .opt{color:var(--mute);font-size:13px;font-weight:400}
 .hjs-cform .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
 .hjs-cform input[type=text],.hjs-cform input[type=email],.hjs-cform input[type=tel],.hjs-cform select,.hjs-cform textarea{width:100%;font:16px/1.4 system-ui,sans-serif;color:var(--ink);background:var(--inbg);border:1px solid var(--line);border-radius:999px;padding:10px 16px;min-height:44px;outline:none}
-.hjs-cform textarea{border-radius:16px;min-height:110px;resize:vertical}
+.hjs-cform textarea{border-radius:16px;min-height:84px;resize:vertical}
 .hjs-cform select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6' fill='none' stroke='%236aae3c' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:18px;padding-right:42px}
 .hjs-cform input:focus,.hjs-cform select:focus,.hjs-cform textarea:focus{border-color:var(--leaf);box-shadow:0 0 0 3px var(--ring)}
 .hjs-cform input[readonly]{background:var(--lock)}
