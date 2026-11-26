@@ -13,7 +13,7 @@
    3) Photos/voice → Storage bucket `complaint-media`, phir n8n pehle
       Zoho Desk ticket banata hai aur wahi Desk id/number Supabase tickets mein
       daalta hai (n8n/complaint_submit_workflow.json).
-   4) Success: ticket number, "1 ghante mein contact", assigned store ka
+   4) Success: ticket number, "team will connect shortly", assigned store ka
       number aur emergency number.
 
    SQL (bucket + upload rule + naye columns): supabase/complaint_form.sql
@@ -35,8 +35,11 @@ const N8N_LOOKUP_URL = 'https://n8n.srv1171323.hstgr.cloud/webhook/hjs-complaint
    ticket nahi daalta (Desk bypass nahi hota). */
 const N8N_SUBMIT_URL = 'https://n8n.srv1171323.hstgr.cloud/webhook/hjs-complaint-submit';
 
-/* Emergency / helpline — healthyjeenasikho.com ka official call number */
-const EMERGENCY = '+91 98769 78488';
+/* Emergency number SIRF BiPAP/CPAP aur Oxygen Concentrator complaints pe
+   dikhta hai (saans wali machine — mareez ko turant zaroorat). Baaki
+   products pe koi emergency number nahi dikhate. */
+const EMERGENCY = { name: 'Arvind', phone: '+91 72106 69844' };
+const EMERGENCY_CATS = ['BIPAP / CPAP', 'OC-5L / OC-10L'];
 
 /* Zoho "Product Service Request" form wali lists — same naam, same order */
 const PRODUCTS = [
@@ -184,6 +187,8 @@ const fmtPhone = (n) => `+91 ${n.slice(0, 5)} ${n.slice(5)}`;
 const tel = (s) => 'tel:' + String(s).replace(/[^\d+]/g, '');
 function catOf(name) {
   const t = String(name || '').toLowerCase();
+  // physio service (Books: "Physiotherapy - At Home" / "- At Center")
+  if (/physio|therapy session|cupping/.test(t) && !/machine|ball|putty|matt|gripper|cot|spirometer/.test(t)) return 'Physiotherapy';
   if (/wheel\s*chair/.test(t)) return 'Wheelchair';
   // bed sheet / bed pan / over-the-bed table / sieve bed (OC) — bed nahi, accessory
   if (/bed|fowler|recliner/.test(t) && !/sheet|pan\b|table|locker|towel|cover|si[ee]ve|seive|traction|attandant|attendant|bath/.test(t)) return 'BED';
@@ -236,6 +241,8 @@ function itemNames(row) {
   return [];
 }
 /* lookup rows → customer (naam, city, products) */
+/* invoice line jo product nahi hai (charges, deposit, discount…) — list mein nahi */
+const NOT_ITEM = /deliver|security|deposit|charge|transport|shipping|freight|installation|refund|discount|penalty|late fee|round ?off|advance|gst|service fee/;
 function toCustomer(rows, num) {
   if (!Array.isArray(rows) || !rows.length) return null;
   const seen = new Set();
@@ -246,12 +253,12 @@ function toCustomer(rows, num) {
     if (inv && !invoices.some((x) => x.invoice === inv))
       invoices.push({ invoice: inv, store: String(r.store || '').toUpperCase(), items: itemNames(r).join(', ') });
     itemNames(r).forEach((n) => {
-      const cat = catOf(n);
       const k = n.toLowerCase();
-      if (!cat || seen.has(k)) return;
+      if (NOT_ITEM.test(k) || seen.has(k)) return;
+      const cat = catOf(n) || 'Other'; // physio / baaki items bhi dikhte hain
       seen.add(k);
       // product jis (latest) invoice pe aaya — wahi invoice + store
-      products.push({ name: n, cat, type: guessType(cat, n), invoice: inv, store: String(r.store || '').toUpperCase() });
+      products.push({ name: n, cat, type: guessType(cat, n), invoice: inv, store: String(r.store || '').toUpperCase(), kind: cat === 'Physiotherapy' ? 'Service' : /\bsale\b/.test(k) ? 'Sale' : /\brent|rental\b/.test(k) ? 'Rent' : '' });
     });
   });
   const code = String(rows[0].store || '').toUpperCase();
@@ -317,6 +324,9 @@ export default function ComplaintForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [prod, setProd] = useState('');
+  // registered: Books ke items mein se ek ya zyada tick (index list) + 'Something else'
+  const [sel, setSel] = useState([]);
+  const [otherOn, setOtherOn] = useState(false);
   const [ptype, setPtype] = useState('');
   const [other, setOther] = useState('');
   const [desc, setDesc] = useState('');
@@ -361,7 +371,26 @@ export default function ComplaintForm() {
       return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${p.cat})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store }));
     return PRODUCTS.map((c) => ({ value: `c:${c}`, label: c, cat: c, type: '', name: c }));
   }, [cust]);
-  const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
+  const isReg = !!(cust && cust.registered && cust.products.length);
+  const regSel = isReg ? sel.map((i) => cust.products[i]).filter(Boolean) : [];
+  // picked = pehla chuna item (Desk ka product/type/invoice isi se); baaki items description mein
+  const picked = isReg
+    ? regSel[0] || (otherOn ? { cat: 'Other', name: other.trim() } : null)
+    : prod === 'other'
+      ? { cat: 'Other', name: other.trim() }
+      : prodOptions.find((o) => o.value === prod) || null;
+  const typeLabelOf = (p) => (TYPES[p.cat] ? (TYPES[p.cat].opts.find((o) => o[0] === p.type) || [p.type, p.type])[1] : '');
+  useEffect(() => {
+    if (!isReg) return;
+    const p = regSel[0];
+    setPtype(p ? p.type : '');
+    if (p && p.invoice) {
+      setInvoice(p.invoice);
+      setEditInv(false);
+    }
+  }, [isReg, sel.join(',')]); // eslint-disable-line
+  const moreInv = new Set(regSel.map((p) => p.invoice).filter((x) => x && x !== invoice)).size;
+  const toggleSel = (i) => setSel((a) => (a.includes(i) ? a.filter((x) => x !== i) : [...a, i]));
   const typeDef = picked ? TYPES[picked.cat] : null;
   // Books item se type mila (registered) → sirf wahi dikhao, baaki options nahi
   const typeAuto = !!(typeDef && picked && picked.type && ptype === picked.type);
@@ -382,7 +411,7 @@ export default function ComplaintForm() {
   if (step === 'form') {
     if (!(cust && cust.registered && cust.name) && name.trim().length < 2) need.push(['Your name', 'cf-name']);
     if (!picked) need.push(['Product', 'cf-prod']);
-    if (prod === 'other' && !other.trim()) need.push(['Product name', 'cf-other']);
+    if ((isReg ? otherOn : prod === 'other') && !other.trim()) need.push(['Product name', 'cf-other']);
     if (typeDef && !ptype) need.push([typeDef.label, 'cf-type']);
     if (!city) need.push(['City', 'cf-city']);
     if (busyPhotos) need.push(['Wait - photos are still loading', '']);
@@ -418,6 +447,8 @@ export default function ComplaintForm() {
     setEmail('');
     const only = cu && cu.registered && cu.products.length === 1;
     setProd(only ? 'p0' : '');
+    setSel(only ? [0] : []); // 1 hi item ho to pehle se tick, warna customer khud chune
+    setOtherOn(false);
     setPtype(only ? cu.products[0].type : '');
     setInvoice(only ? cu.products[0].invoice || '' : cu && cu.registered && cu.invoices.length === 1 ? cu.invoices[0].invoice : '');
     setEditInv(false);
@@ -579,6 +610,15 @@ export default function ComplaintForm() {
       for (let i = 0; i < photos.length; i++) photoUrls.push(await put(photos[i].blob, `photo-${i + 1}.jpg`));
       const voiceUrl = voice ? await put(voice.blob, `voice.${extOf(voice.blob.type)}`) : null;
       const product = picked.cat === 'Other' ? picked.name : picked.cat;
+      // kai items chune → sab Desk description mein (Desk ka product = pehla item)
+      const allItems = isReg
+        ? [
+            ...regSel.map((p) => [p.name, typeLabelOf(p), p.kind, p.invoice].filter(Boolean).join(' · ')),
+            ...(otherOn && other.trim() ? [other.trim() + ' (customer typed)'] : []),
+          ]
+        : [];
+      const problem = desc.trim() || 'Problem not written by customer - see photos / voice note or call';
+      const descOut = allItems.length > 1 ? `${problem}\n\nItems (${allItems.length}): ${allItems.join(' | ')}` : problem;
       const out = await submitToDesk({
         name: (cust.registered ? cust.name || name : name).trim(),
         phone: num,
@@ -586,8 +626,9 @@ export default function ComplaintForm() {
         city,
         product,
         product_type: typeDef ? ptype : null,
-        item_name: picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
-        description: desc.trim() || 'Problem not written by customer - see photos / voice note or call',
+        item_name: isReg && allItems.length > 1 ? [...regSel.map((p) => p.name), ...(otherOn && other.trim() ? [other.trim()] : [])].join(' | ') : picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
+        items: isReg ? regSel.map((p) => ({ name: p.name, category: p.cat, type: p.type || null, invoice: p.invoice || null, kind: p.kind || null })) : undefined,
+        description: descOut,
         photos: photoUrls,
         voice: voiceUrl,
         invoice: invoice.trim() || null,
@@ -598,11 +639,12 @@ export default function ComplaintForm() {
       setDone({
         ticket: (out && out.ticket_number) || '',
         duplicate: !!(out && out.duplicate),
+        emergency: EMERGENCY_CATS.includes(picked.cat) || regSel.some((p) => EMERGENCY_CATS.includes(p.cat)),
         registered: out && typeof out.registered === 'boolean' ? out.registered : cust.registered,
         store,
         contact: STORE_CONTACT[store] || null,
         name: (cust.registered ? cust.name || name : name).trim(),
-        product: `${picked.cat === 'Other' ? picked.name : picked.name}${typeDef ? ' · ' + (typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1] : ''}`,
+        product: allItems.length > 1 ? allItems.map((x) => x.split(' · ').slice(0, 2).join(' · ')).join(', ') : `${picked.name}${typeDef ? ' · ' + (typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1] : ''}`,
         city,
         invoice: invoice.trim(),
         desc: desc.trim(),
@@ -613,7 +655,7 @@ export default function ComplaintForm() {
       window.scrollTo(0, 0);
     } catch (err) {
       console.error('[complaint submit]', err);
-      setSendErr(`Your complaint could not be sent. Please check your internet and try again, or call ${EMERGENCY}.`);
+      setSendErr('Your complaint could not be sent. Please check your internet and try again.');
     }
     setSending(false);
   };
@@ -643,7 +685,7 @@ export default function ComplaintForm() {
             </div>
             <div>
               <div className="intro-t">Product not working right?</div>
-              <div className="intro-s">Tell us here and our team will call you within 1 hour.</div>
+              <div className="intro-s">Tell us here and our team will connect with you shortly.</div>
             </div>
           </section>
           <section className="card">
@@ -682,7 +724,7 @@ export default function ComplaintForm() {
             {[
               ['Enter your mobile number', 'We find your name and products'],
               ['Tell us the problem', 'Add photos or a voice note if you like'],
-              ['We call you within 1 hour', 'Your nearest HJS store takes it up'],
+              ['We connect with you shortly', 'Your nearest HJS store takes it up'],
             ].map(([a, b], i) => (
               <div className="st" key={a}>
                 <span className="st-n">{i + 1}</span>
@@ -693,9 +735,6 @@ export default function ComplaintForm() {
               </div>
             ))}
           </section>
-          <div className="help-line">
-            Urgent? Call <a href={tel(EMERGENCY)}>{EMERGENCY}</a>
-          </div>
           </>
         )}
 
@@ -751,8 +790,63 @@ export default function ComplaintForm() {
             {/* ── Product + type + invoice + store (ek hi card) ── */}
             <div className="card">
               <label className="l" htmlFor="cf-prod">
-                Product <span className="req">*</span>
+                {isReg ? 'Which product has the problem?' : 'Product'} <span className="req">*</span>
               </label>
+              {isReg && (
+                <div id="cf-prod" tabIndex={-1} className={'items' + (bad('cf-prod') ? ' bad' : '')}>
+                  <p className="help" style={{ margin: '0 0 8px' }}>
+                    Tick one or more
+                  </p>
+                  {cust.products.map((p, i) => {
+                    const on = sel.includes(i);
+                    const tl = typeLabelOf(p);
+                    return (
+                      <button
+                        key={p.name + i}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        className={'item' + (on ? ' on' : '')}
+                        onClick={() => toggleSel(i)}
+                      >
+                        <span className="box" aria-hidden="true">
+                          {on && (
+                            <svg width="14" height="14" viewBox="0 0 24 24">
+                              <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="it">
+                          <b>{p.name}</b>
+                          <small>
+                            {[tl || (p.cat !== 'Other' ? p.cat : ''), p.kind, p.invoice].filter(Boolean).join(' · ')}
+                          </small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={otherOn}
+                    className={'item' + (otherOn ? ' on' : '')}
+                    onClick={() => setOtherOn((v) => !v)}
+                  >
+                    <span className="box" aria-hidden="true">
+                      {otherOn && (
+                        <svg width="14" height="14" viewBox="0 0 24 24">
+                          <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="it">
+                      <b>Something else</b>
+                      <small>Not in this list</small>
+                    </span>
+                  </button>
+                </div>
+              )}
+              {!isReg && (
               <div>
                 <select
                   id="cf-prod"
@@ -777,7 +871,8 @@ export default function ComplaintForm() {
                   <option value="other">{reg ? 'Other product' : 'Other'}</option>
                 </select>
               </div>
-              {typeAuto && (
+              )}
+              {typeAuto && !isReg && (
                 <div className="facts">
                   <span className="fact">
                     <small>{typeDef.label}</small>
@@ -785,7 +880,7 @@ export default function ComplaintForm() {
                   </span>
                 </div>
               )}
-              {typeDef && !typeAuto && (
+              {typeDef && !typeAuto && !isReg && (
                 <div id="cf-type" tabIndex={-1} className={'types' + (bad('cf-type') ? ' bad' : '')} role="radiogroup" aria-label={typeDef.label}>
                   <span className="tl">
                     {typeDef.label} <span className="req">*</span>
@@ -806,7 +901,7 @@ export default function ComplaintForm() {
                   </div>
                 </div>
               )}
-              {prod === 'other' && (
+              {(isReg ? otherOn : prod === 'other') && (
                 <input
                   id="cf-other"
                   className={bad('cf-other') ? 'bad' : ''}
@@ -824,7 +919,10 @@ export default function ComplaintForm() {
                 <div className="facts">
                   <span className="fact">
                     <small>Invoice</small>
-                    <b>{invoice}</b>
+                    <b>
+                      {invoice}
+                      {moreInv > 0 && <span className="more"> +{moreInv} more</span>}
+                    </b>
                   </span>
                   {storeContact && (
                     <span className="fact">
@@ -992,7 +1090,7 @@ export default function ComplaintForm() {
                     <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
                     <path d="M12 7v5l3 2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
-                  Our team will contact you within 1 hour
+                  Our team will connect with you shortly
                 </div>
                 {done.registered && done.contact && (
                   <div className="store">
@@ -1004,9 +1102,12 @@ export default function ComplaintForm() {
                     </a>
                   </div>
                 )}
-                <div className="emg">
-                  If you have an emergency, please contact <a href={tel(EMERGENCY)}>{EMERGENCY}</a>
-                </div>
+                {done.emergency && (
+                  <div className="emg">
+                    BiPAP / Oxygen Concentrator emergency? Call {EMERGENCY.name}:{' '}
+                    <a href={tel(EMERGENCY.phone)}>{EMERGENCY.phone}</a>
+                  </div>
+                )}
                 <div className="sum">
                   Product: <b>{done.product}</b>
                   {done.invoice && (
@@ -1017,8 +1118,12 @@ export default function ComplaintForm() {
                   )}
                   <br />
                   City: <b>{done.city}</b>
-                  <br />
-                  Problem: <b>{done.desc}</b>
+                  {done.desc && (
+                    <>
+                      <br />
+                      Problem: <b>{done.desc}</b>
+                    </>
+                  )}
                   {done.photos > 0 && (
                     <>
                       <br />
@@ -1184,6 +1289,16 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform .types.bad{outline:none;border-radius:12px;padding:6px;margin-left:-6px;margin-right:-6px;background:var(--redbg)}
 .hjs-cform .types.bad .tl{color:var(--red)}
 .hjs-cform .opt{color:var(--mute);font-weight:400;font-size:13px;font-family:system-ui,sans-serif}
+.hjs-cform .fact .more{font-weight:500;color:var(--mute)}
+.hjs-cform .items{display:flex;flex-direction:column;gap:8px;outline:none;border-radius:12px}
+.hjs-cform .items.bad{background:var(--redbg);padding:8px;margin:0 -8px}
+.hjs-cform .item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;font:inherit;color:var(--ink);-webkit-tap-highlight-color:transparent}
+.hjs-cform .item.on{border-color:var(--leaf);background:var(--soft)}
+.hjs-cform .item .box{flex:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;background:#fff}
+.hjs-cform .item.on .box{background:var(--leaf);border-color:var(--leaf)}
+.hjs-cform .item .it{min-width:0;display:flex;flex-direction:column}
+.hjs-cform .item .it b{font:600 14.5px/1.3 system-ui,sans-serif;word-break:break-word}
+.hjs-cform .item .it small{font:12.5px/1.35 system-ui,sans-serif;color:var(--mute);margin-top:2px}
 .hjs-cform .stub{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(30,60,20,.12)}
 .hjs-cform .head{padding:26px 20px 18px;text-align:center}
 .hjs-cform .muted{color:var(--mute)}
