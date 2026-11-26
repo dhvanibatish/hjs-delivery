@@ -37,7 +37,13 @@ import {
   Trash2,
   Camera,
   Mic,
+  MessageCircle,
 } from 'lucide-react';
+
+/* phone → tap-to-call / WhatsApp link (10 digit Indian number) */
+const ph10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+const telHref = (p) => (ph10(p).length === 10 ? `tel:+91${ph10(p)}` : '');
+const waHref = (p) => (ph10(p).length === 10 ? `https://wa.me/91${ph10(p)}` : '');
 
 /* ══════════════════════════════════════════════════════════════════════
    1) CONFIG  ── url + ANON PUBLIC key (SERVICE_ROLE nahi). Khaali = DEMO.
@@ -646,7 +652,6 @@ const TXT = {
   tPrioSaved: { en: 'Priority updated', hi: 'Priority update hui' },
   // technician
   techDoneBadge: { en: 'Technician: work done', hi: 'Technician: kaam ho gaya' },
-  resolvedByTech: { en: 'Resolved by technician', hi: 'Technician ne resolve kiya' },
   techDoneTitle: { en: 'Technician marked work done', hi: 'Technician ne kaam poora kiya' },
   techDoneAt: { en: 'Done at', hi: 'Kab' },
   techDoneRemark: { en: 'Technician remark', hi: 'Technician remark' },
@@ -3406,7 +3411,7 @@ function TechBoard({
           return (
             <div
               key={x.ticket_id}
-              className={x.techDone ? 'card tb-card card-resolved' : 'card tb-card'}
+              className="card tb-card"
               onClick={() => onOpen && onOpen(x)}
               style={{ borderLeft: `4px solid ${pm.color}` }}
             >
@@ -3503,15 +3508,9 @@ function TechBoard({
                   )}
                 </div>
               ) : (
-                <div className="resolved-banner" style={{ margin: '10px 0 0' }}>
-                  <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-                  <div style={{ minWidth: 0 }}>
-                    <b>{L('resolvedByTech')}</b>
-                    <div className="resolved-sub">
-                      {fmtFullDateTime(x.techDoneAt)}
-                      {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
-                    </div>
-                  </div>
+                <div className="card-techdone">
+                  <CheckCircle2 size={12} /> {fmtFullDateTime(x.techDoneAt)}
+                  {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
                 </div>
               )}
             </div>
@@ -3889,7 +3888,7 @@ function Header({
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ position: 'relative' }}>
+        <div className="hc-sel" style={{ position: 'relative' }}>
           <Clock
             size={15}
             color={T.inkSoft}
@@ -3941,7 +3940,7 @@ function Header({
           </button>
         </div>
         {(session.canSwitch || session.isHead) && (
-          <div style={{ position: 'relative' }}>
+          <div className="hc-sel" style={{ position: 'relative' }}>
             <Building2
               size={15}
               color={T.inkSoft}
@@ -3983,7 +3982,7 @@ function Header({
         )}
         {bell}
         <span
-          className="live-chip"
+          className={live ? 'live-chip is-live' : 'live-chip'}
           style={{
             background: live ? T.mint : T.amberSoft,
             color: live ? T.green : T.amber,
@@ -4412,38 +4411,16 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
   const pm = prioMeta(d.priority);
-  // technician ne "Work done" kar diya → card hara highlight + upar banner
-  const techResolved = d.techDone && d.stage === 'tech' && !cancelled;
   return (
     <div
-      className={
-        cancelled ? 'card is-cancelled' : techResolved ? 'card card-resolved' : 'card'
-      }
+      className={cancelled ? 'card is-cancelled' : 'card'}
       onClick={onOpen}
       style={
-        techResolved
-          ? { borderLeft: `4px solid ${d.priority ? pm.color : T.green}` }
-          : d.priority && !closed
-            ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
-            : undefined
+        d.priority && !closed
+          ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
+          : undefined
       }
     >
-      {techResolved && (
-        <div className="resolved-banner">
-          <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-          <div style={{ minWidth: 0 }}>
-            <b>{L('resolvedByTech')}</b>
-            <div className="resolved-sub">
-              {[
-                d._raw && (d._raw.tech_done_by || d.technician),
-                d.techDoneAt && fmtFullDateTime(d.techDoneAt),
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-          </div>
-        </div>
-      )}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -4462,9 +4439,15 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         </span>
       </div>
       <div className="card-meta">
-        <span>
-          <Phone size={12} /> {d.phone}
-        </span>
+        {telHref(d.phone) ? (
+          <a className="card-tel" href={telHref(d.phone)} onClick={(e) => e.stopPropagation()}>
+            <Phone size={12} /> {d.phone}
+          </a>
+        ) : (
+          <span>
+            <Phone size={12} /> {d.phone}
+          </span>
+        )}
         <span className="ellip" style={{ maxWidth: 120 }}>
           <MapPin size={12} /> {d.area}
         </span>
@@ -4473,14 +4456,12 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         <span>
           <Clock size={12} /> {niceDate(d.opened) || '—'}
         </span>
-      </div>
-      {d.manager && d.manager !== '—' && (
-        <div className="card-meta">
-          <span className="ellip" style={{ maxWidth: '100%' }}>
+        {d.manager && d.manager !== '—' && (
+          <span className="ellip" style={{ maxWidth: 150 }}>
             <User size={12} /> {d.manager}
           </span>
-        </div>
-      )}
+        )}
+      </div>
       {d.technician && (
         <div className="card-tech">
           <Wrench size={12} />
@@ -4488,6 +4469,11 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
             <b>{d.technician}</b>
             {d.technicianPhone ? ` · ${d.technicianPhone}` : ''}
           </span>
+        </div>
+      )}
+      {d.techDone && d.stage === 'tech' && (
+        <div className="card-techdone">
+          <CheckCircle2 size={12} /> {L('techDoneBadge')}
         </div>
       )}
       {closed ? (
@@ -4674,6 +4660,18 @@ function Drawer({
           <span className="col-pip" style={{ background: stage.color }} />{' '}
           {cancelled ? stage.label : sLabel(d.stage)}
         </span>
+
+        {/* Customer ko seedha call / WhatsApp — phone pe ek tap */}
+        {telHref(d.phone) && (
+          <div className="dr-contact">
+            <a className="dr-call" href={telHref(d.phone)}>
+              <Phone size={16} /> Call customer
+            </a>
+            <a className="dr-wa" href={waHref(d.phone)} target="_blank" rel="noopener noreferrer">
+              <MessageCircle size={16} /> WhatsApp
+            </a>
+          </div>
+        )}
 
         {/* Customer form ki photos / voice — sabse upar, turant dikhe */}
         <CustomerMedia r={r} />
@@ -6272,12 +6270,6 @@ function StyleTag() {
       .cm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
       .cm-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.forestSoft}; background: ${T.mint}; border-radius: 8px; padding: 3px 8px; }
       .cm-chip.warn { color: ${T.amber}; background: ${T.amberSoft}; }
-      .card-resolved { background: #DCEFDD; border-color: #8CC491; box-shadow: 0 0 0 1px #8CC491 inset, 0 4px 14px rgba(46,125,50,.12); }
-      .card-resolved:hover { border-color: ${T.green}; box-shadow: 0 0 0 1px ${T.green} inset, 0 6px 18px rgba(46,125,50,.18); }
-      .card-resolved .card-next, .card-resolved .eq-ico { background: rgba(255,255,255,.75) !important; }
-      .resolved-banner { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 10px; padding: 8px 10px; border-radius: 10px; background: ${T.green}; color: #fff; font-size: 12.5px; line-height: 1.35; }
-      .resolved-banner b { font-weight: 800; }
-      .resolved-sub { font-size: 11px; opacity: .9; margin-top: 1px; overflow-wrap: anywhere; }
       .techdone-box { margin-top: 12px; border: 1px solid #cfe3d0; background: ${T.mint}; border-radius: 13px; padding: 11px 12px; }
       @media (max-width: 760px) {
         .tb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -6360,6 +6352,30 @@ function StyleTag() {
         .lt-btn { padding: 8px 11px; font-size: 12px; }
         .live-chip { font-size: 11.5px; padding: 7px 11px; }
         .view-range .dash-inp { padding: 8px 10px; font-size: 12.5px; }
+      }
+      .card-tel { display: inline-flex; align-items: center; gap: 4px; color: ${T.forestSoft}; font-weight: 700; text-decoration: none; }
+      .dr-contact { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 4px; }
+      .dr-contact a { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; border-radius: 12px; font-size: 14px; font-weight: 800; text-decoration: none; }
+      .dr-call { background: ${T.forest}; color: #fff; }
+      .dr-wa { background: #E7F7EC; color: #1E7B3F; border: 1px solid #BFE6CB; }
+      /* phone: filters 2-2 karke ek line mein, pehla ticket jaldi dikhe */
+      @media (max-width: 760px) {
+        .hdr-controls { display: flex !important; flex-wrap: wrap; gap: 8px !important; align-items: center; }
+        .hdr-controls > .hc-sel { flex: 1 1 40%; min-width: 0; order: 1; }
+        .hdr-controls .store-switch { width: 100%; }
+        .hdr-controls > .view-range { flex: 1 1 100%; order: 3; }
+        .hdr-controls > .layout-toggle { flex: 1 1 100%; display: flex; order: 4; }
+        .hdr-controls > .layout-toggle .lt-btn { flex: 1 1 0; justify-content: center; }
+        .hdr-controls > .nb-wrap { order: 2; }
+        .hdr-controls > .live-chip { order: 5; }
+        /* live hai to count neeche footer mein bhi hai — phone pe chip chhupa do */
+        .hdr-controls > .live-chip.is-live { display: none; }
+        .dash-switch { margin-bottom: 10px !important; }
+        .dash-switch .layout-toggle { display: flex; width: 100%; }
+        .dash-switch .lt-btn { flex: 1 1 0; justify-content: center; white-space: nowrap; padding: 9px 8px; font-size: 12.5px; }
+        main > div:first-child { margin-bottom: 10px !important; }
+        .hjs-complaints .card { padding: 12px 13px; }
+        .hjs-complaints .card-meta { margin-top: 5px; }
       }
       @media (max-width: 400px) { .stat-grid { grid-template-columns: 1fr 1fr; gap: 12px; } .stat-grid.three { grid-template-columns: 1fr 1fr; } }
       @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
