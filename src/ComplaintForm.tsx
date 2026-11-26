@@ -324,9 +324,6 @@ export default function ComplaintForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [prod, setProd] = useState('');
-  // registered: Books ke items mein se ek ya zyada tick (index list) + 'Something else'
-  const [sel, setSel] = useState([]);
-  const [otherOn, setOtherOn] = useState(false);
   const [ptype, setPtype] = useState('');
   const [other, setOther] = useState('');
   const [desc, setDesc] = useState('');
@@ -368,29 +365,10 @@ export default function ComplaintForm() {
   /* product options: registered → uske products; warna saari list */
   const prodOptions = useMemo(() => {
     if (cust && cust.registered && cust.products.length)
-      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${p.cat})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store }));
+      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${[p.cat !== 'Other' ? p.cat : '', p.kind].filter(Boolean).join(' · ') || 'Item'})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store }));
     return PRODUCTS.map((c) => ({ value: `c:${c}`, label: c, cat: c, type: '', name: c }));
   }, [cust]);
-  const isReg = !!(cust && cust.registered && cust.products.length);
-  const regSel = isReg ? sel.map((i) => cust.products[i]).filter(Boolean) : [];
-  // picked = pehla chuna item (Desk ka product/type/invoice isi se); baaki items description mein
-  const picked = isReg
-    ? regSel[0] || (otherOn ? { cat: 'Other', name: other.trim() } : null)
-    : prod === 'other'
-      ? { cat: 'Other', name: other.trim() }
-      : prodOptions.find((o) => o.value === prod) || null;
-  const typeLabelOf = (p) => (TYPES[p.cat] ? (TYPES[p.cat].opts.find((o) => o[0] === p.type) || [p.type, p.type])[1] : '');
-  useEffect(() => {
-    if (!isReg) return;
-    const p = regSel[0];
-    setPtype(p ? p.type : '');
-    if (p && p.invoice) {
-      setInvoice(p.invoice);
-      setEditInv(false);
-    }
-  }, [isReg, sel.join(',')]); // eslint-disable-line
-  const moreInv = new Set(regSel.map((p) => p.invoice).filter((x) => x && x !== invoice)).size;
-  const toggleSel = (i) => setSel((a) => (a.includes(i) ? a.filter((x) => x !== i) : [...a, i]));
+  const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
   const typeDef = picked ? TYPES[picked.cat] : null;
   // Books item se type mila (registered) → sirf wahi dikhao, baaki options nahi
   const typeAuto = !!(typeDef && picked && picked.type && ptype === picked.type);
@@ -411,7 +389,7 @@ export default function ComplaintForm() {
   if (step === 'form') {
     if (!(cust && cust.registered && cust.name) && name.trim().length < 2) need.push(['Your name', 'cf-name']);
     if (!picked) need.push(['Product', 'cf-prod']);
-    if ((isReg ? otherOn : prod === 'other') && !other.trim()) need.push(['Product name', 'cf-other']);
+    if (prod === 'other' && !other.trim()) need.push(['Product name', 'cf-other']);
     if (typeDef && !ptype) need.push([typeDef.label, 'cf-type']);
     if (!city) need.push(['City', 'cf-city']);
     if (busyPhotos) need.push(['Wait - photos are still loading', '']);
@@ -447,8 +425,6 @@ export default function ComplaintForm() {
     setEmail('');
     const only = cu && cu.registered && cu.products.length === 1;
     setProd(only ? 'p0' : '');
-    setSel(only ? [0] : []); // 1 hi item ho to pehle se tick, warna customer khud chune
-    setOtherOn(false);
     setPtype(only ? cu.products[0].type : '');
     setInvoice(only ? cu.products[0].invoice || '' : cu && cu.registered && cu.invoices.length === 1 ? cu.invoices[0].invoice : '');
     setEditInv(false);
@@ -610,15 +586,6 @@ export default function ComplaintForm() {
       for (let i = 0; i < photos.length; i++) photoUrls.push(await put(photos[i].blob, `photo-${i + 1}.jpg`));
       const voiceUrl = voice ? await put(voice.blob, `voice.${extOf(voice.blob.type)}`) : null;
       const product = picked.cat === 'Other' ? picked.name : picked.cat;
-      // kai items chune → sab Desk description mein (Desk ka product = pehla item)
-      const allItems = isReg
-        ? [
-            ...regSel.map((p) => [p.name, typeLabelOf(p), p.kind, p.invoice].filter(Boolean).join(' · ')),
-            ...(otherOn && other.trim() ? [other.trim() + ' (customer typed)'] : []),
-          ]
-        : [];
-      const problem = desc.trim() || 'Problem not written by customer - see photos / voice note or call';
-      const descOut = allItems.length > 1 ? `${problem}\n\nItems (${allItems.length}): ${allItems.join(' | ')}` : problem;
       const out = await submitToDesk({
         name: (cust.registered ? cust.name || name : name).trim(),
         phone: num,
@@ -626,9 +593,8 @@ export default function ComplaintForm() {
         city,
         product,
         product_type: typeDef ? ptype : null,
-        item_name: isReg && allItems.length > 1 ? [...regSel.map((p) => p.name), ...(otherOn && other.trim() ? [other.trim()] : [])].join(' | ') : picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
-        items: isReg ? regSel.map((p) => ({ name: p.name, category: p.cat, type: p.type || null, invoice: p.invoice || null, kind: p.kind || null })) : undefined,
-        description: descOut,
+        item_name: picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
+        description: desc.trim() || 'Problem not written by customer - see photos / voice note or call',
         photos: photoUrls,
         voice: voiceUrl,
         invoice: invoice.trim() || null,
@@ -639,12 +605,12 @@ export default function ComplaintForm() {
       setDone({
         ticket: (out && out.ticket_number) || '',
         duplicate: !!(out && out.duplicate),
-        emergency: EMERGENCY_CATS.includes(picked.cat) || regSel.some((p) => EMERGENCY_CATS.includes(p.cat)),
+        emergency: EMERGENCY_CATS.includes(picked.cat),
         registered: out && typeof out.registered === 'boolean' ? out.registered : cust.registered,
         store,
         contact: STORE_CONTACT[store] || null,
         name: (cust.registered ? cust.name || name : name).trim(),
-        product: allItems.length > 1 ? allItems.map((x) => x.split(' · ').slice(0, 2).join(' · ')).join(', ') : `${picked.name}${typeDef ? ' · ' + (typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1] : ''}`,
+        product: `${picked.cat === 'Other' ? picked.name : picked.name}${typeDef ? ' · ' + (typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1] : ''}`,
         city,
         invoice: invoice.trim(),
         desc: desc.trim(),
@@ -790,63 +756,8 @@ export default function ComplaintForm() {
             {/* ── Product + type + invoice + store (ek hi card) ── */}
             <div className="card">
               <label className="l" htmlFor="cf-prod">
-                {isReg ? 'Which product has the problem?' : 'Product'} <span className="req">*</span>
+                Product <span className="req">*</span>
               </label>
-              {isReg && (
-                <div id="cf-prod" tabIndex={-1} className={'items' + (bad('cf-prod') ? ' bad' : '')}>
-                  <p className="help" style={{ margin: '0 0 8px' }}>
-                    Tick one or more
-                  </p>
-                  {cust.products.map((p, i) => {
-                    const on = sel.includes(i);
-                    const tl = typeLabelOf(p);
-                    return (
-                      <button
-                        key={p.name + i}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={on}
-                        className={'item' + (on ? ' on' : '')}
-                        onClick={() => toggleSel(i)}
-                      >
-                        <span className="box" aria-hidden="true">
-                          {on && (
-                            <svg width="14" height="14" viewBox="0 0 24 24">
-                              <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </span>
-                        <span className="it">
-                          <b>{p.name}</b>
-                          <small>
-                            {[tl || (p.cat !== 'Other' ? p.cat : ''), p.kind, p.invoice].filter(Boolean).join(' · ')}
-                          </small>
-                        </span>
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={otherOn}
-                    className={'item' + (otherOn ? ' on' : '')}
-                    onClick={() => setOtherOn((v) => !v)}
-                  >
-                    <span className="box" aria-hidden="true">
-                      {otherOn && (
-                        <svg width="14" height="14" viewBox="0 0 24 24">
-                          <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </span>
-                    <span className="it">
-                      <b>Something else</b>
-                      <small>Not in this list</small>
-                    </span>
-                  </button>
-                </div>
-              )}
-              {!isReg && (
               <div>
                 <select
                   id="cf-prod"
@@ -871,8 +782,7 @@ export default function ComplaintForm() {
                   <option value="other">{reg ? 'Other product' : 'Other'}</option>
                 </select>
               </div>
-              )}
-              {typeAuto && !isReg && (
+              {typeAuto && (
                 <div className="facts">
                   <span className="fact">
                     <small>{typeDef.label}</small>
@@ -880,7 +790,7 @@ export default function ComplaintForm() {
                   </span>
                 </div>
               )}
-              {typeDef && !typeAuto && !isReg && (
+              {typeDef && !typeAuto && (
                 <div id="cf-type" tabIndex={-1} className={'types' + (bad('cf-type') ? ' bad' : '')} role="radiogroup" aria-label={typeDef.label}>
                   <span className="tl">
                     {typeDef.label} <span className="req">*</span>
@@ -901,7 +811,7 @@ export default function ComplaintForm() {
                   </div>
                 </div>
               )}
-              {(isReg ? otherOn : prod === 'other') && (
+              {prod === 'other' && (
                 <input
                   id="cf-other"
                   className={bad('cf-other') ? 'bad' : ''}
@@ -919,10 +829,7 @@ export default function ComplaintForm() {
                 <div className="facts">
                   <span className="fact">
                     <small>Invoice</small>
-                    <b>
-                      {invoice}
-                      {moreInv > 0 && <span className="more"> +{moreInv} more</span>}
-                    </b>
+                    <b>{invoice}</b>
                   </span>
                   {storeContact && (
                     <span className="fact">
@@ -1289,16 +1196,6 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform .types.bad{outline:none;border-radius:12px;padding:6px;margin-left:-6px;margin-right:-6px;background:var(--redbg)}
 .hjs-cform .types.bad .tl{color:var(--red)}
 .hjs-cform .opt{color:var(--mute);font-weight:400;font-size:13px;font-family:system-ui,sans-serif}
-.hjs-cform .fact .more{font-weight:500;color:var(--mute)}
-.hjs-cform .items{display:flex;flex-direction:column;gap:8px;outline:none;border-radius:12px}
-.hjs-cform .items.bad{background:var(--redbg);padding:8px;margin:0 -8px}
-.hjs-cform .item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;font:inherit;color:var(--ink);-webkit-tap-highlight-color:transparent}
-.hjs-cform .item.on{border-color:var(--leaf);background:var(--soft)}
-.hjs-cform .item .box{flex:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;background:#fff}
-.hjs-cform .item.on .box{background:var(--leaf);border-color:var(--leaf)}
-.hjs-cform .item .it{min-width:0;display:flex;flex-direction:column}
-.hjs-cform .item .it b{font:600 14.5px/1.3 system-ui,sans-serif;word-break:break-word}
-.hjs-cform .item .it small{font:12.5px/1.35 system-ui,sans-serif;color:var(--mute);margin-top:2px}
 .hjs-cform .stub{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(30,60,20,.12)}
 .hjs-cform .head{padding:26px 20px 18px;text-align:center}
 .hjs-cform .muted{color:var(--mute)}
