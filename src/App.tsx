@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import PickupsModule from './Pickups.tsx';
+import { registerListTargets, useSharedLists, ListsAdmin } from './lists.tsx';
 import ComplaintsModule, {
   TECHNICIANS as COMPLAINT_TECHS,
   TECH_ADMIN,
@@ -65,6 +66,7 @@ import {
   Trash2,
   Camera,
   Upload,
+  ListChecks,
 } from 'lucide-react';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -425,6 +427,10 @@ const PAY_OPTIONS = [
   'Through Link',
   'Cash & Online (Both)',
 ];
+/* Upar wali lists ab sirf FALLBACK hain — asli lists Supabase `app_lists` mein
+   hain (All stores → Manage Lists tab). lists.tsx inhe in-place update karta hai. */
+const LIST_TARGETS = { DELIVERY_PERSONS, STORE_MANAGERS, VEHICLES, PAY_OPTIONS };
+registerListTargets(LIST_TARGETS);
 
 /* ══════════════════════════════════════════════════════════════════════
    LOGIN  ── store dropdown se choose karke store-wise password daalo.
@@ -1385,6 +1391,7 @@ function TestModeBadge() {
 
 export default function App() {
   useEmbedFlag();
+  useSharedLists(); // Supabase se delivery persons / managers / vehicles / pay modes
   // Tracking routes (Netlify SPA — query params + optional /track path):
   //   /track                → sales: number se saari deliveries + timeline
   //   /track?inv=CHD/...     → customer: single invoice (phone verify)
@@ -2084,6 +2091,10 @@ export default function App() {
                 deliveries={allStoresData}
                 onOpen={(x) => setActiveId(x.invoice_id)}
               />
+            )}
+            {/* Manage Lists — delivery persons / managers / vehicles / pay modes */}
+            {isAllStores && page === 'lists' && (
+              <ListsAdmin session={session} fallback={LIST_TARGETS} ping={ping} />
             )}
             {isAllStores && page === 'sla' && slaKind === 'delivery' && (
               <SlaReport
@@ -4759,6 +4770,7 @@ function Sidebar({ session, page, onNav }) {
       ? [
           { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
           { id: 'sla', icon: Clock, label: 'Process & SLA' },
+          { id: 'lists', icon: ListChecks, label: 'Manage Lists' },
         ]
       : []),
   ];
@@ -4892,6 +4904,7 @@ function Topbar({
         )}
         {session.isHead && <option value="dashboard">Dashboard</option>}
         {session.isHead && <option value="sla">Process &amp; SLA</option>}
+        {session.isHead && <option value="lists">Manage Lists</option>}
       </select>
       <div className="tb-actions">
         <div className="lang-toggle">
