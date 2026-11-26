@@ -646,6 +646,7 @@ const TXT = {
   tPrioSaved: { en: 'Priority updated', hi: 'Priority update hui' },
   // technician
   techDoneBadge: { en: 'Technician: work done', hi: 'Technician: kaam ho gaya' },
+  resolvedByTech: { en: 'Resolved by technician', hi: 'Technician ne resolve kiya' },
   techDoneTitle: { en: 'Technician marked work done', hi: 'Technician ne kaam poora kiya' },
   techDoneAt: { en: 'Done at', hi: 'Kab' },
   techDoneRemark: { en: 'Technician remark', hi: 'Technician remark' },
@@ -3405,7 +3406,7 @@ function TechBoard({
           return (
             <div
               key={x.ticket_id}
-              className="card tb-card"
+              className={x.techDone ? 'card tb-card card-resolved' : 'card tb-card'}
               onClick={() => onOpen && onOpen(x)}
               style={{ borderLeft: `4px solid ${pm.color}` }}
             >
@@ -3502,9 +3503,15 @@ function TechBoard({
                   )}
                 </div>
               ) : (
-                <div className="card-techdone">
-                  <CheckCircle2 size={12} /> {fmtFullDateTime(x.techDoneAt)}
-                  {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
+                <div className="resolved-banner" style={{ margin: '10px 0 0' }}>
+                  <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <b>{L('resolvedByTech')}</b>
+                    <div className="resolved-sub">
+                      {fmtFullDateTime(x.techDoneAt)}
+                      {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -4405,16 +4412,38 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
   const pm = prioMeta(d.priority);
+  // technician ne "Work done" kar diya → card hara highlight + upar banner
+  const techResolved = d.techDone && d.stage === 'tech' && !cancelled;
   return (
     <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
+      className={
+        cancelled ? 'card is-cancelled' : techResolved ? 'card card-resolved' : 'card'
+      }
       onClick={onOpen}
       style={
-        d.priority && !closed
-          ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
-          : undefined
+        techResolved
+          ? { borderLeft: `4px solid ${d.priority ? pm.color : T.green}` }
+          : d.priority && !closed
+            ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
+            : undefined
       }
     >
+      {techResolved && (
+        <div className="resolved-banner">
+          <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <b>{L('resolvedByTech')}</b>
+            <div className="resolved-sub">
+              {[
+                d._raw && (d._raw.tech_done_by || d.technician),
+                d.techDoneAt && fmtFullDateTime(d.techDoneAt),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -4459,11 +4488,6 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
             <b>{d.technician}</b>
             {d.technicianPhone ? ` · ${d.technicianPhone}` : ''}
           </span>
-        </div>
-      )}
-      {d.techDone && d.stage === 'tech' && (
-        <div className="card-techdone">
-          <CheckCircle2 size={12} /> {L('techDoneBadge')}
         </div>
       )}
       {closed ? (
@@ -6248,6 +6272,12 @@ function StyleTag() {
       .cm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
       .cm-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.forestSoft}; background: ${T.mint}; border-radius: 8px; padding: 3px 8px; }
       .cm-chip.warn { color: ${T.amber}; background: ${T.amberSoft}; }
+      .card-resolved { background: #DCEFDD; border-color: #8CC491; box-shadow: 0 0 0 1px #8CC491 inset, 0 4px 14px rgba(46,125,50,.12); }
+      .card-resolved:hover { border-color: ${T.green}; box-shadow: 0 0 0 1px ${T.green} inset, 0 6px 18px rgba(46,125,50,.18); }
+      .card-resolved .card-next, .card-resolved .eq-ico { background: rgba(255,255,255,.75) !important; }
+      .resolved-banner { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 10px; padding: 8px 10px; border-radius: 10px; background: ${T.green}; color: #fff; font-size: 12.5px; line-height: 1.35; }
+      .resolved-banner b { font-weight: 800; }
+      .resolved-sub { font-size: 11px; opacity: .9; margin-top: 1px; overflow-wrap: anywhere; }
       .techdone-box { margin-top: 12px; border: 1px solid #cfe3d0; background: ${T.mint}; border-radius: 13px; padding: 11px 12px; }
       @media (max-width: 760px) {
         .tb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
