@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useMemo, useEffect } from 'react';
+import { registerListTargets, useSharedLists } from './lists.tsx';
 import {
   Truck,
   Package,
@@ -370,6 +371,8 @@ const PAY_OPTIONS = [
   'Through Link',
   'Cash & Online (Both)',
 ];
+/* fallback — asli lists Supabase `app_lists` se (lists.tsx) */
+registerListTargets({ DELIVERY_PERSONS, STORE_MANAGERS, VEHICLES, PAY_OPTIONS });
 
 /* ══════════════════════════════════════════════════════════════════════
    LOGIN  ── store dropdown se choose karo. Password store-wise 1001 se shuru
@@ -1378,6 +1381,7 @@ export default function App({
   pickKey = 0,
 }) {
   useEmbedFlag();
+  useSharedLists();
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
   const hosted = !!extSession;
