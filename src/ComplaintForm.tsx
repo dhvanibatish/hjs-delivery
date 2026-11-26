@@ -332,6 +332,7 @@ export default function ComplaintForm() {
   const recRef = useRef(null);
   const [sending, setSending] = useState(false);
   const [sendErr, setSendErr] = useState('');
+  const [tried, setTried] = useState(false); // Submit dabaya aur kuch baaki tha
   const [done, setDone] = useState(null);
   // ek complaint ki saari files ek hi folder mein: <mobile>/<date-time>-<random>/
   // Submit fail hua aur dobara dabaya to wahi folder + pehle se upload hui
@@ -376,17 +377,19 @@ export default function ComplaintForm() {
   // Chip sirf Books se aayi invoice pe; khud type karne wale ko text box hi dikhe
   const invKnown = !!(cust && cust.registered && cust.invoices.some((x) => x.invoice === invoice));
 
-  const missing = [];
+  // kya bharna baaki hai — [label, field id]. Problem likhna optional hai.
+  const need = [];
   if (step === 'form') {
-    if (!(cust && cust.registered && cust.name) && name.trim().length < 2) missing.push('full name');
-    if (!picked) missing.push('product');
-    if (prod === 'other' && !other.trim()) missing.push('product name');
-    if (typeDef && !ptype) missing.push(typeDef.label.toLowerCase());
-    if (!desc.trim()) missing.push('problem description');
-    if (!city) missing.push('city');
-    if (busyPhotos) missing.push('photos to finish processing');
-    if (rec.on) missing.push('voice recording to stop');
+    if (!(cust && cust.registered && cust.name) && name.trim().length < 2) need.push(['Your name', 'cf-name']);
+    if (!picked) need.push(['Product', 'cf-prod']);
+    if (prod === 'other' && !other.trim()) need.push(['Product name', 'cf-other']);
+    if (typeDef && !ptype) need.push([typeDef.label, 'cf-type']);
+    if (!city) need.push(['City', 'cf-city']);
+    if (busyPhotos) need.push(['Wait - photos are still loading', '']);
+    if (rec.on) need.push(['Stop the voice recording', '']);
   }
+  const missing = need.map((x) => x[0]);
+  const bad = (id) => tried && need.some((x) => x[1] === id);
 
   /* ── number check ── */
   const check = async () => {
@@ -426,6 +429,7 @@ export default function ComplaintForm() {
     setPhotoErr('');
     clearVoice();
     setSendErr('');
+    setTried(false);
   };
   const backToGate = () => {
     upRef.current = { folder: '', urls: new Map() };
@@ -541,7 +545,19 @@ export default function ComplaintForm() {
   /* ── submit ── */
   const submit = async (e) => {
     e.preventDefault();
-    if (missing.length || sending) return;
+    if (sending) return;
+    if (need.length) {
+      // Submit hamesha dabta hai — jo baaki hai wo laal ho jaata hai aur
+      // pehle khali field pe scroll + focus
+      setTried(true);
+      const first = need.find((x) => x[1]);
+      const el = first && document.getElementById(first[1]);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (el.focus) setTimeout(() => el.focus({ preventScroll: true }), 350);
+      }
+      return;
+    }
     setSending(true);
     setSendErr('');
     try {
@@ -571,7 +587,7 @@ export default function ComplaintForm() {
         product,
         product_type: typeDef ? ptype : null,
         item_name: picked.cat !== 'Other' && picked.name !== picked.cat ? picked.name : null,
-        description: desc.trim(),
+        description: desc.trim() || 'Problem not written by customer - see photos / voice note or call',
         photos: photoUrls,
         voice: voiceUrl,
         invoice: invoice.trim() || null,
@@ -710,6 +726,7 @@ export default function ComplaintForm() {
                   {!reg && <div className="unreg-t">Number not in our records - please add your name</div>}
                   <input
                     id="cf-name"
+                    className={bad('cf-name') ? 'bad' : ''}
                     type="text"
                     placeholder="Full name *"
                     value={name}
@@ -739,6 +756,7 @@ export default function ComplaintForm() {
               <div>
                 <select
                   id="cf-prod"
+                  className={bad('cf-prod') ? 'bad' : ''}
                   value={prod}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -768,7 +786,7 @@ export default function ComplaintForm() {
                 </div>
               )}
               {typeDef && !typeAuto && (
-                <div className="types" role="radiogroup" aria-label={typeDef.label}>
+                <div id="cf-type" tabIndex={-1} className={'types' + (bad('cf-type') ? ' bad' : '')} role="radiogroup" aria-label={typeDef.label}>
                   <span className="tl">
                     {typeDef.label} <span className="req">*</span>
                   </span>
@@ -791,6 +809,7 @@ export default function ComplaintForm() {
               {prod === 'other' && (
                 <input
                   id="cf-other"
+                  className={bad('cf-other') ? 'bad' : ''}
                   type="text"
                   placeholder="Product name *"
                   maxLength={60}
@@ -840,7 +859,7 @@ export default function ComplaintForm() {
                 />
               )}
               {!cityFromInvoice && (
-                <select id="cf-city" value={city} onChange={(e) => setCity(e.target.value)} style={{ marginTop: 8 }} aria-label="City">
+                <select id="cf-city" className={bad('cf-city') ? 'bad' : ''} value={city} onChange={(e) => setCity(e.target.value)} style={{ marginTop: 8 }} aria-label="City">
                   {!city && <option value="">Select your city *</option>}
                   {CITIES.map((c) => (
                     <option key={c} value={c}>
@@ -854,7 +873,7 @@ export default function ComplaintForm() {
             {/* ── Problem + photo + voice (ek hi card) ── */}
             <div className="card">
               <label className="l" htmlFor="cf-desc">
-                What's the problem? <span className="req">*</span>
+                What's the problem? <span className="opt">(optional)</span>
               </label>
               <textarea
                 id="cf-desc"
@@ -936,10 +955,14 @@ export default function ComplaintForm() {
 
             {sendErr && <div className="card senderr">{sendErr}</div>}
             <div className="btnrow">
-              <button className="btn" type="submit" disabled={missing.length > 0 || sending}>
+              <button className="btn" type="submit" disabled={sending}>
                 {sending ? 'Sending…' : 'Submit complaint'}
               </button>
-              <div className="missing">{missing.length ? 'Please fill: ' + missing.join(', ') : ''}</div>
+              {tried && need.length > 0 && (
+                <div className="missing bad-msg" role="alert">
+                  Please fill: <b>{missing.join(', ')}</b>
+                </div>
+              )}
             </div>
           </form>
         )}
@@ -1156,6 +1179,11 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform .btn:disabled{opacity:.45;cursor:not-allowed}
 .hjs-cform .btn:focus-visible,.hjs-cform .linkbtn:focus-visible,.hjs-cform .call:focus-visible,.hjs-cform .mic:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
 .hjs-cform .missing{text-align:center;color:var(--mute);font:13.5px system-ui,sans-serif;margin-top:8px;min-height:20px}
+.hjs-cform .bad-msg{color:var(--red);background:var(--redbg);border-radius:10px;padding:8px 12px;margin:10px auto 0;max-width:420px}
+.hjs-cform select.bad,.hjs-cform input.bad{border-color:var(--red)!important;box-shadow:0 0 0 3px var(--redbg)!important}
+.hjs-cform .types.bad{outline:none;border-radius:12px;padding:6px;margin-left:-6px;margin-right:-6px;background:var(--redbg)}
+.hjs-cform .types.bad .tl{color:var(--red)}
+.hjs-cform .opt{color:var(--mute);font-weight:400;font-size:13px;font-family:system-ui,sans-serif}
 .hjs-cform .stub{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(30,60,20,.12)}
 .hjs-cform .head{padding:26px 20px 18px;text-align:center}
 .hjs-cform .muted{color:var(--mute)}
