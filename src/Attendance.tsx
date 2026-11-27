@@ -2317,11 +2317,26 @@ const LSL_MARK = "Late SL";
 // Ginti payroll (lsl_count) jaisi — Full Day ki gayi LSL nahi gini.
 const lslNthOf = (logs: any[]) => {
   const out: Record<string, number> = {};
-  let n = 0;
+  const per: Record<string, number> = {};   // har mahine 1 se
   [...logs].filter((x: any) => x.late_mark === LSL_MARK && x.late_override !== "Present")
     .sort((a: any, b: any) => a.work_date.localeCompare(b.work_date))
-    .forEach((x: any) => { out[x.work_date] = ++n; });
+    .forEach((x: any) => {
+      const m = x.work_date.slice(0, 7);
+      out[x.work_date] = per[m] = (per[m] || 0) + 1;
+    });
   return out;
+};
+// ek bande ki ek din ki LSL number (us mahine mein) — server se
+const useLslNth = (empId: string | undefined, day: string | undefined, on: boolean) => {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!on || !empId || !day) { setN(0); return; }
+    supabase.from("attendance_logs").select("work_date, late_mark, late_override")
+      .eq("employee_id", empId).eq("late_mark", LSL_MARK)
+      .gte("work_date", monthStart(day)).lte("work_date", day)
+      .then(({ data }) => setN(lslNthOf(data || [])[day] || 0));
+  }, [empId, day, on]);
+  return n;
 };
 // "is mahine 2 LSL · 1 aur = half day" wali patti
 function LslStrip({ nth }: { nth: Record<string, number> }) {
@@ -2520,6 +2535,7 @@ function AttSummary({ me }: any) {
   const [err, setErr] = useState("");
   const [span, setSpan] = useState(7);
   const [custom, setCustom] = useState<any>(null);
+  const [lslNth, setLslNth] = useState<Record<string, number>>({});
 
   const wkEnd = custom ? custom.to : addDays(wk, span - 1);
   const wkFrom = custom ? custom.from : wk;
@@ -2537,6 +2553,11 @@ function AttSummary({ me }: any) {
       supabase.from("holidays").select("*").gte("hol_date", wkFrom).lte("hol_date", wkEnd),
     ]);
     setSess(a.data || []); setLogs(b.data || []); setLeaves(c.data || []); setHols(d.data || []);
+    // LSL number mahine ki 1 tareekh se gino (week beech mahine se shuru ho sakta hai)
+    const ls = await supabase.from("attendance_logs")
+      .select("work_date, late_mark, late_override").eq("employee_id", me.id)
+      .eq("late_mark", LSL_MARK).gte("work_date", monthStart(wkFrom)).lte("work_date", wkEnd);
+    setLslNth(lslNthOf(ls.data || []));
   };
   useEffect(() => { load(); }, [wk, span, custom, me.id]);
   const openSess = sess.find((x) => !x.out_at && x.work_date === istToday());
@@ -2593,8 +2614,10 @@ function AttSummary({ me }: any) {
         !(me.week_off_days || []).includes(new Date(k + "T00:00:00").getDay())
         && !hols.some((h: any) => h.hol_date === k)) === "UL",
       first: list[0]?.in_at, last: list.filter((x) => x.out_at).slice(-1)[0]?.out_at,
+      // Late Short Leave — mahine mein kaunsi (har 3rd = Half Day)
+      lsl: log && ["Present", "Late", "Short Leave"].includes(log.status) ? lslNth[key] || 0 : 0,
     };
-  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess]);
+  }), [wkFrom, dayCount, sess, logs, leaves, hols, me, openSess, lslNth]);
 
   const pos = (t: any) => {
     const m = minsOfDay(t);
@@ -2602,13 +2625,17 @@ function AttSummary({ me }: any) {
   };
 
   const summary = useMemo(() => {
-    const present = days.filter((d) => ["Present", "Late"].includes(d.log?.status)).length;
-    const half = days.filter((d) => d.log?.status === "Half Day").length;
+    // har 3rd LSL wala din Present se hat ke Half Day
+    const lslHalf = days.filter((d) => d.lsl && d.lsl % 3 === 0).length;
+    const lsl = days.filter((d) => d.lsl).length;
+    const present = days.filter((d) => ["Present", "Late"].includes(d.log?.status)
+      && !(d.lsl && d.lsl % 3 === 0)).length;
+    const half = days.filter((d) => d.log?.status === "Half Day").length + lslHalf;
     const weekend = days.filter((d) => d.off && !d.log).length;
     const holiday = days.filter((d) => d.hol && !d.off && !d.log).length;
     const paid = days.filter((d) => d.lv && !d.log && !d.off && !d.hol && !d.ul).length;
     const unpaid = days.filter((d) => d.ul && !d.log).length;
-    return { present, half, weekend, holiday, paid, unpaid,
+    return { present, half, weekend, holiday, paid, unpaid, lsl,
       payable: present + half * 0.5 + weekend + holiday + paid,
       hours: days.reduce((a, d) => a + d.mins, 0) };
   }, [days]);
@@ -2720,7 +2747,13 @@ function AttSummary({ me }: any) {
             <div className="att-dt r">{d.last ? fmtTime(d.last) : ""}</div>
             <div className="att-hrs">
               <b>{hhmm(d.mins).replace("h ", ":").replace("m", "")}</b>
-              <span>Hrs worked</span>
+              {d.lsl ? (
+                <span style={{ color: d.lsl % 3 === 0 ? "#9333ea" : "#c2410c", fontWeight: 700 }}
+                  title={d.lsl % 3 === 0 ? "Every 3rd Late Short Leave in a month = Half Day"
+                    : `Late Short Leave #${d.lsl} this month`}>
+                  {d.lsl % 3 === 0 ? `Half Day · LSL ${d.lsl}` : `Late SL ${d.lsl}`}
+                </span>
+              ) : <span>Hrs worked</span>}
             </div>
           </div>
         ))}
@@ -2737,6 +2770,7 @@ function AttSummary({ me }: any) {
           ["Payable Days", `${summary.payable} Days`, "#2563eb"],
           ["Present", `${summary.present} Days`, "#16a34a"],
           ["Half Day", `${summary.half} Day`, "#ea580c"],
+          ["Late short leave", `${summary.lsl}`, "#c2410c"],
           ["Paid leave", `${summary.paid} Day`, "#7c3aed"],
           ["Holidays", `${summary.holiday} Day`, "#0891b2"],
           ["Weekend", `${summary.weekend} Day`, "#d97706"],
@@ -8771,6 +8805,12 @@ function DaySheet({ d, me, onClose, admin = false, mgr = false, onChanged }: any
       .then(({ data }) => { setSess(data || []); setBusy(false); });
   }, [d.d]);
 
+  // Late Short Leave — is mahine ki kaunsi, har 3rd = Half Day
+  const isLsl = d.log?.late_mark === LSL_MARK && d.log?.late_override !== "Present";
+  const lslWaived = d.log?.late_mark === LSL_MARK && d.log?.late_override === "Present";
+  const lslN = useLslNth(me.id, d.d, isLsl);
+  const lslHalf = isLsl && lslN > 0 && lslN % 3 === 0;
+
   // admin ne din badla -> wapas list pe aur list taaza
   if (edit) {
     return (
@@ -8788,11 +8828,30 @@ function DaySheet({ d, me, onClose, admin = false, mgr = false, onChanged }: any
     <Sheet title={pretty} onClose={onClose}>
       <div className="att-card att-stack">
         <div className="att-between">
-          <span className={markClass(d.mark)} style={{ fontSize: 15, padding: "5px 14px" }}>
-            {markText(d.mark) || "—"}
+          <span className={lslHalf ? "att-mark m-H" : markClass(d.mark)}
+            style={{ fontSize: 15, padding: "5px 14px" }}>
+            {lslHalf ? "H" : markText(d.mark) || "—"}
           </span>
-          <b style={{ fontSize: 15 }}>{d.label}</b>
+          <b style={{ fontSize: 15 }}>{lslHalf ? "Half day (3rd Late Short Leave)" : d.label}</b>
         </div>
+
+        {isLsl && (
+          <div className="att-note" style={{ background: lslHalf ? "#f4ebff" : "#fff4ed",
+            borderColor: lslHalf ? "#d9d6fe" : "#fed7aa", color: lslHalf ? "#6b21a8" : "#9a3412" }}>
+            <span>
+              <b>Late Short Leave{lslN ? ` #${lslN} this month` : ""}</b> — checked in after 10:30
+              and 9 hours were not completed.{" "}
+              {lslHalf ? <b>Every 3rd Late Short Leave in a month = Half Day — 0.5 day cut.</b>
+                : lslN ? `${3 - (lslN % 3)} more this month = 1 half day.` : ""}
+            </span>
+          </div>
+        )}
+        {lslWaived && (
+          <p className="att-muted">
+            Late check-in — Late Short Leave waived (Full Day)
+            {d.log.late_waived_by ? ` by ${d.log.late_waived_by}` : ""}.
+          </p>
+        )}
 
         {admin && (
           <button className="att-btn sm" style={{ alignSelf: "flex-start" }}
