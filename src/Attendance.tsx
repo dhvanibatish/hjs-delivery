@@ -2313,6 +2313,33 @@ function MissedCheckoutNote({ day, onFix }: any) {
 // Late Short Leave: 10:30 ke baad check-in (aur 9 ghante poore nahi).
 // Har 3 LSL = payroll mein half day. Aaj LSL lagi to ek baar pop-up.
 const LSL_MARK = "Late SL";
+// mahine ke logs se: date -> is mahine ki kaunsi LSL (1, 2, 3...). Har 3rd = Half Day.
+// Ginti payroll (lsl_count) jaisi — Full Day ki gayi LSL nahi gini.
+const lslNthOf = (logs: any[]) => {
+  const out: Record<string, number> = {};
+  let n = 0;
+  [...logs].filter((x: any) => x.late_mark === LSL_MARK && x.late_override !== "Present")
+    .sort((a: any, b: any) => a.work_date.localeCompare(b.work_date))
+    .forEach((x: any) => { out[x.work_date] = ++n; });
+  return out;
+};
+// "is mahine 2 LSL · 1 aur = half day" wali patti
+function LslStrip({ nth }: { nth: Record<string, number> }) {
+  const n = Object.keys(nth).length;
+  if (!n) return null;
+  const half = Math.floor(n / 3);
+  const left = 3 - (n % 3);
+  return (
+    <div className="att-note" style={{ background: "#fff4ed", borderColor: "#fed7aa", color: "#9a3412" }}>
+      <span>
+        <b>{n} Late Short Leave</b> this month
+        {half ? <> · <b>{half} half day</b> cut ({half * 0.5} day)</> : null}
+        {" · "}{left === 3 ? "next 3 = 1 half day" : `${left} more = 1 half day`}.
+        {" "}Check in by 10:30, or complete 9 hours that day, to avoid it.
+      </span>
+    </div>
+  );
+}
 function LslPopup({ me, todayLog }: any) {
   const [n, setN] = useState<number | null>(null);
   const [show, setShow] = useState(false);
@@ -3037,11 +3064,18 @@ function CalendarTab({ me }: any) {
     ...Array.from({ length: total }, (_, i) => addDays(`${month}-01`, i)),
   ];
 
+  const lslNth = useMemo(() => lslNthOf(logs), [logs]);
+
   const info = (key: string) => {
     const log = logs.find((x: any) => x.work_date === key);
     const lv = leaves.find((x: any) => key >= x.from_date && key <= x.to_date);
     const hol = hols.find((x: any) => x.hol_date === key);
     const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
+    // Late Short Leave — har 3rd = Half Day
+    const n = lslNth[key];
+    if (log && n && ["Present", "Late", "Short Leave"].includes(log.status))
+      return { label: n % 3 === 0 ? `Half Day (LSL ${n})` : `Late SL ${n}`,
+               mins: log.worked_minutes, color: n % 3 === 0 ? "#9333ea" : "#c2410c" };
     if (log) return { label: log.status, mins: log.worked_minutes,
       color: { Present: "#16a34a", Late: "#d97706", "Half Day": "#9333ea",
                "Short Leave": "#c2410c", Absent: "#dc2626" }[log.status as string] || "#475467" };
@@ -3081,6 +3115,8 @@ function CalendarTab({ me }: any) {
       </div>
 
       {busy && <p className="att-muted">Loading…</p>}
+
+      {!busy && <LslStrip nth={lslNth} />}
 
       {!busy && (
         <div className="att-card">
@@ -8010,6 +8046,8 @@ function MyReportTab({ me }: any) {
     })();
   }, [month, me.id]);
 
+  const lslNth = useMemo(() => lslNthOf(logs), [logs]);
+
   const days = useMemo(() => {
     const from = `${month}-01`;
     const total = Number(lastDayOf(from).slice(-2));
@@ -8026,6 +8064,13 @@ function MyReportTab({ me }: any) {
                  label = log.status;
                  if (lv && lv.leave_type === "SHORT") {
                    mark = "PSL"; label = `${log.status} · Short leave`;
+                 }
+                 // Late Short Leave — har 3rd = Half Day
+                 const n = lslNth[d];
+                 if (n && ["P", "L", "S", "PSL"].includes(mark)) {
+                   mark = n % 3 === 0 ? "H" : "LSL";
+                   label = n % 3 === 0 ? `Half Day — 3rd Late Short Leave (#${n})`
+                     : `Late Short Leave #${n} this month`;
                  } }
       else if (hol) { mark = "F"; label = hol.name; }
       else if (off) { mark = "W"; label = "Week off"; }
@@ -8043,24 +8088,26 @@ function MyReportTab({ me }: any) {
       out.push({ d, mark, label, log, lv });
     }
     return out;
-  }, [logs, leaves, hols, month, me]);
+  }, [logs, leaves, hols, month, me, lslNth]);
 
   const t = useMemo(() => {
-    const c: any = { P: 0, L: 0, H: 0, A: 0, W: 0, F: 0, leave: 0, mins: 0 };
+    const c: any = { P: 0, L: 0, H: 0, A: 0, W: 0, F: 0, LSL: 0, leave: 0, mins: 0 };
     days.forEach((x) => {
-      if (["P", "L", "H", "A", "W", "F"].includes(x.mark)) c[x.mark]++;
+      if (["P", "L", "H", "A", "W", "F", "LSL"].includes(x.mark)) c[x.mark]++;
       else if (x.mark) c.leave++;
       if (x.log) c.mins += x.log.worked_minutes || 0;
     });
-    c.payable = c.P + c.L + c.H * 0.5 + c.leave;
+    c.lslAll = Object.keys(lslNth).length;
+    c.payable = c.P + c.L + c.LSL + c.H * 0.5 + c.leave;
     return c;
   }, [days]);
 
   const shownDays = days.filter((x) => {
     if (!x.mark) return false;
-    if (filter === "worked") return ["P", "L", "H"].includes(x.mark);
+    if (filter === "worked") return ["P", "L", "H", "LSL"].includes(x.mark);
     if (filter === "absent") return x.mark === "A";
-    if (filter === "leave") return !["P", "L", "H", "A", "W", "F"].includes(x.mark);
+    if (filter === "lsl") return !!lslNth[x.d];
+    if (filter === "leave") return !["P", "L", "H", "A", "W", "F", "LSL"].includes(x.mark);
     return true;
   });
 
@@ -8089,6 +8136,8 @@ function MyReportTab({ me }: any) {
           <b style={{ color: "#16a34a" }}>{t.P}</b><span>Present</span></button>
         <button className="att-stat clk" onClick={() => setFilter("worked")}>
           <b style={{ color: "#d97706" }}>{t.L}</b><span>Late</span></button>
+        <button className="att-stat clk" onClick={() => setFilter("lsl")}>
+          <b style={{ color: "#c2410c" }}>{t.lslAll}</b><span>Late short leave</span></button>
         <button className="att-stat clk" onClick={() => setFilter("worked")}>
           <b style={{ color: "#ea580c" }}>{t.H}</b><span>Half</span></button>
         <button className="att-stat clk" onClick={() => setFilter("absent")}>
@@ -8107,6 +8156,8 @@ function MyReportTab({ me }: any) {
 
       {busy && <p className="att-muted">Loading…</p>}
 
+      {!busy && <LslStrip nth={lslNth} />}
+
       {!busy && (
         <div className="att-list">
           <div className="att-hd">
@@ -8118,7 +8169,7 @@ function MyReportTab({ me }: any) {
 
           <div className="att-seg" style={{ padding: "10px 14px 4px" }}>
             {[["all", "All"], ["worked", "Worked"], ["absent", "Absent"],
-              ["leave", "Leave"]].map(([k, l]) => (
+              ["leave", "Leave"], ["lsl", "Late SL"]].map(([k, l]) => (
               <button key={k} className={filter === k ? "on" : ""}
                 onClick={() => setFilter(k)}>{l}</button>
             ))}
