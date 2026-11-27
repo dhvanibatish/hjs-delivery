@@ -1343,15 +1343,11 @@ function hoursSince(ts) {
 
 /* ── TECHNICIAN LOCK ──
    Technician assign ho gaya aur usne abhi "Work done" nahi kiya → ticket
-   lock: store "Resolved" pe aage nahi badha sakta (edit kar sakta hai).
-   Head (All stores) lock tod sakta hai. */
-let LOCK_BYPASS = false;
-function setLockBypass(session) {
-  LOCK_BYPASS = !!(session && session.isHead);
-}
+   lock: koi bhi (store, region, head) "Resolved" pe aage nahi badha sakta.
+   Details edit ho sakti hain. Lock sirf technician ke "Work done" se khulta hai. */
 const isTechLocked = (x) =>
   !!x && x.stage === 'tech' && !x.techDone && !!clean(x.technician);
-const techLockedFor = (x) => isTechLocked(x) && !LOCK_BYPASS;
+const techLockedFor = (x) => isTechLocked(x);
 
 /* technician kab assign hua — log mein aakhri "Moved to Technician Assigned" */
 function techAssignedAt(x) {
@@ -1671,7 +1667,6 @@ export default function App({
   const [viewBranch, setViewBranch] = useState(null);
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
-  setLockBypass(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
   const page = hosted
     ? view === 'dashboard'
@@ -2157,7 +2152,7 @@ export default function App({
         onDone={(id, rm) => markTechDone(id, rm, headTech)}
         embedded
         onlyAssigned={!session.isHead}
-        canDone={!!session.isHead}
+        canDone={false}
       />
     </>
   ) : null;
