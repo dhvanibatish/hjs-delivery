@@ -1130,7 +1130,7 @@ const markClass = (m: string) =>
   m && m.endsWith("?") ? "att-mark m-PEND"
   : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL", "S", "LSL"].includes(m) ? m : "X"}`;
 // muster roll par dikhne wala text — PSL = present, par us din short leave bhi li
-// S = der se check-in (11:30–12:45) -> system ki Short Leave (0.25 cut)
+// S = system ki Short Leave — 27 Nov se: 12:00–12:30 check-in ya 4:30–6:30 check-out
 const markText = (m: string) => (m === "PSL" ? "P (SL)" : m === "S" ? "SL" : m);
 const stateColor: Record<string, string> = {
   In: "#16a34a", Out: "#6b7280", Leave: "#2563eb", "Yet to check in": "#dc2626",
@@ -2264,7 +2264,24 @@ function LslTodayNote({ me, todayLog, tick }: any) {
   if (log.late_mark === "Half Day") {
     return (
       <div className="att-note err" style={{ marginTop: 10 }}>
-        <span><b>You logged in late today at {fmtTime(log.punch_in_at)}</b> (after 12:45) — Half Day.</span>
+        <span><b>You logged in late today at {fmtTime(log.punch_in_at)}</b> (after 12:30) — Half Day.</span>
+      </div>
+    );
+  }
+  // late + jaldi check-out -> Half Day
+  if (log.late_mark === "Short Leave" && log.early_mark === "Short Leave") {
+    return (
+      <div className="att-note err" style={{ marginTop: 10 }}>
+        <span><b>Late check-in ({fmtTime(log.punch_in_at)}) + early check-out</b> — Half Day.</span>
+      </div>
+    );
+  }
+  // 12:00–12:30 check-in -> Short Leave (9 ghante se nahi hat-ti)
+  if (log.late_mark === "Short Leave") {
+    return (
+      <div className="att-note" style={{ marginTop: 10, background: "#fff7ed",
+        border: "1px solid #fed7aa", color: "#9a3412" }}>
+        <span><b>You logged in late today at {fmtTime(log.punch_in_at)}</b> (12:00–12:30) — Short Leave.</span>
       </div>
     );
   }
@@ -2965,7 +2982,7 @@ function MatrixTab({ me }: any) {
         <b className="m-EL">EL</b> earned · <b className="m-SHORT">SHORT</b> short ·{" "}
         <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave ·{" "}
         <b className="m-PSL">P (SL)</b> present, short leave liya ·{" "}
-        <b className="m-S">SL</b> 11:30–12:45 check-in (short leave) ·{" "}
+        <b className="m-S">SL</b> short leave (12:00–12:30 check-in / 4:30–6:30 check-out) ·{" "}
         <b className="att-mark m-LSL" style={{ width: "auto" }}>LSL</b> late short leave ·{" "}
         <b className="att-mark m-LSLH">H</b> har 3rd LSL = half day ·{" "}
         <b className="m-PEND">EL?</b> leave lagi hai, approval pending
