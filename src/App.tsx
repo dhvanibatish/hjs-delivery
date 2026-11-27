@@ -46,7 +46,6 @@ import {
   ShieldCheck,
   LogOut,
   Building2,
-  Wrench,
   Car,
   ArrowRight,
   ArrowLeft,
@@ -1419,7 +1418,11 @@ export default function App() {
     try {
       if (typeof localStorage !== 'undefined') {
         const raw = localStorage.getItem('hjsSession');
-        if (raw) return JSON.parse(raw);
+        if (raw) {
+          const s = JSON.parse(raw);
+          // technician ab alag portal (/?technician) pe — yahan unka session nahi
+          return s && !s.isTech ? s : null;
+        }
       }
     } catch (_) {}
     return null;
@@ -4487,25 +4490,9 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit, onCancel }) 
 }
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
-const LOGIN_TAB = (on) => ({
-  flex: 1,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  border: 'none',
-  borderRadius: 9,
-  padding: 9,
-  fontSize: 13,
-  fontWeight: 700,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  background: on ? '#fff' : 'transparent',
-  color: on ? T.forest : T.inkSoft,
-  boxShadow: on ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
-});
 function Login({ onLogin }) {
-  const [mode, setMode] = useState('store'); // store | tech
+  // Technician login ab alag portal pe (/?technician) — yahan sirf store login
+  const mode = 'store';
   const [branch, setBranch] = useState('');
   const [tech, setTech] = useState('');
   const [pw, setPw] = useState('');
@@ -4628,34 +4615,6 @@ function Login({ onLogin }) {
       <div className="login-form">
         <div className="glass-card">
           <div style={{ marginBottom: 6 }}>
-            <div
-              style={{
-                display: 'flex',
-                gap: 6,
-                background: T.beige,
-                borderRadius: 12,
-                padding: 4,
-                marginBottom: 16,
-              }}
-            >
-              {[
-                ['store', 'Store'],
-                ['tech', 'Technician'],
-              ].map(([k, lbl]) => (
-                <button
-                  key={k}
-                  style={LOGIN_TAB(mode === k)}
-                  onClick={() => {
-                    setMode(k);
-                    setPw('');
-                    setErr('');
-                  }}
-                >
-                  {k === 'tech' ? <Wrench size={14} /> : <Building2 size={14} />}{' '}
-                  {lbl}
-                </button>
-              ))}
-            </div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
               {mode === 'tech' ? 'Technician login' : 'Store login'}
             </div>
