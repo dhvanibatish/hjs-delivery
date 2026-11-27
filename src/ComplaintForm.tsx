@@ -52,7 +52,7 @@ const PRODUCTS = [
   'Oxygen Cylinder',
   'Suction Machine',
 ];
-/* Category chips — customer ko item ka naam nahi pata hota, category aasaan hai */
+/* Step 1: category — customer ko item/invoice ka naam nahi pata, category aasaan hai */
 const CAT_LABEL = {
   BED: 'Hospital Bed',
   'OC-5L / OC-10L': 'Oxygen Concentrator',
@@ -62,10 +62,9 @@ const CAT_LABEL = {
   Monitor: 'Patient Monitor',
   'Oxygen Cylinder': 'Oxygen Cylinder',
   'Suction Machine': 'Suction Machine',
-  Physiotherapy: 'Physiotherapy',
   Other: 'Other',
 };
-const CAT_ORDER = [...PRODUCTS, 'Physiotherapy', 'Other'];
+const CAT_ORDER = [...PRODUCTS, 'Other'];
 const CITIES = [
   'NCR',
   'Gurgaon',
@@ -269,10 +268,11 @@ function toCustomer(rows, num) {
     itemNames(r).forEach((n) => {
       const k = n.toLowerCase();
       if (NOT_ITEM.test(k) || seen.has(k)) return;
-      const cat = catOf(n) || 'Other'; // physio / baaki items bhi dikhte hain
+      const cat = catOf(n) || 'Other'; // baaki items 'Other' mein
+      if (cat === 'Physiotherapy') return; // physio service is form mein nahi
       seen.add(k);
       // product jis (latest) invoice pe aaya — wahi invoice + store
-      products.push({ name: n, cat, type: guessType(cat, n), invoice: inv, store: String(r.store || '').toUpperCase(), kind: String(r.kind || '').trim() || (cat === 'Physiotherapy' ? 'Service' : /\bsale\b/.test(k) ? 'Sale' : /\brent|rental\b/.test(k) ? 'Rent' : '') });
+      products.push({ name: n, cat, type: guessType(cat, n), invoice: inv, store: String(r.store || '').toUpperCase(), kind: String(r.kind || '').trim() || (/\bsale\b/.test(k) ? 'Sale' : /\brent|rental\b/.test(k) ? 'Rent' : '') });
     });
   });
   const code = String(rows[0].store || '').toUpperCase();
@@ -338,7 +338,7 @@ export default function ComplaintForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [prod, setProd] = useState('');
-  const [cat, setCat] = useState(''); // pehle category, phir uska item
+  const [cat, setCat] = useState(''); // step 1: category, step 2: type, step 3: item
   const [ptype, setPtype] = useState('');
   const [other, setOther] = useState('');
   const [desc, setDesc] = useState('');
@@ -380,43 +380,52 @@ export default function ComplaintForm() {
   /* product options: registered → uske products; warna saari list */
   const prodOptions = useMemo(() => {
     if (cust && cust.registered && cust.products.length)
-      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${[p.cat !== 'Other' ? p.cat : '', p.kind].filter(Boolean).join(' · ') || 'Item'})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store, kind: p.kind }));
-    return [...PRODUCTS, 'Physiotherapy'].map((c) => ({ value: `c:${c}`, label: c, cat: c, type: '', name: c }));
+      return cust.products.map((p, i) => ({ value: `p${i}`, label: `${p.name} (${[p.kind, p.invoice ? 'Inv ' + p.invoice : ''].filter(Boolean).join(' · ') || 'Item'})`, cat: p.cat, type: p.type, name: p.name, invoice: p.invoice, store: p.store, kind: p.kind }));
+    return PRODUCTS.map((c) => ({ value: `c:${c}`, label: c, cat: c, type: '', name: c }));
   }, [cust]);
   const picked = prod === 'other' ? { cat: 'Other', name: other.trim() } : prodOptions.find((o) => o.value === prod) || null;
   const typeDef = picked ? TYPES[picked.cat] : null;
+  // Books item se type mila (registered) → sirf wahi dikhao, baaki options nahi
   const isReg = !!(cust && cust.registered && cust.products.length);
-  // registered: sirf wahi categories jinke items customer ke paas hain (+ Other)
-  const catList = isReg ? CAT_ORDER.filter((c) => c === 'Other' || cust.products.some((p) => p.cat === c)) : CAT_ORDER;
-  const itemsInCat = isReg ? prodOptions.filter((o) => o.cat === cat) : [];
+  // registered: sirf wahi categories / types jo customer ke paas hain
+  const catList = isReg ? CAT_ORDER.filter((c) => c === 'Other' || prodOptions.some((o) => o.cat === c)) : CAT_ORDER;
+  const itemsOf = (c) => (isReg ? prodOptions.filter((o) => o.cat === c) : []);
+  const inCat = itemsOf(cat);
+  const catTypes = TYPES[cat] ? (isReg ? TYPES[cat].opts.filter(([v]) => inCat.some((o) => o.type === v)) : TYPES[cat].opts) : [];
+  const matchItems = TYPES[cat] ? inCat.filter((o) => o.type === ptype) : inCat;
   const chooseItem = (v) => {
     setProd(v);
     const o = prodOptions.find((x) => x.value === v);
-    setPtype(o ? o.type : '');
+    if (o && o.type) setPtype(o.type);
     setEditInv(false);
     if (o && o.invoice) setInvoice(o.invoice); // invoice se store/city apne aap
+  };
+  const pickType = (c, t) => {
+    setPtype(t);
+    if (!isReg) return;
+    const m = itemsOf(c).filter((o) => o.type === t);
+    if (m.length === 1) chooseItem(m[0].value);
+    else setProd('');
   };
   const pickCat = (c) => {
     setCat(c);
     setEditInv(false);
+    setPtype('');
+    setProd('');
+    if (!c) return;
     if (!isReg) {
       setProd(c === 'Other' ? 'other' : `c:${c}`);
-      setPtype('');
       return;
     }
-    const items = prodOptions.filter((o) => o.cat === c);
-    if (c === 'Other' && !items.length) {
-      setProd('other');
-      setPtype('');
+    const items = itemsOf(c);
+    if (c === 'Other' && !items.length) return setProd('other');
+    if (TYPES[c]) {
+      const ts = [...new Set(items.map((o) => o.type))];
+      if (ts.length === 1) pickType(c, ts[0]);
     } else if (items.length === 1) chooseItem(items[0].value);
-    else {
-      setProd('');
-      setPtype('');
-    }
   };
-  // Books item se type mila (registered) → sirf wahi dikhao, baaki options nahi
-  const typeAuto = !!(typeDef && picked && picked.type && ptype === picked.type);
-  const typeLabel = typeDef ? ((typeDef.opts.find((o) => o[0] === ptype) || [ptype, ptype])[1]) : '';
+  const typeAuto = !!(isReg && catTypes.length === 1 && ptype);
+  const typeLabel = TYPES[cat] || typeDef ? (((TYPES[cat] || typeDef).opts.find((o) => o[0] === ptype) || [ptype, ptype])[1]) : '';
 
   // Invoice ka store code (CHD/…, NWD/…) → city. Mila to city ka sawaal nahi puchte.
   const invCode = String(invoice || '').split('/')[0].trim().toUpperCase();
@@ -432,9 +441,10 @@ export default function ComplaintForm() {
   const need = [];
   if (step === 'form') {
     if (!(cust && cust.registered && cust.name) && name.trim().length < 2) need.push(['Your name', 'cf-name']);
-    if (!picked) need.push([cat ? 'Product' : 'Category', cat ? 'cf-prod' : 'cf-cat']);
+    if (!cat) need.push(['Category', 'cf-cat']);
+    else if (TYPES[cat] && !ptype) need.push([TYPES[cat].label, 'cf-type']);
+    else if (!picked) need.push(['Product', 'cf-prod']);
     if (prod === 'other' && !other.trim()) need.push(['Product name', 'cf-other']);
-    if (typeDef && !ptype) need.push([typeDef.label, 'cf-type']);
     if (!city) need.push(['City', 'cf-city']);
     if (busyPhotos) need.push(['Wait - photos are still loading', '']);
     if (rec.on) need.push(['Stop the voice recording', '']);
@@ -469,10 +479,8 @@ export default function ComplaintForm() {
     setEmail('');
     const only = cu && cu.registered && cu.products.length === 1;
     setProd(only ? 'p0' : '');
-    // sirf 1 item → category bhi chuni; ek hi category ke kai items → category chuni, item customer chune
-    const cats = cu && cu.registered ? [...new Set(cu.products.map((p) => p.cat))] : [];
-    setCat(cats.length === 1 ? cats[0] : '');
     setPtype(only ? cu.products[0].type : '');
+    setCat(only ? cu.products[0].cat : '');
     setInvoice(only ? cu.products[0].invoice || '' : cu && cu.registered && cu.invoices.length === 1 ? cu.invoices[0].invoice : '');
     setEditInv(false);
     setOther('');
@@ -802,72 +810,60 @@ export default function ComplaintForm() {
 
             {/* ── Product + type + invoice + store (ek hi card) ── */}
             <div className="card">
-              <label className="l">
-                What needs service? <span className="req">*</span>
+              {/* Step 1 — category */}
+              <label className="l" htmlFor="cf-cat">
+                Product category <span className="req">*</span>
               </label>
-              <div id="cf-cat" tabIndex={-1} className={'cats' + (bad('cf-cat') ? ' bad' : '')} role="radiogroup" aria-label="Category">
+              <select id="cf-cat" className={bad('cf-cat') ? 'bad' : ''} value={cat} onChange={(e) => pickCat(e.target.value)}>
+                <option value="">-Select category-</option>
                 {catList.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    role="radio"
-                    aria-checked={cat === c}
-                    className={'tchip' + (cat === c ? ' on' : '')}
-                    onClick={() => pickCat(c)}
-                  >
+                  <option key={c} value={c}>
                     {CAT_LABEL[c] || c}
-                  </button>
+                  </option>
                 ))}
-              </div>
-              {isReg && cat && (itemsInCat.length > 0 || cat === 'Other') && (
+              </select>
+
+              {/* Step 2 — type (Bed / Wheelchair). Ek hi type ho to apne aap. */}
+              {cat && TYPES[cat] && !typeAuto && (
                 <>
-                  <label className="l" htmlFor="cf-prod" style={{ marginTop: 12 }}>
-                    {itemsInCat.length > 1 ? 'Which one?' : 'Your product'} <span className="req">*</span>
+                  <label className="l" htmlFor="cf-type" style={{ marginTop: 12 }}>
+                    {TYPES[cat].label} <span className="req">*</span>
                   </label>
-                  <select
-                    id="cf-prod"
-                    className={bad('cf-prod') ? 'bad' : ''}
-                    value={prod}
-                    onChange={(e) => chooseItem(e.target.value)}
-                  >
-                    {itemsInCat.length !== 1 && <option value="">-Select-</option>}
-                    {itemsInCat.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {`${o.name}${o.kind ? ` (${o.kind})` : ''}`}
+                  <select id="cf-type" className={bad('cf-type') ? 'bad' : ''} value={ptype} onChange={(e) => pickType(cat, e.target.value)}>
+                    <option value="">-Select type-</option>
+                    {catTypes.map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
                       </option>
                     ))}
-                    {cat === 'Other' && <option value="other">Something else</option>}
                   </select>
                 </>
               )}
               {typeAuto && (
                 <div className="facts">
                   <span className="fact">
-                    <small>{typeDef.label}</small>
+                    <small>{TYPES[cat].label}</small>
                     <b>{typeLabel}</b>
                   </span>
                 </div>
               )}
-              {typeDef && !typeAuto && (
-                <div id="cf-type" tabIndex={-1} className={'types' + (bad('cf-type') ? ' bad' : '')} role="radiogroup" aria-label={typeDef.label}>
-                  <span className="tl">
-                    {typeDef.label} <span className="req">*</span>
-                  </span>
-                  <div className="tchips">
-                    {typeDef.opts.map(([v, l]) => (
-                      <button
-                        key={v}
-                        type="button"
-                        role="radio"
-                        aria-checked={ptype === v}
-                        className={'tchip' + (ptype === v ? ' on' : '')}
-                        onClick={() => setPtype(v)}
-                      >
-                        {l.replace(/ (Bed|Wheelchair)$/, '')}
-                      </button>
+
+              {/* Step 3 — item: sirf tab jab ek se zyada match karein */}
+              {isReg && cat && (!TYPES[cat] || ptype) && (matchItems.length > 1 || cat === 'Other') && (
+                <>
+                  <label className="l" htmlFor="cf-prod" style={{ marginTop: 12 }}>
+                    Which one? <span className="req">*</span>
+                  </label>
+                  <select id="cf-prod" className={bad('cf-prod') ? 'bad' : ''} value={prod} onChange={(e) => chooseItem(e.target.value)}>
+                    <option value="">-Select-</option>
+                    {matchItems.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
                     ))}
-                  </div>
-                </div>
+                    {cat === 'Other' && <option value="other">Something else</option>}
+                  </select>
+                </>
               )}
               {prod === 'other' && (
                 <input
@@ -1156,8 +1152,6 @@ html,body{margin:0;padding:0;background:#eef3ea;color-scheme:light}
 .hjs-cform .tl{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink)}
 .hjs-cform .tchips{display:flex;flex-wrap:wrap;gap:8px}
 .hjs-cform .tchip{flex:1 1 auto;min-height:40px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);background:#fff;color:var(--ink);font:600 14px system-ui,sans-serif;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.hjs-cform .cats{display:flex;flex-wrap:wrap;gap:8px;outline:none;border-radius:12px}
-.hjs-cform .cats.bad{background:var(--redbg);padding:8px;margin:0 -8px}
 .hjs-cform .tchip.on{background:var(--leaf);border-color:var(--leaf);color:#fff}
 .hjs-cform h1{font-family:Lora,Georgia,serif;letter-spacing:normal;text-align:center;font-size:clamp(26px,5vw,32px);line-height:1.1;margin:14px 0 6px;font-weight:700;color:var(--ink)}
 .hjs-cform .rule{height:1px;background:var(--line);margin:0 0 18px}
