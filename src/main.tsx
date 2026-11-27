@@ -18,9 +18,11 @@ const isAttendance = params.has('attendance')
 const isPhysio = params.has('physio')
 const isPickupTest = params.has('pickuptest')
 const isComplaintForm = params.has('complaintform')
+// Technician portal — alag link: /?technician (sirf technician login + unki tickets)
+const isTechnician = params.has('technician')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isComplaintForm ? <Suspense fallback={null}><ComplaintForm /></Suspense> : isPickupTest ? <Suspense fallback={null}><PickupTest /></Suspense> : isComplaint ? <ComplaintApp /> : isPickup ? <Pickups /> : isAttendance ? <Attendance /> : isPhysio ? <Physio /> : <App />}
+    {isComplaintForm ? <Suspense fallback={null}><ComplaintForm /></Suspense> : isPickupTest ? <Suspense fallback={null}><PickupTest /></Suspense> : isTechnician ? <ComplaintApp technicianPortal /> : isComplaint ? <ComplaintApp /> : isPickup ? <Pickups /> : isAttendance ? <Attendance /> : isPhysio ? <Physio /> : <App />}
   </StrictMode>,
 )
