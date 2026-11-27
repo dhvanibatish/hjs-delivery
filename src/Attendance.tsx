@@ -404,6 +404,9 @@ const CSS = `
 .hjsatt .m-EL { color: #2563eb; } .hjsatt .m-SHORT { color: #0891b2; }
 .hjsatt .m-PSL { color: #0891b2; }
 .hjsatt .m-S { color: #c2410c; }
+/* Late Short Leave — grid mein alag dikhe; har 3rd = Half Day */
+.hjsatt .m-LSL { color: #c2410c; font-size: 10px; }
+.hjsatt .m-LSLH { color: #fff; background: #c2410c; border-radius: 4px; }
 .hjsatt .m-PEND { color: #b54708; opacity: .75; }
 .hjsatt .m-HALF { color: #0d9488; } .hjsatt .m-UL { color: #be123c; }
 .hjsatt .m-X { color: #2563eb; }
@@ -1125,7 +1128,7 @@ const pillClass = (s: string) => {
 };
 const markClass = (m: string) =>
   m && m.endsWith("?") ? "att-mark m-PEND"
-  : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL", "S"].includes(m) ? m : "X"}`;
+  : `att-mark m-${["P", "L", "H", "A", "W", "F", "EL", "SHORT", "HALF", "UL", "PSL", "S", "LSL"].includes(m) ? m : "X"}`;
 // muster roll par dikhne wala text — PSL = present, par us din short leave bhi li
 // S = der se check-in (11:30–12:45) -> system ki Short Leave (0.25 cut)
 const markText = (m: string) => (m === "PSL" ? "P (SL)" : m === "S" ? "SL" : m);
@@ -2743,6 +2746,13 @@ function MatrixTab({ me }: any) {
       (_, i) => addDays(from, i));
     setDates(all);
 
+    // Late Short Leave ke din (mahine mein kaunsi number) — har 3rd = Half Day
+    const ls = await supabase.rpc("lsl_days", { p_month: from });
+    const lslBy: Record<string, Record<string, number>> = {};
+    (ls.data || []).forEach((x: any) => {
+      (lslBy[x.emp_code] = lslBy[x.emp_code] || {})[x.work_date] = x.nth;
+    });
+
     if (approver) {
       const [{ data }, em] = await Promise.all([
         supabase.rpc("muster_roll_json", { p_month: from }),
@@ -2750,7 +2760,8 @@ function MatrixTab({ me }: any) {
           .select("id, emp_code, full_name, shift_start, shift_end, week_off_days"),
       ]);
       setRows((data || []).map((r: any) => ({
-        code: r.emp_code, name: r.full_name, marks: r.marks || {} })));
+        code: r.emp_code, name: r.full_name, marks: r.marks || {},
+        lsl: lslBy[r.emp_code] || {} })));
 
       const byCode: Record<string, any> = {};
       (em.data || []).forEach((e: any) => { byCode[e.emp_code] = e; });
@@ -2775,7 +2786,8 @@ function MatrixTab({ me }: any) {
           : off ? "W"
           : d > istToday() ? "" : "A";
       });
-      setRows([{ code: me.emp_code, name: me.full_name, marks }]);
+      setRows([{ code: me.emp_code, name: me.full_name, marks,
+        lsl: lslBy[me.emp_code] || {} }]);
       setEmpByCode({ [me.emp_code]: me });
     }
     setBusy(false);
@@ -2810,7 +2822,19 @@ function MatrixTab({ me }: any) {
     setPick((p: any) => (p && p.d === d ? { ...p, log: data || null } : p));
   };
 
-  const tally = (m: Record<string, string>) => {
+  // aaya hua din (P / L / S / PSL) — LSL wahi lagti hai
+  const CAME = ["P", "L", "S", "PSL"];
+  // grid cell: LSL wala din "LSL", har 3rd LSL "H" (half day)
+  const cellOf = (r: any, d: string) => {
+    const m = r.marks[d] || "";
+    const n = r.lsl?.[d];
+    if (!n || !CAME.includes(m)) return { cls: markClass(m), txt: markText(m), tip: "" };
+    return n % 3 === 0
+      ? { cls: "att-mark m-LSLH", txt: "H", tip: `Late Short Leave #${n} — every 3rd = Half Day` }
+      : { cls: "att-mark m-LSL", txt: "LSL", tip: `Late Short Leave #${n} this month` };
+  };
+
+  const tally = (m: Record<string, string>, lsl: Record<string, number> = {}) => {
     const v = Object.values(m);
     const n = (x: string) => v.filter((y) => y === x).length;
     // P/L/S/PSL = aaya (short leave se pay nahi katti), H = aadha din
@@ -2827,18 +2851,27 @@ function MatrixTab({ me }: any) {
         .reduce((o: Record<string, number>, x) => ({ ...o, [x]: (o[x] || 0) + 1 }), {}),
       pay: 0,
     };
+    // Late Short Leave: har 3rd = Half Day (payroll jaisa hi, 0.5 din kata)
+    const lslDays = Object.keys(lsl);
+    const cutDays = lslDays.filter((d) => lsl[d] % 3 === 0);
+    const cutCame = cutDays.filter((d) => CAME.includes(m[d])).length;
+    // 3rd LSL wala din P se hat ke Half Day mein gina
+    t.p -= cutCame; t.half += cutCame;
     // Pay = aaya + half×0.5 + paid leave + week off + holiday
     // (A, UL aur approval-pending leave pay mein nahi)
-    t.pay = t.p + t.half * 0.5 + t.l + t.w + t.f;
-    return t;
+    t.pay = t.p + t.half * 0.5 + t.l + t.w + t.f
+      - (cutDays.length - cutCame) * 0.5;
+    return { ...t, lsl: lslDays.length, lslHalf: cutDays.length };
   };
 
   const exportCsv = () => downloadCsv(
     shown.map((r) => {
       const o: any = { Code: r.code, Name: r.name };
       dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
-      const t = tally(r.marks);
-      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l; o["Unpaid"] = t.ul; o["Pay days"] = t.pay;
+      dates.forEach((d) => { if (r.lsl?.[d]) o[new Date(d).getDate()] = cellOf(r, d).txt; });
+      const t = tally(r.marks, r.lsl);
+      o["Present"] = t.p; o["Absent"] = t.a; o["Leave"] = t.l; o["Unpaid"] = t.ul;
+      o["Late SL"] = t.lsl; o["Half day (3 LSL)"] = t.lslHalf; o["Pay days"] = t.pay;
       return o;
     }), `HJS_matrix_${month}.csv`);
 
@@ -2872,6 +2905,8 @@ function MatrixTab({ me }: any) {
         <b className="m-HALF">HALF</b> half-day leave · <b className="m-UL">UL</b> unpaid leave ·{" "}
         <b className="m-PSL">P (SL)</b> present, short leave liya ·{" "}
         <b className="m-S">SL</b> 11:30–12:45 check-in (short leave) ·{" "}
+        <b className="att-mark m-LSL" style={{ width: "auto" }}>LSL</b> late short leave ·{" "}
+        <b className="att-mark m-LSLH">H</b> har 3rd LSL = half day ·{" "}
         <b className="m-PEND">EL?</b> leave lagi hai, approval pending
       </p>
 
@@ -2899,12 +2934,13 @@ function MatrixTab({ me }: any) {
                 <th style={{ textAlign: "center" }}>A</th>
                 <th style={{ textAlign: "center" }}>Lv</th>
                 <th style={{ textAlign: "center" }}>UL</th>
+                <th style={{ textAlign: "center" }}>LSL</th>
                 <th style={{ textAlign: "center" }}>Pay</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((r) => {
-                const t = tally(r.marks);
+                const t = tally(r.marks, r.lsl);
                 const chips: [string, number, string, string][] = [
                   ["Present", t.present, "#ecfdf3", "#067647"],
                   ["Late", t.late, "#fffaeb", "#b54708"],
@@ -2914,6 +2950,8 @@ function MatrixTab({ me }: any) {
                   ["Week off", t.w, "#f2f4f7", "#475467"],
                   ["Holiday", t.f, "#f2f4f7", "#475467"],
                   ["Unpaid", t.ul, "#fdf2fa", "#c11574"],
+                  ["Late short leave", t.lsl, "#fff4ed", "#c2410c"],
+                  ["Half day (3 LSL)", t.lslHalf, "#c2410c", "#fff"],
                   ["Pending approval", t.pend, "#fffaeb", "#b54708"],
                   ...Object.entries(t.byLeave).map(
                     ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
@@ -2927,20 +2965,23 @@ function MatrixTab({ me }: any) {
                       {dates.map((d) => (
                         <td key={d} style={{ textAlign: "center",
                           cursor: r.marks[d] || canEdit(r.code) ? "pointer" : "default" }}
-                          title={canEdit(r.code) ? "Open / change this day"
-                            : r.marks[d] ? "Open this day" : undefined}
+                          title={cellOf(r, d).tip || (canEdit(r.code) ? "Open / change this day"
+                            : r.marks[d] ? "Open this day" : undefined)}
                           onClick={() => openDay(r.code, d, r.marks[d])}>
-                          <span className={markClass(r.marks[d])}>{markText(r.marks[d]) || "·"}</span>
+                          <span className={cellOf(r, d).cls}>{cellOf(r, d).txt || "·"}</span>
                         </td>
                       ))}
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{t.p}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626" }}>{t.a}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{t.l}</td>
                       <td style={{ textAlign: "center", fontWeight: 700, color: "#c11574" }}>{t.ul}</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#c2410c" }}
+                        title={t.lslHalf ? `${t.lslHalf} half day (every 3rd LSL)` : undefined}>
+                        {t.lsl}{t.lslHalf ? <sup style={{ fontSize: 9 }}> −{t.lslHalf * 0.5}</sup> : null}</td>
                       <td style={{ textAlign: "center", fontWeight: 800, color: "#101828" }}>{t.pay}</td>
                     </tr>
                     <tr className="tot" key={r.code + "-t"}>
-                      <td className="name" colSpan={dates.length + 6}>
+                      <td className="name" colSpan={dates.length + 7}>
                         <div className="att-totchips">
                           {chips.filter(([, v]) => v > 0).map(([k, v, bg, fg]) => (
                             <span key={k} style={{ background: bg, color: fg }}>{k} {v}</span>
@@ -2955,7 +2996,7 @@ function MatrixTab({ me }: any) {
                 );
               })}
               {!shown.length && (
-                <tr><td className="name" colSpan={dates.length + 6}>No data for this month.</td></tr>
+                <tr><td className="name" colSpan={dates.length + 7}>No data for this month.</td></tr>
               )}
             </tbody>
           </table>
@@ -6893,7 +6934,8 @@ function AttSheetTab() {
   // mein nahi · Holiday = holiday pe check-in nahi kiya to 1, kiya to 0 aur
   // C.M mein +2 (hol_credit mein yaad rakha, taaki dobara refill pe double na ho
   // aur agle mahine carry na ho) · Leave = A, UL, har leave = 1,
-  // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini.
+  // H / HALF = 0.5, SHORT aur P (SL) = 0, pending "EL?" bhi leave gini,
+  // har 3rd Late Short Leave = +0.5 (payroll jaisa).
   // Short leave: mahine ki pehli 2 (SHORT + P (SL) + der/jaldi wali S milake)
   // free; 3rd se S = 0.25 (SHORT apply hi 2 ke baad block hai).
   // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
@@ -6904,6 +6946,12 @@ function AttSheetTab() {
     if (error) { setErr(error.message); setBusy(false); return; }
     const byCode: Record<string, Record<string, string>> = {};
     (data || []).forEach((g: any) => { byCode[g.emp_code] = g.marks || {}; });
+    // har 3rd Late Short Leave = Half Day -> Leave mein +0.5
+    const ls = await supabase.rpc("lsl_days", { p_month: from });
+    const lslCut: Record<string, number> = {};
+    (ls.data || []).forEach((x: any) => {
+      if (x.nth % 3 === 0) lslCut[x.emp_code] = (lslCut[x.emp_code] || 0) + 0.5;
+    });
     const [{ data: em }, { data: hl }] = await Promise.all([
       supabase.from("employees").select("emp_code, week_off_days, branch_id"),
       supabase.from("holidays").select("hol_date, branch_id")
@@ -6955,6 +7003,7 @@ function AttSheetTab() {
         }
         else lv += leaveOf(m);
       });
+      lv += lslCut[r.emp_code] || 0;
       // C.M se pichla holiday credit hatao, naya jodo
       const cm = +((Number(r.cm_credit) || 0) - (Number(r.hol_credit) || 0) + comp).toFixed(2);
       let nr: any = { ...r, total_days: total, week_off: off, holiday: hol,
@@ -7281,11 +7330,20 @@ function LateComersTab({ me }: any) {
     setBusy(true); setErr("");
     supabase.from("attendance_logs")
       .select("employee_id, work_date, punch_in_at, punch_out_at, worked_minutes, late_override")
-      .eq("late_mark", LSL_MARK).gte("work_date", from).lte("work_date", to)
+      // mahine ki 1 tareekh se lao, taaki "is mahine ki kaunsi LSL" sahi gine
+      .eq("late_mark", LSL_MARK).gte("work_date", monthStart(from)).lte("work_date", to)
       .order("work_date", { ascending: false }).order("punch_in_at")
       .then(({ data, error }) => {
         if (error) setErr(error.message);
-        setLsl((data || []).filter((r: any) => r.late_override !== "Present"));
+        const kept = (data || []).filter((r: any) => r.late_override !== "Present");
+        // har bande ki har mahine mein number: 1, 2, 3 (3rd = Half Day) ...
+        const seen: Record<string, number> = {};
+        [...kept].sort((a: any, b: any) => a.work_date.localeCompare(b.work_date))
+          .forEach((r: any) => {
+            const k = `${r.employee_id}|${r.work_date.slice(0, 7)}`;
+            r.nth = seen[k] = (seen[k] || 0) + 1;
+          });
+        setLsl(kept.filter((r: any) => r.work_date >= from));
         setBusy(false);
       });
   }, [from, to]);
@@ -7298,9 +7356,6 @@ function LateComersTab({ me }: any) {
   });
   // date-wise groups
   const dates = Array.from(new Set(rows.map((r: any) => r.work_date)));
-  // is range mein har bande ki kitni
-  const perEmp: Record<string, number> = {};
-  rows.forEach((r: any) => { perEmp[r.employee_id] = (perEmp[r.employee_id] || 0) + 1; });
   const isToday = (d: string) => d === istToday();
 
   return (
@@ -7322,12 +7377,14 @@ function LateComersTab({ me }: any) {
               "Check-in": fmtTime(r.punch_in_at),
               "Check-out": r.punch_out_at ? fmtTime(r.punch_out_at) : "",
               Hours: r.worked_minutes ? hhmm(r.worked_minutes) : "",
+              "LSL no. (month)": r.nth,
+              "Half day": r.nth % 3 === 0 ? "Yes" : "",
             };
           }), `HJS_late_short_leave_${from}_to_${to}.csv`)}>CSV</button>
       </div>
       <p className="att-muted">
         Checked in after 10:30 and did not complete 9 hours — Late Short Leave stayed.
-        Every 3 = half day cut. Made Full Day by a manager are not shown.
+        Counted month-wise — every 3rd Late Short Leave in a month = Half Day.
       </p>
       <Note>{err}</Note>
       {busy ? <p className="att-muted">Loading…</p> : (
@@ -7346,7 +7403,8 @@ function LateComersTab({ me }: any) {
                 </div>
                 {list.map((r: any) => {
                   const e: any = emp(r.employee_id);
-                  const n = perEmp[r.employee_id] || 1;
+                  const n = r.nth || 1;
+                  const half = n % 3 === 0;
                   return (
                     <div className="att-row" key={`${d}-${r.employee_id}`} style={{ flexWrap: "wrap" }}>
                       <Avatar name={e.full_name || "?"} />
@@ -7361,12 +7419,13 @@ function LateComersTab({ me }: any) {
                           {r.worked_minutes ? `${hhmm(r.worked_minutes)} worked` : ""}
                         </span>
                       </span>
-                      <span className={pillClass("Short Leave")}>
-                        {isToday(d) && !r.punch_out_at ? "Late SL · still in" : "Late Short Leave"}
+                      <span className={pillClass(half ? "Half Day" : "Short Leave")}>
+                        {isToday(d) && !r.punch_out_at ? "Late SL · still in"
+                          : half ? "Half Day (3rd LSL)" : "Late Short Leave"}
                       </span>
-                      <span className="att-muted" style={{ width: 92, textAlign: "right",
-                        color: n >= 3 ? "#b42318" : undefined, fontWeight: n >= 3 ? 700 : undefined }}>
-                        {n}× in period
+                      <span className="att-muted" style={{ width: 110, textAlign: "right",
+                        color: half ? "#b42318" : undefined, fontWeight: half ? 700 : undefined }}>
+                        #{n} this month
                       </span>
                     </div>
                   );
@@ -7483,6 +7542,8 @@ function ReportsTab({ isAdmin = false }: any) {
   const [month, setMonth] = useState(istToday().slice(0, 7));
   const [data, setData] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
+  // Late Short Leave ke din: emp_code -> { date: number (1,2,3..) }
+  const [lslBy, setLslBy] = useState<Record<string, Record<string, number>>>({});
 
   useEffect(() => {
     (async () => {
@@ -7491,7 +7552,16 @@ function ReportsTab({ isAdmin = false }: any) {
       // muster roll ab har bande ka ek hi row deta hai (marks JSON mein),
       // warna 87 x 31 rows server ki 1000 wali cap se kat jaate the
       const rpcName = kind === "muster" ? "muster_roll_json" : fn;
-      const { data: d } = await supabase.rpc(rpcName, { p_month: `${month}-01` });
+      const [{ data: d }, ls] = await Promise.all([
+        supabase.rpc(rpcName, { p_month: `${month}-01` }),
+        kind === "muster" ? supabase.rpc("lsl_days", { p_month: `${month}-01` })
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const by: Record<string, Record<string, number>> = {};
+      (ls.data || []).forEach((x: any) => {
+        (by[x.emp_code] = by[x.emp_code] || {})[x.work_date] = x.nth;
+      });
+      setLslBy(by);
       setData(d || []); setBusy(false);
     })();
   }, [kind, month]);
@@ -7501,7 +7571,11 @@ function ReportsTab({ isAdmin = false }: any) {
     const byEmp: Record<string, any> = {};
     const dset = new Set<string>();
     data.forEach((r: any) => {
-      const marks = r.marks || {};
+      // LSL wale din "LSL", har 3rd LSL "H" (half day) — Monthly Grid jaisa
+      const marks: Record<string, string> = { ...(r.marks || {}) };
+      Object.entries(lslBy[r.emp_code] || {}).forEach(([d, n]) => {
+        if (["P", "L", "S", "PSL"].includes(marks[d])) marks[d] = n % 3 === 0 ? "H" : "LSL";
+      });
       byEmp[r.emp_code] = { name: r.full_name, marks };
       Object.keys(marks).forEach((d) => dset.add(d));
     });
@@ -7516,13 +7590,13 @@ function ReportsTab({ isAdmin = false }: any) {
       v.t = t;
       // 30 din ke mahine ki poori salary. Week off aur holiday paid hain —
       // sirf absent kata hai, half day aadha. 26 present + 4 Sunday = 30 payable.
-      v.payable = (t.P || 0) + (t.L || 0) + (t.H || 0) * 0.5
+      v.payable = (t.P || 0) + (t.L || 0) + (t.LSL || 0) + (t.H || 0) * 0.5
         + (t.W || 0) + (t.F || 0)
-        + Object.keys(t).filter((k) => !["P", "L", "H", "A", "W", "F", "UL"].includes(k))
+        + Object.keys(t).filter((k) => !["P", "L", "LSL", "H", "A", "W", "F", "UL"].includes(k))
             .reduce((a, k) => a + (k === "HALF" ? t[k] * 0.5 : k === "SHORT" ? t[k] * 0.25 : t[k]), 0);
     });
     return { rows: Object.entries(byEmp), dates: dates.sort() };
-  }, [data, kind]);
+  }, [data, kind, lslBy]);
 
   return (
     <>
@@ -7555,10 +7629,11 @@ function ReportsTab({ isAdmin = false }: any) {
               ? muster.rows.map(([code, v]: any) => {
                   const o: any = { Code: code, Name: v.name };
                   muster.dates.forEach((d) => { o[new Date(d).getDate()] = v.marks[d] || ""; });
-                  o.Present = v.t.P || 0; o.Late = v.t.L || 0; o.Half = v.t.H || 0;
+                  o.Present = v.t.P || 0; o.Late = v.t.L || 0;
+                  o["Late SL"] = v.t.LSL || 0; o.Half = v.t.H || 0;
                   o.Absent = v.t.A || 0;
                   o.Leave = Object.keys(v.t)
-                    .filter((k) => !["P","L","H","A","W","F"].includes(k))
+                    .filter((k) => !["P","L","LSL","H","A","W","F"].includes(k))
                     .reduce((a: number, k) => a + v.t[k], 0);
                   o["Week off"] = v.t.W || 0; o.Holiday = v.t.F || 0;
                   o.Payable = v.payable;
@@ -7575,7 +7650,8 @@ function ReportsTab({ isAdmin = false }: any) {
           <div className="att-legend">
             <span><i className="m-P">P</i> present</span>
             <span><i className="m-L">L</i> late</span>
-            <span><i className="m-H">H</i> half</span>
+            <span><i className="m-H">H</i> half (har 3rd LSL bhi)</span>
+            <span><i className="m-LSL">LSL</i> late short leave</span>
             <span><i className="m-A">A</i> absent</span>
             <span><i className="m-W">W</i> week off</span>
             <span><i className="m-F">F</i> holiday</span>
@@ -7589,6 +7665,7 @@ function ReportsTab({ isAdmin = false }: any) {
                   {muster.dates.map((d) => <th key={d}>{new Date(d).getDate()}</th>)}
                   <th className="tot">P</th>
                   <th className="tot">L</th>
+                  <th className="tot">LSL</th>
                   <th className="tot">H</th>
                   <th className="tot">A</th>
                   <th className="tot">Leave</th>
@@ -7609,10 +7686,11 @@ function ReportsTab({ isAdmin = false }: any) {
                     ))}
                     <td className="tot" style={{ color: "#16a34a" }}>{v.t.P || 0}</td>
                     <td className="tot" style={{ color: "#d97706" }}>{v.t.L || 0}</td>
+                    <td className="tot" style={{ color: "#c2410c" }}>{v.t.LSL || 0}</td>
                     <td className="tot" style={{ color: "#ea580c" }}>{v.t.H || 0}</td>
                     <td className="tot" style={{ color: "#dc2626" }}>{v.t.A || 0}</td>
                     <td className="tot" style={{ color: "#2563eb" }}>
-                      {Object.keys(v.t).filter((k) => !["P","L","H","A","W","F"].includes(k))
+                      {Object.keys(v.t).filter((k) => !["P","L","LSL","H","A","W","F"].includes(k))
                         .reduce((a, k) => a + v.t[k], 0)}
                     </td>
                     <td className="tot att-muted">{v.t.W || 0}</td>
