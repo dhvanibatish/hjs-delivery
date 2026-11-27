@@ -2281,7 +2281,7 @@ export default function App({
         {active && (
           <Drawer
             d={active}
-            isHead={session.isPower}
+            isHead={!!(session.isPower || session.isHead)}
             canPriority={canSetPriority(session)}
             onPriority={(p) => setPriority(active.ticket_id, p)}
             canDelete={session.isPower}
@@ -2442,7 +2442,7 @@ export default function App({
       {active && (
         <Drawer
           d={active}
-          isHead={session.isPower}
+          isHead={!!(session.isPower || session.isHead)}
           canPriority={canSetPriority(session)}
           onPriority={(p) => setPriority(active.ticket_id, p)}
           canDelete={session.isPower}
