@@ -27,6 +27,7 @@ import {
   Accessibility,
   Stethoscope,
   Wrench,
+  Lock,
   RefreshCw,
   CloudOff,
   Pencil,
@@ -704,6 +705,15 @@ const TXT = {
   tPrioSaved: { en: 'Priority updated', hi: 'Priority update hui' },
   // technician
   techDoneBadge: { en: 'Technician: work done', hi: 'Technician: kaam ho gaya' },
+  resolvedByTech: { en: 'Resolved by technician', hi: 'Technician ne resolve kiya' },
+  techLockedShort: { en: 'Waiting for technician', hi: 'Technician ka intezaar' },
+  techLockedMsg: {
+    en: 'Locked until the technician marks the work done. You can still edit the details.',
+    hi: 'Jab tak technician "Work done" nahi karta, ticket aage nahi badhega. Details edit kar sakte ho.',
+  },
+  ttAssigned: { en: 'Assigned', hi: 'Assign hue' },
+  ttAgo: { en: 'ago', hi: 'ho gaye' },
+  ttDoneIn: { en: 'Done in', hi: 'Kaam hua' },
   techDoneTitle: { en: 'Technician marked work done', hi: 'Technician ne kaam poora kiya' },
   techDoneAt: { en: 'Done at', hi: 'Kab' },
   techDoneRemark: { en: 'Technician remark', hi: 'Technician remark' },
@@ -1330,6 +1340,76 @@ function hoursSince(ts) {
   if (isNaN(d)) return 0;
   return (Date.now() - d.getTime()) / HOUR;
 }
+
+/* ── TECHNICIAN LOCK ──
+   Technician assign ho gaya aur usne abhi "Work done" nahi kiya → ticket
+   lock: store "Resolved" pe aage nahi badha sakta (edit kar sakta hai).
+   Head (All stores) lock tod sakta hai. */
+let LOCK_BYPASS = false;
+function setLockBypass(session) {
+  LOCK_BYPASS = !!(session && session.isHead);
+}
+const isTechLocked = (x) =>
+  !!x && x.stage === 'tech' && !x.techDone && !!clean(x.technician);
+const techLockedFor = (x) => isTechLocked(x) && !LOCK_BYPASS;
+
+/* technician kab assign hua — log mein aakhri "Moved to Technician Assigned" */
+function techAssignedAt(x) {
+  const log = existingLog(x);
+  for (let i = log.length - 1; i >= 0; i--) {
+    const ev = log[i];
+    if (ev && ev.stage === 'tech' && ev.action !== 'Edited' && ev.ts) return ev.ts;
+  }
+  return (x && x._raw && (x._raw.updated_at || x._raw.created_at)) || null;
+}
+/* 75 min → "1 h 15 min", 50 h → "2 din 2 h" */
+function fmtElapsed(fromTs, toTs) {
+  if (!fromTs) return '';
+  const a = new Date(fromTs).getTime();
+  const b = toTs ? new Date(toTs).getTime() : Date.now();
+  if (isNaN(a) || isNaN(b)) return '';
+  const mins = Math.max(0, Math.floor((b - a) / 60000));
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  const dayW = HJS_LANG === 'hi' ? 'din' : 'd';
+  if (d > 0) return `${d} ${dayW} ${h} h`;
+  if (h > 0) return `${h} h ${m} min`;
+  return `${m} min`;
+}
+/* har minute re-render, taaki timer chalta dikhe */
+function useMinuteTick(on = true) {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setN((n) => n + 1), 60000);
+    return () => clearInterval(t);
+  }, [on]);
+}
+/* Technician timer chip — assign ke baad kitna time hua (done ho gaya to
+   kitne time mein hua). 24h+ amber, 48h+ red. */
+function TechTimer({ d, compact }) {
+  const since = techAssignedAt(d);
+  useMinuteTick(!!since && !d.techDone);
+  if (!since) return null;
+  const done = !!d.techDone;
+  const hrs = done ? 0 : hoursSince(since);
+  const tone = done ? 'ok' : hrs >= 48 ? 'late' : hrs >= 24 ? 'warn' : 'run';
+  return (
+    <div className={`tech-timer tt-${tone}`} style={compact ? { marginTop: 8 } : null}>
+      <Clock size={12} />
+      {done ? (
+        <span>
+          {L('ttDoneIn')} <b>{fmtElapsed(since, d.techDoneAt)}</b>
+        </span>
+      ) : (
+        <span>
+          {L('ttAssigned')} <b>{fmtElapsed(since)}</b> {L('ttAgo')}
+        </span>
+      )}
+    </div>
+  );
+}
 /*
   Ek ticket kaha dikhe:
   - PENDING (received/talk/status)  → hamesha "Today" me.
@@ -1544,11 +1624,32 @@ export default function App({
   pickKey = 0,
   onLogout: extLogout = null,
   onNav: extNav = null, // hosted: delivery app ka page badlo (complaints ⇄ techadmin)
+  technicianPortal = false, // /?technician — sirf technician login + unka view
 }) {
   // extSession aaye = delivery app ke andar embed ho raha hai. Tab na Login
   // screen, na apna Sidebar/Topbar — sirf board/dashboard render hota hai.
   const hosted = !!extSession;
-  const [ownSession, setOwnSession] = useState(null);
+  // technician portal: login phone pe yaad rahe (apni alag key, store
+  // login se takraav nahi). Store wale ?complaints pe technician session na chale.
+  const TECH_KEY = 'hjsTechSession';
+  const [ownSession, setOwnSession] = useState(() => {
+    if (!technicianPortal) return null;
+    try {
+      const raw = localStorage.getItem(TECH_KEY);
+      const s = raw ? JSON.parse(raw) : null;
+      return s && s.isTech ? s : null;
+    } catch (_) {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (!technicianPortal) return;
+    try {
+      if (ownSession && ownSession.isTech)
+        localStorage.setItem(TECH_KEY, JSON.stringify(ownSession));
+      else localStorage.removeItem(TECH_KEY);
+    } catch (_) {}
+  }, [ownSession, technicianPortal]);
   const session = hosted ? extSession : ownSession;
   const setSession = hosted ? () => {} : setOwnSession;
   const [tickets, setTickets] = useState([]);
@@ -1570,6 +1671,7 @@ export default function App({
   const [viewBranch, setViewBranch] = useState(null);
   // kaun logged-in hai — har app_log event isi se stamp hota hai
   setActor(session);
+  setLockBypass(session);
   const [ownPage, setOwnPage] = useState('tickets'); // tickets | dashboard
   const page = hosted
     ? view === 'dashboard'
@@ -1813,8 +1915,13 @@ export default function App({
   };
 
   const applyMove = async (ticketId, toStage, fields, mode) => {
-    const patch = buildPatch(toStage, fields, mode);
     const cur = tickets.find((x) => x.ticket_id === ticketId);
+    // technician ne abhi resolve nahi kiya → store aage nahi badha sakta
+    if (mode === 'move' && toStage === 'resolution' && techLockedFor(cur)) {
+      ping(L('techLockedMsg'));
+      return;
+    }
+    const patch = buildPatch(toStage, fields, mode);
     // technician badla to purana "kaam ho gaya" reset — naya banda fir se karega
     if (
       toStage === 'tech' &&
@@ -1860,6 +1967,10 @@ export default function App({
     const cur = tickets.find((x) => x.ticket_id === ticketId);
     const goingBack =
       cur && stageIndex(toStage) < stageIndex(cur.stage || 'received');
+    if (!goingBack && techLockedFor(cur)) {
+      ping(L('techLockedMsg'));
+      return;
+    }
     if (goingBack) {
       const ok =
         typeof window === 'undefined'
@@ -2018,7 +2129,12 @@ export default function App({
     }
   };
 
-  if (!session) return <Login onLogin={setSession} />;
+  if (!session)
+    return technicianPortal ? (
+      <Login onLogin={setSession} techOnly />
+    ) : (
+      <Login onLogin={setSession} />
+    );
 
   // ── Technician view: app ke andar ek page (sidebar/topbar wahi).
   // Head = saare stores; region / store login = sirf apne store(s) ki
@@ -2041,6 +2157,7 @@ export default function App({
         onDone={(id, rm) => markTechDone(id, rm, headTech)}
         embedded
         onlyAssigned={!session.isHead}
+        canDone={!!session.isHead}
       />
     </>
   ) : null;
@@ -2954,8 +3071,9 @@ function CategoriesView({ items, loading, onOpen, onMove, onCommit }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
-function Login({ onLogin }) {
-  const [mode, setMode] = useState('store'); // store | tech
+function Login({ onLogin, techOnly = false }) {
+  // techOnly = /?technician portal; warna sirf store login (?complaints)
+  const mode = techOnly ? 'tech' : 'store';
   const [branch, setBranch] = useState('');
   const [tech, setTech] = useState('');
   const [pw, setPw] = useState('');
@@ -3028,19 +3146,35 @@ function Login({ onLogin }) {
                 Healthy Jeena Sikho
               </div>
               <div style={{ fontSize: 12.5, opacity: 0.75 }}>
-                Complaint Desk
+                {techOnly ? 'Technician Portal' : 'Complaint Desk'}
               </div>
             </div>
           </div>
-          <h1 className="hero-h1">
-            Every complaint,
-            <br />
-            in one place.
-          </h1>
-          <p className="hero-p">
-            Every complaint from your sheet — from the first customer call to
-            final resolution, store by store, live from Supabase.
-          </p>
+          {techOnly ? (
+            <>
+              <h1 className="hero-h1">
+                Your tickets,
+                <br />
+                on your phone.
+              </h1>
+              <p className="hero-p">
+                See the complaints assigned to you, call the customer, and mark
+                the work done — all in one place.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="hero-h1">
+                Every complaint,
+                <br />
+                in one place.
+              </h1>
+              <p className="hero-p">
+                Every complaint from your sheet — from the first customer call to
+                final resolution, store by store, live from Supabase.
+              </p>
+            </>
+          )}
           <div className="hero-chips">
             {['Oxygen', 'Hospital Bed', 'CPAP / BiPAP', 'Wheelchair'].map(
               (c) => (
@@ -3068,25 +3202,6 @@ function Login({ onLogin }) {
       <div className="login-form">
         <div className="glass-card">
           <div style={{ marginBottom: 6 }}>
-            <div className="login-tabs">
-              {[
-                ['store', 'Store'],
-                ['tech', 'Technician'],
-              ].map(([k, lbl]) => (
-                <button
-                  key={k}
-                  className={mode === k ? 'login-tab on' : 'login-tab'}
-                  onClick={() => {
-                    setMode(k);
-                    setPw('');
-                    setErr('');
-                  }}
-                >
-                  {k === 'tech' ? <Wrench size={14} /> : <Building2 size={14} />}{' '}
-                  {lbl}
-                </button>
-              ))}
-            </div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>
               {mode === 'tech' ? 'Technician login' : 'Store login'}
             </div>
@@ -3241,6 +3356,7 @@ function TechBoard({
   onDone,
   embedded,
   onlyAssigned = false, // store login: sirf wahi technicians jo is store ki tickets pe lage
+  canDone = true, // store manager technician ki jagah "Work done" nahi kar sakta (lock)
 }) {
   const admin = !!session.isTechAdmin;
   const [tab, setTab] = useState('open');
@@ -3469,7 +3585,7 @@ function TechBoard({
           return (
             <div
               key={x.ticket_id}
-              className="card tb-card"
+              className={x.techDone ? 'card tb-card card-resolved' : 'card tb-card'}
               onClick={() => onOpen && onOpen(x)}
               style={{ borderLeft: `4px solid ${pm.color}` }}
             >
@@ -3516,6 +3632,7 @@ function TechBoard({
                 </div>
               )}
 
+              <TechTimer d={x} compact />
               {tab === 'open' ? (
                 <div onClick={(e) => e.stopPropagation()}>
                   {!isOpen ? (
@@ -3525,15 +3642,21 @@ function TechBoard({
                           <Phone size={14} /> {L('techCall')}
                         </a>
                       )}
-                      <button
-                        className="tech-done-btn"
-                        onClick={() => {
-                          setOpenId(x.ticket_id);
-                          setRemark('');
-                        }}
-                      >
-                        <CheckCircle2 size={15} /> {L('techMarkDone')}
-                      </button>
+                      {canDone ? (
+                        <button
+                          className="tech-done-btn"
+                          onClick={() => {
+                            setOpenId(x.ticket_id);
+                            setRemark('');
+                          }}
+                        >
+                          <CheckCircle2 size={15} /> {L('techMarkDone')}
+                        </button>
+                      ) : (
+                        <div className="card-locked" style={{ flex: 2, marginTop: 0 }}>
+                          <Lock size={13} /> {L('techLockedShort')}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="tech-confirm">
@@ -3566,9 +3689,15 @@ function TechBoard({
                   )}
                 </div>
               ) : (
-                <div className="card-techdone">
-                  <CheckCircle2 size={12} /> {fmtFullDateTime(x.techDoneAt)}
-                  {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
+                <div className="resolved-banner" style={{ margin: '10px 0 0' }}>
+                  <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <b>{L('resolvedByTech')}</b>
+                    <div className="resolved-sub">
+                      {fmtFullDateTime(x.techDoneAt)}
+                      {r.tech_done_remarks ? ` · ${r.tech_done_remarks}` : ''}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -4469,16 +4598,38 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
   const [expand, setExpand] = useState(false);
   const canInline = !!(next && onCommit);
   const pm = prioMeta(d.priority);
+  // technician ne "Work done" kar diya → card hara highlight + upar banner
+  const techResolved = d.techDone && d.stage === 'tech' && !cancelled;
   return (
     <div
-      className={cancelled ? 'card is-cancelled' : 'card'}
+      className={
+        cancelled ? 'card is-cancelled' : techResolved ? 'card card-resolved' : 'card'
+      }
       onClick={onOpen}
       style={
-        d.priority && !closed
-          ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
-          : undefined
+        techResolved
+          ? { borderLeft: `4px solid ${d.priority ? pm.color : T.green}` }
+          : d.priority && !closed
+            ? { borderLeft: `4px solid ${pm.color}`, background: d.priority === 'High' ? '#FFF8F7' : undefined }
+            : undefined
       }
     >
+      {techResolved && (
+        <div className="resolved-banner">
+          <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <b>{L('resolvedByTech')}</b>
+            <div className="resolved-sub">
+              {[
+                d._raw && (d._raw.tech_done_by || d.technician),
+                d.techDoneAt && fmtFullDateTime(d.techDoneAt),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <div className="eq-ico" style={{ background: stage.soft }}>
           <Icon size={17} color={stage.color} />
@@ -4529,11 +4680,7 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
           </span>
         </div>
       )}
-      {d.techDone && d.stage === 'tech' && (
-        <div className="card-techdone">
-          <CheckCircle2 size={12} /> {L('techDoneBadge')}
-        </div>
-      )}
+      {d.stage === 'tech' && d.technician && <TechTimer d={d} compact />}
       {closed ? (
         <div
           className="card-done"
@@ -4541,6 +4688,10 @@ function Card({ d, stage, onOpen, onMove, onCommit }) {
         >
           {cancelled ? <AlertTriangle size={13} /> : <Info size={13} />}{' '}
           {stage.short}
+        </div>
+      ) : next && techLockedFor(d) ? (
+        <div className="card-locked" title={L('techLockedMsg')}>
+          <Lock size={13} /> {L('techLockedShort')}
         </div>
       ) : next ? (
         <>
@@ -4897,7 +5048,15 @@ function Drawer({
                 <ShieldCheck size={14} /> {L('headCanEdit')}
               </div>
             )}
-            {next ? (
+            {techLockedFor(d) ? (
+              <div className="lock-note">
+                <Lock size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <b>{L('techLockedShort')}</b>
+                  <div style={{ marginTop: 2 }}>{L('techLockedMsg')}</div>
+                </div>
+              </div>
+            ) : next ? (
               <div className="next-hint">
                 <span className="col-pip" style={{ background: next.color }} />
                 <span>
@@ -4914,10 +5073,19 @@ function Drawer({
                 if (i > idx + 1) return null;
                 const filled = i <= idx;
                 const isNext = i === idx + 1;
+                const locked = isNext && techLockedFor(d);
                 return (
                   <button
                     key={s.id}
-                    className={isNext ? 'stage-pick-btn is-next' : 'stage-pick-btn'}
+                    disabled={locked}
+                    title={locked ? L('techLockedMsg') : undefined}
+                    className={
+                      locked
+                        ? 'stage-pick-btn is-locked'
+                        : isNext
+                          ? 'stage-pick-btn is-next'
+                          : 'stage-pick-btn'
+                    }
                     style={{
                       background: filled ? s.color : isNext ? s.soft : '#fff',
                       color: filled ? '#fff' : s.color,
@@ -4933,6 +5101,9 @@ function Drawer({
                         size={12}
                         style={{ marginRight: 4, verticalAlign: -1 }}
                       />
+                    )}
+                    {locked && (
+                      <Lock size={11} style={{ marginRight: 4, verticalAlign: -1 }} />
                     )}
                     {sShort(s.id)}
                   </button>
@@ -6328,6 +6499,21 @@ function StyleTag() {
       .cm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
       .cm-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: ${T.forestSoft}; background: ${T.mint}; border-radius: 8px; padding: 3px 8px; }
       .cm-chip.warn { color: ${T.amber}; background: ${T.amberSoft}; }
+      .tech-timer { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 9px; border-radius: 9px; font-size: 11.5px; font-weight: 600; }
+      .tech-timer b { font-weight: 800; }
+      .tt-run { background: #EEF2FB; color: #3B5BA9; }
+      .tt-warn { background: ${T.amberSoft}; color: ${T.amber}; }
+      .tt-late { background: #FDE7E7; color: #C62828; }
+      .tt-ok { background: rgba(255,255,255,.7); color: ${T.green}; }
+      .card-locked { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; padding: 9px; border-radius: 10px; border: 1.5px dashed #C9CED6; background: #F4F5F7; color: #5B6472; font-size: 12.5px; font-weight: 700; cursor: not-allowed; }
+      .lock-note { display: flex; gap: 9px; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: #F4F5F7; border: 1px solid #DDE1E6; color: #4A5260; font-size: 12.5px; }
+      .stage-pick-btn.is-locked { background: #F4F5F7 !important; color: #8A919C !important; border-color: #C9CED6 !important; border-style: dashed !important; cursor: not-allowed; }
+      .card-resolved { background: #DCEFDD; border-color: #8CC491; box-shadow: 0 0 0 1px #8CC491 inset, 0 4px 14px rgba(46,125,50,.12); }
+      .card-resolved:hover { border-color: ${T.green}; box-shadow: 0 0 0 1px ${T.green} inset, 0 6px 18px rgba(46,125,50,.18); }
+      .card-resolved .card-next, .card-resolved .eq-ico { background: rgba(255,255,255,.75) !important; }
+      .resolved-banner { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 10px; padding: 8px 10px; border-radius: 10px; background: ${T.green}; color: #fff; font-size: 12.5px; line-height: 1.35; }
+      .resolved-banner b { font-weight: 800; }
+      .resolved-sub { font-size: 11px; opacity: .9; margin-top: 1px; overflow-wrap: anywhere; }
       .techdone-box { margin-top: 12px; border: 1px solid #cfe3d0; background: ${T.mint}; border-radius: 13px; padding: 11px 12px; }
       @media (max-width: 760px) {
         .tb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
