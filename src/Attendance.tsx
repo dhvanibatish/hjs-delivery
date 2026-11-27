@@ -3074,6 +3074,8 @@ function CalendarTab({ me }: any) {
   const [leaves, setLeaves] = useState<any[]>([]);
   const [hols, setHols] = useState<any[]>([]);
   const [busy, setBusy] = useState(true);
+  // din pe tap -> us din ki detail (LSL bhi)
+  const [pick, setPick] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -3129,6 +3131,21 @@ function CalendarTab({ me }: any) {
     return { label: "Absent", color: "#dc2626" };
   };
 
+  // Day detail screen ke liye us din ka data
+  const openDay = (key: string) => {
+    const log = logs.find((x: any) => x.work_date === key);
+    const lv = leaves.find((x: any) => key >= x.from_date && key <= x.to_date);
+    const hol = hols.find((x: any) => x.hol_date === key);
+    const off = (me.week_off_days || []).includes(new Date(key + "T00:00:00").getDay());
+    if (!log && !lv && !hol && key > istToday()) return;   // aage ka khaali din
+    const n = lslNth[key];
+    const mark = log
+      ? (n && ["Present", "Late", "Short Leave"].includes(log.status)
+          ? (n % 3 === 0 ? "H" : "LSL") : letterOf(log.status))
+      : hol ? "F" : off ? "W" : lv ? lv.leave_type : "A";
+    setPick({ d: key, mark, label: info(key).label || "—", log: log || null, lv: log ? null : lv });
+  };
+
   const tot = logs.reduce((a: number, r: any) => a + (r.worked_minutes || 0), 0);
 
   return (
@@ -3164,7 +3181,8 @@ function CalendarTab({ me }: any) {
               if (!key) return <div className="att-calday pad" key={`p${i}`} />;
               const v = info(key);
               return (
-                <div className={`att-calday ${key === istToday() ? "now" : ""}`} key={key}>
+                <div className={`att-calday ${key === istToday() ? "now" : ""}`} key={key}
+                  style={{ cursor: "pointer" }} onClick={() => openDay(key)}>
                   <div className="n">{key.slice(-2)}</div>
                   <div className="st" style={{ color: v.color }}>{v.label}</div>
                   {v.mins ? <div className="hr">{hhmm(v.mins)}</div> : null}
@@ -3174,6 +3192,8 @@ function CalendarTab({ me }: any) {
           </div>
         </div>
       )}
+
+      {pick && <DaySheet d={pick} me={me} onClose={() => setPick(null)} />}
     </div>
   );
 }
