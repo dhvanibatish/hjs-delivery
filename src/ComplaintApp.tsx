@@ -104,6 +104,58 @@ async function sbTechLogin(name, pin) {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ZOHO DESK SYNC (n8n) — app → Desk
+   1) Stage 1 (Details & Problem) save/edit → Desk ticket ka subject update
+   2) Resolution save (resolved tick)      → Desk ticket Closed
+   Desk sync fail ho to bhi app ka save nahi rukta — sirf console mein error.
+   ══════════════════════════════════════════════════════════════════════ */
+const N8N_BASE = 'https://n8n.srv1171323.hstgr.cloud/webhook';
+const DESK_HOOK = {
+  problem: `${N8N_BASE}/desk-update-problem`,
+  close: `${N8N_BASE}/desk-close-ticket`,
+};
+/* Desk ka ticket number (#2823) — row mein ticket_number, warna ticket_id */
+const deskNo = (r) =>
+  String((r && (r.ticket_number || r.ticket_id)) || '')
+    .replace('#', '')
+    .trim();
+async function deskPost(url, payload) {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) console.error('[desk sync]', res.status, url);
+  } catch (e) {
+    console.error('[desk sync]', e);
+  }
+}
+function syncDeskProblem(raw, f, store) {
+  const ticket = deskNo(raw);
+  const problem = String((f.problem === 'Other' ? f.problemOther : f.problem) || '').trim();
+  if (!ticket || !problem) return;
+  deskPost(DESK_HOOK.problem, {
+    action: 'subject',
+    ticket_number: ticket,
+    product: f.ptype || clean(raw && raw.product) || '',
+    problem,
+    store: store || '',
+  });
+}
+function syncDeskClose(raw, f, store) {
+  const ticket = deskNo(raw);
+  if (!ticket) return;
+  const action = f.action === 'Other' ? f.actionOther : f.action;
+  deskPost(DESK_HOOK.close, {
+    action: 'close',
+    ticket_number: ticket,
+    store: store || '',
+    resolution: [action, f.remarks].filter(Boolean).join(' — '),
+  });
+}
 const T = {
   forest: '#14392B',
   forestSoft: '#1E5138',
@@ -1787,6 +1839,12 @@ export default function App({
       );
       if (mode === 'move') jumpMobile(landed);
       applyLocal(ticketId, patch);
+      // ── Zoho Desk sync (background — await nahi, save nahi rukta)
+      const raw = (cur && cur._raw) || {};
+      const storeName = cur ? branchLabel(cur.branch) : '';
+      if (toStage === 'talk') syncDeskProblem(raw, fields, storeName);
+      if (toStage === 'resolution' && fields.resolved && !(raw && raw.is_resolved))
+        syncDeskClose(raw, fields, storeName);
     } catch (e) {
       ping(`${L('tSaveFail')}: ` + e.message);
     }
