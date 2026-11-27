@@ -94,6 +94,15 @@ async function sbLatest() {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
+/* Technician ke liye halki query — sirf assign hui tickets ki kuch columns */
+async function sbTechLatest() {
+  const res = await fetch(
+    `${CONFIG.url}/rest/v1/${CONFIG.table}?select=ticket_id,ticket_number,full_name,product,product_type,city,status,technician,expected_date,tech_done_at&technician=not.is.null&order=updated_at.desc&limit=40`,
+    { headers: HDRS() },
+  );
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
+}
 /* Technician login — PIN client mein nahi, Supabase RPC verify karta hai
    (complaint_tech_login · SQL file: complaints_priority_technician.sql) */
 async function sbTechLogin(name, pin) {
@@ -1788,6 +1797,43 @@ export default function App({
         if (fresh.length) notifyNew(fresh);
       } catch (e) {
         console.warn('[complaints poll]', e);
+      }
+    };
+    const id = setInterval(tick, 60000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line
+  }, [session]);
+
+  // ── TECHNICIAN: har 60 sec check — mujhe (ya Tech Admin ko kisi ko bhi)
+  // naya ticket assign hua? To notification + list reload.
+  useEffect(() => {
+    if (!session || !session.isTech || !CONFIGURED) return;
+    let stop = false;
+    const mine = (name) => session.isTechAdmin || sameName(name, session.techName);
+    const tick = async () => {
+      if (stop || !loadedRef.current) return;
+      try {
+        const rows = await sbTechLatest();
+        const known = new Set(
+          ticketsRef.current
+            .filter((x) => x.stage === 'tech' && mine(x.technician))
+            .map((x) => x.ticket_id),
+        );
+        const fresh = rows.filter(
+          (r) =>
+            statusToStage(r.status) === 'tech' &&
+            !r.tech_done_at &&
+            mine(r.technician) &&
+            !known.has(r.ticket_id),
+        );
+        if (!fresh.length) return;
+        await load(true);
+        notifyAssigned(fresh);
+      } catch (e) {
+        console.warn('[tech poll]', e);
       }
     };
     const id = setInterval(tick, 60000);
@@ -3719,6 +3765,18 @@ function TechView({
 }) {
   const [activeId, setActiveId] = useState(null);
   const active = tickets.find((x) => x.ticket_id === activeId) || null;
+  // naya ticket assign hone pe alert — permission yahin se (button tap zaroori, iPhone ke liye)
+  const [perm, setPerm] = useState(() => (canNotify() ? Notification.permission : 'unsupported'));
+  const askPerm = async () => {
+    try {
+      const p = await Notification.requestPermission();
+      setPerm(p);
+      if (p === 'granted')
+        showNote('✅ Alerts ON', 'Naya ticket assign hote hi yahan notification aayega', 'hjs-tech-on');
+    } catch (_) {
+      setPerm('denied');
+    }
+  };
   const canDoneActive =
     active &&
     active.stage === 'tech' &&
@@ -3759,6 +3817,27 @@ function TechView({
       </div>
 
       <div className="tech-body">
+        {perm === 'default' && (
+          <div className="nb-perm" style={{ borderRadius: 12, marginBottom: 12, border: `1px solid ${T.line}` }}>
+            <span>
+              {HJS_LANG === 'hi'
+                ? 'Naya ticket assign hote hi alert chahiye?'
+                : 'Get an alert when a new ticket is assigned to you?'}
+            </span>
+            <button className="btn-primary nb-on" onClick={askPerm}>
+              <Bell size={14} /> {HJS_LANG === 'hi' ? 'Alerts on karein' : 'Turn on alerts'}
+            </button>
+          </div>
+        )}
+        {perm === 'denied' && (
+          <div className="nb-perm" style={{ borderRadius: 12, marginBottom: 12, border: `1px solid ${T.line}` }}>
+            <span>
+              {HJS_LANG === 'hi'
+                ? 'Notifications band hain — phone Settings → Notifications mein HJS ko Allow karein.'
+                : 'Notifications are blocked — allow HJS in your phone Settings → Notifications.'}
+            </span>
+          </div>
+        )}
         {error && (
           <div className="err">
             <CloudOff size={18} color={T.red} />
@@ -4189,19 +4268,52 @@ function Header({
    untouched ticket laal dikhti hai. Browser notification tab tak aati hai
    jab tak app ka tab khula hai (chahe dusre tab pe ho). */
 const canNotify = () => typeof window !== 'undefined' && 'Notification' in window;
+/* iPhone (Home Screen app) pe `new Notification()` nahi chalta — wahan
+   service worker se dikhana padta hai. SW mile to wahi, warna purana tareeka. */
+async function showNote(title, body, tag) {
+  const opts = { body, tag, icon: '/favicon.png' };
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && reg.showNotification) {
+        await reg.showNotification(title, opts);
+        return;
+      }
+    }
+    const n = new Notification(title, opts);
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch (e) {
+    console.warn('[notify]', e);
+  }
+}
+/* Technician ko naya ticket assign hua */
+function notifyAssigned(rows) {
+  if (!canNotify() || Notification.permission !== 'granted') return;
+  if (rows.length > 3) {
+    showNote(`${rows.length} naye tickets assign hue`, 'HJS Complaints kholo', 'hjs-tech-many');
+    return;
+  }
+  rows.forEach((r) =>
+    showNote(
+      `🔧 Naya ticket · ${clean(r.full_name) || 'Customer'}`,
+      [
+        r.ticket_number ? `#${r.ticket_number}` : '',
+        [clean(r.product), realVal(r.product_type)].filter(Boolean).join(' '),
+        normalizeCity(r.city),
+        r.expected_date ? `Kab tak: ${niceDate(r.expected_date)}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      `hjs-tech-${r.ticket_id}`,
+    ),
+  );
+}
 function notifyNew(rows) {
   if (!canNotify() || Notification.permission !== 'granted') return;
-  const send = (title, body, tag) => {
-    try {
-      const n = new Notification(title, { body, tag, icon: '/favicon.png' });
-      n.onclick = () => {
-        window.focus();
-        n.close();
-      };
-    } catch (e) {
-      console.warn('[notify]', e);
-    }
-  };
+  const send = showNote;
   if (rows.length > 3) {
     send(`${rows.length} new complaints`, 'Open HJS Complaints to pick them up', 'hjs-cmp-many');
     return;
