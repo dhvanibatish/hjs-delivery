@@ -7075,7 +7075,16 @@ function AttSheetTab() {
     setRows(Array.isArray(data) ? data : []);
     setBusy(false);
   };
-  useEffect(() => { load(); }, [month]);
+  // Sheet khulte hi Monthly Grid se apne aap sync (Present / Leave / Week off /
+  // Holiday wale columns) — sirf is mahine aur pichhle mahine ka, purane band
+  // mahine nahi chhede. L.M, deduction, remarks waise hi rehte hain.
+  useEffect(() => {
+    (async () => {
+      await load();
+      const prev = shiftMonth(monthStart(istToday()), -1).slice(0, 7);
+      if (month >= prev) await refillFromGrid(true);
+    })();
+  }, [month]);
 
   // Monthly Grid (muster_roll_json) ke marks se Days columns bharo.
   // Total = mahine ke din (joining se pehle / leaving ke baad ke khaali din nahi)
@@ -7089,7 +7098,7 @@ function AttSheetTab() {
   // Short leave: mahine ki pehli 2 (SHORT + P (SL) + der/jaldi wali S milake)
   // free; 3rd se S = 0.25 (SHORT apply hi 2 ke baad block hai).
   // L.M, C.M, deduction aur remarks jaise hain waise rehte hain.
-  const refillFromGrid = async () => {
+  const refillFromGrid = async (auto = false) => {
     setBusy(true); setErr(""); setGridMsg("");
     const from = `${month}-01`;
     const { data, error } = await supabase.rpc("muster_roll_json", { p_month: from });
@@ -7172,8 +7181,11 @@ function AttSheetTab() {
     const bad = res.find((x) => x.error);
     if (bad?.error) setErr(bad.error.message);
     setRows(next);
-    setGridMsg(`${done} rows refilled from the Monthly Grid.` +
-      (miss ? ` ${miss} not found in the grid — left as they were.` : ""));
+    setGridMsg(auto
+      ? `Synced with the Monthly Grid · ${new Date().toLocaleTimeString("en-GB",
+          { hour: "2-digit", minute: "2-digit", timeZone: TZ })}`
+      : `${done} rows refilled from the Monthly Grid.` +
+        (miss ? ` ${miss} not found in the grid — left as they were.` : ""));
     setBusy(false);
   };
 
