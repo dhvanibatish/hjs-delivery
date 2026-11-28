@@ -353,9 +353,11 @@ const CSS = `
   border-bottom: 1px solid #f2f4f7; background: #fff; }
 .hjsatt .att-regsheet .gs { border-left: 1px solid #e4e7ec; }
 .hjsatt .att-regsheet tbody tr:hover td { background: #f9fafb; }
-/* Attendance sheet: location-wise group header */
+/* Attendance sheet + Monthly Grid: location-wise group header */
+.hjsatt .att-mx tr.att-locrow td, .hjsatt .att-mx tbody tr.att-locrow:hover td,
 .hjsatt .att-regsheet tr.att-locrow td, .hjsatt .att-regsheet tbody tr.att-locrow:hover td {
   background: #eef4ff; border-top: 1px solid #d0dcf5; border-bottom: 1px solid #d0dcf5; padding: 8px 0; }
+.hjsatt .att-mx tr.att-locrow span,
 .hjsatt .att-regsheet tr.att-locrow span { position: sticky; left: 0; padding-left: 12px;
   font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #1849a9; }
 .hjsatt .att-regsheet td.hl, .hjsatt .att-regsheet th.hl { background: #fffbe6; }
@@ -2832,14 +2834,20 @@ function MatrixTab({ me }: any) {
     });
 
     if (approver) {
-      const [{ data }, em] = await Promise.all([
+      const [{ data }, em, br] = await Promise.all([
         supabase.rpc("muster_roll_json", { p_month: from }),
         supabase.from("employees")
-          .select("id, emp_code, full_name, shift_start, shift_end, week_off_days"),
+          .select("id, emp_code, full_name, shift_start, shift_end, week_off_days, branch_id"),
+        supabase.from("branches").select("id, name"),
       ]);
+      // location (branch) naam — Attendance Sheet jaisa location-wise group karne ke liye
+      const bn: Record<string, string> = {};
+      (br.data || []).forEach((b: any) => { bn[b.id] = b.name; });
+      const locBy: Record<string, string> = {};
+      (em.data || []).forEach((e: any) => { locBy[e.emp_code] = bn[e.branch_id] || ""; });
       setRows((data || []).map((r: any) => ({
         code: r.emp_code, name: r.full_name, marks: r.marks || {},
-        lsl: lslBy[r.emp_code] || {} })));
+        lsl: lslBy[r.emp_code] || {}, loc: locBy[r.emp_code] || "No location" })));
 
       const byCode: Record<string, any> = {};
       (em.data || []).forEach((e: any) => { byCode[e.emp_code] = e; });
@@ -2872,8 +2880,23 @@ function MatrixTab({ me }: any) {
   };
   useEffect(() => { load(); }, [month, me.id]);
 
+  // Attendance Sheet jaisa: location-wise, phir har location me naam A-Z ("No location" neeche)
+  const locOfRow = (r: any) => r.loc || "No location";
   const shown = rows.filter((r) =>
-    !q || `${r.name} ${r.code}`.toLowerCase().includes(q.toLowerCase()));
+    !q || `${r.name} ${r.code} ${r.loc || ""}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((x, y) => {
+      const lx = locOfRow(x), ly = locOfRow(y);
+      if (lx !== ly) {
+        if (lx === "No location") return 1;
+        if (ly === "No location") return -1;
+        return lx.localeCompare(ly, "en", { sensitivity: "base" });
+      }
+      return String(x.name || "").trim()
+        .localeCompare(String(y.name || "").trim(), "en", { sensitivity: "base" });
+    });
+  const mxLocCount: Record<string, number> = {};
+  shown.forEach((r) => { mxLocCount[locOfRow(r)] = (mxLocCount[locOfRow(r)] || 0) + 1; });
+  const multiLoc = Object.keys(mxLocCount).length > 1;
 
   const MARK_LABEL: Record<string, string> = {
     P: "Present", L: "Late", H: "Half day",
@@ -2944,7 +2967,7 @@ function MatrixTab({ me }: any) {
 
   const exportCsv = () => downloadCsv(
     shown.map((r) => {
-      const o: any = { Code: r.code, Name: r.name };
+      const o: any = { Location: r.loc || "", Code: r.code, Name: r.name };
       dates.forEach((d) => { o[new Date(d).getDate()] = r.marks[d] || ""; });
       dates.forEach((d) => { if (r.lsl?.[d]) o[new Date(d).getDate()] = cellOf(r, d).txt; });
       const t = tally(r.marks, r.lsl);
@@ -3017,8 +3040,10 @@ function MatrixTab({ me }: any) {
               </tr>
             </thead>
             <tbody>
-              {shown.map((r) => {
+              {shown.map((r, i) => {
                 const t = tally(r.marks, r.lsl);
+                const loc = locOfRow(r);
+                const firstOfLoc = multiLoc && (i === 0 || locOfRow(shown[i - 1]) !== loc);
                 const chips: [string, number, string, string][] = [
                   ["Present", t.present, "#ecfdf3", "#067647"],
                   ["Late", t.late, "#fffaeb", "#b54708"],
@@ -3035,8 +3060,15 @@ function MatrixTab({ me }: any) {
                     ([k, v]) => [k, v, "#eff8ff", "#175cd3"] as [string, number, string, string]),
                 ];
                 return (
-                  <>
-                    <tr key={r.code}>
+                  <React.Fragment key={r.code}>
+                    {firstOfLoc && (
+                      <tr className="att-locrow">
+                        <td colSpan={dates.length + 7}>
+                          <span>{loc} · {mxLocCount[loc]}</span>
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
                       <td className="name">
                         <PName id={r.id} code={r.code}>{r.code} · {r.name}</PName>
                       </td>
@@ -3070,7 +3102,7 @@ function MatrixTab({ me }: any) {
                         </div>
                       </td>
                     </tr>
-                  </>
+                  </React.Fragment>
                 );
               })}
               {!shown.length && (
