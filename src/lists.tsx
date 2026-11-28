@@ -295,6 +295,16 @@ export function ListsAdmin({ session, fallback, ping }) {
     if (kind === 'delivery_person') l = l.filter((v) => v !== MBC);
     return l; /* eslint-disable-next-line */
   }, [g, kind, scope, fallback]);
+  /* store_manager ke liye: usi store ke delivery persons dropdown mein dikhao
+     (DB → shared → fallback), MBC hata ke. Taaki manually naam+number na likhna pade. */
+  const personChoices = useMemo(() => {
+    let l = dbList('delivery_person', scope);
+    if ((!l || !l.length) && SHARES[scope]) l = dbList('delivery_person', SHARES[scope]);
+    if (!l || !l.length) l = fbList('delivery_person', scope);
+    return (l || []).filter((v) => v !== MBC);
+    /* eslint-disable-next-line */
+  }, [g, scope, fallback]);
+
   const items = draft || saved;
   const dirty = !!draft;
 
@@ -459,6 +469,45 @@ export function ListsAdmin({ session, fallback, ping }) {
             >
               {sharedFrom} wali copy karke shuru karo
             </button>
+          </div>
+        )}
+
+        {/* Store manager ke liye delivery-person dropdown — manual typing optional */}
+        {kind === 'store_manager' && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              padding: '10px 12px',
+              background: C.mint,
+              border: `1px solid ${C.green}`,
+              borderRadius: 12,
+              marginBottom: items.length ? 12 : 0,
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.forest }}>Delivery person se chuno:</span>
+            <select
+              style={{ ...inp, flex: 1, minWidth: 200, cursor: 'pointer', appearance: 'auto' }}
+              value=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  setItems([e.target.value]);
+                  setEditIdx(-1);
+                }
+              }}
+            >
+              <option value="">
+                {personChoices.length ? `— ${scope} ka person chuno —` : `${scope} ki delivery list khaali hai`}
+              </option>
+              {personChoices.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <span style={{ fontSize: 12, color: C.inkSoft }}>ya neeche ✎ se khud type karo</span>
           </div>
         )}
 
