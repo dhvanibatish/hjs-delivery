@@ -4843,7 +4843,7 @@ function LeavesScreen({ me, tab }: any) {
         </div>
       </div>
 
-      <div className="att-lvgrid">
+      {canSeeCredits(me) && <div className="att-lvgrid">
         {(!sheet ? bal
           : bal.some((b) => b.leave_type === "EL")
             ? bal.map((b) => (b.leave_type === "EL" ? { ...b, _sheet: sheet } : b))
@@ -4917,7 +4917,7 @@ function LeavesScreen({ me, tab }: any) {
           );
         })}
         {!bal.length && !sheet && <p className="att-empty">No balance set yet — ask your admin.</p>}
-      </div>
+      </div>}
 
       {editBal && (
         <BalanceSheet b={editBal} who={me}
@@ -5002,6 +5002,17 @@ const LEAVE_RULES: Record<string, {
 const CORP_ONLY_TYPES = ["COMP", "FLEX", "BDAY", "ANNIV"];
 // Policy ab saari branches / stores pe — sirf branch ka flag dekhte hain
 const isCorporate = (emp: any) => !!emp?.branches?.corporate_policy;
+// Leave credits (EL cards) kise dikhein: Head Office sab, Noida Showroom sab
+// (Ankit VGN-E175 ko chhod ke). Baaki kisi store wale ko apne credits nahi dikhte —
+// Head Office me bhi jo "... Store" team me hain (Mohali Store: Niranjan, Sanjay,
+// Bikash, Rahul, Sunil) unko bhi nahi.
+const NO_CREDIT_CODES = ["VGN-E175", "VGN-E027"];   // Ankit (Noida), Surendra (Physio)
+const canSeeCredits = (emp: any) => {
+  if (NO_CREDIT_CODES.includes(String(emp?.emp_code || ""))) return false;
+  if (String(emp?.teams?.name || "").toLowerCase().includes("store")) return false;
+  const b = String(emp?.branches?.name || "").toLowerCase();
+  return b.includes("head office") || b.includes("noida showroom");
+};
 
 function ApplyLeaveSheet({ me, types: allTypes, onClose, only = "" }: any) {
   const today = istToday();
